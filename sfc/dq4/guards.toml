@@ -38,6 +38,7 @@ paths = [
 name = "dq4-window-check"
 why = "창 글자 깨짐·비침(#911 가게 동료 창 2프레임 깨짐 shopflip, #916·#918·#922 가게 목록·동료 창·사기 확인 shopwho)과, 넘친 목록 이름이 창보다 늦게 올라와 목록 줄이 비는 프레임·「누가」 창이 닫히며 메시지 창에 이름이 비치는 프레임(--every 로 talk02-full·shopwho·partyitems 와 battle11·party21 구간을 매 프레임 잼)이 다시 생기지 않게"
 paths = [
+  "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4windowname.asm",
   "sfc/dq4/tools/dq4windowname.py",
   "sfc/dq4/tools/dq4windowtext.py",
@@ -57,6 +58,7 @@ paths = [
   "tools/mesence_settings.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/wc && DQ4_WINDOWNAME_SYMBOLS=$PWD/work/wc/wn.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/wc/menu.sfc && rm -rf work/wc/out && uv run --locked python sfc/dq4/tools/dq4windowcheck.py --rom work/ch1/dq4-ch1.sfc --symbols work/wc/wn.sym --symbols-rom work/wc/menu.sfc --out work/wc/out --jobs 4 --every"
+parts = 3
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-build", "ch1-walk"]
 
@@ -236,7 +238,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/wc && DQ4_WINDOWNAME_SYMBOLS=$PWD/work/wc/wn.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/wc/menu.sfc && rm -rf work/compat-scenes && uv run --locked python sfc/dq4/tools/dq4compatscenes.py --rom work/ch1/dq4-ch1-full.sfc --out work/compat-scenes --window-rom work/ch1/dq4-ch1.sfc --symbols work/wc/wn.sym --symbols-rom work/wc/menu.sfc"
-parts = 5
+parts = 6
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 
 [[check]]
@@ -403,7 +405,7 @@ paths = [
   "tools/mesence_settings.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/ch2talk && uv run --locked python sfc/dq4/tools/dq4ch2partytalkcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/ch2talk"
-parts = 4
+parts = 6
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-build", "ch1-walk"]
 
@@ -803,6 +805,7 @@ groups = ["ch1-build", "ch1-walk"]
 name = "dq4-battle-check"
 why = "걸음 전투가 걸리고 이겨 맵으로 돌아오는지와, 전투 상태 창 오른쪽 위 모서리·테두리가 이름 다섯째 칸에 덮이지 않는지(창 17·26·27 너비 6 그대로라 맨 오른쪽 사람의 이름 다섯째 칸이 테두리 열을 덮던 것), 필드 전투 글의 몬스터 이름이 꼬리(Ａ~Ｈ·たち)나 빌려 쓴 DQ5 몬스터 때문에 가나로 찍히지 않는지(names_one·names_two·name-table), 필드 전투 화면 위·아래 띠의 필드 타일이 전투 전과 같은지(새 필드 타일을 512 이상에 두면 전투 배경 그림이 VRAM 워드 4000~ 을 덮어 풀밭·숲이 줄무늬가 되던 것)"
 paths = [
+  "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4windowname.py",
   "sfc/dq4/tools/dq4windowname.asm",
@@ -1067,6 +1070,7 @@ groups = ["ch1-build", "ch1-walk"]
 name = "dq4-sfx-scene"
 why = "손으로 적은 효과음 결정 표의 동작마다(문·계단·상자·항아리·메뉴·대화·여관·교회·전투 공격·무기 27가지·주문·맞음·빗나감·회심·보스·スカラ·도망·레벨 업·서장 수련·개구리) 소리 대기열에 기대한 (명령, 효과음, 갈래)가 들어가고, 항목마다 울림 하나가 짝지어지고, 울린 소리의 바탕(원본 DQ5 샘플·NDS·잡음)이 결정과 같은지(bsnes·snes9x, 배포 롬 장면 둘 포함). 대응표와 결정 표의 어긋남, --sfx-call 자리·무기 표 롬 바이트, 「부를 수 없음」 까닭도 본다. 회심은 검사 롬 사본의 판정 난수 범위를 1 로 고정해 일으키므로 회심 난수 굴림(00:953A 의 0~31)은 다루지 않는다. 판정 앞 조건 셋($100E bit7, 일행 전투 칸 여덟의 +7 bit6, 26:8D0A 가진 물건)은 공격 소리 프레임에 모두 꺼져 있어야 하고, 켜져 있으면 그 까닭을 대며, 기록이 비면 따로 실패한다"
 paths = [
+  "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4sound-game.args",
   "sfc/dq4/tools/dq4sound*.py",
@@ -1168,6 +1172,7 @@ groups = ["ch1-build", "ch1-walk"]
 name = "dq4-title-scene"
 why = "배포 롬을 전원부터: 서곡이 지금 곡이 되어 울리고 타이틀이 밝아지는지, 기록 없을 때 메뉴에서 이름 입력으로 가는지, 이름 조합·B·「지우기」·다섯째 글자 거절(거절음)이 커서·조합 상태까지 모델과 같은지, Y 뒤 서장 맵·무음 곡·이름 바이트, 새 기록이 밑판과 이름·체크섬만 다른지, 그 기록으로 이어 하기(bsnes·snes9x)"
 paths = [
+  "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4growth.py",
   "sfc/dq4/tools/dq4nameentry.py",
   "sfc/dq4/tools/dq4nameentry.asm",
@@ -1780,7 +1785,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-npc-talk && uv run --locked python sfc/dq4/tools/dq4npccheck.py --build work/dq4-groups --out work/guard-npc-talk"
-parts = 3
+parts = 4
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-walk"]
 
@@ -1807,7 +1812,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-group-links && uv run --locked python sfc/dq4/tools/dq4groupcheck.py --rom work/dq4-groups/groups.sfc --out work/guard-group-links"
-parts = 3
+parts = 4
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-walk"]
 
@@ -2527,6 +2532,7 @@ groups = ["ch1-build", "ch1-walk"]
 name = "dq4-crit-conditions"
 why = "일행 たたかう 의 회심 판정(20:C697~C6C4) 앞 조건 셋의 갈래를 1장 롬 들판 전투에서 잰다. 판정 난수를 늘 회심(20:C6B3 = 01)·회심 없음(20:C6B9 = FF)으로 고정한 사본에서, 조건이 모두 꺼지면 난수대로, $100E bit7 이면 늘 회심 아님, 주인공 전투 칸 +7 bit6(필드 41 상태 1A, 치는 쪽 칸을 읽음)이나 가진 물건 일곱 칸이 26:8D33 과 같으면(26:8D0A) 늘 회심이어야 한다. 첫 판정은 주인공($10F5 = 00)의 공격이어야 하고, 같은 전투를 두 번 돌린 판정 기록이 같아야 한다. 이어 dq4sfxscene --critical-negative 로 battle-critical 에 $100E bit7, 칸 0·1 의 +7 bit6 을 하나씩 더 묶으면 그 까닭을 대며 실패해야 한다. 판정 코드 바이트가 바뀌거나 조건의 뜻이 바뀌면 깨진다. dq4sfxscene 의 critical_blockers 가 battle-critical 에서 이 셋(일행 전투 칸 여덟의 +7 포함)을 확인하는 근거다"
 paths = [
+  "sfc/dq4/tools/dq4shards.py",
   "fc/dq4/tools/dq4apu.py",
   "fc/dq4/tools/dq4bank.py",
   "fc/dq4/tools/dq4block.py",

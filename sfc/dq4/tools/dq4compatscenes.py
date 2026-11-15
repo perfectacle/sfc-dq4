@@ -206,7 +206,12 @@ def run_scene(scene, rng, a, out, patched, names=None):
         problems.insert(0, f'장면 검사 실패(종료 {rc}, {log.name})')
     if scene == 'window':
         problems += window_reached(out / f'{scene}-{rng}', names=names)
-    if not lines:
+    # 창 장면 일부만 돌면(하위 조각) 기록할 접근이 하나도 없을 수 있다(가게 목록 읽기·BRK 는 몇 장면에만 있다). 그때는
+    # 프로브가 기록 파일을 열었는지(붙었는지)만 보고, 장면이 돌았는지는 window_reached 가 본다
+    partial = names is not None and set(names) != set(window_frames())
+    if partial and not bus.exists():
+        problems.append('프로브 기록 파일이 없음(프로브가 붙지 않음)')
+    elif not partial and not lines:
         problems.append('프로브 기록이 없음(프로브가 붙지 않았거나 장면이 돌지 않음)')
     return {'scene': scene, 'ranges': rng, 'status': 'failed' if problems else 'passed', 'problems': problems,
             'dq5_accesses': dq5, 'records': len(set(lines)),

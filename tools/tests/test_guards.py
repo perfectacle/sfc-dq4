@@ -970,6 +970,19 @@ class ShardTest(unittest.TestCase):
             self.assertEqual(guards.record_times([p / 'report.json', p / 'shard.json'], times), 2)
             self.assertEqual(json.loads(times.read_text()), {'a': 120.0, 'd': 7.0, 'old': 5})
 
+    def test_record_times_sums_parts_across_shard_files(self):
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d)
+            times = p / 'times.json'
+            for k, secs in ((1, 300), (2, 250)):
+                (p / f's{k}.json').write_text(json.dumps({'rows': [
+                    {'name': 'p', 'file': 'g', 'status': 'passed', 'detail': f'{secs}초', 'part': [k, 2]}]}))
+            self.assertEqual(guards.record_times([p / 's1.json', p / 's2.json'], times), 1)
+            self.assertEqual(json.loads(times.read_text()), {'p': 550.0})
+            self.assertEqual(guards.record_times([p / 's1.json'], times), 0)
+
     def test_repo_times_name_real_checks(self):
         checks, _ = guards.load(guards.tracked())
         names = {c['name'] for c in checks}
