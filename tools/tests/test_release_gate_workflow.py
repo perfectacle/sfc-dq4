@@ -142,6 +142,8 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.assertNotRegex(gate, r'secrets:\s*inherit')
         self.assertRegex(gate, r'uses:\s*\./\.github/workflows/guard-shards\.yml')
         self.assertRegex(gate, r'mode:\s*release\b')
+        # workflow_dispatch 의 number 입력도 문자열로 넘어가 workflow_call 의 number 입력이 받지 않는다
+        self.assertIn('shards: ${{ fromJSON(inputs.shards) }}', gate)
 
     def test_permissions_read_only(self):
         for text in (self.text, GATE.read_text(encoding='utf-8')):
