@@ -26,10 +26,11 @@ for path in (TOOLS, DQ5_TOOLS):
 import dq5map  # noqa: E402
 from dq5exitcheck import dp86_allowed, warp_exit  # noqa: E402
 import dq4freshstate  # noqa: E402
+import dq4outside  # noqa: E402
 from dq4environmentart import create_assets  # noqa: E402
 from dq4environmentmap import prepare_maps, render_maps  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
-from dq4environmentrom import (COUNTER_PROPS, DOOR_KIND, FLOOR, GATE_KIND, OPENINGS, door_floor, GROUPS, MAPS, STAIRS, WALL, WATER_SLOT, water_block,  # noqa: E402
+from dq4environmentrom import (COUNTER_PROPS, DOOR_KIND, FLOOR, GATE_KIND, HIDDEN, OPENINGS, door_floor, GROUPS, MAPS, STAIRS, WALL, WATER_SLOT, water_block,  # noqa: E402
                                FOUNTAIN_FRAMES, FOUNTAIN_SLOT, WATER_FRAMES, WATER_PERIOD, build_graphics, fountain_block,
                                fountain_frames, objects, water_frames)
 import dq4mesen  # noqa: E402
@@ -140,6 +141,18 @@ def with_floor_doors(image, source, prepared):
         for x in range(source.w):
             if block_prop(source, source.cell(x, y) & 31) in OPENINGS:
                 image.paste(prepared[door_floor(source, x, y)][0].convert("RGB"), (x * 16, y * 16))
+    return image
+
+
+def with_hidden_cells(image, source, local):
+    """Offline render with the never-reached zone-0 cells black, as FC draws them: the build gives them a colour-0
+    block (dq4outside.hidden_cells, dq4environmentrom.HIDDEN) that shows the black backdrop, not the map palette's
+    colour 0. Those cells win over doors, as in map_document."""
+    if HIDDEN not in local:
+        return image
+    image = image.copy()
+    for x, y in dq4outside.hidden_cells(source):
+        image.paste((0, 0, 0), (x * 16, y * 16, x * 16 + 16, y * 16 + 16))
     return image
 
 
@@ -257,7 +270,7 @@ def main():
     def expected(name, frame):
         """Offline render with the water frame the game was showing."""
         image = render_maps(args.dq4, shown_assets(assets, frame), [name])[name][0]
-        return with_floor_doors(image, sources[name], prepared[name])
+        return with_hidden_cells(with_floor_doors(image, sources[name], prepared[name]), sources[name], built[name][1])
 
     sources, prepared = {}, {}
     for _, _, name, source, _, tiles, _ in prepare_maps(prg, assets, MAPS):

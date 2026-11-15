@@ -551,6 +551,24 @@ class RomCheckExpectationTests(unittest.TestCase):
             self.assertIs(shown[WATER_FRAMES[0]], assets[WATER_FRAMES[frame]])
             self.assertIs(shown[FOUNTAIN_FRAMES[0]], assets[FOUNTAIN_FRAMES[frame]])
 
+    def test_expected_render_blackens_the_hidden_zone0_cells(self):
+        # A map the build gives the colour-0 block (dq4environmentrom.HIDDEN) shows the black backdrop on those
+        # cells, not the map palette's colour 0. Without this the ROM check failed on every such map.
+        from unittest import mock
+        import dq4environmentromcheck as check
+        from dq4environmentrom import HIDDEN
+        from PIL import Image
+        image = Image.new("RGB", (48, 32), (24, 33, 41))
+        hidden = {(0, 0), (2, 1)}
+        with mock.patch.object(check.dq4outside, "hidden_cells", return_value=hidden):
+            shown = check.with_hidden_cells(image, None, {HIDDEN: 7})
+            self.assertIs(check.with_hidden_cells(image, None, {0x01: 7}), image)
+        for y in range(2):
+            for x in range(3):
+                want = (0, 0, 0) if (x, y) in hidden else (24, 33, 41)
+                self.assertEqual({shown.getpixel((x * 16 + dx, y * 16 + dy)) for dx in range(16) for dy in range(16)},
+                                 {want}, (x, y))
+
     def test_char_base_ignores_cleared_vram(self):
         # 3D/01: the real BG tiles sat at 4000 with a water slot mid-animation, while 8000 was cleared VRAM. Counting
         # the blank tile there picked 8000 and redrew the map black.
