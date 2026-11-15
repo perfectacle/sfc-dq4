@@ -93,6 +93,10 @@ jobs:
           path: assets
           persist-credentials: false
 
+      # Guard input keys read big folders by size and mtime; a fresh checkout would change every key.
+      - name: Pin the asset checkout's file times to its commit
+        run: git -C assets ls-files -z | (cd assets && xargs -0 touch -h -d "@$(git log -1 --format=%ct)")
+
       - uses: ./.github/actions/ci-tools # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
 
       - uses: ./.github/actions/ci-roms # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
@@ -196,6 +200,10 @@ jobs:
           token: ${{ secrets.CI_ROM_TOKEN }}
           path: assets
           persist-credentials: false
+
+      # Guard input keys read big folders by size and mtime; a fresh checkout would change every key.
+      - name: Pin the asset checkout's file times to its commit
+        run: git -C assets ls-files -z | (cd assets && xargs -0 touch -h -d "@$(git log -1 --format=%ct)")
 
       - uses: ./.github/actions/ci-tools # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
 

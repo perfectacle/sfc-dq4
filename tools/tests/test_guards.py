@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -376,6 +377,17 @@ class RunTest(unittest.TestCase):
                     self.assertIn('tools/mesence_settings.py', c['paths'], f'{toml}: {c["name"]}')
         self.assertGreater(found, 0)
 
+    def test_written_paths_are_not_inputs(self):
+        run = ('uv run python a.py --report work/lc/report.json && uv run python -m unittest x 2>&1 '
+               '| tee work/door.log | tail -1 > work/last.txt && b --json $PWD/work/r.json --rom work/ch1/x.sfc')
+        self.assertEqual(guards.written_paths(run), ['work/lc/report.json', 'work/door.log', 'work/last.txt', 'work/r.json'])
+        check = {'name': 't', 'file': 'sfc/dq4/guards.toml', 'run': run, 'needs': [], 'paths': []}
+        with mock.patch.object(guards, 'hash_path') as hp:
+            guards.input_key(check)
+        hashed = [str(c.args[1]) for c in hp.call_args_list]
+        self.assertTrue(any(h.endswith('work/ch1/x.sfc') for h in hashed))
+        self.assertFalse([h for h in hashed if h.endswith(('report.json', 'door.log', 'last.txt', 'r.json'))])
+
     def test_hash_path_dirs_by_stat_and_big_files_by_stat(self):
         import hashlib
         import os
@@ -399,6 +411,9 @@ class RunTest(unittest.TestCase):
             os.utime(f, ns=(1, 2_000_000_000))
             self.assertNotEqual(key(d), k1)
             k2 = key(d)
+            (d / '.git').mkdir()
+            (d / '.git' / 'index').write_bytes(b'i')    # 체크아웃의 .git 은 보지 않음
+            self.assertEqual(key(d), k2)
             (d / 'b.bin').write_bytes(b'')
             self.assertNotEqual(key(d), k2)
             small = key(f)

@@ -205,6 +205,11 @@ def made_paths(run):
     return [m for st in run.split('&&')[:-1] for m in re.findall(r'--out\s+(\S+)', st)]
 
 
+def written_paths(run):
+    """명령이 결과로 쓰는 파일(tee·>·>>·--report·--json 뒤). 입력 키에 넣으면 도는 사이 생기거나 바뀌어 통과를 남기지 못한다."""
+    return re.findall(r'(?:\btee(?:\s+-a)?|>>?|--report|--json)\s+(?:\$PWD/)?(work/[^\s;&|)]+)', run)
+
+
 def under(path, base):
     p, b = PurePosixPath(path).parts, PurePosixPath(base).parts
     return p[:len(b)] == b
@@ -254,7 +259,9 @@ def hash_path(h, path):
         else:
             h.update(hashlib.sha1(path.read_bytes()).digest())
     elif path.is_dir():
-        for f in sorted(p for p in path.rglob('*') if p.is_file()):
+        # 자원 저장소 같은 체크아웃의 .git 은 내용이 작업 트리 파일과 겹치고, git 명령이 index 를 고쳐 쓰거나 새로 받을
+        # 때마다 시각이 바뀐다
+        for f in sorted(p for p in path.rglob('*') if p.is_file() and '.git' not in p.relative_to(path).parts):
             rel = f.relative_to(path)
             # 폴더 안 cache/ 는 빌드가 같은 내용으로 다시 써 mtime 만 바뀌므로 내용으로 본다
             if 'cache' in rel.parts[:-1] and f.stat().st_size <= BIG_FILE:
@@ -352,7 +359,7 @@ def input_key(check, root=ROOT, environ=os.environ, built=False):
                 return None
             h.update(b'mesence-settings:' + digest.encode())
     hash_path(h, root / 'rom')
-    made = made_paths(run) + out_dirs(run)
+    made = made_paths(run) + out_dirs(run) + written_paths(run)
     for tok in sorted(set(re.findall(r'(?<![\w/])(?:\$PWD/)?(work/\S+|rom/\S+)', run))):
         if not any(under(tok, d) for d in made):
             h.update(tok.encode())
