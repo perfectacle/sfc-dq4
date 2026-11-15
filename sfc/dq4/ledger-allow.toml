@@ -58,7 +58,15 @@ earlier = "chapter1"
 later = "people"
 reuse = true
 at = "3D:EA00~3D:FD8F"
-why = "세트 팔레트 표(dq4people.PALETTES_AT)와 맵 팔레트 줄 루틴·표(MAP_PALETTES_AT 3D:EB60). 공용 줄이 다섯에 빌린 일행 줄까지 실어 표가 3D:FA80 을 넘는다"
+why = "세트 팔레트 표(dq4people.PALETTES_AT)와 그 뒤의 세트 타일(TILE_AREAS 의 3D:EB60~FD80)"
+
+[[overlap]]
+earlier = "chapter1"
+later = "people"
+reuse = true
+at = "39:C000~39:EFFF"
+max = 12288
+why = "맵 팔레트 줄 루틴·표(dq4people.MAP_PALETTES_AT 39:C000, 맵 레코드 자리 39 의 뒤쪽. 항목이 맵 그룹 × 줄이라 3D 의 빈 자리를 넘는다)"
 
 [[overlap]]
 earlier = "chapter1"
@@ -448,6 +456,36 @@ stage = "people"
 at = "0E:F26A~0E:F581"
 data = true
 why = "세트 9A 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0D:905F~0D:9362"
+data = true
+why = "세트 38 의 원래 타일 자료 자리를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0E:827D~0E:8543"
+data = true
+why = "세트 67 의 원래 타일 자료 자리를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0E:8971~0E:8C65"
+data = true
+why = "세트 6A 의 원래 타일 자료 자리를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0E:E4D9~0E:E7D1"
+data = true
+why = "세트 96 의 원래 타일 자료 자리를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0E:E85B~0E:EC58"
+data = true
+why = "세트 97 의 원래 타일 자료 자리를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
 
 [[original]]
 stage = "people"

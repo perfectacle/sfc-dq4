@@ -181,6 +181,24 @@ class SheetTests(unittest.TestCase):
         self.assertEqual(c.getpixel((6, 14)), (60, 180, 40, 255))
         self.assertEqual(c.getpixel((3, 12))[3], 0)
 
+    def test_place_keeps_earlier_waves_when_a_later_person_joins(self):
+        a = P.Person((0x10,), None, 'x', 'a')
+        b = P.Person((0x11,), None, 'x', 'b')
+        late = P.Person((0x12,), None, 'x', 'late', wave=1, weight=P.KEY_WEIGHT)
+        hists = {a: Counter({(200, 30, 30): 50, (20, 20, 20): 10}), b: Counter({(40, 40, 220): 50, (20, 20, 20): 10}),
+                 late: Counter({(210, 60, 20): 80, (30, 200, 30): 40})}
+        where = {a: {0x36, 0x46}, b: {0x37}, late: {0x36, 0x46}}
+        before, was = P.place([a, b], hists, {a: {0x36}, b: {0x37}})
+        after, board = P.place([a, b, late], hists, where)
+        for p in (a, b):
+            self.assertEqual(after[p], before[p])
+        # 뒤 차례 인물이 서지 않는 그룹의 줄 색은 그대로다
+        self.assertEqual(board[(0x37, after[b][0])], was[(0x37, before[b][0])])
+        # 첫 차례 뒤에 생긴 그룹에도 앞 차례 인물의 줄이 실린다
+        self.assertIn((0x46, after[a][0]), board)
+        line, slots = after[late]
+        self.assertEqual(set(slots), set(hists[late]))
+
     def test_place_keeps_one_slot_per_color_and_tunes_each_group(self):
         a = P.Person((0x10,), None, 'x', 'a')
         b = P.Person((0x11,), None, 'x', 'b')
@@ -721,6 +739,21 @@ class UsageTests(unittest.TestCase):
             self.assertEqual(P.chapter_groups(1), [0x36, 0x38])
             self.assertEqual(P.chapter_groups(3), [0x40])
             self.assertEqual(P.chapter_groups(9), [])
+
+
+class GroupTests(unittest.TestCase):
+    def test_every_group_of_the_group_build_takes_its_own_lines(self):
+        # 빠진 그룹은 맵 팔레트 줄을 받지 못해 앞 맵 그룹의 색으로 그려진다
+        import dq4groupbuild
+        self.assertEqual(P.DQ4_GROUPS, frozenset(dq4groupbuild.LINKS))
+
+    def test_tile_areas_and_tables_do_not_overlap(self):
+        spans = [(P.cpu(at), P.cpu(at) + size) for at, size in P.TILE_AREAS]
+        spans += [(P.cpu(P.MAP_PALETTES_AT), P.cpu('39:F000')), (P.cpu(P.PALETTES_AT), P.cpu('3D:EB60')),
+                  (P.cpu(P.HOOK_AT), P.cpu(P.HOOK_AT) + 0x200)]
+        spans.sort()
+        for (_, end), (start, _) in zip(spans, spans[1:]):
+            self.assertLessEqual(end, start)
 
 
 class TileAreaTests(unittest.TestCase):
