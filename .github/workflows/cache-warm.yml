@@ -1,0 +1,94 @@
+name: cache-warm
+
+# Fills the main-scope caches every guard reads (pass records, build stages, scene and start
+# states, sound) with a cached rehearsal of every CI guard, so pull requests and the main push
+# run start warm. A rehearsal verdict, not release evidence. It passes the ROM bundle secrets
+# to guard-shards.yml, so it runs only on a schedule or by hand from main, never for pull
+# requests (tools/tests/test_release_gate_workflow.py keeps it that way).
+# Format: sfc/dq4/docs/dq4-release-check-format.md
+on:
+  schedule:
+    # 00:17 KST, off the hour when scheduled runs pile up
+    - cron: '17 15 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Warm even if this commit was warmed lately
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # The same group as release-gate.yml on main, so a warm run and the gate never overlap.
+  group: release-gate-main
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 5
+    outputs:
+      warm: ${{ steps.decide.outputs.warm }}
+    steps:
+      # The commit SHA and time of the last warm run that passed; no ROM data, so a plain cache.
+      - name: Restore the last warmed commit
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: work/cache-warm
+          key: cache-warm-restore
+          restore-keys: cache-warm-
+
+      - name: Decide whether to warm
+        id: decide
+        env:
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          FORCE: ${{ inputs.force || false }}
+        run: |
+          last_sha='' last_at=0
+          if [ -f work/cache-warm/last ]; then read -r last_sha last_at < work/cache-warm/last; fi
+          now=$(date +%s)
+          # GitHub drops a cache unused for 7 days; warm again a day before that even on the same commit.
+          stale=$(( now - last_at > 6 * 86400 ))
+          warm=true
+          if [ "$REF" != refs/heads/main ]; then
+            echo "::warning::main 에서만 데운다(이 실행 $REF)"
+            warm=false
+          elif [ "$FORCE" != true ] && [ "$last_sha" = "$SHA" ] && [ "$stale" = 0 ]; then
+            echo "main $SHA 는 $(( (now - last_at) / 3600 ))시간 전에 데웠다. 건너뜀"
+            warm=false
+          fi
+          echo "warm=$warm" >> "$GITHUB_OUTPUT"
+
+  warm:
+    needs: plan
+    if: needs.plan.outputs.warm == 'true'
+    uses: ./.github/workflows/guard-shards.yml # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+    with:
+      ref: ${{ github.sha }}
+      mode: release
+      cache: true
+      # The free plan runs 20 jobs at once; the rom matrix runs before the shards.
+      shards: 16
+    secrets:
+      CI_ROM_TOKEN: ${{ secrets.CI_ROM_TOKEN }}
+      CI_ROM_AGE_KEY: ${{ secrets.CI_ROM_AGE_KEY }}
+
+  mark:
+    needs: warm
+    if: needs.warm.result == 'success'
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 5
+    steps:
+      - name: Record the warmed commit
+        env:
+          SHA: ${{ github.sha }}
+        run: mkdir -p work/cache-warm && echo "$SHA $(date +%s)" > work/cache-warm/last
+
+      - name: Save the warmed commit
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: work/cache-warm
+          key: cache-warm-${{ github.run_id }}-${{ github.run_attempt }}
