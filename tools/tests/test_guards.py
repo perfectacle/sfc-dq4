@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import unittest
 from unittest import mock
@@ -861,6 +862,74 @@ class ShardTest(unittest.TestCase):
         self.assertLessEqual(max(loads) - min(loads), 1)
         self.assertEqual(guards.shard_part(self.CHECKS, 1, 2, weights), guards.shard_part(self.CHECKS, 1, 2, weights))
 
+    def test_parts_expand_up_to_the_shard_count(self):
+        cs = [dict(self.CHECKS[0], parts=4), self.CHECKS[1]]
+        self.assertEqual([c.get('part') for c in guards.expand_parts(cs, 8)], [(1, 4), (2, 4), (3, 4), (4, 4), None])
+        self.assertEqual([c.get('part') for c in guards.expand_parts(cs, 2)], [(1, 2), (2, 2), None])
+        self.assertEqual([c.get('part') for c in guards.expand_parts(cs, 1)], [None, None])
+        self.assertEqual(guards.unit_name(guards.expand_parts(cs, 8)[2]), 'a 3/4')
+
+    def test_parts_of_one_check_go_to_different_shards(self):
+        cs = [dict(self.CHECKS[0], parts=3), dict(self.CHECKS[3], parts=5), *self.CHECKS[4:]]
+        weights = {'a': 3000, 'd': 50, 'e': 10, 'f': 10}
+        for n in (3, 5, 8):
+            units = guards.expand_parts(cs, n)
+            got = [guards.shard_part(units, k, n, weights) for k in range(1, n + 1)]
+            self.assertEqual(sorted(map(guards.unit_name, (c for g in got for c in g))),
+                             sorted(map(guards.unit_name, units)))
+            for g in got:
+                names = [c['name'] for c in g]
+                self.assertEqual(len(names), len(set(names)), g)
+        # 무게는 검사 시간/하위 조각 수라 큰 검사의 하위 조각이 조각마다 하나씩 간다
+        got = [guards.shard_part(guards.expand_parts(cs, 3), k, 3, weights) for k in (1, 2, 3)]
+        self.assertEqual([sorted(c.get('part', (0,))[0] for c in g if c['name'] == 'a') for g in got], [[1], [2], [3]])
+
+    def test_merge_parts(self):
+        def row(name, part, status='passed', detail='100초, 롬 SHA-1 abc'):
+            return {'name': name, 'file': 'g', 'status': status, 'detail': detail} | ({'part': part} if part else {})
+        rows = [row('x', None, detail='5초'), row('p', [2, 3], detail='200초, 롬 SHA-1 abc'), row('p', [1, 3]),
+                row('p', [3, 3], detail='150초, 롬 SHA-1 abc')]
+        got = guards.merge_parts(rows)
+        self.assertEqual([r['name'] for r in got], ['x', 'p'])
+        self.assertEqual((got[1]['status'], got[1]['detail']), ('passed', '450초(하위 조각 3개, 가장 긴 것 200초), 롬 SHA-1 abc'))
+        self.assertEqual(guards.SECONDS.match(got[1]['detail'])[1], '450')
+        bad = guards.merge_parts([row('p', [1, 2]), row('p', [2, 2], 'failed', '종료 코드 1, 로그 l')])
+        self.assertEqual((bad[0]['status'], bad[0]['detail']), ('failed', '하위 조각 2/2: 종료 코드 1, 로그 l'))
+        short = guards.merge_parts([row('p', [1, 3]), row('p', [3, 3])])
+        self.assertEqual((short[0]['status'], short[0]['detail']), ('skipped', '하위 조각 [2] 결과 없음'))
+        twice = guards.merge_parts([row('p', [1, 2]), row('p', [1, 2]), row('p', [2, 2])])
+        self.assertEqual(twice[0]['status'], 'skipped')
+
+    def test_part_env_and_file_names(self):
+        import tempfile
+        c = {'name': 'p', 'file': 'g', 'run': 'echo "part=$DQ4_GUARD_PART" > "$OUT"', 'needs': [], 'paths': [],
+             'part': (2, 3)}
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / 'seen'
+            env = dict(os.environ, OUT=str(out), DQ4_GUARD_PART='9/9')
+            with mock.patch.object(guards, 'input_key', return_value=None):
+                status, _ = guards.run_check(c, 30, Path(d), env=env)
+                self.assertEqual((status, out.read_text().strip()), ('passed', 'part=2/3'))
+                self.assertTrue((Path(d) / 'p~2of3.log').is_file())
+                guards.run_check(dict(c, part=None), 30, Path(d), env=env)
+                self.assertEqual(out.read_text().strip(), 'part=')
+        self.assertEqual(guards.part_tag(c), '~2of3')
+        self.assertIsNone(guards.NAME.match('p~2of3'))
+
+    def test_parts_field_is_checked(self):
+        self.assertEqual(load(GOOD.replace('needs = ["rom"]', 'needs = ["rom"]\nparts = 4'))[1], [])
+        for bad in ('1', '65', '"4"', 'true'):
+            self.assertTrue(load(GOOD.replace('needs = ["rom"]', f'needs = ["rom"]\nparts = {bad}'))[1], bad)
+
+    def test_parted_guards_run_tools_that_split(self):
+        # parts 가 있는 가드의 마지막 단계 도구는 DQ4_GUARD_PART 를 읽어야 한다. 읽지 않으면 하위 조각마다 전부 돈다
+        checks, _ = guards.load(guards.tracked())
+        parted = [c for c in checks if c.get('parts')]
+        self.assertTrue(parted)
+        for c in parted:
+            script = re.search(r'python (\S+\.py)', c['run'].split('&&')[-1])[1]
+            self.assertIn('add_part_arg(', (guards.ROOT / script).read_text(encoding='utf-8'), c['name'])
+
     def test_weights_fall_back_to_cache_then_mean(self):
         w = guards.shard_weights(self.CHECKS, times={'a': 10.0}, cached={'b': 30.0, 'a': 99.0})
         self.assertEqual((w['a'], w['b']), (10.0, 30.0))
@@ -942,6 +1011,8 @@ class PrPlanTest(unittest.TestCase):
         self.assertEqual(guards.pr_shards(cs[:1], w, per=480), 1)
         self.assertEqual(guards.pr_shards(cs, {f'g{i}': 5000.0 for i in range(5)}, per=480, most=3), 3)
         self.assertEqual(guards.pr_shards([], w), 0)
+        self.assertEqual(guards.pr_shards([dict(cs[0], parts=4)], {'g0': 1500.0}, per=480), 4)
+        self.assertEqual(guards.pr_shards([dict(cs[0], parts=2)], {'g0': 1500.0}, per=480), 2)
 
     def test_plan_output_and_local_only_body(self):
         import subprocess

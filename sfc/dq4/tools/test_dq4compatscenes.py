@@ -126,6 +126,42 @@ class CompatScenes(unittest.TestCase):
         self.assertIn('--every', cmd)
         self.assertIn('/r/ch1.sfc', cmd)
 
+    def test_parts_cover_every_scene_once(self):
+        units = cs.work_units(cs.SCENES, cs.RANGES)
+        frames = cs.window_frames()
+        self.assertEqual(len(units), 4 + 2 * len(frames))
+        whole = {(s, r, n) for s, r, n, _ in units}
+        for n in (1, 3, 5, 8):
+            got = [u for k in range(1, n + 1) for s, r, names in cs.part_pairs(units, (k, n))
+                   for u in ([(s, r, x) for x in names] if names is not None else [(s, r, None)])]
+            self.assertEqual(len(got), len(whole))
+            self.assertEqual(set(got), whole)
+        self.assertEqual(cs.part_pairs(units, None),
+                         [(s, r, list(frames) if s == 'window' else None) for s in cs.SCENES for r in cs.RANGES])
+
+    def test_parts_balance_window_frames(self):
+        units = cs.work_units(cs.SCENES, cs.RANGES)
+        loads = [sum(u[3] for u in units if any(
+            (u[0], u[1]) == (s, r) and (names is None or u[2] in names) for s, r, names in cs.part_pairs(units, (k, 5))))
+            for k in range(1, 6)]
+        self.assertLess(max(loads) / min(loads), 1.2)
+
+    def test_window_part_runs_only_its_scenes(self):
+        a = SimpleNamespace(rom=Path('/r/full.sfc'), jobs=3, window_rom=Path('/r/ch1.sfc'), symbols=Path('/w/wn.sym'),
+                            symbols_rom=Path('/w/menu.sfc'))
+        _, cmd = cs.commands('window', 'io', a, Path('/o'), ['talk01', 'ship2'])
+        self.assertEqual(cmd[cmd.index('--scenes') + 1], 'talk01,ship2')
+        self.assertNotIn('--scenes', cs.commands('window', 'io', a, Path('/o'))[1])
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / 'readset.json').write_text(json.dumps({'a': {'returncode': 0}}))
+            (d / 'a').mkdir()
+            (d / 'a' / 'v00000.bin').write_bytes(b'')
+            self.assertEqual(cs.window_reached(d, {'a': 1, 'b': 1}, names=['a']), [])
+            self.assertEqual(cs.window_reached(d, {'a': 1, 'b': 1}), ['창 장면 b: 돌지 않음'])
+
     def test_mesen_wraps_script_only_with_log(self):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop('DQ4_OPENBUS_LOG', None)

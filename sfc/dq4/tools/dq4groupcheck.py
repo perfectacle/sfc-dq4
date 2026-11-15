@@ -12,6 +12,7 @@
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4groupcheck.py --rom work/dq4-groups/groups.sfc \\
       --out work/dq4-groups/check
+  … --part 2/5      장면을 5 몫으로 나눠 둘째 몫만(기본 DQ4_GUARD_PART, CI 가드 하위 조각)
 """
 
 import argparse
@@ -215,37 +216,28 @@ def stair_scenes(prg, groups, rom_data=None):
                        {"map": f"{there_group:02X}/{there_number:02X}", "cell": list(cell(dest["x"], dest["y"]))})
 
 
-def main():
-    # 이 파일의 다른 함수를 가져다 쓰는 검사들이 병렬 장치까지 끌어오지 않게 main 에서만 가져온다
-    import dq4shards
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--rom", required=True, type=Path)
-    ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
-    dq4freshstate.add_argument(ap)
-    ap.add_argument("--out", required=True, type=Path)
-    ap.add_argument("--jobs", type=int, default=dq4shards.jobs(), help="함께 띄우는 일 수(기본 HEADLESS_SLOTS, dq4shards.jobs)")
-    ap.add_argument("--groups", type=lambda v: {int(g, 16) for g in v.split(",")}, default=set(LINKS),
-                    help="DQ5 groups to walk (hex, comma-separated); all by default")
-    ap.add_argument("--set", default="", help="WRAM writes before every warp (dq5warp.lua SET), e.g. 2199|01 "
-                    "for a chapter-1 ROM (the throne-room opening done)")
-    args = ap.parse_args()
-    global PRESET
-    PRESET = args.set
-    mesence = Path(os.environ["MESENCE"])
-    out = args.out.resolve()
-    if out.exists() and any(out.iterdir()):
-        raise SystemExit(f"{out} is not empty")
-    rom = args.rom.resolve()
-    state = dq4freshstate.resolve(args.state, mesence, rom, out / "start")
-    prg = ines.prg(args.dq4.read_bytes())
+# area 장면들(area_scenes)을 몫 나누기에서 한 단위로 부르는 이름과 그 무게(장면 수)
+AREA, AREA_WEIGHT = "area", 4
 
-    stairs = list(stair_scenes(prg, args.groups, rom.read_bytes()))
-    skipped = {name: why for name, starts, why in stairs if starts is None}
-    jobs = [(name, [{"TO": to, "TEST": test, **({"ROMPATCH": patch} if patch else {})} for to, test, patch in starts],
-             want) for name, starts, want in stairs if starts is not None]
+
+def part_scenes(units, part):
+    """units [(name, starts, want)] 중 part(k, n) 몫. 장면마다 같은 출발 상태에서 따로 돌아 이름이 단위다. starts 가
+    None 인 것(건너뛴 계단)은 무게 0, AREA 는 area-hop 이 남긴 상태를 뒤 장면이 이어 쓰므로 통째로 한 단위다. 판정은
+    장면마다 따로라 몫 결과를 모으면 전체와 같다."""
+    import dq4shards
+    return dq4shards.part_of(units, part, key=lambda u: u[0],
+                             weight=lambda u: 0 if u[1] is None else AREA_WEIGHT if u[0] == AREA else 1)
+
+
+def scene_units(prg, groups, rom_data=None):
+    """몫으로 나눌 단위 [(name, starts, want)]: 계단(stair_scenes, 건너뛴 것은 starts None), 그룹마다 exit·stay·enter,
+    groups 에 バトランド 가 들면 AREA 하나. starts 는 dq5warp.lua 환경 묶음들(앞 것이 맞으면 뒤는 돌지 않음)."""
+    jobs = [(name, None if starts is None else [{"TO": to, "TEST": test, **({"ROMPATCH": patch} if patch else {})}
+                                                for to, test, patch in starts], want)
+            for name, starts, want in stair_scenes(prg, groups, rom_data)]
     found = doors(prg)
     _, props = dq4fieldport.fc_field(prg)
-    for group, link in ((g, part) for g, parts in LINKS.items() if g in args.groups for part in parts):
+    for group, link in ((g, part) for g, parts in LINKS.items() if g in groups for part in parts):
         if not link["field"]:
             continue
         x, y = cell(*link["arrival"])
@@ -265,6 +257,40 @@ def main():
             for (sx, sy), d in enter_starts(props, blocks):
                 jobs.append((f"enter-{tag(group, link)}-{sx},{sy}-{d}", [{"field": (sx, sy), "TEST": f"{d}:{PRESS},wait:400"}],
                              {"map": arrival, "cell": [ex, ey]}))
+    if placement(prg)[0x02, 0][0] in groups:
+        jobs.append((AREA, AREA, None))
+    return jobs
+
+
+def main():
+    # 이 파일의 다른 함수를 가져다 쓰는 검사들이 병렬 장치까지 끌어오지 않게 main 에서만 가져온다
+    import dq4shards
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--rom", required=True, type=Path)
+    ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
+    dq4freshstate.add_argument(ap)
+    ap.add_argument("--out", required=True, type=Path)
+    ap.add_argument("--jobs", type=int, default=dq4shards.jobs(), help="함께 띄우는 일 수(기본 HEADLESS_SLOTS, dq4shards.jobs)")
+    ap.add_argument("--groups", type=lambda v: {int(g, 16) for g in v.split(",")}, default=set(LINKS),
+                    help="DQ5 groups to walk (hex, comma-separated); all by default")
+    dq4shards.add_part_arg(ap)
+    ap.add_argument("--set", default="", help="WRAM writes before every warp (dq5warp.lua SET), e.g. 2199|01 "
+                    "for a chapter-1 ROM (the throne-room opening done)")
+    args = ap.parse_args()
+    global PRESET
+    PRESET = args.set
+    mesence = Path(os.environ["MESENCE"])
+    out = args.out.resolve()
+    if out.exists() and any(out.iterdir()):
+        raise SystemExit(f"{out} is not empty")
+    rom = args.rom.resolve()
+    state = dq4freshstate.resolve(args.state, mesence, rom, out / "start")
+    prg = ines.prg(args.dq4.read_bytes())
+
+    jobs = part_scenes(scene_units(prg, args.groups, rom.read_bytes()), args.part)
+    skipped = {name: why for name, starts, why in jobs if starts is None}
+    area = any(name == AREA for name, _, _ in jobs)
+    jobs = [job for job in jobs if job[1] is not None and job[0] != AREA]
     results = {}
     def tries(name, starts, want):
         for n, extra in enumerate(starts):
@@ -283,10 +309,11 @@ def main():
             name, want = futures[future]
             got, n = future.result()
             results[name] = {"got": got, "want": want, "ok": same_place(got, want), "start": n}
-    if placement(prg)[0x02, 0][0] in args.groups:
+    if area:
         area_scenes(mesence, rom, prg, state, out, results)
     ok = all(r["ok"] for r in results.values())
-    report = {"status": "passed" if ok else "failed", "scenes": dict(sorted(results.items())), "skipped": skipped}
+    report = {"status": "passed" if ok else "failed", "part": args.part and f"{args.part[0]}/{args.part[1]}",
+              "scenes": dict(sorted(results.items())), "skipped": skipped}
     (out / "results.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")
     print(json.dumps(report, ensure_ascii=False))
     return 0 if ok else 1

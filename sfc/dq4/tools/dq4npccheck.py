@@ -11,6 +11,7 @@
          (dq5progresscheck.lua, MODE=shop) are the group's list from dq4shopport.py, at its FC prices
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4npccheck.py --build work/dq4-groups --out work/dq4-groups/npccheck
+  … --part 2/5      장면을 5 몫으로 나눠 둘째 몫만(기본 DQ4_GUARD_PART, CI 가드 하위 조각)
 
 --rom checks another ROM built with the same people (the chapter-1 ROM with dq4chapter1.py build --keep DIR,
 --build DIR/groups and --texts its dq4chapter1.py messages JSON); --maps limits the maps, and --no-tables leaves
@@ -240,6 +241,21 @@ def staged(source, fc, person):
 CHAPTER2_GROUPS = tuple(f"{g:02X}" for g, parts in LINKS.items() if any(p.get("chapter") == 2 for p in parts))
 
 
+# 에뮬레이터를 띄우지 않고 결과만 적는 장면
+SKIPPED_KINDS = ("unreachable", "closed", "staged")
+
+
+def part_jobs(jobs, part):
+    """jobs 중 part(k, n) 몫. 장면마다 같은 출발 상태에서 따로 돌고 서로 주고받는 것이 없으므로 장면 이름이 단위다.
+    결과만 적는 장면은 무게 0 이라 몫의 길이를 바꾸지 않는다. 판정은 장면마다 따로라 몫 결과를 모으면 전체와 같다."""
+    import dq4shards
+    return dq4shards.part_of(jobs, part, key=lambda job: job[1], weight=lambda job: 0 if job[0] in SKIPPED_KINDS else 1)
+
+
+def part_label(part):
+    return f"{part[0]}/{part[1]}" if part else None
+
+
 def main():
     # 이 파일의 다른 함수를 가져다 쓰는 검사들이 병렬 장치까지 끌어오지 않게 main 에서만 가져온다
     import dq4shards
@@ -250,6 +266,7 @@ def main():
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=dq4shards.jobs(), help="함께 띄우는 일 수(기본 HEADLESS_SLOTS, dq4shards.jobs)")
     ap.add_argument("--rom", type=Path, help="ROM to check (default BUILD/groups.sfc)")
+    dq4shards.add_part_arg(ap)
     ap.add_argument("--maps", nargs="+", help="only these maps (GG/MM)")
     ap.add_argument("--no-tables", action="store_true", help="leave out the person table scenes")
     ap.add_argument("--texts", type=Path, help="the ROM's messages: dq5text/1 (default BUILD/text.json) or "
@@ -387,8 +404,10 @@ def main():
                         jobs.append(("talk", f"talk-{m.replace('/', '')}-{i}-foot", m,
                                      warp_to(m, fx, fy, lift), fd, p["night"], want))
 
+    jobs = part_jobs(jobs, args.part)
+
     def scene(kind, name, to, test, night):
-        if kind in ("unreachable", "closed", "staged"):
+        if kind in SKIPPED_KINDS:
             return None, None, None
         if kind == "table":
             return run(mesence, rom_path, state, out, name, libdir, to, test, night, sets=sets) + (None,)
@@ -447,9 +466,10 @@ def main():
                 results[name] = {"ok": ok, "want": f"{message:03X}", "got": [f"{v:03X}" for v in messages or []][:4],
                                  "timing": timing, **({"price": got_price, "want_price": price} if price is not None else {})}
     ok = all(r["ok"] for r in results.values())
-    report = {"status": "passed" if ok else "failed", "scenes": dict(sorted(results.items())), "later_states": later}
+    report = {"status": "passed" if ok else "failed", "part": part_label(args.part), "scenes": dict(sorted(results.items())),
+              "later_states": later}
     (out / "results.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")
-    print(json.dumps({"status": report["status"], "scenes": len(results),
+    print(json.dumps({"status": report["status"], "part": report["part"], "scenes": len(results),
                       "failed": {k: v for k, v in results.items() if not v["ok"]}}, ensure_ascii=False))
     return 0 if ok else 1
 

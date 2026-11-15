@@ -198,7 +198,8 @@ def stage_unit(ctx):
 
 def load_ci(folder):
     """CI 조각 결과(guards.py --all --json)를 모은다. {'commit', 'shards', 'rows', 'local'(이름 목록)}. 결과가 없거나,
-    조각이 빠졌거나, 커밋이 서로 다르거나, 한 검사가 두 조각에 있으면 ValueError."""
+    조각이 빠졌거나, 커밋이 서로 다르거나, 한 검사가 두 조각에 있으면 ValueError. 하위 조각 행은 검사 하나로
+    합친다(guards.merge_parts)."""
     parts = []
     for f in sorted(Path(folder).rglob('*.json')):
         data = json.loads(f.read_text(encoding='utf-8'))
@@ -216,7 +217,7 @@ def load_ci(folder):
     got = sorted(p['shard'][0] if p['shard'] else 1 for p in parts)
     if got != list(range(1, n + 1)):
         raise ValueError(f'조각 {n}개 가운데 받은 것 {got}')
-    rows = [r for p in parts for r in p['rows']]
+    rows = guards.merge_parts([r for p in parts for r in p['rows']])
     names = [r['name'] for r in rows]
     twice = sorted({x for x in names if names.count(x) > 1})
     if twice:

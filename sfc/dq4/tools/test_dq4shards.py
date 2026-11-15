@@ -42,3 +42,43 @@ class ShardTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PartTests(unittest.TestCase):
+    def test_parts_cover_items_once_in_order(self):
+        items = [f's{i:02}' for i in range(23)]
+        for n in (1, 2, 3, 5, 23, 30):
+            got = [dq4shards.part_of(items, (k, n)) for k in range(1, n + 1)]
+            self.assertEqual(sorted(x for g in got for x in g), items)
+            for g in got:
+                self.assertEqual(g, [x for x in items if x in g])
+
+    def test_none_is_everything_and_weights_balance(self):
+        self.assertEqual(dq4shards.part_of([3, 1, 2], None), [3, 1, 2])
+        w = {'a': 10, 'b': 6, 'c': 4, 'd': 1}
+        got = [dq4shards.part_of('abcd', (k, 2), weight=w.get) for k in (1, 2)]
+        self.assertEqual(got, [['a', 'd'], ['b', 'c']])
+
+    def test_same_split_whatever_the_input_order(self):
+        items = [f'm{i}' for i in range(17)]
+        a = dq4shards.part_of(items, (2, 4))
+        b = dq4shards.part_of(list(reversed(items)), (2, 4))
+        self.assertEqual(sorted(a), sorted(b))
+
+    def test_duplicate_keys_and_bad_part(self):
+        with self.assertRaises(ValueError):
+            dq4shards.part_of(['a', 'a'], (1, 2))
+        import argparse
+        for bad in ('0/2', '3/2', 'x'):
+            with self.assertRaises(argparse.ArgumentTypeError):
+                dq4shards.parse_part(bad)
+        self.assertIsNone(dq4shards.parse_part(''))
+
+    def test_part_arg_reads_env_once(self):
+        import argparse
+        ap = argparse.ArgumentParser()
+        with mock.patch.dict(os.environ, {dq4shards.PART_ENV: '2/3'}):
+            dq4shards.add_part_arg(ap)
+            self.assertNotIn(dq4shards.PART_ENV, os.environ)
+        self.assertEqual(ap.parse_args([]).part, (2, 3))
+        self.assertEqual(ap.parse_args(['--part', '1/4']).part, (1, 4))
