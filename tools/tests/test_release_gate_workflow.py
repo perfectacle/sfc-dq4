@@ -109,7 +109,7 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         gate = GATE.read_text(encoding='utf-8')
         self.assertNotRegex(gate, r'secrets:\s*inherit')
         self.assertRegex(gate, r'uses:\s*\./\.github/workflows/guard-shards\.yml')
-        self.assertRegex(gate, r'mode:\s*release\b')
+        self.assertRegex(gate, r"mode:\s*\$\{\{ inputs\.guards == '' && 'release' \|\| 'pr' \}\}")
         # workflow_dispatch 의 number 입력도 문자열로 넘어가 workflow_call 의 number 입력이 받지 않는다
         self.assertIn('shards: ${{ fromJSON(inputs.shards) }}', gate)
 
@@ -127,8 +127,8 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
 
     def test_roms_come_only_from_the_composite_action(self):
         uses = [s for steps in self.jobs.values() for s in steps if './.github/actions/ci-roms' in s]
-        self.assertEqual(len(uses), sum('ci_artifact_check.py' in run_texts(s) for st in self.jobs.values() for s in st)
-                         + 1, '롬을 받는 잡마다(빌드 잡 + 올리는 잡) ci-roms 를 쓴다')
+        self.assertEqual(len(uses), sum('ci_artifact_check.py' in run_texts(s) for st in self.jobs.values() for s in st),
+                         '롬을 받는 잡은 올리기 앞에 검사하는 잡뿐이고 ci-roms 를 쓴다')
         for f in (WORKFLOW, GATE):
             self.assertNotIn('ci_gate_setup.sh roms', f.read_text(encoding='utf-8'))
         action = ACTION.read_text(encoding='utf-8')

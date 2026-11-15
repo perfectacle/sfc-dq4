@@ -102,16 +102,18 @@ uv run --locked python sfc/dq4/tools/dq4publish.py release --report work/release
 
 ## CI 에서 돌리기
 
-MesenCE 가 필요 없는 실행 검사는 GitHub 러너에서 나눠 돈다. 사람이 `gh workflow run release-gate.yml [-f shards=N] [-f ref=REF]` 로 부를 때만 돈다.
+MesenCE 가 필요 없는 실행 검사는 GitHub 러너에서 나눠 돈다. 사람이 `gh workflow run release-gate.yml [-f shards=N] [-f ref=REF] [-f guards=이름,…]` 로 부를 때만 돈다. `guards` 를 주면 그 검사만 다시 돈다(`mode: pr`).
 
 | 파일 | 하는 일 |
 | --- | --- |
-| `.github/workflows/release-gate.yml` | `workflow_dispatch` 만. 롬 시크릿을 이름을 대어 `guard-shards.yml` 에 넘긴다(`mode: release`) |
-| `.github/workflows/guard-shards.yml` | `workflow_call` 만. 입력 `ref`·`mode`(`release` 모든 검사, `pr` 은 `guards` 목록만)·`guards`·`shards`. `build`(롬 풀기·출하 롬 빌드·조각 목록) → `shard` 행렬(`guards.py --all --run --no-cache --shard k/N --exclude-needs MESENCE,LIBDIR --json`) → `report`(`release_check.py --ci-summary`, 실행 요약에 표) |
+| `.github/workflows/release-gate.yml` | `workflow_dispatch` 만. 롬 시크릿을 이름을 대어 `guard-shards.yml` 에 넘긴다(`guards` 가 비면 `mode: release`, 아니면 `pr`) |
+| `.github/workflows/guard-shards.yml` | `workflow_call` 만. 입력 `ref`·`mode`(`release` 모든 검사, `pr` 은 `guards` 목록만)·`guards`·`shards`. `build`(도구 캐시 채우기·조각 목록) → `shard` 행렬(`guards.py --all --run --no-cache --shard k/N --exclude-needs MESENCE,LIBDIR --json`) → `report`(`release_check.py --ci-summary`, 실행 요약에 표) |
 | `.github/actions/ci-roms` | composite action. 프라이빗 에셋 저장소 릴리스 `ci-roms-v1` 의 age 암호화 묶음(`dq5.sfc dq6.sfc dq4.nes dq4-rev0.nes dq4ds.nds dq4ds-kr.nds dq4ds-kr.ml1 dq4ds-kr.sav`)을 `rom/` 에 풀고 롬 SHA-256 목록을 `$RUNNER_TEMP/rom-hashes.txt` 에 |
 | `tools/ci_gate_setup.sh tools` | asar·Galmuri·libretro 코어를 `$RUNNER_TEMP/gate-tools` 에 두고 `ASAR`·`DQ4_GALMURI`·`DQ4_CORES` 를 잡 환경에 |
 | `tools/ci_artifact_check.py DIR --hashes FILE` | 올리기 바로 앞. 롬·세이브·패치 확장자(`.sfc .smc .nes .nds .ml1 .sav .mss .ips .srm .state`), 심볼릭 링크, 롬 해시와 같은 내용, 8MB 넘는 파일이 있으면 1. 실패하면 올리지 않는다 |
 
+- 조각마다 출하 롬을 캐시 없이 `work/ch1` 에 빌드한다(약 13분). 빌드가 읽는 에셋은 에셋 저장소에 커밋돼 있어야 한다. 로컬에만 있는 파일은 CI 롬을 바꾼다.
+- 리눅스 bsnes 는 WRAM 을 `/proc/self/maps` 의 코어 매핑에서 찾는다(`dq4libretro.linux_segments`). 못 찾으면 직렬화로 읽고 써서 타이밍이 바뀌어 걷기가 어긋난다.
 - 시크릿: `CI_ROM_TOKEN`(에셋 저장소 읽기), `CI_ROM_AGE_KEY`(age 개인 키). 키 줄은 `::add-mask::` 로 가린다.
 - artifact 는 조각 결과 JSON 과 검사 로그뿐이다. `actions/cache` 는 asar·코어 빌드(`$RUNNER_TEMP/gate-tools`)만 담는다.
 - 조각은 `tools/guardshard-times.json`(검사마다 지난 시간)으로 고르게 나눈다. `guards.py --record-times 보고서…` 로 고쳐 쓴다.

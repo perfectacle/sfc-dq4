@@ -78,13 +78,6 @@ jobs:
 
       - run: uv sync --locked
 
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: perfectacle/sfc-dq4-assets
-          token: ${{ secrets.CI_ROM_TOKEN }}
-          path: assets
-          persist-credentials: false
-
       - name: Restore tool builds
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -93,20 +86,9 @@ jobs:
             ${{ runner.temp }}/gate-tools/cores
           key: gate-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/ci_gate_setup.sh', 'sfc/dq4/tools/dq4cores.py', 'sfc/dq4/tools/dq4cores-bsnes-romtrace.patch') }}
 
+      # Warms the tool cache once so the shards do not all build the cores.
       - name: Build asar, fetch Galmuri, build libretro cores
         run: tools/ci_gate_setup.sh tools
-
-      - uses: ./.github/actions/ci-roms # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
-        with:
-          token: ${{ secrets.CI_ROM_TOKEN }}
-          age_key: ${{ secrets.CI_ROM_AGE_KEY }}
-
-      - name: Build the ship ROM
-        env:
-          DQ4_ASSETS: ${{ github.workspace }}/assets
-          DQ4_READSET: 'off'
-          DQ4_BUILD_CACHE: 'off'
-        run: uv run --frozen python sfc/dq4/tools/dq4build.py --out work/release-build
 
       - name: List the shards
         env:
