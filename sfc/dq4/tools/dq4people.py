@@ -163,8 +163,7 @@ PEOPLE = (
     Person((0x0E,), PROLOGUE, 'h143', '신시아', main=True, spare=0x2D),
     # 개구리는 서장에만 나오고 그림 50 은 다른 그룹에서 슬라임이라, 개구리는 쓰지 않는 그림 93 의 세트를 빌린다
     Person((0x50,), PROLOGUE, 'h174', '개구리', anim='frames', main=True, outline=True, spare=0x93),  # 풀·나뭇잎과 같은 초록이라
-    # 지하 수련의 검사는 스크립트가 붙은 엔트리(dq4prologue.MASTER_SRC)라 세트 팔레트 표와 상관없이 OBJ 팔레트 0 으로
-    # 그려진다(수련 장면의 OAM 실측)
+    # 빌린 그림 90 의 세트 63 은 엔진이 OBJ 팔레트 0 으로 싣는다(LINE0_SETS)
     Person((0x08,), PROLOGUE, 'h019', '검사', main=True, spare=0x90, line=0),
     # 줄 1: 색 거리만 재면 신시아가 쓰는 빌린 줄에 들어, 윗옷 노랑이 신시아의 색에 밀려 살색으로 실린다
     Person((0x17,), PROLOGUE, 'h003', '어머니', spare=0x39, line=1),
@@ -240,6 +239,9 @@ PEOPLE = (
       for role, pic, sheet, group, anim in EVENT_PEOPLE),
 )
 SHARED_LINES = (0, 1, 2, 3, 4)
+# DQ5 의 6타일 세트 싣기(1F:CFD7 → 1F:D051)는 세트 63·6C(원래 신부 그림 90·91)를 7E:21B3 bit3 이 꺼져 있으면 세트
+# 팔레트 표 값을 버리고 OBJ 팔레트 0 으로 둔다. 이 세트를 빌린 인물은 줄 0 이어야 제 색으로 그려진다
+LINE0_SETS = frozenset({0x63, 0x6C})
 # 일행 줄(5·6·7) 가운데 그 맵 그룹에서 일행이 쓰지 않는 줄. 서장에는 용사(7)뿐이고, 1장 그룹에는 라이언(6)과
 # 호이민(5)뿐이다. 나오는 그룹이 모두 여기 드는 인물은 그 줄도 쓴다(그 그룹의 줄 색을 맵 팔레트로 덮는다).
 # 2장 그룹은 세 줄 모두 2장 일행이 쓴다
@@ -1071,6 +1073,12 @@ def where(people, used):
     return out
 
 
+def line0_problems(rows):
+    """엔진이 팔레트 0 으로 싣는 세트(LINE0_SETS)를 쓰면서 줄 0 이 아닌 인물."""
+    return [f'{p.role}: 세트 {s:02X} 는 OBJ 팔레트 0 으로 실리는데 줄 {line}'
+            for p, s, _, _, _, _, line, _ in rows if s in LINE0_SETS and line != 0]
+
+
 def prepare(rom, assets, work, base=None, squeeze=False):
     """인물마다 시트를 만들어 타일 한도에 맞춘다. [(인물, 세트, 배치, 한도, 타일, 낮춘 단계, 줄, 줄 색)]."""
     cells = {p: rgb_frames(p, assets) for p in PEOPLE}
@@ -1095,6 +1103,8 @@ def prepare(rom, assets, work, base=None, squeeze=False):
             index_image(cells[p], pal, layout).save(path)
             steps.append(name)
         rows.append((p, s, layout, limit, tiles(path, layout), steps, line, pal))
+    if line0_problems(rows):
+        raise SystemExit('\n'.join(line0_problems(rows)))
     return rows, board
 
 
