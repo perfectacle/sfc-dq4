@@ -489,6 +489,24 @@ why = "세트 97 의 원래 타일 자료 자리를 NDS 인물 그림으로 그 
 
 [[original]]
 stage = "people"
+at = "0C:FA2C~0C:FCEC"
+data = true
+why = "세트 2E 의 원래 타일 자료 자리를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0D:D6C7~0D:D990"
+data = true
+why = "세트 57 의 원래 타일 자료 자리를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0D:EFDA~0D:F233"
+data = true
+why = "세트 61 의 원래 타일 자료 자리를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
 at = "1F:D71D~1F:FE97"
 data = true
 why = "세트 레코드(52바이트)·세트 포인터를 바꾼 세트로(dq4people). 레코드는 자료다. 타일 수 22 뒤에 타일 자료 주소 셋이 오면 JSL 처럼 보인다(1F:EEE2)"
