@@ -9,6 +9,12 @@
   event   castle_day 끝에서 2장 사건 인물(dq4people.EVENT_PEOPLE)이 나올 그룹의 맵으로. 사건이 아직 인물을 놓지 않으므로
           그 맵 인물 목록의 앞 엔트리 그림을 사건 그림으로 바꾼 시험 롬(--out 아래 event.sfc)을 쓴다. 사건 그림마다 판정을
           지난 슬롯이 하나 이상이어야 한다
+  far     castle_day 끝에서 서장·1장 밖 DQ4 그룹(3D~)의 인물이 있는 맵마다 낮·밤으로(far_day·far_night). 맵마다 인물 목록
+          첫 엔트리의 두 칸 아래로 워프한다
+
+장면마다 공용 줄(dq4people.SHARED_LINES) 가운데 롬이 그 맵에서 덮는 줄의 CGRAM 색이 롬 표와 같고, 화면 안 OAM 가운데
+공용 줄을 쓰면서 판정한 인물 슬롯의 타일이 아닌 것이 없어야 한다. 맵 물체나 연출이 공용 줄을 쓰거나 덮으면 걸린다.
+필드 맵($BE bit7 꺼짐)은 DQ5 낮밤 루틴(01:A3F1)이 OBJ 팔레트 3·4 를 덮으므로 색 대신 그 줄을 쓰는 슬롯이 없는지 본다.
 
 인물 슬롯(7E:3220)마다 세트는 덤프한 WRAM($BC 맵 그룹, 7E:2190 flag)을 넣고 롬의 인물 훅(dq4people.HOOK_AT)을
 65816 해석기로 그대로 돌려 얻는다. 그 세트 레코드로 칸 목록(7E:8060-)의 타일·좌우 반전이 레코드와 같은지, 칸의
@@ -33,6 +39,7 @@ import dq4ch1walkcheck as walk  # noqa: E402
 import dq4mesen  # noqa: E402
 import dq4people  # noqa: E402
 import dq5npcrecord  # noqa: E402
+import dq5objpalette  # noqa: E402
 import dq5sprite as S  # noqa: E402
 from dq5exitcheck import warp_exit  # noqa: E402
 from dq5map import Rom  # noqa: E402
@@ -47,7 +54,8 @@ MAPS = {
     '3B/05': (10, 5), '3B/06': (54, 5), '3C/00': (20, 45), '3C/01': (2, 2),
 }
 SCENES = {'day': ('castle_day', walk.DAY), 'night': ('castle_day', walk.NIGHT), 'hoimin': ('shoes_chest', ''),
-          'event': ('castle_day', walk.DAY)}
+          'event': ('castle_day', walk.DAY), 'far_day': ('castle_day', walk.DAY), 'far_night': ('castle_day', walk.NIGHT)}
+FAR = ('far_day', 'far_night')
 # 사건 인물이 나올 그룹마다 들어설 맵과 칸(필드에서 들어설 때의 칸 dq4groupbuild.LINKS 의 arrival 은 맵 가장자리라 그대로
 # 워프하면 바로 필드로 나가므로 몇 칸 안쪽). 한 맵에 큰 세트를 다 넣으면 OBJ VRAM(512타일)을 넘어 그룹 3D 는 두 맵에 나눈다
 EVENT_MAPS = {'3D/03': (20, 89), '3D/04': (44, 7), '40/00': (46, 59), '45/09': (42, 57)}
@@ -95,6 +103,54 @@ def event_rom(data):
     return bytes(out), by_map
 
 
+def far_maps(entries):
+    """{맵: 워프 칸}. 인물 목록 엔트리(dq5npcrecord.dump)에서 서장·1장 밖 DQ4 그룹의 맵과, 첫 엔트리의 두 칸 아래."""
+    near = {int(m[:2], 16) for m in MAPS}
+    out = {}
+    for e in entries:
+        name = e['name']
+        if len(name) == 5 and name[2] == '/' and name not in out:
+            try:
+                group = int(name[:2], 16)
+            except ValueError:
+                continue
+            if group in dq4people.DQ4_GROUPS and group not in near:
+                at = e.get('day') or e['fields']
+                out[name] = (at['x'], at['y'] + 2)
+    return out
+
+
+def wrong_lines(want, cgram):
+    """색이 want(롬이 그 맵에서 덮는 CGRAM 사본, dq5objpalette.run_lines)와 다른 공용 줄. 덮지 않는 줄(모두 0)은
+    견주지 않는다."""
+    row = lambda b, n: b[0x100 + n * 32 + 2:0x100 + n * 32 + 32]  # noqa: E731
+    return [n for n in dq4people.SHARED_LINES if any(row(want, n)) and row(cgram, n) != row(want, n)]
+
+
+FIELD_LINES = (3, 4)                                # 필드에서 01:A3F1 이 시간대 색으로 덮는 OBJ 팔레트
+
+
+def field_clash(slots):
+    """필드에서 덮이는 줄(FIELD_LINES)을 쓰는 슬롯 번호."""
+    return [s['slot'] for s in slots if 'palette' in s and int(s['palette'].split('(')[1].rstrip(')')) in FIELD_LINES]
+
+
+def foreign_oam(oam, slots):
+    """{줄: 수}. 화면 안 OAM 가운데 공용 줄을 쓰면서 판정한 인물 슬롯의 타일이 아닌 것."""
+    ranges = [(s['base'], int(s['tiles'].split('/')[1])) for s in slots if 'base' in s]
+    foreign = {}
+    for i in range(128):
+        x, y, tile, attr = oam[i * 4:i * 4 + 4]
+        x |= (oam[512 + i // 4] >> (i % 4 * 2) & 1) << 8
+        if x >= 256:
+            x -= 512
+        tile |= (attr & 1) << 8
+        line = attr >> 1 & 7
+        if y < 224 and -16 < x < 256 and line in dq4people.SHARED_LINES and not any(b <= tile < b + c for b, c in ranges):
+            foreign[line] = foreign.get(line, 0) + 1
+    return foreign
+
+
 def hook_set(rom, wram, picture):
     """롬의 인물 훅을 덤프한 WRAM 으로 돌려 그림 → 세트."""
     cpu = Cpu(rom, bytearray(wram))
@@ -136,7 +192,7 @@ def judge(rom, wram, vram):
         pal_ok = sum(1 for c in cells if (c >> 9) & 7 == pal)
         vt = sum(1 for i, t in enumerate(tiles) if 0 <= base + i < 0x200 and
                  bytes(vram[0xC000 + (base + i) * 32:0xC000 + (base + i) * 32 + 32]) == t)
-        ok = cell_ok == 48 and vt == len(tiles) and (pal_ok == 48 or s in (0x63, 0x6C))
+        ok = cell_ok == 48 and vt == len(tiles) and pal_ok == 48
         out.append({'slot': slot, 'picture': g, 'set': s, 'base': base, 'tiles': f'{vt}/{len(tiles)}',
                     'cells': f'{cell_ok}/48', 'palette': f'{pal_ok}/48 ({pal})', 'ok': ok})
     return out
@@ -161,14 +217,15 @@ def scene_ok(found, want, slots):
     return found == want and bool(slots) and all(s['ok'] for s in slots)
 
 
-def scene(mesence, rom, states, out, name, m):
+def scene(mesence, rom, states, out, name, m, cells=None):
     seg, poke = SCENES[name]
+    cells = {**MAPS, **EVENT_MAPS, **(cells or {})}
     dest = out / f'{name}-{m.replace("/", "")}'
     dest.mkdir(parents=True, exist_ok=True)
     state = (states / seg / 'end.mss').resolve()
 
     def warp(to, where, save):
-        x, y = {**MAPS, **EVENT_MAPS}[to]
+        x, y = cells[to]
         env = {'STATE': str(state), 'TO': f'{to},{x},{y}', 'SAVE': save, 'SETTLE': '120', 'MAXF': '1500',
                'WARPEXIT': f'{warp_exit(rom):X}', 'ANYWHERE': '1', **({'POKE': poke} if poke else {})}
         walk.run(mesence, rom, walk.WARP, where, env, 300)
@@ -192,8 +249,16 @@ def scene(mesence, rom, states, out, name, m):
     for sl in slots:
         if 'base' in sl:
             sl['shown'] = shown(oam, sl['base'], int(sl['tiles'].split('/')[1]))
-    return {'scene': dest.name, 'map': found, 'ok': scene_ok(found, m, slots), 'slots': slots,
-            **({} if slots else {'note': '판정할 슬롯 없음'})}
+    want = dq5objpalette.run_lines(rom.read_bytes(), wram[0xBC], wram[0xBD], True, 0, dq5objpalette.MAP_LOADER)
+    field = not wram[0xBE] & 0x80
+    wrong = [] if field else wrong_lines(want, (dest / 'cgram.bin').read_bytes())
+    foreign, clash = foreign_oam(oam, slots), field_clash(slots) if field else []
+    note = ([] if slots else ['판정할 슬롯 없음']) + [f'롬 표와 색이 다른 공용 줄 {n}' for n in wrong] + \
+        [f'줄 {n} 을 쓰는 인물 밖 OAM {k}개' for n, k in sorted(foreign.items())] + \
+        [f'필드에서 덮이는 줄을 쓰는 슬롯 {s:02X}' for s in clash]
+    return {'scene': dest.name, 'map': found,
+            'ok': scene_ok(found, m, slots) and not wrong and not foreign and not clash,
+            'slots': slots, **({'note': ', '.join(note)} if note else {})}
 
 
 def main():
@@ -209,13 +274,15 @@ def main():
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     rom = args.rom.resolve()
-    jobs = [(rom, n, m) for n in args.scenes if n != 'event' for m in args.maps]
+    jobs = [(rom, n, m, None) for n in args.scenes if n != 'event' and n not in FAR for m in args.maps]
+    far = far_maps(dq5npcrecord.dump(Rom(rom.read_bytes()))['entries']) if set(args.scenes) & set(FAR) else {}
+    jobs += [(rom, n, m, far) for n in args.scenes if n in FAR for m in far]
     wanted = {}
     if 'event' in args.scenes:
         data, wanted = event_rom(rom.read_bytes())
         test = out / 'event.sfc'
         test.write_bytes(data)
-        jobs += [(test, 'event', m) for m in EVENT_MAPS]
+        jobs += [(test, 'event', m, None) for m in EVENT_MAPS]
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         results = list(pool.map(lambda j: scene(mesence, j[0], args.states, out, *j[1:]), jobs))
     for r in results:

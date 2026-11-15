@@ -1070,8 +1070,20 @@ class LineTests(unittest.TestCase):
             P.lines([pinned], {pinned: shades(30, 3)}, {pinned: {self.ELSEWHERE}})
 
     def test_the_swordsman_is_pinned_to_line_zero(self):
-        # 지하 수련의 검사는 스크립트 엔트리라 세트 팔레트 표와 상관없이 OBJ 팔레트 0 으로 그려진다
+        # 검사가 빌린 그림 90 의 세트 63 은 엔진이 OBJ 팔레트 0 으로 싣는다
         self.assertEqual(next(p for p in P.PEOPLE if p.role == '검사').line, 0)
+
+    def test_a_set_the_engine_loads_on_palette_zero_must_sit_on_line_zero(self):
+        row = lambda role, s, line: (P.Person((1,), None, 's', role), s, 'simple', 24, 20, [], line, [])  # noqa: E731
+        self.assertEqual(P.line0_problems([row('a', 0x63, 0), row('b', 0x6C, 0), row('c', 0x62, 3)]), [])
+        problems = P.line0_problems([row('a', 0x63, 2), row('b', 0x6C, 4), row('c', 0x62, 3)])
+        self.assertEqual(len(problems), 2)
+        self.assertIn('a: 세트 63', problems[0])
+        self.assertIn('줄 4', problems[1])
+
+    def test_the_palette_zero_sets_are_the_two_the_engine_tests_for(self):
+        # 1F:D051 은 CMP #$63 / CMP #$6C 로 이 두 세트만 가린다
+        self.assertEqual(P.LINE0_SETS, {0x63, 0x6C})
 
 
 class WeightTests(unittest.TestCase):

@@ -57,6 +57,57 @@ class EventMapTests(unittest.TestCase):
                 self.assertLessEqual(abs(dy), 6)
 
 
+class FarMapTests(unittest.TestCase):
+    def test_takes_the_first_entry_of_each_map_outside_the_near_groups(self):
+        entries = [{'name': '40/01', 'day': {'x': 5, 'y': 9}, 'night': {'x': 1, 'y': 1}},
+                   {'name': '40/01', 'fields': {'x': 7, 'y': 7}},
+                   {'name': '45/09', 'fields': {'x': 3, 'y': 4}},
+                   {'name': '36/00', 'fields': {'x': 3, 'y': 4}},      # 서장·1장 그룹은 MAPS 가 맡는다
+                   {'name': '1B/00', 'fields': {'x': 3, 'y': 4}},      # DQ4 그룹이 아님
+                   {'name': '숨은 목록', 'fields': {'x': 3, 'y': 4}}]
+        self.assertEqual(C.far_maps(entries), {'40/01': (5, 11), '45/09': (3, 6)})
+
+
+class SharedLineTests(unittest.TestCase):
+    def cgram(self, lines):
+        out = bytearray(0x200)
+        for n, v in lines.items():
+            out[0x100 + n * 32:0x120 + n * 32] = bytes([v]) * 32
+        return bytes(out)
+
+    def test_a_line_the_rom_covers_must_hold_the_rom_colours(self):
+        want = self.cgram({0: 1, 3: 2})
+        self.assertEqual(C.wrong_lines(want, self.cgram({0: 1, 3: 2, 2: 9})), [])   # 줄 2 는 롬이 덮지 않음
+        self.assertEqual(C.wrong_lines(want, self.cgram({0: 1, 3: 7})), [3])
+
+    def test_colour_zero_of_a_line_is_not_compared(self):
+        want, got = bytearray(self.cgram({3: 2})), bytearray(self.cgram({3: 2}))
+        got[0x160:0x162] = b'\xff\x7f'
+        self.assertEqual(C.wrong_lines(bytes(want), bytes(got)), [])
+
+    def oam(self, rows):
+        out = bytearray(0x220)
+        for i in range(128):
+            out[i * 4 + 1] = 0xF0                                       # 화면 밖
+        for i, (x, y, tile, line) in enumerate(rows):
+            out[i * 4:i * 4 + 4] = bytes((x, y, tile & 0xFF, tile >> 8 | line << 1 | 0x20))
+        return bytes(out)
+
+    def test_counts_shared_line_tiles_outside_the_judged_slots(self):
+        slots = [{'base': 0x90, 'tiles': '24/24'}, {'ok': False}]
+        oam = self.oam([(10, 10, 0x90, 3), (10, 10, 0xA7, 3), (10, 10, 0xA8, 3), (10, 10, 0x1A8, 4),
+                        (10, 10, 0x30, 6), (10, 0xF0, 0x30, 3)])
+        self.assertEqual(C.foreign_oam(oam, slots), {3: 1, 4: 1})          # 일행 줄 6 과 화면 밖은 세지 않음
+        self.assertEqual(C.foreign_oam(self.oam([(10, 10, 0x90, 3)]), slots), {})
+
+
+class FieldClashTests(unittest.TestCase):
+    def test_names_slots_on_the_lines_the_field_routine_overwrites(self):
+        slots = [{'slot': 0, 'palette': '48/48 (6)'}, {'slot': 8, 'palette': '48/48 (3)'},
+                 {'slot': 9, 'palette': '40/48 (4)'}, {'slot': 10, 'palette': '48/48 (2)'}, {'slot': 11, 'ok': False}]
+        self.assertEqual(C.field_clash(slots), [8, 9])
+
+
 class ShownTests(unittest.TestCase):
     def test_counts_on_screen_sprites_in_the_tile_range(self):
         oam = bytearray(544)
