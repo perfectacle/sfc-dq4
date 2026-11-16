@@ -139,7 +139,7 @@ class RomTest(unittest.TestCase):
         from dq5map import Rom
         from dq5npc import script_bytes
         rom = Rom(DQ5.read_bytes())
-        (script,) = ev.scripts(0x1100, POINTS)
+        script = ev.scripts(0x1100, POINTS)[0]
         addr = int(ev.OPENER_SCRIPT.replace(':', ''), 16)
         code = dq5npcwrite.encode({'format': dq5npcwrite.FORMAT, 'commands': script['commands']})
         self.assertLessEqual(len(code), len(script_bytes(rom, addr)))
@@ -148,7 +148,7 @@ class RomTest(unittest.TestCase):
 class ScriptTest(unittest.TestCase):
     def test_opener_runs_box_story_reveal_nene_pad_nene(self):
         m = ev.message_ids(0x1100)
-        (script,) = ev.scripts(0x1100, POINTS)
+        script = ev.scripts(0x1100, POINTS)[0]
         self.assertEqual(script['address'], ev.OPENER_SCRIPT)
         cmds = script['commands']
         self.assertEqual([c['op'] for c in cmds], ['3F', '37', '21', '37', '21', '05', '21', '11', '40', '16'])

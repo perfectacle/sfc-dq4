@@ -27,6 +27,7 @@ import dq4shop  # noqa: E402
 import dq5item  # noqa: E402
 from dq4environmentrom import TARGETS  # noqa: E402
 from dq4groupbuild import placement  # noqa: E402
+from dq4itemport import IRON_SAFE  # noqa: E402
 from dq4shopport import _fold, dq5_items  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
@@ -46,9 +47,9 @@ GOLD = 0x100
 # FC special chest contents with a DQ5 reward of the same kind: FF, the empty chest (message 0297), is DQ5 FFFF
 # 「からっぽだった」.
 EMPTY = 0xFFFF
-# EE is chapter 3's iron safe (きたのどうくつ 3D/06): FC sets $627D bit3 and turns the cell into block 19 (1E:$B81B).
-# DQ5 has no such item, so it opens empty until that event is ported.
-SPECIAL = {0xFF: EMPTY, 0xEE: EMPTY}
+# EE is chapter 3's iron safe (きたのどうくつ 3D/06, 1E:$B81B), the story item of its own slot. Putting it back
+# (dq4ch3safe) clears this chest's open bit.
+SPECIAL = {0xFF: EMPTY, 0xEE: IRON_SAFE}
 # E3 은 4장에서 やみのランプ 만 준다(1E:$B9ED, 5장이면 메시지와 이벤트가 이어짐). DQ5 에 같은 이름이 있다.
 SPECIAL_ITEMS = {0xE3: "やみのランプ"}
 # DQ5 drawer open bits 7E:222C + flag_index: the original table ends at 2236 & FC, 2238 (flag_index 0C) is read
