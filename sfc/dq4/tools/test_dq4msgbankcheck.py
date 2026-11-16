@@ -21,7 +21,7 @@ class TestRomTests(unittest.TestCase):
         index = index_table(moved, relocated(moved)[1])[0]
         banks = {Rom(moved).u24(index + 3 * g['group']) >> 19 for g in groups}
         self.assertEqual(banks, {0x1E, 0x1F})
-        self.assertTrue(any(moved[lorom(0x558000):lorom(0x558000) + 16]))
+        self.assertTrue(any(moved[lorom(0x55C000):lorom(0x55C000) + 16]))
         for g in groups:
             first = g['group'] * 16
             self.assertEqual(g['expected'][:2], original(None, first))
