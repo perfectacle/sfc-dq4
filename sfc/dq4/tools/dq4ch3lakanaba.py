@@ -70,6 +70,7 @@ STOCK_AT = ch3.VARS_AT + 4     # 파는 손님에게서 산 ブーメラン·く
 WAGE_AT = ch3.VARS_AT + 7      # 오늘 일삯 16비트(FC $07C6~). 가게를 닫거나 그만둘 때 금화로
 ITEM_AT = ch3.VARS_AT + 9      # 지금 손님: bit0-2 품목 칸, bit4-5 값(0 그대로, 1 깎음, 2 웃돈, 3 파는 손님)
 MODE_SELLER = 3
+ROW = 16                       # 값·일삯 표의 값 칸마다 칸 수(ITEM_AT 의 bit4-5 가 그대로 16 단위)
 # 무기점 품목: (DQ5 물건, FC 값). 앞 셋이 FC 무기점 목록(01 02 09), 뒤 셋은 파는 손님에게서 사면 그 재고만큼 목록 뒤에
 # 붙는다(15:$B26B). 파는 손님의 품목은 15:$A4A1(01 02 09 0B 04)이고 rand < 8 이면 はじゃのつるぎ(23)
 GOODS = ((0x02, 30), (0x06, 100), (0x1C, 200), (0x21, 350), (0x07, 550), (0x0D, 3500))
@@ -98,6 +99,7 @@ SELLER_BELOW = 0x30
 HAJA_BELOW = 8
 RESULT_BELOW = (0x20, 0x40, 0x60)       # 돈 모자람 / 소지품 가득 / 장비 못 함 / 나머지 팜
 DISCOUNT_BELOW, RAISE_BELOW = 0x40, 0x80
+LUCK_BELOW, LUCK40_BELOW = 0x80, 0x40      # 흥정 뒤 r2 의 두 문턱
 TOM_GOLD = (2, 11)                      # 2 + rand mod 11(15:$A06E)
 RAND = 0x00953A                         # JSL, A = N: 0~N-1(DP $10·$11 을 씀)
 
@@ -187,6 +189,7 @@ def _join(*parts):
 MESSAGES = {
     # 네네·포포로(FC 16/01)
     'bento': pages('네네', '자, 여기 도시락./오늘도 힘내고 와요.'),                          # 080E
+    'go_west': pages('네네', '집을 나서면/졸지 말고/곧장 서쪽으로/걸어가요.', '그럼 힘내고 와요.'),   # 080A
     'forgot': pages('네네', '어머 여보./뭐 두고 간 거라도/있어요?', '일 힘내고 와요./쪽.'),    # 0810
     'dream': pages('네네', '있잖아요……/우리도 언젠가는/우리 가게를/갖고 싶네요.',           # 080F
                    '당신은 언제까지나/남 밑에서 일할/사람이 아니에요.',
@@ -326,7 +329,7 @@ def _arrive():
     a.label('buyer')(0xA2, STOCKED)
     for k in range(STOCKED, len(GOODS)):
         a(lda(STOCK_AT + k - STOCKED)).br(BEQ, f'none{k}')(0xE8).label(f'none{k}')
-    a(0x8A, 0x22, *_al(RAND), 0xC9, STOCKED).br(BCC, 'buyer_item')
+    a(_pick(), 0xC9, STOCKED).br(BCC, 'buyer_item')
     a(0x38, 0xE9, STOCKED, 0xA8, 0xA2, STOCKED)
     a.label('scan')(0xBF, *_al(STOCK_AT - STOCKED)).br(BEQ, 'skip')(0xC0, 0x00).br(BEQ, 'found')(0x88)
     a.label('skip')(0xE8, 0xE0, len(GOODS)).br(BCC, 'scan')(0xA9, 0x00).br(BRA, 'buyer_item')
@@ -334,6 +337,16 @@ def _arrive():
     a.label('buyer_item')(sta(ITEM_AT))
     a.label('end')
     return a.bytes() + LEAVE
+
+
+def _pick():
+    """A = 사는 손님 품목 칸 = rand(목록 수 X). BUYER_PICK 이 있으면(검사가 품목을 고를 때) 그 칸, 같은 5바이트."""
+    if BUYER_PICK is None:
+        return bytes((0x8A, 0x22)) + _al(RAND)
+    return bytes((0xA9, BUYER_PICK, 0xEA, 0xEA, 0xEA))
+
+
+BUYER_PICK = None
 
 
 def _set_talk(talks):
@@ -386,8 +399,8 @@ def _haggle(at):
     """대화 호출(값에 「아니오」): r < 40 깎음(DISCOUNT, 값 칸 1), < 80 웃돈(RAISE, 값 칸 2), 나머지 흥정 없음. 깎거나
     올리면 $F5·값 루틴을 그 값으로 둔다. 그 뒤 갈래가 볼 둘째 난수 r2 도 여기서 굴린다: LUCK = r2 < 80, LUCK40 = r2 < 40
     (갈래마다 r2 를 한 번만 보므로 한 값으로 두 문턱을 둬도 FC 와 같은 확률)."""
-    a = Asm()(ENTER, _clear(LUCK), _clear(LUCK40), _rand(0xFF), 0xC9, 0x80).br(BCS, 'r')(_set(LUCK))
-    a(0xC9, 0x40).br(BCS, 'r')(_set(LUCK40))
+    a = Asm()(ENTER, _clear(LUCK), _clear(LUCK40), _rand(0xFF), 0x48, 0xC9, LUCK_BELOW).br(BCS, 'r40')(_set(LUCK))
+    a.label('r40')(0x68, 0xC9, LUCK40_BELOW).br(BCS, 'r')(_set(LUCK40))
     a.label('r')(_rand(0xFF), 0xC9, DISCOUNT_BELOW).br(BCS, 'raise')
     a(_set(DISCOUNT), 0xA9, 0x10).br(BRA, 'mode')
     a.label('raise')(0xC9, RAISE_BELOW).br(BCS, 'end')(_set(RAISE), 0xA9, 0x20)
@@ -525,8 +538,9 @@ def native(ctx):
         out.extend(b)
     talk = ctx.talk or {name: 0 for name in TALKS}
     put('ids', bytes(i for i, _ in GOODS) + bytes(8 - len(GOODS)))
-    put('prices', b''.join(p.to_bytes(2, 'little') for row in prices() for p in row + [0] * (8 - len(GOODS))))
-    put('wages', b''.join(w.to_bytes(2, 'little') for row in wages() for w in row + [0] * (8 - len(GOODS))))
+    # 표 칸 = ITEM_AT & 37(값 칸 × 16 + 품목)이라 값 칸마다 16칸
+    put('prices', b''.join(p.to_bytes(2, 'little') for row in prices() for p in row + [0] * (ROW - len(GOODS))))
+    put('wages', b''.join(w.to_bytes(2, 'little') for row in wages() for w in row + [0] * (ROW - len(GOODS))))
     # 값 루틴 주소가 _item_to_f5 에 들어가므로 먼저 둔다
     put('price_to_f5', _price_to_f5(at))
     put('where', _where())
@@ -574,13 +588,14 @@ def _flag_off(flag):
     return {"op": "flag-off", "index": flag[0], "mask": ~flag[1] & 0xFF}
 
 
-def talk_scripts(ctx):
+def talk_scripts(ctx, flip_buy=False):
+    """flip_buy 는 검사용: 값 물음(032D)의 「예」 조건을 뒤집는다(dq4ch3lakanabacheck 가 A 만으로 「아니오」 갈래를 돈다)."""
     say_, call, flag, on, when = ctx.say, ctx.call, ctx.flag, ctx.flag_on, ctx.when
     done = on(ANSWERED)
     nene = when(DAY,
-                [when(flag(WORKED), [say_('home'), say_('goodnight'), call('sleep')],
+                [when(flag(ch3.FRESH), [say_('go_west')], [when(flag(WORKED), [say_('home'), say_('goodnight'), call('sleep')],
                       [when(flag(BENTO_TODAY), [when(flag(SLEPT), [say_('dream')], [say_('forgot')])],
-                            [say_('home'), say_('goodnight'), call('sleep')])])],
+                            [say_('home'), say_('goodnight'), call('sleep')])])])],
                 [say_('night_home'), say_('goodnight'), call('sleep')])
     master = [call('where'),
               when(flag(ACROSS), [say_('across'), when(YES, [say_('customer_ok')], [say_('come_in')])],
@@ -594,7 +609,7 @@ def talk_scripts(ctx):
     # FC: 흥정을 거절하면 r2 < 80 이면 0333 으로 가고, 아니면 032E 뒤 처음 값으로 다시(032D)
     leave_or_again = when(flag(LUCK), [say_('no_thanks')], [say_('kidding'), on(AGAIN)])
     price = [call('prep'), say_('buy'),
-             when(YES, [call('result')],
+             when(_not(YES) if flip_buy else YES, [call('result')],
                   [call('haggle'),
                    when(flag(DISCOUNT), [say_('discount'), when(YES, [call('result')], [leave_or_again])]),
                    when(flag(RAISE), [say_('raise'),
@@ -791,11 +806,20 @@ def npc_lists(lists, ctx):
 
 
 def start_messages(ctx):
-    """3장 처음 상태(오늘 도시락 flag 꺼짐, 낮)에서 바꾼 인물의 첫 메시지(3장 인물 검사의 기대값)."""
+    """{(맵, FC 대화, 밤 또는 None): 첫 메시지}: 3장 처음 상태(오늘 도시락 flag 꺼짐, 출근 전)에서 대화를 바꾼 인물(3장
+    인물 검사의 기대값). 네네는 낮에도 오늘 도시락을 받기 전이라 잠 갈래다."""
     m = ctx.msg
-    return {(HOUSE, FC_NENE, False): m['home'], (TOWN, FC_TOM, False): m['tom_hello'],
-            (TOWN, FC_TOM, True): m['tom_night'], (TOWN, FC_SON, False): m['son_lend'],
-            (TOWN, FC_SON, True): m['son_lend'], (HOUSE, FC_NENE, True): m['night_home']}
+    return {(HOUSE, FC_NENE, False): m['home'], (HOUSE, FC_NENE, True): m['night_home'],
+            (HOUSE, FC_POPOLO_DAY, False): m['popolo_day'], (HOUSE, FC_POPOLO_NIGHT, True): m['popolo_night'],
+            (TOWN, FC_TOM, False): m['tom_hello'], (TOWN, FC_TOM, True): m['tom_night'],
+            (TOWN, FC_SON, None): m['son_lend'], (CELLAR, FC_QUIT, False): m['tomorrow']}
+
+
+def absent(ctx):
+    """{(맵, DQ5 셀 x, y, 밤)}: 처음 상태에서 없는 FC 인물. 카운터 주인은 첫 출근(꾸지람) 전에는 숨고, 문·밖에 세운 FC 슬롯
+    11·14·15 는 목록에서 뺐다(첫 출근 주인·손님·가게를 닫는 이벤트가 맡음)."""
+    return {(m, *c, time == 'night') for m, time, c in (MASTER, *STRAYS)}
 
 
 FC_NENE, FC_TOM, FC_SON, FC_MASTER, FC_QUIT = 0x057, 0x058, 0x055, 0x054, 0x052
+FC_POPOLO_DAY, FC_POPOLO_NIGHT = 0x2C2, 0x1B5

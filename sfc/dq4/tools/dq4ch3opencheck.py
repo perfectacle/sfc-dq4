@@ -57,15 +57,16 @@ OPEN_INPUT = ';'.join(['a:8;wait:50;left:2;wait:30'] * 26) + ';wait:120;' + wc.p
 
 # (이름, 방법, 인자, 선택). 2장 검사의 빈 성 묶음을 계단까지 쓰고(empty_leave), 그 뒤 성 앞마당에서 장 끝이 3장으로 이어진다
 FIRST, LAST = 'empty_throne_side', 'empty_leave'
-# 사건 등록 견본(dq4ch3lakanaba): 시작 칸에서 위의 네네에게 말을 건다. 시작 소지품의 도시락(물건 칸 1)이 있으면 받지
-# 않고, 그 칸을 비운 뒤 다시 걸면 도시락을 받고 BENTO_TODAY 가 켜진다
+# 레이크나바 모듈(dq4ch3lakanaba): 시작 칸에서 위의 네네에게 말을 건다. 첫머리 직후(집을 다시 불러오기 전, FRESH)에는
+# 「곧장 서쪽으로」 뿐이라 도시락(물건 칸 1)도 오늘 도시락 flag 도 그대로다. FRESH 를 지우고 도시락 칸을 비운 뒤 다시 걸면
+# 오늘 도시락 전이라 잠 → 아침 → 도시락을 받고 BENTO_TODAY 가 켜진다
 NENE_TALK = wc.talk('up', 12)
 BENTO_KEEP = ('ch3_bento_keep', 'walk', NENE_TALK,
               {'map': ch3.HOUSE, 'off': ['BENTO_TODAY'], 'items': [BENTO], 'bytes': {'ITEM1': BENTO}})
 BENTO_GIVE = ('ch3_bento_give', 'walk', NENE_TALK,
               {'map': ch3.HOUSE, 'want': ['BENTO_TODAY'], 'items': [BENTO], 'bytes': {'ITEM1': BENTO}})
-# 도시락 칸을 비우는 시작 SET(한 번)
-NO_BENTO = f'{(ch2.PARTY_AT + 0x16 + 1) & 0xFFFF:04X}=FF'
+# 도시락 칸을 비우고 첫머리 직후 표시(맵 안 임시 칸)를 지우는 시작 SET(한 번)
+NO_BENTO = f'{(ch2.PARTY_AT + 0x16 + 1) & 0xFFFF:04X}=FF;{(0x7E2190 + ch3.FRESH[0]) & 0xFFFF:04X}=00'
 
 
 def segments(start):
@@ -92,8 +93,8 @@ def give_bento(mesence, rom, dest, seed):
     return {**r, 'status': 'failed', 'problems': r['problems'] + more} if more else r
 
 
-# 공용 장치(대화 호출 표의 give·take·pay·earn): 검사 롬 사본의 표 칸 0(견본의 give_bento)을 그 장치로 바꾸고, 도시락을
-# 비운 채 네네에게 한 번 말을 건다. (이름, 장치, 인자, 시작 SET, 끝 바이트). 톨네코는 ぬののふく(42, 장비)만 가진다
+# 공용 장치(대화 호출 표의 give·take·pay·earn): 검사 롬 사본의 표 칸 0(레이크나바의 잠)을 그 장치로 바꾸고, 도시락을
+# 비운 채 네네에게 한 번 말을 건다(오늘 도시락 전이라 080B·080C 뒤 표 칸 0 을 부름). (이름, 장치, 인자, 시작 SET, 끝 바이트). 톨네코는 ぬののふく(42, 장비)만 가진다
 DEVICE_TALK = wc.talk('up', 2)
 DEVICES = (
     ('pay_ok', 'pay', 0, '2019=40;201A=9C;201B=00', {'GOLD0': 0x88, 'GOLD1': 0x13, 'GOLD2': 0}),       # 40000 - 35000

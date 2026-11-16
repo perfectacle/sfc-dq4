@@ -24,6 +24,9 @@ from dq4ch3slots import SLOTS, VARS_AT  # noqa: E402
 # 7E:2208 은 DQ5 가 색인 쓰기로만 덮는 자리(dq4ch2slots 「flag 자리」). 2장 첫머리·텐페·사건 전투가 bit0·1·2·4·6·7 을 쓴다
 CHAPTER3 = (0x78, 0x08)        # 7E:2208 bit3  3장 진행 중(2장 끝에서 켬). 주인공 그림·성장·장비를 톨네코로
 OPENING = (0x78, 0x20)         # 7E:2208 bit5  3장 첫머리(제목 상자·서두·네네)를 기다림. 옮길 때 켜고 첫머리 끝에 끔
+# 7E:21A3 bit5(맵을 옮기면 지워짐): 첫머리가 끝난 뒤 아직 집을 다시 불러오지 않음. FC 는 맵에 들 때마다 $628B 를 FF 로
+# 쓰고 네네(대화 057)가 bit6 이 꺼져 있으면 「집을 나서면 곧장 서쪽으로」(080A)라 하므로, 첫머리 직후에만 그 말이다
+FRESH = (0x13, 0x20)
 
 HOUSE = '3E/01'                # FC 16/01 레이크나바 톨네코의 집
 START_CELL = (0x1B * 2, 0x05 * 2 + 1)    # FC 3장 시작 (1B,05)
@@ -227,7 +230,7 @@ def scripts(first_message, native_points):
     return [{"address": OPENER_SCRIPT, "commands": [
         _cmd('3F'), _cmd('37', *_al(native_points['box3'])), msg('opening'),
         _cmd('37', *_al(native_points['reveal'])), msg('nene_call'),
-        _cmd('05', *_al(at['pad'])), msg('nene_wake'),
+        _cmd('05', *_al(at['pad'])), msg('nene_wake'), _cmd('10', *FRESH),
         _cmd('11', OPENING[0], ~OPENING[1] & 0xFF), _cmd('40'), _cmd('16')]}] + \
         [s for ctx in contexts(first_message, points=native_points) if hasattr(ctx.module, 'scripts')
          for s in ctx.module.scripts(ctx)]
@@ -643,6 +646,11 @@ def start_messages(first_message):
         if hasattr(ctx.module, 'start_messages'):
             out.update(ctx.module.start_messages(ctx))
     return out
+
+
+def absent():
+    """{(맵, DQ5 셀 x, y, 밤)}: 사건 모듈이 3장 처음 상태에서 없앤 인물(dq4npccheck --chapter3 이 말 걸지 않음)."""
+    return {k for ctx in contexts() if hasattr(ctx.module, 'absent') for k in ctx.module.absent(ctx)}
 
 
 def state_messages(first_message):
