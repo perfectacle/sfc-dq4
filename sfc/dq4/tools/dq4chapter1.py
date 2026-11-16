@@ -397,7 +397,8 @@ def messages(ported_messages, report):
     # 1장 그룹 인물(왕좌의 방은 이 연출 배치로 바꿈)의 일본어 원문을 FC 메시지 묶음으로 찾아 한글로
     import dq4ch1talk
     import dq4ch2talk
-    korean = {**dq4ch1talk.TEXTS, **FRONT_TEXTS, **dq4ch2talk.TEXTS}
+    import dq4ch3event
+    korean = {**dq4ch1talk.TEXTS, **FRONT_TEXTS, **dq4ch2talk.TEXTS, **dq4ch3event.ported_texts()}
     for m, people in report.items():
         if m == THRONE:
             continue
@@ -413,7 +414,6 @@ def messages(ported_messages, report):
     first = dq4npcport.FIRST_MESSAGE + len(ported_messages)
     events = dq4ch1event.texts(first)
     import dq4ch2event
-    import dq4ch3event
     import dq4signs
     for name, texts in (('1장', TEXTS), ('서장', dq4prologue.TEXTS), ('시스템', dq4sysmsg.TEXTS),
                         ('팻말', dq4signs.texts()),

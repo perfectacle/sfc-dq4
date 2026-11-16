@@ -656,6 +656,18 @@ def absent():
     return {k for ctx in contexts() if hasattr(ctx.module, 'absent') for k in ctx.module.absent(ctx)}
 
 
+def ported_texts():
+    """{FC 메시지 묶음: 한글}: 사건 모듈의 PORTED. dq4npcport 가 옮긴 일본어 임시 대사를 같은 메시지 번호에서 덮는다
+    (dq4chapter1.messages, 2장 dq4ch2talk 과 같음)."""
+    out = {}
+    for key, mod in modules():
+        for fc, parts in getattr(mod, 'PORTED', {}).items():
+            if fc in out:
+                raise SystemExit(f'{key}: 옮긴 대사 {"+".join(f"{m:04X}" for m in fc)} 를 다른 모듈도 덮음')
+            out[fc] = parts
+    return out
+
+
 def state_messages(first_message):
     """{상태 이름: (SET, {(맵, FC 칸, 밤): 첫 메시지})}: 사건 모듈의 state_messages(ctx)."""
     out = {}

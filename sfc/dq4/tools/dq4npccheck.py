@@ -305,7 +305,8 @@ def main():
                     help="the ROM is the --chapter2 build: check the chapter-2 groups with the chapter-2 flag on")
     ap.add_argument("--chapter3", action="store_true",
                     help="the ROM is the --chapter3 build: check the chapter-3 groups with the chapter-3 flag on")
-    ap.add_argument("--states", help="with --chapter2: later states (dq4ch2event.state_messages names, comma-separated). "
+    ap.add_argument("--states", help="with --chapter2 or --chapter3: later states (dq4ch2event·dq4ch3event.state_messages names, "
+                    "comma-separated). "
                     "Each sets its flags too and talks only to the people its table lists")
     args = ap.parse_args()
     sets, lift, groups = None, 0, None
@@ -371,9 +372,12 @@ def main():
                 gone |= dq4ch3event.absent()
     states = {}
     if args.states:
-        if not args.chapter2:
-            raise SystemExit("--states needs --chapter2")
-        table = dq4ch2event.state_messages(first + len(dq4ch1event.MESSAGES))
+        if args.chapter3:
+            table = dq4ch3event.state_messages(third)
+        elif args.chapter2:
+            table = dq4ch2event.state_messages(first + len(dq4ch1event.MESSAGES))
+        else:
+            raise SystemExit("--states needs --chapter2 or --chapter3")
         unknown = [n for n in args.states.split(",") if n not in table]
         if unknown:
             raise SystemExit(f"no such state: {', '.join(unknown)} (have {', '.join(table)})")
