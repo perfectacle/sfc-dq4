@@ -1042,7 +1042,7 @@ class ShardTest(unittest.TestCase):
 
     def test_repo_times_name_real_checks(self):
         checks, _ = guards.load(guards.tracked())
-        names = {c['name'] for c in checks}
+        names = {c['name'] for c in checks} | {s['name'] for s in guards.load_sweeps(guards.tracked())[0]}
         self.assertTrue(set(guards.load_shard_times()) <= names, set(guards.load_shard_times()) - names)
 
     def test_cli_lists_a_shard_and_the_local_share(self):
@@ -1055,6 +1055,115 @@ class ShardTest(unittest.TestCase):
         bad = subprocess.run([sys.executable, str(guards.ROOT / 'tools' / 'guards.py'), '--shard', '1/2'],
                              capture_output=True, text=True)
         self.assertNotEqual(bad.returncode, 0)
+
+
+class SweepTest(unittest.TestCase):
+    """release.toml 의 시드 스윕을 CI 조각 단위로 펼치기(guards.sweep_units)."""
+    SWEEPS = [{'file': 'sfc/dq4/release.toml', 'name': 'w', 'why': 'y', 'seeds': 3,
+               'run': 'uv run --locked python t.py --rom {rom} --out {out} --seeds {seeds}'},
+              {'file': 'sfc/dq4/release.toml', 'name': 'b', 'why': 'y', 'seeds': 2, 'parts': 4, 'needs': ['rom', 'X'],
+               'run': 'a && uv run --locked python b.py --rom {rom} --out {out} --seeds {seeds}'}]
+
+    def units(self, failed=()):
+        with mock.patch.object(guards, 'failed_seeds', side_effect=lambda s, root: list(failed) if s['name'] == 'w' else []):
+            return guards.sweep_units(self.SWEEPS)
+
+    def test_repo_sweeps_load_and_do_not_shadow_checks(self):
+        sweeps, problems = guards.load_sweeps(guards.tracked())
+        self.assertEqual(problems, [])
+        self.assertTrue(sweeps)
+        checks, _ = guards.load(guards.tracked())
+        self.assertFalse({s['name'] for s in sweeps} & {c['name'] for c in checks})
+
+    def test_bad_sweeps_are_problems(self):
+        bad = 'sfc/x/release.toml'
+        text = ('[[sweep]]\nname = "A_b"\nwhy = "w"\nrun = "x {rom}"\nparts = 1\n'
+                '[[sweep]]\nname = "c"\nwhy = "w"\nrun = "x {rom} {out} {seeds}"\nseeds = "8"\n')
+        _, problems = guards.load_sweeps([bad], read=lambda f: text)
+        self.assertEqual(len(problems), 4, problems)
+
+    def test_one_unit_per_seed_with_failed_seeds(self):
+        units = self.units(failed=[9, 1])
+        seeds = [u for u in units if u['name'] == 'w']
+        self.assertEqual([u['seeds'] for u in seeds], [[0], [1], [2], [9]])
+        self.assertEqual([u['seed_unit'] for u in seeds], [(1, 4), (2, 4), (3, 4), (4, 4)])
+        self.assertEqual(seeds[3]['run'], f'uv run --locked python t.py --rom {guards.SWEEP_ROM} '
+                                          '--out work/sweep/w/seed-9 --seeds 9')
+        self.assertEqual(guards.out_dirs(seeds[3]['run']), ['work/sweep/w/seed-9'])
+        self.assertEqual(guards.part_tag(seeds[3]), '~seed9')
+        self.assertEqual(guards.record_tags(seeds[3]), ['~seed9'])
+        self.assertEqual(guards.unit_slots(seeds[3:], '/u'), [{'prefix': 'guard-unit-w~seed9', 'dir': '/u/w~seed9'}])
+        self.assertEqual(guards.unit_name(seeds[3]), 'w 시드 9')
+        self.assertEqual(seeds[0]['needs'], ['rom'])
+        self.assertTrue(all(u['sweep'] for u in units))
+
+    def test_parted_sweep_keeps_every_seed_in_each_part(self):
+        b = [u for u in self.units() if u['name'] == 'b']
+        self.assertEqual(len(b), 1)
+        self.assertEqual(b[0]['parts'], 4)
+        self.assertTrue(b[0]['run'].endswith('--out work/sweep/b --seeds 0,1'))
+        parts = guards.expand_parts(b)
+        self.assertEqual([u['part'] for u in parts], [(1, 4), (2, 4), (3, 4), (4, 4)])
+        self.assertNotIn('tag', parts[0])
+
+    def test_shards_cover_every_unit_once(self):
+        units = guards.expand_parts(self.units())
+        weights = guards.shard_weights(units, times={'w': 30.0, 'b': 40.0}, cached={})
+        self.assertEqual(guards.unit_weight(units[0], weights), 10.0)
+        got = [guards.unit_name(u) for k in (1, 2, 3) for u in guards.shard_part(units, k, 3, weights)]
+        self.assertEqual(sorted(got), sorted(guards.unit_name(u) for u in units))
+
+    def test_seed_rows_merge_into_one_sweep_with_the_failed_seed(self):
+        units = self.units()
+        w = [u for u in units if u['name'] == 'w']
+        with mock.patch.object(guards, 'git', return_value='c\n'):
+            rows = guards.result_json([(w[0], 'passed', '3초'), (w[1], 'failed', '종료 코드 1, 로그 l'),
+                                       (w[2], 'passed', '4초')], [])['rows']
+        self.assertEqual(rows[1], {'name': 'w', 'file': 'sfc/dq4/release.toml', 'status': 'failed',
+                                   'detail': '종료 코드 1, 로그 l', 'part': [2, 3], 'seeds': [1], 'sweep': True})
+        merged = guards.merge_parts(rows)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]['status'], 'failed')
+        self.assertEqual(merged[0]['detail'], '시드 1: 종료 코드 1, 로그 l')
+        self.assertTrue(merged[0]['sweep'])
+        ok = guards.merge_parts([dict(r, status='passed', detail='3초') for r in rows])[0]
+        self.assertEqual((ok['status'], ok['detail']), ('passed', '9초(하위 조각 3개, 가장 긴 것 3초)'))
+        self.assertEqual(guards.merge_parts(rows[:2])[0]['status'], 'failed')
+        self.assertEqual(guards.merge_parts([rows[0], rows[2]])[0]['status'], 'skipped')
+
+    def test_failed_seeds_in_reads_json_lines(self):
+        text = '\n'.join(['{"scene": "a", "seed": 3, "status": "failed"}', '{"seed": 4, "status": "passed"}',
+                          '{"seed": "all", "status": "failed"}', 'x {"seed": 5, "status": "failed"}',
+                          '{"seed": 3, "status": "failed"}', '{"seed": 7, "status": "failed"', '{"seed": 8, "status": "failed"}'])
+        self.assertEqual(guards.failed_seeds_in(text), [3, 8])
+
+    def test_parted_sweep_failure_names_seeds_from_the_log(self):
+        import tempfile
+        part = guards.expand_parts([u for u in self.units() if u["name"] == "b"])[1]
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / 'b~2of4.log').write_text('{"seed": 1, "status": "failed"}\n')
+            self.assertEqual(guards.sweep_failure(part, 'failed', '종료 코드 1', d), '종료 코드 1, 실패 시드 1')
+            self.assertEqual(guards.sweep_failure(part, 'passed', '3초', d), '3초')
+            (Path(d) / 'b~2of4.log').write_text('Traceback\n')
+            self.assertIn('못 읽음', guards.sweep_failure(part, 'failed', '종료 코드 1', d))
+            (Path(d) / 'b~2of4.log').unlink()
+            (Path(d) / 'b~1,2of4.log').write_text('{"seed": 0, "status": "failed"}\n')
+            self.assertEqual(guards.sweep_failure(part, 'failed', '종료 코드 1', d), '종료 코드 1, 실패 시드 0')
+        c = {'name': 'g', 'run': 'x'}
+        self.assertEqual(guards.sweep_failure(c, 'failed', '종료 코드 1'), '종료 코드 1')
+
+    def test_parted_repo_sweeps_run_tools_that_split(self):
+        for s in guards.load_sweeps(guards.tracked())[0]:
+            if s.get('parts'):
+                script = re.search(r'python (\S+\.py)', s['run'].split('&&')[-1])[1]
+                self.assertIn('add_part_arg(', (guards.ROOT / script).read_text(encoding='utf-8'), s['name'])
+
+    def test_cli_needs_all_for_sweeps(self):
+        import subprocess
+        r = subprocess.run([sys.executable, str(guards.ROOT / 'tools' / 'guards.py'), '--sweeps'], capture_output=True,
+                           text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('--all', r.stderr)
 
 
 class PrPlanTest(unittest.TestCase):

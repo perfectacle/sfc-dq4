@@ -7,6 +7,7 @@
   unit      CI 와 같은 폴더마다 단위 테스트 전부(롬이 있으므로 롬 게이트 시험도 돈다)
   guards    모든 guards.toml 의 실행 검사 전부. 검사 결과 캐시와 장면 캐시를 쓰지 않는다(--rehearse 면 씀)
   sweep     트랙의 release.toml 시드 스윕(시드 0 부터 N 개와 seeds.json 의 실패 시드)
+            --ci-report 면 guards·sweep 은 CI 결과만 받고 에뮬레이터를 돌리지 않는다(로컬 몫 LOCAL_NEEDS 만 예외)
   coverage  빌드 경로(dq4publish.inputs 의 .py) 커버리지. 로컬(단위 전부 + 빌드 캐시 끈 빌드 한 번, 하위 프로세스도
             잼) ≥ LOCAL_MIN, CI 와 같게(롬 링크 없는 임시 워크트리에서 롬·도구 환경 변수 없이 단위만) ≥ CI_MIN
 
@@ -20,12 +21,13 @@
 
   uv run --locked python tools/release_check.py                 # 전부(몇 시간)
   uv run --locked python tools/release_check.py --rehearse --stages build,unit
-  uv run --locked python tools/release_check.py --ci-report DIR  # guards 는 CI 결과를 받고 로컬 몫만 돌림
+  uv run --locked python tools/release_check.py --ci-report DIR  # guards·sweep 은 CI 결과, 로컬은 build·unit·coverage
   uv run --locked python tools/release_check.py --ci-summary DIR # CI report 잡: 조각 결과 요약(Markdown), 실패면 1
 
 --ci-report 의 DIR 은 배포 관문 워크플로(release-gate.yml → guard-shards.yml)의 조각 결과(guards.py --all --json)를 받은 폴더다. 조각이 모두
-있고 그 커밋이 지금 HEAD 여야 한다. CI 가 통과·실패로 판정한 검사는 그 결과를 그대로 쓰고(실패를 로컬에서 다시 돌려
-덮지 않는다), CI 가 뺀 로컬 몫(needs 에 guard-shards.yml 의 LOCAL_NEEDS 가 든 것)과 CI 에서 돌리지 않음(skipped)인 검사만 로컬에서 돌린다.
+있고 그 커밋이 지금 HEAD 여야 한다. CI 가 판정한 검사·스윕은 그 결과를 그대로 쓴다(실패를 로컬에서 다시 돌려 덮지 않는다).
+CI 가 뺀 로컬 몫(needs 에 guard-shards.yml 의 LOCAL_NEEDS 가 든 것)만 로컬에서 돌린다. CI 에서 돌리지 않음(skipped)이거나
+결과가 없는 검사·스윕은 다시 돌리지 않고 통과가 아닌 것으로 적는다.
 """
 import argparse
 import hashlib
@@ -37,7 +39,6 @@ import subprocess
 import sys
 import threading
 import time
-import tomllib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ci_cache  # noqa: E402
@@ -117,31 +118,17 @@ def sh(cmd, log, env=None, timeout=None):
 
 
 def sweeps(files=None):
-    """모든 트랙의 release.toml 의 [[sweep]]. 각 항목에 'file' 을 붙인다."""
-    files = files if files is not None else guards.tracked()
-    out = []
-    for f in sorted(x for x in files if Path(x).name == 'release.toml'):
-        for s in tomllib.loads((ROOT / f).read_text(encoding='utf-8')).get('sweep', []):
-            out.append({'file': f, **s})
-    return out
+    """모든 트랙의 release.toml 의 [[sweep]](guards.load_sweeps). 각 항목에 'file' 을 붙인다."""
+    return guards.load_sweeps(files if files is not None else guards.tracked(), lambda f: (ROOT / f).read_text(
+        encoding='utf-8'))[0]
 
 
-def seed_list(n, failed=()):
-    """시드 0 부터 n 개, 이어서 실패 시드(겹침 없이 차례 유지)."""
-    out = list(range(n))
-    for s in failed:
-        if s not in out:
-            out.append(s)
-    return out
+seed_list = guards.seed_list
 
 
 def failed_seeds(sweep):
     """그 트랙 폴더 seeds.json 에서 그 스윕 이름의 실패 시드. 없으면 빈 목록."""
-    path = ROOT / Path(sweep['file']).parent / 'seeds.json'
-    if not path.exists():
-        return []
-    data = json.loads(path.read_text(encoding='utf-8'))
-    return [int(e['seed']) for e in data.get(sweep['name'], [])]
+    return guards.failed_seeds(sweep, ROOT)
 
 
 def gate_env(run_dir, base=None):
@@ -262,7 +249,9 @@ def load_ci(folder):
     if got != list(range(1, n + 1)):
         raise ValueError(f'조각 {n}개 가운데 받은 것 {got}')
     rows = guards.merge_parts([r for p in parts for r in p['rows']])
-    names = [r['name'] for r in rows]
+    sweep_rows = [r for r in rows if r.get('sweep')]
+    rows = [r for r in rows if not r.get('sweep')]
+    names = [r['name'] for r in rows + sweep_rows]
     twice = sorted({x for x in names if names.count(x) > 1})
     if twice:
         raise ValueError(f'두 조각에서 돈 검사: {twice}')
@@ -278,16 +267,27 @@ def load_ci(folder):
         if any(d['commit'] != commit for d in digests):
             text, ok = text + '- **빌드 대조의 커밋이 조각 결과와 다름**\n', False
         build = {'ok': ok, 'text': text}
-    return {'commit': commit, 'shards': n, 'rows': rows, 'local': local, 'cached': cached, 'build': build}
+    return {'commit': commit, 'shards': n, 'rows': rows, 'sweeps': sweep_rows, 'local': local, 'cached': cached,
+            'build': build}
 
 
-def ci_summary(ci, require_build=False):
+def ci_sweeps(ci, wanted):
+    """CI 스윕 결과를 wanted(release.toml 스윕) 차례로. CI 에 없는 스윕은 「결과 없음」 으로 skipped."""
+    got = {r['name']: r for r in ci.get('sweeps', [])}
+    return [got.get(s['name']) or {'name': s['name'], 'file': s['file'], 'status': 'skipped',
+                                   'detail': 'CI 결과 없음(release-gate 가 sweeps 를 돌리지 않음)'} for s in wanted]
+
+
+def ci_summary(ci, require_build=False, wanted=None):
     """(Markdown, CI 결과가 모두 통과인가). 돌리지 않음(skipped)도 CI 환경이 모자란 것이라 통과로 치지 않는다. 캐시를
     쓴 실행(연습)은 모두 통과여도 판정을 연습으로 적는다. 빌드 대조(캐시 빌드 = 무캐시 빌드)가 있으면 그것도 같아야
-    통과이고, require_build(배포 관문)면 없을 때도 실패다."""
+    통과이고, require_build(배포 관문)면 없을 때도 실패다. wanted(release.toml 스윕)를 주면 그 스윕이 모두 CI 에서
+    통과해야 통과다(시드 단위 실패는 그 시드를 적는다)."""
     words = {'passed': '통과', 'failed': '실패', 'skipped': '돌리지 않음'}
     build = ci.get('build')
-    ok = bool(ci['rows']) and all(r['status'] == 'passed' for r in ci['rows'])
+    sw = ci_sweeps(ci, wanted) if wanted is not None else ci.get('sweeps', [])
+    ok = (bool(ci['rows']) and all(r['status'] == 'passed' for r in ci['rows'])
+          and all(r['status'] == 'passed' for r in sw))
     ok = ok and (build['ok'] if build else not require_build)
     word = ('연습 통과(캐시 씀, 배포 근거 아님)' if ci.get('cached') else '통과') if ok else '실패'
     lines = ['# 배포 관문 CI 결과', '', f'- 커밋: `{ci["commit"]}`', f'- 조각 {ci["shards"]}개, 검사 {len(ci["rows"])}개'
@@ -299,6 +299,11 @@ def ci_summary(ci, require_build=False):
         lines += ['', build['text'].rstrip('\n')]
     elif require_build:
         lines += ['', '## 캐시 빌드와 무캐시 빌드 대조', '', '- **무캐시 빌드 결과가 없음**(cold-build 잡을 본다)']
+    if sw:
+        lines += ['', '## 시드 스윕', '', f'스윕 {len(sw)}개({sum(r["status"] == "passed" for r in sw)}개 통과)', '',
+                  '| 스윕 | 결과 | 시드 단위 | 내용 |', '| --- | --- | --- | --- |']
+        lines += [f'| {r["name"]} | {words.get(r["status"], r["status"])} | {len(r.get("parts") or [])} | {r["detail"]} |'
+                  for r in sorted(sw, key=lambda r: (r['status'] == 'passed', r['name']))]
     if ci['local']:
         lines += ['', '## 로컬 몫', '', '리눅스 CI 에서 돌리지 않아 `release_check.py --ci-report` 가 로컬에서 돌린다.', '',
                   ', '.join(ci['local'])]
@@ -311,10 +316,14 @@ def stage_guards(ctx):
         return {'status': 'failed', 'seconds': 0, 'detail': '; '.join(problems[:5]), 'rows': []}
     t0 = time.time()
     ci = ctx.get('ci')
-    # CI 가 판정한 검사는 그 결과를 쓴다. 로컬 몫과 CI 에서 돌리지 않은 것만 여기서 돈다
-    judged = {r['name']: r for r in ci['rows'] if r['status'] in ('passed', 'failed')} if ci else {}
-    done = guards.run_many([c for c in checks if c['name'] not in judged], ctx['parallel'], ctx['timeout'],
-                           no_cache=not ctx['rehearse'], logs=ctx['logs'] / 'guards', env=env_for(ctx))
+    # CI 결과가 있으면 로컬 몫(LOCAL_NEEDS)만 여기서 돈다. CI 에서 돌리지 않음·결과 없음인 검사는 로컬 에뮬레이터로
+    # 메우지 않고 그대로 통과가 아닌 것으로 남긴다
+    judged = {r['name']: r for r in ci['rows']} if ci else {}
+    mine = [c for c in checks if c['name'] in ci['local']] if ci else checks
+    missing = [c for c in checks if ci and c['name'] not in judged and c['name'] not in ci['local']]
+    done = guards.run_many(mine, ctx['parallel'], ctx['timeout'], no_cache=not ctx['rehearse'],
+                           logs=ctx['logs'] / 'guards', env=env_for(ctx)) if mine else []
+    done += [(c, 'skipped', 'CI 결과 없음') for c in missing]
     rows = [{'name': c['name'], 'file': c['file'], 'status': judged[c['name']]['status'],
              'detail': f'CI: {judged[c["name"]]["detail"]}'} for c in checks if c['name'] in judged]
     rows += [{'name': c['name'], 'file': c['file'], 'status': s, 'detail': d} for c, s, d in done]
@@ -326,6 +335,8 @@ def stage_guards(ctx):
 
 
 def stage_sweep(ctx):
+    if ctx.get('ci'):
+        return stage_sweep_ci(ctx)
     if 'rom' not in ctx:
         return {'status': 'failed', 'seconds': 0, 'detail': '빌드한 롬이 없음', 'rows': []}
     rows, secs_all = [], 0
@@ -344,6 +355,19 @@ def stage_sweep(ctx):
     ok = bool(rows) and all(r['status'] == 'passed' for r in rows)
     return {'status': 'passed' if ok else 'failed', 'seconds': secs_all, 'rows': rows,
             'detail': f'{sum(r["status"] == "passed" for r in rows)}/{len(rows)} 통과'}
+
+
+def stage_sweep_ci(ctx):
+    """CI 조각이 돈 스윕 결과(시드 단위를 합친 것)를 받는다. 에뮬레이터를 돌리지 않는다."""
+    rows = []
+    for r in ci_sweeps(ctx['ci'], sweeps()):
+        seeds = sorted({s for p in r.get('parts') or [] for s in p.get('seeds', [])})
+        rows.append({'name': r['name'], 'file': r['file'], 'status': r['status'], 'seeds': seeds,
+                     'seconds': int(m[1]) if (m := guards.SECONDS.match(r['detail'])) else 0, 'state_cache': [],
+                     'detail': f'CI: {r["detail"]}'})
+    ok = bool(rows) and all(r['status'] == 'passed' for r in rows)
+    return {'status': 'passed' if ok else 'failed', 'seconds': 0, 'rows': rows,
+            'detail': f'CI {sum(r["status"] == "passed" for r in rows)}/{len(rows)} 통과'}
 
 
 def build_path_files(root=ROOT):
@@ -460,7 +484,7 @@ def markdown(report):
              f'- 시각: {report["when"]}']
     if report.get('ci'):
         ci = report['ci']
-        lines.append(f'- CI: 조각 {ci["shards"]}개에서 검사 {ci["ran"]}개, 로컬 몫 {ci["local"]}개')
+        lines.append(f'- CI: 조각 {ci["shards"]}개에서 검사 {ci["ran"]}개·스윕 {ci.get("sweeps", 0)}개, 로컬 몫 {ci["local"]}개')
     lines += ['', '| 단계 | 결과 | 시간 | 내용 |', '| --- | --- | --- | --- |']
     for name, st in report['stages'].items():
         lines.append(f'| {name} | {words.get(st["status"], st["status"])} | {st["seconds"]}초 | {st.get("detail", "")} |')
@@ -511,7 +535,7 @@ def main():
     ap.add_argument('--parallel', type=int, default=2)
     ap.add_argument('--timeout', type=int, default=1800, help='실행 검사 하나의 시간 제한(초). 스윕은 이것의 네 배')
     ap.add_argument('--ci-report', type=Path, metavar='DIR',
-                    help='배포 관문 워크플로의 조각 결과 폴더. guards 단계는 CI 결과를 쓰고 로컬 몫만 돌린다')
+                    help='배포 관문 워크플로의 조각 결과 폴더. guards·sweep 단계는 CI 결과를 쓰고 로컬 몫만 돌린다')
     ap.add_argument('--ci-summary', type=Path, metavar='DIR',
                     help='조각 결과를 요약해 Markdown 으로 찍고 끝낸다(CI report 잡). 모두 통과가 아니면 1')
     ap.add_argument('--require-build', action='store_true',
@@ -519,7 +543,7 @@ def main():
     a = ap.parse_args()
     if a.ci_summary:
         try:
-            text, ok = ci_summary(load_ci(a.ci_summary), a.require_build)
+            text, ok = ci_summary(load_ci(a.ci_summary), a.require_build, sweeps())
         except (OSError, ValueError, KeyError, TypeError) as e:
             print(f'# 배포 관문 CI 결과\n\n- 조각 결과를 읽지 못함: {type(e).__name__}: {e}')
             return 1
@@ -555,7 +579,8 @@ def main():
     report = {'verdict': verdict(stages, a.rehearse, wanted, dirty), 'commit': head, 'dirty': dirty,
               'rom_sha1': ctx.get('rom_sha1'), 'when': time.strftime('%Y-%m-%d %H:%M'), 'rehearse': a.rehearse,
               'states': states,
-              'ci': {'shards': ci['shards'], 'ran': len(ci['rows']), 'local': len(ci['local'])} if ci else None,
+              'ci': {'shards': ci['shards'], 'ran': len(ci['rows']), 'sweeps': len(ci['sweeps']),
+                     'local': len(ci['local'])} if ci else None,
               'stages': stages}
     # 이 폴더 이름 규칙을 바꾸면 dq4publish.check_report 도 함께 바꾼다(배포판은 이 자리의 보고서만 받는다)
     dest = root / (ctx['rom_sha1'][:12] if ctx.get('rom_sha1') else f'nobuild-{head[:12]}')

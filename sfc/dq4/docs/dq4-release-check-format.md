@@ -9,7 +9,7 @@
 | `build` | `dq4build.py` 로 출하 롬을 `work/release/run-*/build/` 에 빌드(빌드 단계 캐시 켬). 같은 때 모든 캐시를 끈 빌드를 `build-cold/` 에 한 번 더([캐시 빌드 대조](#캐시-빌드-대조)) | 롬이 나오고, 두 빌드의 산출물 바이트가 모두 같음. 롬 SHA-1 이 보고서 폴더 이름 |
 | `unit` | CI test 잡과 같은 폴더(`sfc/dq4/tools`, `sfc/dq5/tools/tests`, `tools/tests`, `fc/dq4/tools`, `nds/dq4/tools`)마다 `unittest discover` | 모두 0 으로 끝남. 롬이 있으므로 롬 게이트 시험도 돈다 |
 | `guards` | 모든 트랙 `guards.toml` 의 실행 검사 전부(`guards.run_many`). PR 에서 빠지는 `tier = "release"` 검사와 묶음으로만 걸리는 검사도 여기서 돈다 | 모두 통과 |
-| `sweep` | 트랙마다 `release.toml` 의 시드 스윕 | 모두 0 으로 끝남 |
+| `sweep` | 트랙마다 `release.toml` 의 시드 스윕. `--ci-report` 면 CI 결과만 받는다 | 모두 0 으로 끝남(CI 는 시드 단위가 모두 통과) |
 | `coverage` | 빌드 경로(`dq4publish.inputs()` 의 시험 아닌 `.py`) 커버리지를 둘로 잰다. 로컬: 단위 전부와 빌드 캐시 끈 빌드 한 번(`patch = subprocess` 로 단계 스크립트까지). CI 와 같게: 롬 링크 없는 임시 워크트리에서 롬·도구 환경 변수(`CI_UNSET`) 없이 단위만 | 로컬 ≥ 90%, CI 와 같게 ≥ 80% |
 
 - 앞 단계가 실패해도 나머지를 돌려 보고서에 모두 남긴다. 실패한 검사·스윕은 다시 돌려 통과로 덮지 않는다. 실패 까닭(장면 검사가 남기는 「MesenCE 실행: …」)이 로그에 그대로 남고, 바쁜 머신에서 실패하는 검사의 목록이 된다.
@@ -66,13 +66,25 @@
 | 칸 | 뜻 |
 | --- | --- |
 | `name`·`why` | 스윕 이름과 지키는 것 |
-| `run` | 명령. `{rom}` 관문이 빌드한 롬, `{out}` 출력 폴더, `{seeds}` 쉼표로 이은 시드 |
-| `seeds` | 시드 수. 없으면 `--seeds-n`(기본 16) |
+| `run` | 명령. `{rom}` 출하 롬, `{out}` 출력 폴더, `{seeds}` 쉼표로 이은 시드 |
+| `seeds` | 시드 수. 없으면 `--seeds-n`(기본 16, CI 는 `guards.SWEEP_SEEDS_N` 16) |
+| `needs` | `guards.toml` 과 같은 뜻. 없으면 `["rom"]` |
+| `parts` | CI 에서 시드를 나누지 않고 모든 시드를 받은 하위 조각 n 개로 나눈다(`DQ4_GUARD_PART`). 도구가 시드를 합쳐 판정할 때(전투 갈래의 분포 검사). 마지막 단계 도구가 `add_part_arg` 를 불러야 한다 |
 
 - 시드는 0 부터 차례로 n 개다. 시드 0 은 실행 검사와 같은 기준이라 늘 든다.
 - 그 트랙 폴더의 `seeds.json`(`{"스윕 이름": [{"seed": 5, ...}]}`)에 적은 실패 시드를 덧붙인다. 아직 파일은 없다.
 - 기본 16 은 자동 검증 계획의 「배포 전 16~32」 가운데 낮은 쪽이다. 16시드로 잡아도 스윕 전체가 실행 검사 전부보다 짧아([걸리는 시간](#걸리는-시간)), 관문 한 번이 몇 시간 안에 든다.
 - 스윕마다의 수는 계획의 케이스 표를 따랐다. 전투 갈래 32, 인물 길 막기 8, 코어 교차 4, 가게·마을 8 이다.
+
+#### CI 에서
+
+배포 관문 워크플로가 스윕을 실행 검사와 같은 조각 행렬에서 돌린다(`guard-shards.yml` 입력 `sweeps`, `release-gate.yml` 만 true, `mode: release` 에서만). 잡 수는 늘지 않는다.
+
+- `guards.py --all --sweeps` 가 스윕을 단위로 펼친다(`guards.sweep_units`). `parts` 가 없으면 시드 하나가 단위 하나다. 출력은 `work/sweep/<이름>/seed-<시드>`, 로그·통과 기록 꼬리는 `~seed<시드>`, 조각에 넣는 이름은 「이름 시드 s」 다. `parts` 가 있으면 하위 조각 n 개로, 출력은 `work/sweep/<이름>` 이다.
+- `{rom}` 은 조각 잡이 rom 잡에서 받아 둔 `guards.SWEEP_ROM`(`work/ch1/dq4-ch1-full.sfc`)이다.
+- 단위 무게는 `guardshard-times.json` 의 스윕 시간 ÷ 단위 수다. 시간은 실행 검사처럼 `--record-times` 로 고친다.
+- 결과 행은 `"sweep": true` 를 단다. 시드 단위 행은 `"part": [i, n]`·`"seeds": [s]` 도 달아 `merge_parts` 가 스윕 하나로 합친다. 단위가 하나라도 실패하면 실패이고 글이 「시드 s: …」 다. 빠지면 돌리지 않음이다. `parts` 스윕이 실패하면 로그의 JSON 줄(`"seed"` 정수, `"status": "failed"`)에서 읽은 시드를 「실패 시드 …」 로 붙인다(`guards.failed_seeds_in`).
+- report 잡의 `--ci-summary` 는 「시드 스윕」 표를 따로 찍는다. `release.toml` 의 스윕이 모두 통과해야 통과다. CI 에 없는 스윕은 「CI 결과 없음」 이다.
 
 ## 보고서
 
@@ -157,7 +169,7 @@ uv run --locked python sfc/dq4/tools/dq4publish.py release --report work/release
 - 조각은 `tools/guardshard-times.json`(검사마다 지난 시간)으로 고르게 나눈다. `guards.py --record-times 보고서…` 로 고쳐 쓴다.
 - 긴 검사는 `guards.toml` 에 `parts = n` 을 달아 하위 조각으로 나눈다. `--shard` 때 조각 수와 상관없이 하위 조각 n 개로 펼치고(`expand_parts`, 무게 = 검사 시간/n), 같은 검사의 하위 조각은 되도록 서로 다른 조각에 넣는다. 하위 조각 k 는 `DQ4_GUARD_PART=k/n` 으로 돈다. 조각이 n 보다 적어 한 조각에 여럿 들면 한 프로세스로 함께 돈다(`DQ4_GUARD_PART=1,3/4`, `guards.group_parts`). 통과 기록이 이미 있는 몫은 빼고 돈다. 결과 행은 하위 조각마다 `"part": [k, n]` 이 붙는다. `release_check.load_ci`·`ship.py` 가 `guards.merge_parts` 로 검사 하나로 합친다(하위 조각이 모두 있고 모두 통과해야 통과). 통과 기록 이름은 하위 조각마다 `<이름>~<k>of<n>` 이라 조각 수가 다른 실행끼리 맞는다. 로그 이름은 함께 돈 몫을 모두 적는다(`<이름>~1,3of4`).
 - 검사 도구 쪽 인터페이스는 `sfc/dq4/tools/dq4shards.py` 의 `add_part_arg(ap)`(`--part k/n` 또는 `k1,k2/n`, 기본 `DQ4_GUARD_PART`, 읽은 뒤 환경에서 지움. 몫 여럿은 `dq4shards.Parts` 라 `f'{k}/{n}'` 이 `1,3/4`)와 `part_of(단위, part, key, weight)`(결정적 몫, 모으면 전체). 단위는 서로 상태를 주고받지 않는 장면이고, 몫에서는 판정도 그 몫 단위로 좁힌다. `parts` 가 달린 가드의 마지막 단계 도구는 `add_part_arg` 를 불러야 한다(`test_guards.test_parted_guards_run_tools_that_split`).
-- 로컬에서 마무리: 조각 artifact 를 받은 폴더로 `release_check.py --ci-report DIR` 를 돌리면 guards 단계는 CI 결과(같은 커밋, 조각이 모두 있어야 함)를 쓰고 로컬 몫만 돈다.
+- 로컬에서 마무리: 조각 artifact 를 받은 폴더로 `release_check.py --ci-report DIR` 를 돌린다. guards·sweep 단계는 CI 결과(같은 커밋, 조각이 모두 있어야 함)만 받고 로컬 몫(`LOCAL_NEEDS`)만 돈다. CI 에서 돌리지 않음·결과 없음인 검사·스윕은 로컬 에뮬레이터로 메우지 않고 통과가 아닌 것으로 남는다. 로컬에서 도는 것은 build·unit·coverage(에뮬레이터 없음)다.
 - `tools/tests/test_release_gate_workflow.py` 가 지킨다: 관문은 `workflow_dispatch` 만(`pull_request`·`pull_request_target`·`schedule` 금지), 조각 워크플로는 `workflow_call` 만이고 부르는 곳은 관문·`cache-warm.yml`·`ci.yml` 뿐, `cache-warm.yml` 은 `schedule`·`workflow_dispatch` 만이고 정각이 아니며 main 에서만·`mode: release`·`cache: true`·조각 16 이하·시크릿은 이름으로·올리기 없음·평문 캐시는 데운 커밋 표시만·묶음 `release-gate-main`, 올리기 앞 검사 단계, 평문 캐시 경로(도구·통과 기록만), 롬 파생 폴더는 enc-cache·ship-cache 로만, ship-cache 단계 목록 = `SHIP_LABELS`, 단위 캐시 열쇠에 모드·조각 번호 없음·unit-cache 자리 수 = `guards.UNIT_SLOTS`·통과 기록 → 자리 목록 → 되살리기 차례, 관문은 `rehearse` 일 때만 장면·상태·통과 기록 캐시(빌드 단계 캐시는 늘 쓰고 cold-build 는 모든 캐시를 끔, build-verify·report 가 대조), 시크릿을 찍는 줄 없음. `tools/tests/test_pr_guards_workflow.py` 는 `ci.yml` 쪽을 지킨다: `pull_request_target`·`workflow_run`·`issue_comment`·`secrets: inherit` 없음, 시크릿을 쓰는 잡은 `pr-guards` 하나이고 조건은 「CI 몫 있음 그리고 (같은 저장소 브랜치 PR 또는 main push)」 글자 그대로, `mode: pr`·`cache: true`, `guard-plan` 이 보호 테스트를 계획보다 먼저, `ci-ok` 가 `pr-guards-result`·`required-checks` 를 기다림, `LOCAL_NEEDS` 정본은 `guard-shards.yml` 하나.
 
 ## 남은 것

@@ -27,6 +27,10 @@ on:
         description: Number of guard shards (1-64)
         type: number
         default: 8
+      sweeps:
+        description: Also run the seed sweeps of every release.toml, one unit per seed (mode release only)
+        type: boolean
+        default: false
       cache:
         description: >-
           Use the build stage, scene and state caches and earlier passes (a rehearsal in mode
@@ -71,6 +75,7 @@ jobs:
           SHARDS: ${{ inputs.shards }}
           MODE: ${{ inputs.mode }}
           GUARDS: ${{ inputs.guards }}
+          SWEEPS: ${{ inputs.sweeps }}
         run: |
           case "$SHARDS" in ''|*[!0-9]*) echo "::error::shards must be a number"; exit 1 ;; esac
           if [ "$SHARDS" -lt 1 ] || [ "$SHARDS" -gt 64 ]; then echo "::error::shards must be 1-64"; exit 1; fi
@@ -85,6 +90,7 @@ jobs:
             pr) [ -n "$GUARDS" ] || { echo "::error::mode pr needs a guard list"; exit 1; } ;;
             *) echo "::error::mode must be release or pr"; exit 1 ;;
           esac
+          if [ "$SWEEPS" = true ] && [ "$MODE" != release ]; then echo "::error::sweeps run only in mode release"; exit 1; fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "shards=$(seq -s, 1 "$SHARDS" | sed 's/^/[/; s/$/]/')" >> "$GITHUB_OUTPUT"
 
@@ -99,9 +105,11 @@ jobs:
         env:
           SHARDS: ${{ steps.plan.outputs.count }}
           GUARDS: ${{ inputs.guards }}
+          SWEEPS: ${{ inputs.sweeps }}
         run: |
           only=()
           if [ -n "$GUARDS" ]; then only=(--only "$GUARDS"); fi
+          if [ "$SWEEPS" = true ]; then only+=(--sweeps); fi
           pids=()
           for k in $(seq 1 "$SHARDS"); do
             uv run --frozen python tools/guards.py --all "${only[@]}" --shard "$k/$SHARDS" --exclude-needs "$LOCAL_NEEDS" \
@@ -480,9 +488,11 @@ jobs:
           N: ${{ needs.build.outputs.count }}
           GUARDS: ${{ inputs.guards }}
           MODE: ${{ inputs.mode }}
+          SWEEPS: ${{ inputs.sweeps }}
         run: |
           only=() pending=()
           if [ -n "$GUARDS" ]; then only=(--only "$GUARDS"); fi
+          if [ "$SWEEPS" = true ]; then only+=(--sweeps); fi
           if [ "$MODE" = pr ]; then pending=(--pending-only); fi
           uv run --frozen python tools/guards.py --all "${only[@]}" --shard "$K/$N" --exclude-needs "$LOCAL_NEEDS" \
             --unit-slots "$RUNNER_TEMP/unit-slots.json" "${pending[@]}"
@@ -505,10 +515,12 @@ jobs:
           K: ${{ matrix.k }}
           N: ${{ needs.build.outputs.count }}
           GUARDS: ${{ inputs.guards }}
+          SWEEPS: ${{ inputs.sweeps }}
         run: |
           mkdir -p work/ci-gate
           only=()
           if [ -n "$GUARDS" ]; then only=(--only "$GUARDS"); fi
+          if [ "$SWEEPS" = true ]; then only+=(--sweeps); fi
           uv run --frozen python tools/guards.py --all "${only[@]}" --run --parallel 2 --timeout 3600 \
             --shard "$K/$N" --exclude-needs "$LOCAL_NEEDS" --json "work/ci-gate/shard-$K.json"
 
@@ -520,10 +532,12 @@ jobs:
           K: ${{ matrix.k }}
           N: ${{ needs.build.outputs.count }}
           GUARDS: ${{ inputs.guards }}
+          SWEEPS: ${{ inputs.sweeps }}
         run: |
           mkdir -p work/ci-gate
           only=()
           if [ -n "$GUARDS" ]; then only=(--only "$GUARDS"); fi
+          if [ "$SWEEPS" = true ]; then only+=(--sweeps); fi
           # A 4-core runner is slower than the dev machine the 1800 s default fits
           # (dq4-compat-scenes took longer than that with every scene passing).
           uv run --frozen python tools/guards.py --all "${only[@]}" --run --no-cache --parallel 2 --timeout 3600 \
