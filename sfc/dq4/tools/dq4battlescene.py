@@ -19,8 +19,10 @@
 
   python sfc/dq4/tools/dq4cores.py
   python sfc/dq4/tools/dq4battlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/battlescene [--seeds 0,1,2]
-      [--scenes attack,flee] [--core snes9x|bsnes|all] [--jobs 4] [--part k/n]
+      [--scenes attack,flee] [--core snes9x|bsnes|all] [--jobs 4] [--part k/n [--split-seeds]]
   --part k/n(기본 DQ4_GUARD_PART): 장면·코어 묶음을 n 몫으로 나눠 k 번째만 돈다. 시드는 한 몫에 모두 둔다.
+  --split-seeds: 몫을 (장면, 코어, 시드)로 나눈다. 분포 검사는 몫 안에서 하지 않고 시드별 원자료를 JSON 줄
+      {"sweep_data": …} 로 찍는다. 몫을 모두 모아 judge_sweep 이 판정한다(배포 관문 report, release.toml 의 judge).
 결과: OUT/results.json(장면·코어·시드마다 판정과 요약, part), OUT/<장면>-<코어>/seed-N/*.png.
 """
 import argparse
@@ -537,7 +539,8 @@ JUDGES = {'attack': judge_attack, 'armor': judge_attack, 'flee': judge_flee, 'no
 
 
 def distribution(summaries):
-    """시드 집합에서 선제·기습·회심·도망 실패가 몇 번 나왔는지. 도망은 선제가 아닌 전투의 시도를 차례별로 센다."""
+    """시드 집합에서 선제·기습·회심·도망 실패가 몇 번 나왔는지. 도망은 선제가 아닌 전투의 시도를 차례별로 센다.
+    모든 칸이 시드마다의 합이라 시드를 나눠 센 것을 add_counts 로 더하면 한 번에 센 것과 같다."""
     out = {'battles': 0, 'preemptive': 0, 'ambush': 0, 'hits': 0, 'crits': 0, 'flee_tries': 0, 'flee_fails': 0,
            'flee_by_try': [[0, 0] for _ in FLEE_FAIL]}
     for s in summaries:
@@ -559,6 +562,13 @@ def distribution(summaries):
                 row = out['flee_by_try'][min(k, len(FLEE_FAIL) - 1)]
                 row[0] += 1
                 row[1] += k < fails
+    return out
+
+
+def add_counts(a, b):
+    """distribution 결과 둘의 합(칸마다 더함)."""
+    out = {k: a[k] + b[k] for k in a if k != 'flee_by_try'}
+    out['flee_by_try'] = [[x[0] + y[0], x[1] + y[1]] for x, y in zip(a['flee_by_try'], b['flee_by_try'])]
     return out
 
 
@@ -1214,6 +1224,56 @@ def seed_work(units, seeds):
     return [(s, c, seed) for s, c in units for seed in seeds]
 
 
+# bsnes 는 같은 장면이 snes9x 보다 2~3배 걸린다(배포 관문 CI 실측: party2 1703초 / 538초, 나머지 장면 묶음 약 2배)
+CORE_WEIGHT = {'bsnes': 2.5}
+
+
+def part_seed_work(names, cores, seeds, part):
+    """--split-seeds: part(k, n) 몫의 (장면, 코어, 시드). 무게는 장면 시간 어림 × 코어 무게."""
+    return dq4shards.part_of(seed_work(work_units(names, cores), seeds), part, key=lambda w: f'{w[0]}/{w[1]}/{w[2]}',
+                             weight=lambda w: SCENES[w[0]].get('seconds', 60) * CORE_WEIGHT.get(w[1], 1))
+
+
+def sweep_data(units):
+    """몫이 찍는 시드별 원자료 {'장면/코어/시드': {'counts': distribution([결과]), 'started': 전투가 걸렸나}}."""
+    return {f"{u['scene']}/{core_key(u['core'])}/{r['seed']}": {'counts': distribution([r]),
+                                                              'started': r.get('start') is not None}
+            for u in units for r in u['results']}
+
+
+def judge_units(groups, log):
+    """[(장면, 코어, [(시드, counts, started)])] → [(장면, 코어, 합친 counts, 문제)]. 전투가 걸리지 않은 시드가 있는
+    장면·코어는 문제를 보지 않는다(그 시드 행이 이미 실패)."""
+    out = []
+    for scene, core, rows in groups:
+        counts = distribution([])
+        for _, c, _ in rows:
+            counts = add_counts(counts, c)
+        ok = all(started for _, _, started in rows)
+        out.append((scene, core, counts, distribution_problems(scene, counts, log) if ok else []))
+    return out
+
+
+def judge_sweep(datas):
+    """배포 관문 report: --split-seeds 몫들의 sweep_data 를 합쳐 장면·코어마다 분포 검사. 문제 글 목록(없으면 통과).
+    한 프로세스가 몫 여럿을 돌면 같은 자료가 몫마다 붙어 오므로 키로 합친다(같은 키는 같은 값). 장면·코어마다 시드
+    집합이 다르면 몫이 빠진 것이라 문제다."""
+    raw = {}
+    for d in datas:
+        raw.update(d)
+    groups = {}
+    for key, v in raw.items():
+        scene, core, seed = key.rsplit('/', 2)
+        groups.setdefault((scene, core), []).append((int(seed), v['counts'], v['started']))
+    problems, log = [], []
+    sets = {tuple(sorted(s for s, _, _ in rows)) for rows in groups.values()}
+    if len(sets) > 1:
+        problems.append(f'장면·코어마다 시드가 다름: {sorted(len(s) for s in sets)}개')
+    for scene, core, _, bad in judge_units([(s, c, sorted(rows)) for (s, c), rows in sorted(groups.items())], log):
+        problems += [f'{scene}/{core} 시드 합: {p}' for p in bad]
+    return problems
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('mode', nargs='?', default='check', choices=('check', '_unit'))
@@ -1226,6 +1286,8 @@ def main():
     ap.add_argument('--repeat', type=int, default=2, help='시드마다 같은 상태에서 몇 번 돌려 요약을 견줄지')
     wc.add_seed_args(ap)
     dq4shards.add_part_arg(ap)
+    ap.add_argument('--split-seeds', action='store_true',
+                    help='--part 몫을 (장면, 코어, 시드)로 나누고 분포 검사 대신 시드별 원자료를 찍는다(judge_sweep 이 합쳐 판정)')
     args = ap.parse_args()
     seeds = wc.seeds_of(args)
     part = f'{args.part[0]}/{args.part[1]}' if args.part else None
@@ -1264,10 +1326,14 @@ def main():
                                                             'problems': ['프로세스가 결과를 남기지 않음(시간 초과·오류, log.txt)']}]}
 
     # 시드마다 따로 띄워(시드끼리는 출발 상태만 같다) 가장 긴 장면도 코어 자리 여럿에 나눠 돈다. 판정은 합친 뒤 장면·코어마다
-    mine = part_units(names, cores, args.part)
-    work = seed_work(mine, seeds)
+    defer = bool(args.split_seeds and args.part)
+    if defer:
+        work = part_seed_work(names, cores, seeds, args.part)
+    else:
+        work = seed_work(part_units(names, cores, args.part), seeds)
     shards = dict(zip(work, dq4shards.pmap(one, work, args.jobs)))
-    units = [merge_units([shards[s, c, seed] for seed in seeds]) for s, c in mine]
+    mine = list(dict.fromkeys(w[:2] for w in work))
+    units = [merge_units([shards[w] for w in work if w[:2] == sc]) for sc in mine]
     rows = []
     for u in units:
         for r in u['results']:
@@ -1275,19 +1341,18 @@ def main():
                          'problems': r['problems'], 'battle_frames': r.get('battle_frames'),
                          'turns': r.get('turns'), 'seconds': r.get('seconds'), 'digests': r.get('digests')})
     dist, skipped, growth = {}, [], {}
-    for u in units:
-        core = core_key(u['core'])
-        counts = distribution(u['results'])
+    judged = judge_units([(u['scene'], core_key(u['core']), [(r['seed'], distribution([r]), r.get('start') is not None)
+                                                             for r in u['results']]) for u in units],
+                         [] if defer else skipped)
+    for u, (_, core, counts, bad) in zip(units, judged):
         dist[f"{u['scene']}/{core}"] = counts
-        # 장면 프로세스가 결과를 남기지 못했으면 그 실패만 적는다
-        if not all(r.get('start') is not None for r in u['results']):
-            continue
-        bad = distribution_problems(u['scene'], counts, skipped)
-        if bad:
+        if bad and not defer:
             rows.append({'scene': u['scene'], 'core': u['core'], 'seed': 'all', 'status': 'failed', 'problems': bad,
                          'battle_frames': None, 'turns': None, 'seconds': None, 'digests': None})
         if u['scene'] in ('growth', 'growth2'):
             growth[f"{u['scene']} {core}"] = [growth_table(r, u['expect']) for r in u['results'] if r.get('after')]
+    if defer:
+        print('분포 검사는 몫을 모두 모아 judge_sweep 이 함(--split-seeds)', file=sys.stderr)
     for line in dict.fromkeys(skipped):
         print(f'분포 검사 건너뜀: {line}', file=sys.stderr)
     for core, tables in growth.items():
@@ -1304,6 +1369,8 @@ def main():
     for r in rows:
         print(json.dumps({k: r[k] for k in ('scene', 'core', 'seed', 'status', 'problems', 'battle_frames', 'turns')},
                          ensure_ascii=False))
+    if defer:
+        print(json.dumps({'sweep_data': sweep_data(units)}, ensure_ascii=False, separators=(',', ':')))
     print(json.dumps({'status': report['status'], 'part': part, 'units': len(units), 'rom_sha1': report['rom_sha1'],
                       'seconds': report['seconds']}))
     return 0 if ok else 1

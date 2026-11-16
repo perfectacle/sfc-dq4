@@ -69,7 +69,8 @@
 | `run` | 명령. `{rom}` 출하 롬, `{out}` 출력 폴더, `{seeds}` 쉼표로 이은 시드 |
 | `seeds` | 시드 수. 없으면 `--seeds-n`(기본 16, CI 는 `guards.SWEEP_SEEDS_N` 16) |
 | `needs` | `guards.toml` 과 같은 뜻. 없으면 `["rom"]` |
-| `parts` | CI 에서 시드를 나누지 않고 모든 시드를 받은 하위 조각 n 개로 나눈다(`DQ4_GUARD_PART`). 도구가 시드를 합쳐 판정할 때(전투 갈래의 분포 검사). 마지막 단계 도구가 `add_part_arg` 를 불러야 한다 |
+| `parts` | CI 에서 모든 시드를 받은 하위 조각 n 개로 나눈다(`DQ4_GUARD_PART`). 몫을 어떻게 나눌지는 도구가 정한다. 마지막 단계 도구가 `add_part_arg` 를 불러야 한다 |
+| `judge` | `parts` 스윕에서 시드를 합쳐 세는 판정을 report 로 미룰 때 「경로.py:함수」. 도구는 몫마다 시드별 판정만 하고 원자료를 `{"sweep_data": …}` JSON 줄로 찍는다. 함수는 몫들의 원자료 목록을 받아 문제 글 목록을 돌려준다 |
 
 - 시드는 0 부터 차례로 n 개다. 시드 0 은 실행 검사와 같은 기준이라 늘 든다.
 - 그 트랙 폴더의 `seeds.json`(`{"스윕 이름": [{"seed": 5, ...}]}`)에 적은 실패 시드를 덧붙인다. 아직 파일은 없다.
@@ -84,6 +85,8 @@
 - `{rom}` 은 조각 잡이 rom 잡에서 받아 둔 `guards.SWEEP_ROM`(`work/ch1/dq4-ch1-full.sfc`)이다.
 - 단위 무게는 `guardshard-times.json` 의 스윕 시간 ÷ 단위 수다. 시간은 실행 검사처럼 `--record-times` 로 고친다.
 - 결과 행은 `"sweep": true` 를 단다. 시드 단위 행은 `"part": [i, n]`·`"seeds": [s]` 도 달아 `merge_parts` 가 스윕 하나로 합친다. 단위가 하나라도 실패하면 실패이고 글이 「시드 s: …」 다. 빠지면 돌리지 않음이다. `parts` 스윕이 실패하면 로그의 JSON 줄(`"seed"` 정수, `"status": "failed"`)에서 읽은 시드를 「실패 시드 …」 로 붙인다(`guards.failed_seeds_in`).
+- `judge` 가 있으면 몫 행에 그 몫 로그의 `sweep_data` 를 `"data"` 로 싣고(`guards.unit_data`), `merge_parts` 가 몫이 모두 통과했을 때 몫들의 `data` 로 그 함수를 한 번 부른다(`guards.judge_merged`). 문제가 있으면 실패(「합친 판정: …」), 원자료가 빠진 몫이 있으면 돌리지 않음이다. 빠진 몫이 모두 캐시 통과(연습 실행)면 통과에 「합친 판정 건너뜀」 을 붙인다.
+- 전투 갈래(`dq4-battle-seeds`)는 `--split-seeds` 로 몫을 (장면, 코어, 시드)로 나눈다(`dq4battlescene.part_seed_work`, 무게 = 장면 시간 어림 × `CORE_WEIGHT`). 선제·기습·회심·도망 실패 셈은 시드마다의 합이라, `judge_sweep` 이 몫들의 시드별 셈을 더해 `distribution_problems` 로 보면 나누지 않을 때와 판정이 같다. 장면·코어마다 시드 집합이 다르면 문제다. `--part` 없이 돌면(로컬 관문) 예전처럼 도구 안에서 판정한다.
 - report 잡의 `--ci-summary` 는 「시드 스윕」 표를 따로 찍는다. `release.toml` 의 스윕이 모두 통과해야 통과다. CI 에 없는 스윕은 「CI 결과 없음」 이다.
 
 ## 보고서
