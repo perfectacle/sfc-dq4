@@ -120,7 +120,7 @@ uv run --locked python sfc/dq4/tools/dq4publish.py release --report work/release
 
 ## CI 커버리지 기록
 
-배포 관문 cold-build 잡이 `release_check.py --ci-coverage KIND OUT` 으로 두 기록을 `work/ci-digest/` 에 쓰고, 롬 검사를 거쳐 artifact `build-digest-release-cold` 로 올린다.
+배포 관문 cold-build 의 ch1 잡이 `release_check.py --ci-coverage KIND OUT` 으로 두 기록을 `work/ci-digest/` 에 쓰고, 롬 검사를 거쳐 artifact `build-digest-release-cold-ch1` 로 올린다.
 
 - `coverage-unit.json`(`unit`): `uv sync` 바로 뒤, 에셋·도구·롬이 오기 전에 단위 전부를 coverage 로. CI 와 같게(`CI_MIN`)의 근거다.
 - `coverage-build.json`(`build`, `--build-out work/cold/ch1`): ch1 무캐시 빌드를 coverage 로(단계 스크립트까지). 로컬 수(`LOCAL_MIN`)에 로컬 단위와 합친다.
