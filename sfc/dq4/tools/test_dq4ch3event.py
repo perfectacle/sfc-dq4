@@ -12,6 +12,7 @@ import dq4ch2slots as slots  # noqa: E402
 import dq4ch3event as ev  # noqa: E402
 import dq4chapterbox as box  # noqa: E402
 import dq4growth  # noqa: E402
+import dq4itemport  # noqa: E402
 
 ROOT = HERE.parents[2]
 DQ5, DQ4 = ROOT / 'rom' / 'dq5.sfc', ROOT / 'rom' / 'dq4.nes'
@@ -126,10 +127,12 @@ class RomTest(unittest.TestCase):
         hp, mp, st, agi, it, luck, vit = dq4growth.MEASURED[dq4growth.FC_TORNEKO][1][0]
         self.assertEqual((s['hp'], s['mp'], s['agility'], s['stats']), (hp, mp, agi, (st, vit, it, luck)))
         self.assertEqual(s['next'], dq4growth.MEASURED[dq4growth.FC_TORNEKO][1][1])
-        self.assertEqual(s['items'], [(0x42, True)])                 # Eぬののふく
-        self.assertEqual(s['dropped'], ['おべんとう'])               # DQ5 에 없는 물건
+        # Eぬののふく, おべんとう 는 사건 물건 자리(dq4itemport.BENTO)
+        self.assertEqual(s['items'], [(0x42, True), (dq4itemport.BENTO, False)])
+        self.assertEqual(s['dropped'], [])
         r = ev.torneko_record(ch2.person_record(DQ5.read_bytes(), 0), s)
-        self.assertEqual((r[0x12], r[2], r[0xE], r[0x14:0x16], r[0x16:0x18]), (1, hp, hp, b'\x01\x00', b'\x42\xff'))
+        self.assertEqual((r[0x12], r[2], r[0xE], r[0x14:0x16], r[0x16:0x19]),
+                         (1, hp, hp, b'\x01\x00', bytes((0x42, dq4itemport.BENTO, 0xFF))))
 
     def test_opener_script_fits_the_borrowed_one(self):
         import dq5npcwrite
@@ -171,7 +174,8 @@ class ScriptTest(unittest.TestCase):
         import dq4chapter1
         first = dq4chapter1.chapter3_message(0xC80)
         self.assertEqual(first, dq4chapter1.chapter2_message(0xC80) + len(ch2.texts(dq4chapter1.chapter2_message(0xC80))))
-        self.assertEqual(sorted(ev.texts(first)), list(range(first, first + len(ev.MESSAGES))))
+        # 사건 모듈 메시지는 이 모듈 메시지 바로 뒤에 빈 번호 없이
+        self.assertEqual(sorted(ev.texts(first)), list(range(first, first + ev.message_count())))
 
 
 class ListTest(unittest.TestCase):

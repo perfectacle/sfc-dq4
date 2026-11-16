@@ -5,11 +5,11 @@ Items the ported shops sell get their FC price: DQ5 price = 23:B081[item] x 21:A
 item is named after (BORROWED): the name, the power (k5) and the price become the FC ones. The equip bits (k6, k7-k8)
 stay DQ5's, as for every other ported item. Format: sfc/dq4/docs/dq4-environment-format.md 「가게」.
 
-Chapter 2's story items take DQ5 key-item slots no DQ5 talk condition or item query of this hack reads (EVENT_ITEMS):
+Chapter 2's and 3's story items take DQ5 key-item slots no DQ5 talk condition or item query of this hack reads (EVENT_ITEMS):
 the FC name goes on the slot, the record (k1-k4) and the field-use handler become those of ゴールドオーブ, which shows
 「しかし ここでは 何も おこらなかった！」 (11:8BE4 -> message 1A8). とうぞくのカギ keeps DQ5's own slot B7, whose record
 DQ5 leaves empty (a weapon that sells): it gets まほうのカギ's record, and dq4door opens lock-1 doors for it.
-Format: sfc/dq4/docs/dq4-chapter2-format.md 「사건 물건」.
+Format: sfc/dq4/docs/dq4-chapter2-format.md 「사건 물건」, sfc/dq4/docs/dq4-chapter3-format.md 「사건 물건」.
 """
 
 import sys
@@ -38,8 +38,17 @@ WEAPON = 0
 BORROWED = {0x01: "てつのやり", 0x34: "せいぎのそろばん", 0x4E: "てつのまえかけ", 0x61: "はぐれメタルよろい",
             0x89: "きんのかみかざり", 0x8C: "はねぼうし"}
 # DQ5 key item -> FC story item. ゴールドオーブ (C6) has おうごんのうでわ's name length (10 bytes with the dakuten
-# marks); あくまのおもちゃ (BE) is an empty DQ5 record of さえずりのみつ's length (8 bytes).
-EVENT_ITEMS = {0xC6: "おうごんのうでわ", 0xBE: "さえずりのみつ"}
+# marks); あくまのおもちゃ (BE) is an empty DQ5 record of さえずりのみつ's length (8 bytes). Chapter 3's take DQ5 items
+# no FC item, chest substitute or talk condition names: モンスターほいほい (C3, empty record) and ルラムーンそう (CA,
+# ゴールドオーブ's record) fit their letters' lengths. No free slot is 11 bytes long for ぎんのめがみぞう, so the three
+# neighbours まもののエサ·ばくだんいし·ファイトいっぱつ (6 + 8 + 9) are rewritten as one run (NAME_RUNS).
+BENTO, IRON_SAFE, STATUE, PRINCE_LETTER, KING_LETTER = 0xBB, 0xBC, 0xBD, 0xC3, 0xCA
+EVENT_ITEMS = {0xC6: "おうごんのうでわ", 0xBE: "さえずりのみつ",
+               BENTO: "おべんとう", IRON_SAFE: "てつのきんこ", STATUE: "ぎんのめがみぞう",
+               PRINCE_LETTER: "おうじのてがみ", KING_LETTER: "おうのてがみ"}
+# Neighbouring items whose names are written together: the string table is walked by length (21:955D), so the names may
+# change length as long as the run keeps its total.
+NAME_RUNS = ((BENTO, IRON_SAFE, STATUE),)
 EVENT_TEMPLATE = 0xC6
 THIEF_KEY, KEY_TEMPLATE = 0xB7, 0xB8
 # Record bytes the story items copy: k1 (flags, price scale), k2 (slot), k3 and k4 (description and use message).
@@ -145,16 +154,28 @@ def event_writes(rom, prg):
     import dq5text
     fc = set(dq4shop.item_names(prg)[0].values())
     out = []
+    in_runs = {item for run in NAME_RUNS for item in run}
+    for run in NAME_RUNS:
+        if list(run) != list(range(run[0], run[0] + len(run))) or not set(run) <= set(EVENT_ITEMS):
+            raise ValueError(f"{run}: a name run is neighbouring story items")
+        at = name_at(rom, run[0])
+        old = bytes(rom.u8(at + k) for k in range(name_at(rom, run[-1] + 1) - at))
+        new = b"".join(bytes((len(n),)) + n for n in (encode_name(rom, EVENT_ITEMS[i]) for i in run))
+        if len(new) != len(old):
+            raise ValueError(f"{run}: {len(new)} name bytes in place of {len(old)}")
+        out.append({"at": _cpu(at), "hex": new.hex(" ").upper(), "orig": old.hex(" ").upper(),
+                    "note": "물건 " + "·".join(f"{i:02X} {EVENT_ITEMS[i]}" for i in run) + " 이름(길이째)"})
     for item, fc_item in sorted(EVENT_ITEMS.items()):
         if fc_item not in fc:
             raise ValueError(f"{fc_item}: not an FC item name")
-        at = name_at(rom, item)
-        old = dq5text.string(rom, ITEM_NAMES, item)
-        new = encode_name(rom, fc_item)
-        if len(new) != len(old):
-            raise ValueError(f"{fc_item}: {len(new)} name bytes in place of {len(old)}")
-        out.append({"at": _cpu(at + 1), "hex": new.hex(" ").upper(), "orig": old.hex(" ").upper(),
-                    "note": f"물건 {item:02X} 이름 {fc_item}"})
+        if item not in in_runs:
+            at = name_at(rom, item)
+            old = dq5text.string(rom, ITEM_NAMES, item)
+            new = encode_name(rom, fc_item)
+            if len(new) != len(old):
+                raise ValueError(f"{fc_item}: {len(new)} name bytes in place of {len(old)}")
+            out.append({"at": _cpu(at + 1), "hex": new.hex(" ").upper(), "orig": old.hex(" ").upper(),
+                        "note": f"물건 {item:02X} 이름 {fc_item}"})
         out += _record_writes(rom, item, EVENT_TEMPLATE, fc_item)
     # B7 keeps its own handler (11:8E43, key level 1); まほうのカギ's would open lock-2 doors.
     out += _record_writes(rom, THIEF_KEY, KEY_TEMPLATE, "とうぞくのカギ", handler=False)

@@ -35,8 +35,10 @@ class AllocationTest(unittest.TestCase):
         import dq4prologue
         prologue = dq4prologue.talk_doc()["scripts"]
         import dq4ch2event
+        import dq4ch3event
         ch1 = len(dq4ch1event.TALKS)
-        events = ch1 + len(dq4ch2event.talk_scripts(port.FIRST_MESSAGE))   # 등록한 사건 모듈(EVENTS)의 대화까지
+        # 등록한 2장·3장 사건 모듈(EVENTS)의 대화까지
+        events = ch1 + len(dq4ch2event.talk_scripts(port.FIRST_MESSAGE)) + len(dq4ch3event.talk_names())
         f = port.FIRST_MESSAGE
         messages = [{"id": f + k, "codes": [port.END]} for k in range(3)]
         scripts = port.talk_doc(messages)["scripts"]
@@ -45,8 +47,11 @@ class AllocationTest(unittest.TestCase):
         self.assertEqual(scripts[:len(prologue)], prologue)
         self.assertEqual([s["body"] for s in scripts[len(prologue):len(prologue) + ch1]],
                          dq4ch1event.talk_scripts(f + 3))   # 사건 메시지는 옮긴 메시지 바로 뒤
-        self.assertEqual([s["body"] for s in scripts[len(prologue) + ch1:len(prologue) + events]],
+        ch2 = ch1 + len(dq4ch2event.talk_scripts(f))
+        self.assertEqual([s["body"] for s in scripts[len(prologue) + ch1:len(prologue) + ch2]],
                          dq4ch2event.talk_scripts(f + 3 + len(dq4ch1event.MESSAGES)))   # 2장은 1장 사건 뒤
+        self.assertEqual([s["body"] for s in scripts[len(prologue) + ch2:len(prologue) + events]],
+                         dq4ch3event.talk_scripts(f + 3 + len(dq4ch1event.MESSAGES) + dq4ch2event.message_count()))
         first = port.first_talk()
         for k, s in enumerate(scripts[len(prologue) + events:]):
             # Talk first_talk() + k shows message FIRST_MESSAGE + k, as port gives the people.

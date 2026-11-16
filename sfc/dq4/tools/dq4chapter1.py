@@ -350,7 +350,7 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=(),
         points = dq4chapterbox.entry_points(scenes(prologue))
         scripts += dq4ch2event.scripts(chapter2_message(first), points, chapter3)
         import dq4ch3event
-        ch3_new, ch3_overrides = dq4ch3event.npc_lists(ported)
+        ch3_new, ch3_overrides = dq4ch3event.npc_lists(ported, chapter3_talk())
         new_lists += ch3_new
         overrides = ch3_overrides + overrides
         scripts += dq4ch3event.scripts(chapter3_message(first), points)
@@ -456,12 +456,15 @@ def message_flow(first_message):
     import dq4ch2event
     import dq4prologue
     scripts = npc_scripts(first_message)
+    import dq4ch3event
     talks = ([s["body"] for s in dq4prologue.talk_doc()["scripts"]] + dq4ch1event.talk_scripts(first_message) +
-             dq4ch2event.talk_scripts(chapter2_message(first_message)))
+             dq4ch2event.talk_scripts(chapter2_message(first_message)) +
+             dq4ch3event.talk_scripts(chapter3_message(first_message)))
     _, at = dq4prologue.native()
     events = [dq4prologue.end_event(at), dq4ch2event.join_event(chapter2_message(first_message), dq4ch2event.native()[1]),
               dq4ch2event.altar_event(chapter2_message(first_message))] + \
-        dq4ch2event.event_tokens(chapter2_message(first_message))
+        dq4ch2event.event_tokens(chapter2_message(first_message)) + \
+        dq4ch3event.event_tokens(chapter3_message(first_message))
     return {"talks": talks, "scripts": [s["commands"] for s in scripts], "events": events,
             "pauses": dq4ch1event.pauses(first_message)}
 
@@ -482,6 +485,12 @@ def chapter2_talk():
     """2장 사건의 첫 대화 번호: 1장 사건 대화 바로 뒤."""
     import dq4ch1event
     return event_talk() + len(dq4ch1event.TALKS)
+
+
+def chapter3_talk():
+    """3장 사건의 첫 대화 번호: 2장 대화(사건 모듈 것까지) 바로 뒤."""
+    import dq4ch2event
+    return chapter2_talk() + len(dq4ch2event.talk_names())
 
 
 def event_talk():
@@ -697,9 +706,11 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False, chapter3=False):
     from kr_patch.fc import ines
     work.mkdir(parents=True, exist_ok=True)
     import dq4ch2event
+    import dq4ch3event
     boss = dq4ch1event.encounter_doc()
-    if dq4ch2event.encounter_groups():
-        boss["event_groups"] += dq4ch2event.encounter_groups()
+    more = dq4ch2event.encounter_groups() + dq4ch3event.encounter_groups()
+    if more:
+        boss["event_groups"] += more
     (work / 'boss.json').write_text(json.dumps(boss))
     import dq4party
     (work / 'learn.json').write_text(json.dumps(dq4party.learn_doc(dq5, dq4)))
@@ -709,7 +720,8 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False, chapter3=False):
     (work / 'party.dq5patch.json').write_text(json.dumps(
         {"format": "dq5patch/1", "name": "dq4-party", "writes": dq4party.writes(dq5, dq4)}, ensure_ascii=False))
     monsters = dq4ch1event.monster_doc(ines.prg(dq4.read_bytes()))
-    more = dq4ch2event.monster_entries(ines.prg(dq4.read_bytes()))
+    more = dq4ch2event.monster_entries(ines.prg(dq4.read_bytes())) + \
+        dq4ch3event.monster_entries(ines.prg(dq4.read_bytes()))
     if more:
         monsters["monsters"] += more
     import dq4monport
@@ -743,7 +755,8 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False, chapter3=False):
                                                 work / 'monster-records.dq5patch.json'))
     out = bytearray(apply_writes(clear_mirror(rom, original, group_ranges()), original, patches))
     # NDS 몬스터 그림: 무리 조합 검사가 이 롬의 무리·사건 무리로 세도록 다른 패치를 얹은 뒤에 만든다
-    events = [dq4ch1event.BOSS_GROUP, *(g['index'] for g in dq4ch2event.encounter_groups())]
+    events = [dq4ch1event.BOSS_GROUP, *(g['index'] for g in dq4ch2event.encounter_groups() +
+                                        dq4ch3event.encounter_groups())]
     out = bytearray(apply_writes(out, original, [dq4monport.build(dq5, out, work / 'monport',
                                                                   work / 'groups' / 'zone-report.json', events)]))
     import dq4menupatch

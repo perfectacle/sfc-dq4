@@ -40,7 +40,7 @@ INDIRECT_CALL = 0xFC                            # JSR (abs,X): 대상은 모르�
 # native() 의 이름 가운데 자료(이벤트 스크립트·기록·빈 줄)인 것과, PHP 로 시작하지 않는 코드. 둘 다 아닌 이름이
 # PHP 로 시작하지 않으면 문제로 친다(자료로 잘못 알고 건너뛰지 않게)
 DATA_ENTRIES = {'blank2', 'end_event', 'talk_event', 'ev_back', 'ev_out', 'ev_stop', 'fly_event', 'record', 'event',
-                'kick_walk', 'name', 'recruits'}
+                'kick_walk', 'name', 'recruits', 'amounts'}
 CODE_ENTRIES = {'hero_picture'}
 
 
@@ -78,6 +78,15 @@ def blobs():
         if hasattr(ctx.module, 'native'):
             blob, at = ctx.module.native(ctx)
             name = f'ch2.{ctx.key}'
+            entries, problems = entries_of(name, ctx.code_at, blob, at, getattr(ctx.module, 'DATA_ENTRIES', ()),
+                                           getattr(ctx.module, 'CODE_ENTRIES', ()))
+            if problems:
+                raise ValueError('; '.join(problems))
+            out.append((name, ctx.code_at, blob, entries))
+    for ctx in dq4ch3event.contexts():
+        if hasattr(ctx.module, 'native'):
+            blob, at = ctx.module.native(ctx)
+            name = f'ch3.{ctx.key}'
             entries, problems = entries_of(name, ctx.code_at, blob, at, getattr(ctx.module, 'DATA_ENTRIES', ()),
                                            getattr(ctx.module, 'CODE_ENTRIES', ()))
             if problems:
