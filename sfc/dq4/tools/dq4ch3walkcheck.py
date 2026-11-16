@@ -49,6 +49,9 @@ FLAGS = {
     'TOM_PUSH': wc.flag(lakanaba.TOM_PUSH), 'SCOTT_DAYS': (ch3.SCOTT_DAYS, 0xFF),
     # 구르는 바위(dq4boulder)의 메움 비트(bit0 왼쪽 구덩이, bit1 가운데)
     'SAFE_FILL': (safe.BOULDER_VARS(safe.boulder.FILL), 0xFF),
+    'RAFT_RIDING': wc.flag(safe.RIDING),
+    'RAFT_X': (safe.RAFT_VARS + safe.raft.RX, 0xFF),
+    'RAFT_Y': (safe.RAFT_VARS + safe.raft.RY, 0xFF),
     **{f'ENDOR_{k}': wc.flag(getattr(endor, k)) for k in ('ALLOWED', 'SHOP', 'ORDER', 'DELIVERED', 'SOLD', 'SON_CHEER',
                                                           'NOTICE', 'OPENED', 'BUTTON', 'ASKED', 'PRESSED')},
     'ENDOR_COUNT': (ch3.VARS_AT + ch3.SLOTS['E'].vars[0] + endor.VARS, 0xFF),
@@ -238,6 +241,25 @@ SEGMENTS = [
     ('endor_button_side', 'warp', f'{endor.CAVE_WET},{BUTTON_CELL[0]},{BUTTON_CELL[1] + 1}', {'map': endor.CAVE_WET}),
     ('endor_button', 'walk', f'up:40;wait:200;a:8;wait:60;a:8;wait:600',
      {'map': endor.CAVE_DRY, 'cell': endor.BUTTON_LAND[1], 'want': ['ENDOR_BUTTON'], 'changes': 1, 'after': 60}),
+    # 여신상 동굴 배(dq4raft): 단추 앞(앞 구간이 켠 BUTTON 을 끔). 입구 층의 배 칸으로 걸어 들어가 타고 호수를 돌아
+    # 아래 끝에서 48/05 의 물로 넘어간다
+    ('raft_entry', 'warp', f'{endor.CAVE_ENTRY},22,8',
+     {'map': endor.CAVE_ENTRY, 'set': f'{0x2190 + endor.BUTTON[0]:04X}&{~endor.BUTTON[1] & 0xFF:02X}', 'off': ['ENDOR_BUTTON']}),
+    ('raft_board', 'walk', '24,9;24,11;44,11;wait:30', {'map': endor.CAVE_ENTRY, 'cell': (44, 11), 'want': ['RAFT_RIDING']}),
+    ('raft_lake', 'walk', '62,11;62,31;50,31;left:20;wait:300',
+     {'map': endor.CAVE_LOW_WET, 'changes': 1, 'after': 60, 'want': ['RAFT_RIDING']}),
+    ('raft_low', 'walk', 'wait:200;6,63;6,55;8,55;22,55;22,39;26,39;26,35;64,35;64,53;68,53;68,63;wait:300',
+     {'map': endor.CAVE_WET, 'changes': 1, 'after': 60, 'off': ['RAFT_RIDING'], 'bytes': {'RAFT_X': 3, 'RAFT_Y': 0x1B}}),
+    ('raft_button', 'walk', 'wait:200;56,55;56,47;52,47;52,39;48,39;48,35;20,35;20,25;22,25;22,21;24,21;24,19;26,19;'
+     '26,11;30,11;30,7;34,7;34,5;wait:200;a:8;wait:60;a:8;wait:600',
+     {'map': endor.CAVE_DRY, 'cell': endor.BUTTON_LAND[1], 'want': ['ENDOR_BUTTON'], 'changes': 1, 'after': 60}),
+    ('raft_dry', 'walk', 'wait:200;24,5;24,31;28,31;28,33;54,33;54,45;60,45;60,49;wait:300',
+     {'map': endor.CAVE_LOW_DRY, 'changes': 1, 'after': 60}),
+    ('raft_board2', 'walk', 'wait:200;60,57;60,55;58,55;wait:30', {'map': endor.CAVE_LOW_DRY, 'want': ['RAFT_RIDING']}),
+    ('raft_island', 'walk', '58,53;64,53;64,47;60,47;60,43;56,43;56,39;52,39;52,35;30,35;30,17;30,15;28,15;28,13;wait:300',
+     {'map': endor.STATUE_ROOM, 'changes': 1, 'after': 60, 'off': ['RAFT_RIDING']}),
+    ('raft_statue', 'walk', f'wait:200;18,39;18,37;16,37;16,33;12,33;12,11;wait:30;{SAFE_SEARCH}',
+     {'map': endor.STATUE_ROOM, 'items': [endor.STATUE]}),
 ]
 
 

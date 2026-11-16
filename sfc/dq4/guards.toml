@@ -116,6 +116,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "rm -rf work/compat-probe && uv run --locked python sfc/dq4/tools/dq4compatcheck.py probe --rom work/ch1/dq4-ch1-full.sfc --out work/compat-probe"
@@ -244,6 +245,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/wc && DQ4_WINDOWNAME_SYMBOLS=$PWD/work/wc/wn.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/wc/menu.sfc && rm -rf work/compat-scenes && uv run --locked python sfc/dq4/tools/dq4compatscenes.py --rom work/ch1/dq4-ch1-full.sfc --out work/compat-scenes --window-rom work/ch1/dq4-ch1.sfc --symbols work/wc/wn.sym --symbols-rom work/wc/menu.sfc"
@@ -273,6 +275,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/compat-walk && uv run --locked python sfc/dq4/tools/dq4compatcheck.py walk --rom work/ch1/dq4-ch1-full.sfc --out work/compat-walk"
@@ -362,6 +365,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/heroblock && uv run --locked python sfc/dq4/tools/dq4heroblockcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/heroblock --jobs 6"
@@ -412,6 +416,7 @@ why = "3장 사건 구간을 3장 출발 상태(첫머리 뒤 톨네코 집, 조
 paths = [
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
   "sfc/dq4/tools/dq4ch2walkcheck.py",
   "sfc/dq4/tools/dq4ch2event.py",
@@ -461,6 +466,7 @@ paths = [
   "sfc/dq4/tools/dq4heroblockcheck.py",
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
   "sfc/dq4/tools/dq4ch2walkcheck.py",
   "sfc/dq4/tools/dq4ch1walkcheck.py",
@@ -511,6 +517,7 @@ name = "dq4-ch3-lakanaba"
 why = "3장 레이크나바 사건(dq4ch3lakanaba): 네네(오늘 도시락 전이면 잠 → HP·MP 채움·아침·날수 + 1 → 도시락, 받은 뒤엔 한마디), 무기점 첫 출근(문 앞 꾸지람 → 카운터 안으로)·둘째 날(카운터 안 주인에게 「예」)·카운터 너머, 손님 갈래를 문턱을 바꾼 롬 사본으로(파는 손님 はじゃのつるぎ 재고 + 1, 사는 손님 돈 모자람·소지품 가득·장비 못 함·팜, 값 물음 「아니오」 뒤 깎음·웃돈·흥정 없음의 일삯), 일삯 100 이상이면 가게를 닫고 밤(0341), 아래층에서 그만두기, 톰 노인 밀기·교회 도착 골드, 톰 아들의 개(DOG)·우리의 개 숨기, 필드에서 돌아오면 오늘 도시락·출근 flag 지움. 메시지 차례·flag·금화·일삯·재고를 보고 두 번 돌려 같아야 한다"
 paths = [
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4itemport.py",
   "sfc/dq4/tools/dq4prologue.py",
@@ -542,6 +549,7 @@ paths = [
   "sfc/dq4/tools/dq4chapterwalk.py",
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch2walkcheck.py",
   "sfc/dq4/tools/dq4ch2ending.py",
   "sfc/dq4/tools/dq4libretro.py",
@@ -564,6 +572,7 @@ why = "3장 북쪽 동굴 금고: 전멸하면 3장에서 일행 소지품에 �
 paths = [
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4ch3safecheck.py",
   "sfc/dq4/tools/dq4ch3event.py",
@@ -592,6 +601,26 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출�
 groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
+name = "dq4-ch3-raft"
+why = "3장 여신상 동굴 배(dq4raft): 탄 채 걸음 전투를 하고 돌아와도 배에 탄 채 물 칸을 지나간다(48/02·48/06). 전투 뒤 맵을 다시 그리는 길에서 탐 flag·물 칸 표시(셀 +1 bit1)·배 자리가 지워지면 깨진다. 타기·넘어가기·내리기·여신상은 dq4-ch3-walk 의 raft_* 구간, 배 칸 밖 물로 못 걷는 것은 dq4-ch3-heroblock 의 raft-* 사례가 본다"
+paths = [
+  "sfc/dq4/tools/dq4raft.py",
+  "sfc/dq4/tools/dq4raftcheck.py",
+  "sfc/dq4/tools/dq4ch3safe.py",
+  "sfc/dq4/tools/dq4ch3slots.py",
+  "sfc/dq4/tools/dq4ch3endor.py",
+  "sfc/dq4/tools/dq4ch3event.py",
+  "sfc/dq4/tools/dq4battlecheck.py",
+  "sfc/dq4/tools/lua/dq4battle.lua",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3raft && uv run --locked python sfc/dq4/tools/dq4raftcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3raft"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
 name = "dq4-ch3-endor"
 why = "3장 엔돌 사건의 대화 갈래: 왕(첫 알현 「아니요」·편지 기다림·납품 뒤), 가게 주인 「아니요」(금화 그대로), 밤의 아들·네네(잠 뒤 아침 마을), 네네 「아니요」·개통 거짓말 갈래, 납품(주문 전·「아니요」·다 채운 뒤)과 안내인, 수집가(여신상 없음·「아니요」·판 뒤), 여신상 동굴 단추 「아니요」 를 3장 출발 상태에서 걸어 메시지 차례와 flag 를 본다. 대화 스크립트 갈래·메시지 차례(dq4ch3endor.MESSAGES)·3장 엔돌 대체 목록을 바꾸면 깨진다. 큰 길은 dq4-ch3-walk 의 endor_* 구간이 본다. 두 번 걸어 기록이 같아야 한다"
 paths = [
@@ -599,6 +628,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3endorcheck.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3walkcheck.py",
   "sfc/dq4/tools/dq4ch3event.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
@@ -715,6 +745,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/ch2heroblock && uv run --locked python sfc/dq4/tools/dq4heroblockcheck.py --chapter2 --rom work/ch2/dq4-ch1-full.sfc --out work/ch2heroblock --jobs 6"
@@ -740,6 +771,7 @@ paths = [
   "sfc/dq4/tools/dq4brkscan.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/ch2compat && uv run --locked python sfc/dq4/tools/dq4compatcheck.py walk --chapter2 --rom work/ch2/dq4-ch1-full.sfc --out work/ch2compat --jobs 4"
@@ -785,6 +817,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/fieldsave && uv run --locked python sfc/dq4/tools/dq4fieldsavecheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/fieldsave"
@@ -816,6 +849,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/savefixture && uv run --locked python sfc/dq4/tools/dq4savefixture.py check --rom work/ch1/dq4-ch1-full.sfc --out work/savefixture"
@@ -929,6 +963,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fieldmath && uv run --locked python sfc/dq4/tools/dq4fieldmathcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fieldmath"
@@ -1019,6 +1054,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/shopscene && uv run --locked python sfc/dq4/tools/dq4shopscene.py --rom work/ch1/dq4-ch1-full.sfc --out work/shopscene --jobs 4"
@@ -1080,6 +1116,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/townscene && uv run --locked python sfc/dq4/tools/dq4townscene.py check --rom work/ch1/dq4-ch1-full.sfc --out work/townscene --jobs 4 && rm -rf work/townnight && uv run --locked python sfc/dq4/tools/dq4townscene.py daynight --rom work/ch1/dq4-ch1-full.sfc --out work/townnight --jobs 4"
@@ -1322,6 +1359,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4battlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/battlescene --seeds 0,1,2"
@@ -1355,6 +1393,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4battlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/partyspells --seeds 0,1,2 --scenes party2piorimu,party2hyadain && rm -rf work/fieldspell && uv run --locked python sfc/dq4/tools/dq4fieldspellcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fieldspell"
@@ -1462,6 +1501,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/sfxscene && uv run --locked python sfc/dq4/tools/dq4sfxscene.py --rom work/ch1/dq4-ch1-full.sfc --out work/sfxscene --jobs 4"
@@ -1504,6 +1544,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/titlescene && uv run --locked python sfc/dq4/tools/dq4titlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/titlescene"
@@ -1600,6 +1641,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4ch3*.py",
 ]
@@ -1636,6 +1678,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/doorstand && uv run --locked python sfc/dq4/tools/dq4doorstandcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/doorstand"
@@ -2109,6 +2152,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "test $( (uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4npcport.py -k HiddenPeopleTest -k SleeperTalkTest -k StandingTalkTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4shopscene.py -k ShopPlaceTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4sleepertalk.py -v) 2>&1 | tee work/map-people-rom-tests.log | grep -c ' \\.\\.\\. ok$') -eq 25"
@@ -3078,6 +3122,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-crit && uv run --locked python sfc/dq4/tools/dq4critcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-crit && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/fresh-critneg && uv run --locked python sfc/dq4/tools/dq4sfxscene.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-critneg --critical-negative"
@@ -3169,6 +3214,7 @@ paths = [
   "sfc/dq4/tools/lua/dq4openbus.lua",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/lrreadset && uv run --locked python sfc/dq4/tools/dq4libretroreadsetcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/lrreadset"
@@ -3362,6 +3408,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4ch3*.py",
 ]
@@ -3406,6 +3453,7 @@ paths = [
   "sfc/dq5/tools/dq5monlimits.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4monartcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/monartcheck"
@@ -3438,6 +3486,7 @@ paths = [
   "sfc/dq5/tools/dq5sram.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4monactcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/monactcheck"

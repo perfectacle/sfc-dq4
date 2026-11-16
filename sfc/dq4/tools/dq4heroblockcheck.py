@@ -253,6 +253,8 @@ def king_cases(ch2):
 
 # 3장 톨네코 집(3E/01): 출발 상태가 그 맵이라 마을(3E/00) 왼쪽 가장자리를 거쳐 들어간다
 CH3_HOP = '3E/00,4,26'
+# 48/02 의 배 인물 슬롯: 목록 첫 인물이라 첫 인물 슬롯(dq5npclists.SLOT_FIRST)
+RAFT_SLOT = 0x08
 
 
 def chapter3_cases():
@@ -296,6 +298,15 @@ def chapter3_cases():
         out[f'endor-button-{x}'] = {'warp': f'{endor.CAVE_WET},{x},{by1}', 'set': '',
                                     'walk': 'up:40;wait:200;a:8;wait:60;a:8;wait:800', 'free': '24,5',
                                     'want': [('ENDOR_BUTTON', endor.BUTTON)], 'map': endor.CAVE_DRY, 'maxf': 3000}
+    # 여신상 동굴 배(48/02, FC 40/00 배 (16,05)). 배 칸이 아닌 물 칸으로는 못 걷는다: 배 위 칸 (15,04)에서 오른쪽 물
+    # (16,04)로 밀기, 배를 타고 한 칸 가서 땅에 내린 뒤(배는 (16,05)에 남음) 위 칸에서 다시 물로 밀기. 배는 단추 앞에만 있다
+    off = f'{0x2190 + endor.BUTTON[0]:04X}&{~endor.BUTTON[1] & 0xFF:02X}'
+    out['raft-water'] = {'warp': f'{endor.CAVE_ENTRY},42,8', 'set': off, 'walk': 'right:40;wait:30', 'hero_at': (42, 9),
+                         'free': '24,9', 'want': [], 'map': endor.CAVE_ENTRY, 'maxf': 2000}
+    out['raft-left-water'] = {'warp': f'{endor.CAVE_ENTRY},42,10', 'set': off,
+                              'walk': '44,11;46,11;44,11;42,11;42,9;right:40;wait:30', 'hero_at': (42, 9),
+                              'free': '24,9', 'want': [], 'not': [('RAFT_RIDING', safe.RIDING)], 'map': endor.CAVE_ENTRY,
+                              'maxf': 3000, 'ride': (RAFT_SLOT,)}
     out.update(shop_cases(lakanaba))
     return out
 
@@ -314,10 +325,10 @@ def shop_cases(lakanaba):
     return out
 
 
-def overlaps(text):
+def overlaps(text, ride=()):
     """track.txt(lua/dq4heroblock.lua 의 TRACK)에서 두 인물이 겹쳐 보인 프레임 수와 처음 몇 프레임.
     인물은 16×16 점(2×2 셀)을 차지하므로 X·Y 점 차가 둘 다 16 보다 작으면 겹친다. 그리지 않는 슬롯은 빼고 일행과 인물
-    사이만 센다."""
+    사이만 센다. ride 의 슬롯(주인공이 올라타는 배)은 겹쳐도 세지 않는다."""
     frames, first = 0, []
     for line in text.splitlines():
         f, *slots = line.split()
@@ -325,7 +336,7 @@ def overlaps(text):
         for v in slots:
             n, rest = v.split(':')
             x, y, gone = map(int, rest.split(','))
-            if not gone:
+            if not gone and int(n, 16) not in ride:
                 seen.append((n, x, y))
         hits = [f'{a[0]}/{b[0]}' for i, a in enumerate(seen) for b in seen[i + 1:]
                 if (int(a[0], 16) < PARTY_SLOTS) != (int(b[0], 16) < PARTY_SLOTS) and abs(a[1] - b[1]) < 16 and abs(a[2] - b[2]) < 16]
@@ -431,7 +442,7 @@ def run_case(mesence, rom, base, out, name, case, exit_at, seed=0):
     if not track.exists():
         problems.append('track.txt 없음')
     else:
-        overlap, first = overlaps(track.read_text())
+        overlap, first = overlaps(track.read_text(), case.get('ride', ()))
         if overlap:
             problems.append(f'인물이 겹쳐 보인 프레임 {overlap}개(처음 {first})')
     return {'name': name, 'seed': seed, 'status': 'failed' if problems else 'passed', 'problems': problems, 'overlap': overlap,
