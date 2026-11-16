@@ -105,6 +105,8 @@ def _lists():
     for m in W.ENDOR_MAPS:
         out.setdefault(m, [])
     out[W.CASINO] = [_entry('day', fc) for fc in W.CASINO_PEOPLE]
+    m, t, fc = W.EMPTY_SHOP
+    out.setdefault(m, []).append(_entry(t, fc))
     return {m: {"map": m, "entries": e} for m, e in out.items()}
 
 
@@ -135,6 +137,8 @@ class ListTest(unittest.TestCase):
         # 엔돌 기본 목록(2장도 씀)은 그대로
         for m in W.ENDOR_MAPS:
             self.assertEqual(lists[m], base[m])
+        m, t_, fc = W.EMPTY_SHOP
+        self.assertNotIn((t_, W.cell(*fc)), {(e["time"], (e["fields"]["x"], e["fields"]["y"])) for e in lists[m]["entries"]})
         ryan = names['ch3_towns_4001']["entries"]
         self.assertEqual({e["time"] for e in ryan}, {'day', 'night'})
         self.assertTrue(all(e["fields"]["talk"] == t['ryan'] for e in ryan))
@@ -155,7 +159,7 @@ class ListTest(unittest.TestCase):
     def test_absent_and_start_tables_cover_the_changed_people(self):
         c = ctx()
         gone = W.absent(c)
-        self.assertEqual(len(gone), 2 * len(W.CASINO_PEOPLE) + 3)
+        self.assertEqual(len(gone), 2 * len(W.CASINO_PEOPLE) + 3 + 1)
         start = W.start_messages(c)
         for (m, time, fc) in (*W.RETALK, *W.ENDOR):
             key = (m, W.cell(*fc), None if time is None else time == 'night')
