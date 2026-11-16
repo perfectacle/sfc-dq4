@@ -50,8 +50,8 @@ env:
   # Guards whose needs name this stay on the local machine (results that differ on Linux).
   LOCAL_NEEDS: macos
   # Free plan: at most 20 jobs run at once for the account. A run is build, two rom jobs, the shards and report;
-  # mode release adds cold-build and build-verify, which run beside the shards (build and rom end before
-  # them, report after). The shard count is capped at JOB_LIMIT - FIXED_JOBS so the run never queues behind itself.
+  # mode release adds the two cold-build jobs and build-verify, which run beside the shards (build and rom end
+  # before them, report after). The shard count is capped at JOB_LIMIT - FIXED_JOBS so the run never queues behind itself.
   JOB_LIMIT: 20
   FIXED_JOBS: 4
 
@@ -254,12 +254,24 @@ jobs:
 
   # Release gate only: both ship ROMs again from scratch with every cache off (build stages, sound
   # conversion and trace checks, uv packages, the tool builds) and ch2 on the Python path instead of the
-  # Go tools, beside the shards. build-verify compares the bytes with the rom job's cached builds.
+  # Go tools, beside the shards. build-verify compares the bytes with the rom job's cached builds. One job
+  # per variant: the Python sound compaction alone is the longest step of the whole gate.
   cold-build:
+    name: cold build ${{ matrix.variant }}
     needs: build
     if: inputs.mode == 'release'
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: ch1
+            args: ''
+            native: ''
+          - variant: ch2
+            args: --chapter2
+            native: 'off'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -295,33 +307,29 @@ jobs:
           token: ${{ secrets.CI_ROM_TOKEN }}
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
 
-      - name: Build both ship ROMs with every cache off
+      # ch2 runs on the Python path (DQ4_NATIVE=off): build-verify then shows it gives the Go bytes too
+      - name: Build the ship ROM with every cache off
         env:
           DQ4_ASSETS: ${{ github.workspace }}/assets
           DQ4_READSET: 'off'
           DQ4_BUILD_CACHE: 'off'
           DQ4_SOUND_CACHE: 'off'
+          VARIANT: ${{ matrix.variant }}
+          ARGS: ${{ matrix.args }}
+          NATIVE: ${{ matrix.native }}
         run: |
-          set -o pipefail
-          uv run --frozen python sfc/dq4/tools/dq4build.py --out work/cold/ch1 >"$RUNNER_TEMP/cold-ch1.log" 2>&1 &
-          ch1=$!
-          DQ4_NATIVE=off uv run --frozen python sfc/dq4/tools/dq4build.py --out work/cold/ch2 --chapter2 \
-            >"$RUNNER_TEMP/cold-ch2.log" 2>&1 &
-          ch2=$!
-          ok=0
-          wait "$ch1" || ok=1
-          wait "$ch2" || ok=1
-          tail -n 5 "$RUNNER_TEMP/cold-ch1.log" "$RUNNER_TEMP/cold-ch2.log"
-          if [ "$ok" != 0 ]; then tail -n 60 "$RUNNER_TEMP/cold-ch1.log" "$RUNNER_TEMP/cold-ch2.log"; fi
-          exit "$ok"
+          args=()
+          if [ -n "$ARGS" ]; then args=("$ARGS"); fi
+          if [ -n "$NATIVE" ]; then export DQ4_NATIVE="$NATIVE"; fi
+          uv run --frozen python sfc/dq4/tools/dq4build.py --out "work/cold/$VARIANT" "${args[@]}"
 
-      - name: Hash the cold builds for build-verify
+      - name: Hash the cold build for build-verify
+        env:
+          VARIANT: ${{ matrix.variant }}
         run: |
           mkdir -p work/ci-digest
-          for v in ch1 ch2; do
-            uv run --frozen python tools/ci_cache.py digest --dir "work/cold/$v" --variant "$v" --kind cold \
-              --out "work/ci-digest/cold-$v.json"
-          done
+          uv run --frozen python tools/ci_cache.py digest --dir "work/cold/$VARIANT" --variant "$VARIANT" --kind cold \
+            --out "work/ci-digest/cold-$VARIANT.json"
 
       - name: Check the digest upload for ROM data
         id: digestcheck
@@ -330,13 +338,15 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ steps.digestcheck.outcome == 'success' }}
         with:
-          name: build-digest-${{ inputs.mode }}-cold
+          name: build-digest-${{ inputs.mode }}-cold-${{ matrix.variant }}
           path: work/ci-digest
           if-no-files-found: error
           retention-days: 14
 
-      # After the upload, so build-verify still compares the bytes when this finds a missing key input
+      # After the upload, so build-verify still compares the bytes when this finds a missing key input.
+      # Both variants in the ch1 job, which ends well before the Python-path ch2 job.
       - name: Check that every build stage cache key holds what the stage reads
+        if: matrix.variant == 'ch1'
         env:
           DQ4_ASSETS: ${{ github.workspace }}/assets
           DQ4_READSET: 'off'
