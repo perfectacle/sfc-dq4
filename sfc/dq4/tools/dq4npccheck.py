@@ -301,6 +301,13 @@ def main():
             import dq4ch3event
             (index, mask), groups = dq4ch3event.CHAPTER3, CHAPTER3_GROUPS
         sets = f"{0x2190 + index:04X}|{mask:02X}"
+        if args.chapter3:
+            # 3장 시작 표(dq4ch3event.start_messages)는 톨네코 처음 상태를 가정한다(네네는 도시락을 가졌으면 말이
+            # 다르다). 새 게임 상태의 주인공 물건 칸을 톨네코 처음 소지품으로 덮는다(빈 칸은 FF)
+            import dq4ch2event
+            items = [item for item, _ in dq4ch3event.start(TOOLS.parents[2] / "rom" / "dq5.sfc", args.dq4)["items"]]
+            at = (dq4ch2event.PARTY_AT + 0x16) & 0xFFFF
+            sets += "".join(f";{at + k:04X}={items[k] if k < len(items) else 0xFF:02X}" for k in range(12))
     mesence = Path(os.environ["MESENCE"])
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):

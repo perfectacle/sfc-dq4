@@ -259,13 +259,14 @@ def chapter3_cases():
     """3장 사건 사례. 출발 상태는 3장 톨네코 집(dq4ch3walkcheck.head). 사건 모듈이 주인공 칸으로 거는 사건을 더하면
     그 사건을 걸 수 있는 칸마다 여기에 사례를 둔다(꼴은 chapter2_cases 와 같고, 같은 맵이면 hop)."""
     import dq4ch3event as ch3
-    taps, close = wc.taps, pc.CLOSE
+    close = pc.CLOSE
     nx, ny = ch3.NENE_CELL
     # 네네(낮, 침대 머리 위 칸)에게 위 칸에서 아래로 말을 건다. 침대(시작 칸)는 FC 에서 막힌 블록이라 맵을 다시 불러온
     # 뒤에는 설 수 없고, 순간이동으로 세우면 「その方向には誰もいない」(129)만 떴다. 순간이동은 TO 한 셀 아래에 내린다.
-    # 말이 끝나면 위 줄로 돌아 방 오른쪽으로 걸어 간다(오른쪽 칸은 침대). distinct 1: 129 밖의 메시지가 하나
+    # 말이 끝나면 위 줄로 돌아 방 오른쪽으로 걸어 간다(오른쪽 칸은 침대). 말이 끝난 뒤 A 를 더 누르면 다시 말을 걸어
+    # 창이 남으므로 닫기만 누른다. distinct 1: 129 밖의 메시지가 하나
     return {'nene-above': {'hop': CH3_HOP, 'warp': f'{ch3.HOUSE},{nx},{ny - 3}', 'set': '',
-                           'walk': f'{wc.talk("down", 12)};{taps(2)};{close};{nx},{ny - 4}', 'free': f'{nx + 4},{ny - 4}',
+                           'walk': f'{wc.talk("down", 12)};wait:120;{close};{close};{nx},{ny - 4}', 'free': f'{nx + 4},{ny - 4}',
                            'want': [], 'map': ch3.HOUSE, 'distinct': 1, 'maxf': 2500}}
 
 
