@@ -134,6 +134,18 @@ SEGMENTS = [
     ('collector_day_side', 'warp', _below(endor.COLLECTOR, endor.COLLECTORS[0][2]),
      {'map': endor.COLLECTOR, 'set': sets(), 'poke': wc.DAY}),
     ('collector_day', 'walk', f"10,9;{talk('up', 3)}", {'map': endor.COLLECTOR, 'poke': wc.DAY}),
+    # 용병: 로렌스 「아니요」·금화 모자람, 스콧은 개가 따라오면 거절·400 골드로 고용(손님 기록 C0 | 28)
+    ('lawrence_no_side', 'warp', _below(endor.BARD_HALL, endor.LAWRENCE[0][2]), {'map': endor.BARD_HALL, 'set': sets()}),
+    ('lawrence_no', 'walk', talk_no('up', 1, 1), {'map': endor.BARD_HALL, 'off': ['LAWRENCE']}),
+    ('lawrence_poor_side', 'warp', _below(endor.BARD_HALL, endor.LAWRENCE[0][2]),
+     {'map': endor.BARD_HALL, 'set': sets(more=(_gold(599),))}),
+    ('lawrence_poor', 'walk', talk('up', 4), {'map': endor.BARD_HALL, 'off': ['LAWRENCE'], 'bytes': {'PARTY_N': 1}}),
+    ('scott_dog_side', 'warp', _below(endor.TOWN, endor.SCOTT[2]),
+     {'map': endor.TOWN, 'set': sets(more=(_gold(400), f'{0x2190 + ch3.DOG[0]:04X}|{ch3.DOG[1]:02X}'))}),
+    ('scott_dog', 'walk', talk('up', 4), {'map': endor.TOWN, 'off': ['SCOTT'], 'bytes': {'GOLD0': 0x90, 'GOLD1': 0x01}}),
+    ('scott_side', 'warp', _below(endor.TOWN, endor.SCOTT[2]), {'map': endor.TOWN, 'set': sets(more=(_gold(400),))}),
+    ('scott_hire', 'walk', talk('up', 6), {'map': endor.TOWN, 'want': ['SCOTT'],
+                                           'bytes': {'PARTY_N': 2, 'PARTY1': 0xE8, 'GOLD0': 0, 'GOLD1': 0}}),
     # 단추에 「아니요」: 그대로 48/03, 칸을 떠났다가 다시 서야 또 묻는다
     ('button_no_side', 'warp', f'{endor.CAVE_WET},{walk.BUTTON_CELL[0]},{walk.BUTTON_CELL[1] + 1}',
      {'map': endor.CAVE_WET, 'set': sets()}),
@@ -161,6 +173,8 @@ MESSAGES = {
     'deliver_no': ['deliver_ask', 'deliver_left', 'left_swords', 'left_armors', 'deliver_more'],
     'guide_idle': ['guide_idle'], 'guide_order': ['guide_order'], 'guide_done': ['guide_done'],
     'collector_none': ['collector_wish'], 'collector_no': ['collector_offer', 'collector_no'],
+    'lawrence_no': ['lawrence_offer', 'lawrence_no'], 'lawrence_poor': ['lawrence_offer', 'lawrence_poor'],
+    'scott_dog': ['scott_offer', 'scott_dog'], 'scott_hire': ['scott_offer', 'scott_hired'],
     'collector_after': ['collector_admire'], 'collector_day': ['collector_wish'], 'button_no': ['button'],
 }
 

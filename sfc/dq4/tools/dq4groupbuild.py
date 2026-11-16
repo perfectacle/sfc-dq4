@@ -216,7 +216,7 @@ ENTRY_COLUMN = {1: 0, 3: 1}
 # the bytes the longer names take come off the end of slots 0-3 (kind 00 is no companion kind; kinds start at 01) and
 # the rewrite stays inside table 0A.
 COMPANION_TABLE = 0x0A
-COMPANION_NAMES = {0x05 * 4: "호이민"}
+COMPANION_NAMES = {0x05 * 4: "호이민", 0x28 * 4: "스콧", 0x29 * 4: "로렌스"}     # 스콧·로렌스: 3장 용병(dq4mercenary)
 COMPANION_SPARE = range(4)
 # Human companions' names (name table 00, person number - 3). Chapter 2 borrows the person records of ヘンリー (09) and
 # サンチョ (05) for クリフト and ブライ; ピピン, フローラ and パパス never join in this hack, so their slots give the bytes.
