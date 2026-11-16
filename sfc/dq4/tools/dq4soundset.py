@@ -13,6 +13,7 @@ import argparse
 import itertools
 import json
 import math
+import os
 from pathlib import Path
 import sys
 
@@ -177,6 +178,14 @@ def song_score(score, drop_tracks=(), drop_programs=(), track_db=None, yield_tra
                 e = e | {'yield': True}
         timeline.append(e)
     return score | {'timeline': timeline}
+
+
+def sound_cache(assets, cache_dir=None):
+    """BRR·시퀀스 묶기·검산 캐시 자리. 기본은 자원 저장소의 sfc/dq4/cache/sound, DQ4_SOUND_CACHE=off 면 None(늘 새로
+    변환: 배포 관문의 무캐시 빌드)."""
+    if os.environ.get('DQ4_SOUND_CACHE') == 'off':
+        return None
+    return cache_dir or Path(assets) / 'sfc/dq4/cache/sound'
 
 
 def build(base, assets, songs, *, cache_dir, max_rate=8000, max_samples=14, map_fades=False, preview=None,
@@ -663,7 +672,8 @@ def main():
     ap.add_argument('--song', action='append', required=True, metavar='DQ5_SLOT=NDS_ID')
     ap.add_argument('--out', type=Path, required=True)
     ap.add_argument('--cache-dir', type=Path,
-                    help='BRR and sequence compaction cache (default: ASSETS/sfc/dq4/cache/sound, keyed by input and tool source hashes)')
+                    help='BRR, sequence compaction and trace check cache (default: ASSETS/sfc/dq4/cache/sound, keyed by input and '
+                         'tool source hashes; DQ4_SOUND_CACHE=off turns it off)')
     ap.add_argument('--max-rate', type=int, default=8000)
     ap.add_argument('--max-samples', type=int, default=14)
     ap.add_argument('--map-fades', action='store_true')
@@ -815,7 +825,7 @@ def main():
     for k, v in (x.split('=') for x in args.sfx_pcm):
         seq, branch = (int(y, 16) for y in k.split('-'))
         spare_effects.setdefault(seq, {})[branch] = None if v == '-' else v
-    rom, report = build(base, args.assets, songs, cache_dir=args.cache_dir or args.assets / 'sfc/dq4/cache/sound', max_rate=args.max_rate,
+    rom, report = build(base, args.assets, songs, cache_dir=sound_cache(args.assets, args.cache_dir), max_rate=args.max_rate,
                         max_samples=args.max_samples, map_fades=args.map_fades, preview=args.preview, stream=stream,
                         stream_ticks={slot: int(v) for slot, v in per_slot(args.stream_ticks)},
                         budgets=budgets, pinned=[int(x, 16) for x in args.pin],

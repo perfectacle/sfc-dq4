@@ -2,14 +2,15 @@
 
 단계(차례대로, 앞 단계가 실패해도 나머지를 돌려 보고서에 모두 남긴다):
 
-  build     출하 롬을 빌드한다(dq4build.py). 롬 SHA-1 이 보고서 폴더 이름이 된다
+  build     출하 롬을 빌드한다(dq4build.py, 빌드 단계 캐시 켬). 관문 모드에서는 같은 때 모든 캐시를 끄고 파이썬 경로로
+            한 번 더 빌드해 산출물 바이트가 모두 같아야 통과. 롬 SHA-1 이 보고서 폴더 이름이 된다
   unit      CI 와 같은 폴더마다 단위 테스트 전부(롬이 있으므로 롬 게이트 시험도 돈다)
   guards    모든 guards.toml 의 실행 검사 전부. 검사 결과 캐시와 장면 캐시를 쓰지 않는다(--rehearse 면 씀)
   sweep     트랙의 release.toml 시드 스윕(시드 0 부터 N 개와 seeds.json 의 실패 시드)
   coverage  빌드 경로(dq4publish.inputs 의 .py) 커버리지. 로컬(단위 전부 + 빌드 캐시 끈 빌드 한 번, 하위 프로세스도
             잼) ≥ LOCAL_MIN, CI 와 같게(롬 링크 없는 임시 워크트리에서 롬·도구 환경 변수 없이 단위만) ≥ CI_MIN
 
-관문 모드(--rehearse 아님)에서는 모든 단계가 같은 환경(gate_env)으로 돈다: 장면 캐시(DQ4_READSET=off), 빌드 단계
+관문 모드(--rehearse 아님)에서는 build 의 캐시 빌드 밖의 모든 단계가 같은 환경(gate_env)으로 돈다: 장면 캐시(DQ4_READSET=off), 빌드 단계
 캐시(DQ4_BUILD_CACHE=off), 서장 끝·시작 상태 캐시(DQ4_STATES_CACHE 를 이 실행 폴더의 빈 states/ 로, 처음 한 번 만들어 그
 실행 안에서만 다시 씀). guards.py 의 검사 결과 캐시도 쓰지 않는다. 단계마다 같은 머신에서 돈 MesenCE 수(이 실행과 다른 워크트리)를
 30초마다 세어 보고서에 적는다. 실패한 단계·검사는 다시 돌리지 않고 그대로 적는다.
@@ -39,6 +40,7 @@ import time
 import tomllib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ci_cache  # noqa: E402
 import guards  # noqa: E402
 
 ROOT = guards.ROOT
@@ -143,7 +145,8 @@ def failed_seeds(sweep):
 
 
 def gate_env(run_dir, base=None):
-    """관문 모드의 환경: 캐시를 모두 끈다(상태 캐시는 run_dir/states 에서 이 실행 동안만)."""
+    """관문 모드의 환경: 캐시를 모두 끈다(상태 캐시는 run_dir/states 에서 이 실행 동안만). build 단계만 빌드 단계 캐시를
+    켜고(cached_env) 같은 때의 무캐시 빌드(cold_env)와 바이트를 견준다."""
     return dict(base if base is not None else os.environ, DQ4_READSET='off', DQ4_BUILD_CACHE='off',
                 DQ4_STATES_CACHE=str(run_dir / 'states'))
 
@@ -160,15 +163,56 @@ def state_note(text):
     return sorted(set(re.findall(r'"state_cache":\s*"([a-z]+)"', text)))
 
 
+def cold_env(run_dir, base=None):
+    """무캐시 빌드의 환경: 관문 환경에 곡 변환·검산 캐시도 끄고, Go 도구 대신 파이썬 경로로."""
+    return dict(gate_env(run_dir, base), DQ4_SOUND_CACHE='off', DQ4_NATIVE='off')
+
+
+def cached_env(run_dir, base=None):
+    """관문 빌드의 환경: 관문 환경에서 빌드 단계 캐시만 기본(공유 칸)대로 켠다."""
+    env = gate_env(run_dir, base)
+    src = base if base is not None else os.environ
+    if 'DQ4_BUILD_CACHE' in src:
+        env['DQ4_BUILD_CACHE'] = src['DQ4_BUILD_CACHE']
+    else:
+        env.pop('DQ4_BUILD_CACHE')
+    return env
+
+
 def stage_build(ctx):
+    """출하 롬을 빌드한다. 관문 모드에서는 빌드 단계 캐시로 빌드하고, 같은 때 모든 캐시를 끈 빌드(cold_env)를 따로 해
+    산출물 바이트가 모두 같아야 통과다(캐시 키에 빠진 입력이 있으면 여기서 드러난다). 연습이면 캐시 빌드 하나만."""
     out = ctx['dir'] / 'build'
-    code, secs = sh(BUILD.format(out=out.relative_to(ROOT)), ctx['logs'] / 'build.log', env_for(ctx))
+    jobs = {'cached': (out, cached_env(ctx['dir']) if not ctx['rehearse'] else None, 'build.log')}
+    if not ctx['rehearse']:
+        jobs['cold'] = (ctx['dir'] / 'build-cold', cold_env(ctx['dir']), 'build-cold.log')
+    done = {}
+
+    def one(kind):
+        folder, env, log = jobs[kind]
+        done[kind] = sh(BUILD.format(out=folder.relative_to(ROOT)), ctx['logs'] / log, env)
+    threads = [threading.Thread(target=one, args=(k,)) for k in jobs]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    secs = max(s for _, s in done.values())
     rom = out / ROM_NAME
-    if code != 0 or not rom.exists():
-        return {'status': 'failed', 'seconds': secs, 'detail': f'종료 코드 {code}, 로그 build.log'}
+    failed = [f'{k} 종료 코드 {c}(로그 {jobs[k][2]})' for k, (c, _) in done.items() if c != 0]
+    if failed or not rom.exists():
+        return {'status': 'failed', 'seconds': secs, 'detail': ', '.join(failed) or f'{ROM_NAME} 없음'}
     ctx['rom'] = rom
     ctx['rom_sha1'] = hashlib.sha1(rom.read_bytes()).hexdigest()
-    return {'status': 'passed', 'seconds': secs, 'detail': f'롬 SHA-1 {ctx["rom_sha1"]}'}
+    detail = f'롬 SHA-1 {ctx["rom_sha1"]}'
+    if 'cold' not in jobs:
+        return {'status': 'passed', 'seconds': secs, 'detail': detail}
+    text, same = ci_cache.verify_build([ci_cache.digest(folder, 'ch1', kind) for kind, (folder, _, _) in jobs.items()],
+                                       variants=('ch1',))
+    (ctx['logs'] / 'build-verify.md').write_text(text, encoding='utf-8')
+    if not same:
+        return {'status': 'failed', 'seconds': secs,
+                'detail': f'캐시 빌드가 무캐시 빌드와 다름 — 캐시 키에 빠진 입력(로그 build-verify.md), {detail}'}
+    return {'status': 'passed', 'seconds': secs, 'detail': f'{detail}, 무캐시 빌드와 바이트 같음'}
 
 
 def unit_counts(text):
@@ -225,20 +269,36 @@ def load_ci(folder):
     local = sorted({x['name'] for p in parts for x in p['local']})
     # 표시가 없는 옛 조각 결과는 캐시를 쓰지 않던 때의 것이다
     cached = any(p.get('cached', False) for p in parts)
-    return {'commit': commits.pop(), 'shards': n, 'rows': rows, 'local': local, 'cached': cached}
+    commit = commits.pop()
+    # 빌드 대조(ci_cache.verify_build): 무캐시 빌드 결과가 있을 때만. 조각이 받은 롬도 함께 견준다
+    digests = ci_cache.load_digests(folder)
+    build = None
+    if any(d['kind'] == ci_cache.COLD for d in digests):
+        text, ok = ci_cache.verify_build(digests)
+        if any(d['commit'] != commit for d in digests):
+            text, ok = text + '- **빌드 대조의 커밋이 조각 결과와 다름**\n', False
+        build = {'ok': ok, 'text': text}
+    return {'commit': commit, 'shards': n, 'rows': rows, 'local': local, 'cached': cached, 'build': build}
 
 
-def ci_summary(ci):
+def ci_summary(ci, require_build=False):
     """(Markdown, CI 결과가 모두 통과인가). 돌리지 않음(skipped)도 CI 환경이 모자란 것이라 통과로 치지 않는다. 캐시를
-    쓴 실행(연습)은 모두 통과여도 판정을 연습으로 적는다."""
+    쓴 실행(연습)은 모두 통과여도 판정을 연습으로 적는다. 빌드 대조(캐시 빌드 = 무캐시 빌드)가 있으면 그것도 같아야
+    통과이고, require_build(배포 관문)면 없을 때도 실패다."""
     words = {'passed': '통과', 'failed': '실패', 'skipped': '돌리지 않음'}
+    build = ci.get('build')
     ok = bool(ci['rows']) and all(r['status'] == 'passed' for r in ci['rows'])
+    ok = ok and (build['ok'] if build else not require_build)
     word = ('연습 통과(캐시 씀, 배포 근거 아님)' if ci.get('cached') else '통과') if ok else '실패'
     lines = ['# 배포 관문 CI 결과', '', f'- 커밋: `{ci["commit"]}`', f'- 조각 {ci["shards"]}개, 검사 {len(ci["rows"])}개'
              f'({sum(r["status"] == "passed" for r in ci["rows"])}개 통과), 로컬 몫 {len(ci["local"])}개',
              f'- 판정: **{word}**', '', '| 검사 | 결과 | 내용 |', '| --- | --- | --- |']
     lines += [f'| {r["name"]} | {words.get(r["status"], r["status"])} | {r["detail"]} |'
               for r in sorted(ci['rows'], key=lambda r: (r['status'] == 'passed', r['name']))]
+    if build:
+        lines += ['', build['text'].rstrip('\n')]
+    elif require_build:
+        lines += ['', '## 캐시 빌드와 무캐시 빌드 대조', '', '- **무캐시 빌드 결과가 없음**(cold-build 잡을 본다)']
     if ci['local']:
         lines += ['', '## 로컬 몫', '', '리눅스 CI 에서 돌리지 않아 `release_check.py --ci-report` 가 로컬에서 돌린다.', '',
                   ', '.join(ci['local'])]
@@ -454,10 +514,12 @@ def main():
                     help='배포 관문 워크플로의 조각 결과 폴더. guards 단계는 CI 결과를 쓰고 로컬 몫만 돌린다')
     ap.add_argument('--ci-summary', type=Path, metavar='DIR',
                     help='조각 결과를 요약해 Markdown 으로 찍고 끝낸다(CI report 잡). 모두 통과가 아니면 1')
+    ap.add_argument('--require-build', action='store_true',
+                    help='--ci-summary: 캐시 빌드와 무캐시 빌드의 대조가 있고 같아야 통과(배포 관문)')
     a = ap.parse_args()
     if a.ci_summary:
         try:
-            text, ok = ci_summary(load_ci(a.ci_summary))
+            text, ok = ci_summary(load_ci(a.ci_summary), a.require_build)
         except (OSError, ValueError, KeyError, TypeError) as e:
             print(f'# 배포 관문 CI 결과\n\n- 조각 결과를 읽지 못함: {type(e).__name__}: {e}')
             return 1
@@ -478,6 +540,9 @@ def main():
             ap.error(f'--ci-report: CI 커밋 {ci["commit"][:12]} 이 HEAD {head[:12]} 와 다름')
         if ci['cached'] and not a.rehearse:
             ap.error('--ci-report: 캐시를 쓴 CI 실행(release-gate rehearse)이라 배포 근거가 아님. --rehearse 와 함께만 받는다')
+        if not a.rehearse and not (ci['build'] and ci['build']['ok']):
+            ap.error('--ci-report: CI 의 캐시 빌드가 같은 실행의 무캐시 빌드와 같다는 대조가 '
+                     + ('어긋남' if ci['build'] else '없음(build-digest artifact 도 받는다)'))
     root = ROOT / 'work' / 'release'
     tmp = root / f'run-{os.getpid()}'
     (tmp / 'logs').mkdir(parents=True, exist_ok=True)

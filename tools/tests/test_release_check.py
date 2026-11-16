@@ -98,6 +98,58 @@ class ReleaseCheckTest(unittest.TestCase):
         self.assertIsNone(rc.env_for({**ctx, 'rehearse': True}))
         self.assertEqual(rc.env_for({**ctx, 'rehearse': True}, {'X': '1'}), {'X': '1'})
 
+    def test_build_stage_envs_cache_only_the_gated_build(self):
+        run = Path('/r/run-1')
+        cold = rc.cold_env(run, {'X': '1', 'DQ4_BUILD_CACHE': '/c'})
+        self.assertEqual((cold['DQ4_BUILD_CACHE'], cold['DQ4_SOUND_CACHE'], cold['DQ4_NATIVE'], cold['DQ4_READSET']),
+                         ('off', 'off', 'off', 'off'))
+        self.assertEqual(rc.cached_env(run, {'DQ4_BUILD_CACHE': '/c'})['DQ4_BUILD_CACHE'], '/c')
+        cached = rc.cached_env(run, {'X': '1'})
+        self.assertNotIn('DQ4_BUILD_CACHE', cached)
+        self.assertEqual((cached['DQ4_READSET'], cached['X']), ('off', '1'))
+
+    def _work(self):
+        """stage_build 는 실행 폴더를 저장소 기준 상대 경로로 넘기므로 저장소 안 work/ 에 둔다."""
+        (rc.ROOT / 'work').mkdir(exist_ok=True)
+        return rc.ROOT / 'work'
+
+    def _fake_build(self, differ):
+        """sh 대신: --out 폴더에 롬과 ledger 를 쓴다. differ 면 무캐시 빌드의 1장 롬이 다르다."""
+        def sh(cmd, log, env=None, timeout=None):
+            out = rc.ROOT / cmd.split('--out ')[1].split()[0]
+            out.mkdir(parents=True, exist_ok=True)
+            cold = env and env.get('DQ4_NATIVE') == 'off'
+            (out / rc.ROM_NAME).write_bytes(b'rom')
+            (out / 'dq4-ch1.sfc').write_bytes(b'ch1-other' if cold and differ else b'ch1')
+            (out / 'ledger.json').write_text('{}')
+            log.write_text('ok')
+            return 0, 1
+        return sh
+
+    def test_build_stage_fails_when_the_cached_build_differs_from_the_cold_one(self):
+        for differ in (False, True):
+            with tempfile.TemporaryDirectory(dir=self._work()) as d, \
+                    mock.patch.object(rc, 'sh', self._fake_build(differ)):
+                run = Path(d)
+                (run / 'logs').mkdir()
+                got = rc.stage_build({'dir': run, 'logs': run / 'logs', 'rehearse': False})
+                self.assertEqual(got['status'], 'failed' if differ else 'passed', got)
+                if differ:
+                    self.assertIn('캐시 키', got['detail'])
+                    self.assertIn('chapter1 build', (run / 'logs' / 'build-verify.md').read_text(encoding='utf-8'))
+                else:
+                    self.assertTrue((run / 'build-cold' / rc.ROM_NAME).is_file())
+                    self.assertIn('무캐시 빌드와 바이트 같음', got['detail'])
+
+    def test_rehearsal_build_skips_the_cold_build(self):
+        with tempfile.TemporaryDirectory(dir=self._work()) as d, \
+                mock.patch.object(rc, 'sh', self._fake_build(True)):
+            run = Path(d)
+            (run / 'logs').mkdir()
+            got = rc.stage_build({'dir': run, 'logs': run / 'logs', 'rehearse': True})
+            self.assertEqual(got['status'], 'passed')
+            self.assertFalse((run / 'build-cold').exists())
+
     def test_stage_exception_is_recorded_not_raised(self):
         def boom(ctx):
             raise RuntimeError('worktree add 실패')
@@ -228,6 +280,38 @@ class ReleaseCheckTest(unittest.TestCase):
         ci['rows'].append({'name': 'b', 'status': 'skipped', 'detail': '설정 안 된 환경 변수 ASAR'})
         self.assertFalse(rc.ci_summary(ci)[1])
         self.assertFalse(rc.ci_summary(dict(ci, rows=[]))[1])
+
+    def _digests(self, d, cold_rom=b'r', with_cold=True, commit='c' * 40):
+        """CI artifact 꼴의 빌드 대조 파일: rom 잡(cached)·조각(shard-1)·무캐시(cold)."""
+        sub = Path(d) / 'build-digest'
+        sub.mkdir(exist_ok=True)
+        kinds = [('cached', b'r'), ('shard-1', b'r')] + ([('cold', cold_rom)] if with_cold else [])
+        for v in ('ch1', 'ch2'):
+            for kind, rom in kinds:
+                f = sub / f'{kind}-{v}.json'
+                f.write_text(json.dumps({'format': 'dq4-build-digest/1', 'variant': v, 'kind': kind, 'commit': commit,
+                                         'files': {'dq4-ch1-full.sfc': rom.hex(), 'ledger.json': '00'}}))
+
+    def test_ci_summary_needs_the_cached_build_to_match_the_cold_build(self):
+        row = {'name': 'a', 'file': 'g', 'status': 'passed', 'detail': '9초'}
+        with tempfile.TemporaryDirectory() as d:
+            self._ci(d, [([1, 1], [row], [])])
+            self.assertIsNone(rc.load_ci(d)['build'])
+            self.assertTrue(rc.ci_summary(rc.load_ci(d))[1])
+            text, ok = rc.ci_summary(rc.load_ci(d), require_build=True)
+            self.assertFalse(ok)
+            self.assertIn('무캐시 빌드 결과가 없음', text)
+            commit = json.loads(next(Path(d).rglob('shard-*.json')).read_text())['commit']
+            self._digests(d, commit=commit)
+            text, ok = rc.ci_summary(rc.load_ci(d), require_build=True)
+            self.assertTrue(ok, text)
+            self.assertIn('ch2: 같음', text)
+            self._digests(d, cold_rom=b'x', commit=commit)
+            text, ok = rc.ci_summary(rc.load_ci(d), require_build=True)
+            self.assertFalse(ok)
+            self.assertIn('캐시 키에 빠진 입력', text)
+            self._digests(d, commit='d' * 40)
+            self.assertFalse(rc.ci_summary(rc.load_ci(d), require_build=True)[1])
 
     def test_guards_stage_keeps_ci_verdicts_and_runs_the_rest_locally(self):
         """CI 가 통과·실패로 판정한 검사는 다시 돌리지 않고(실패를 덮지 않음), 로컬 몫과 CI 에서 돌리지 않은 것만 돈다."""
