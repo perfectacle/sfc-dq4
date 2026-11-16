@@ -1247,18 +1247,15 @@ def build_conflict(a, b, places=None):
     return touches(a, b) or touches(b, a)
 
 
-def build_batches(builders, places=None):
-    """빌드 검사를 차례대로, 서로 부딪치지 않는 것끼리 묶는다. 앞 묶음이 다 끝나야 다음 묶음이 돈다. 부딪치는 검사는 이전 것이
-    든 묶음보다 뒤에 둬 명단 차례를 지킨다."""
-    batches = []
-    for c in builders:
-        after = max((i for i, b in enumerate(batches) if any(build_conflict(c, x, places) for x in b)), default=-1)
-        for b in batches[after + 1:]:
-            b.append(c)
-            break
-        else:
-            batches.append([c])
-    return batches
+def run_order(hit, builders, places, weights):
+    """(띄울 차례, 앞서 끝나야 하는 것). 빌드 검사는 명단 차례로 먼저, 나머지는 무게(held_weight)가 큰 것부터. 빌드 검사는
+    앞의 빌드 검사 가운데 부딪치는 것(build_conflict)이 끝나야, 나머지 검사는 자기가 읽거나 쓰는 것을 만드는 빌드 검사가
+    끝나야 돈다. 부딪치지 않는 검사는 빌드 검사가 도는 동안에도 돈다."""
+    rest = [c for c in hit if c not in builders]
+    order = builders + sorted(rest, key=lambda c: (-held_weight(c, weights), rest.index(c)))
+    after = [{j for j in range(min(i, len(builders))) if build_conflict(c, order[j], places)}
+             for i, c in enumerate(order)]
+    return order, after
 
 
 def run_many(hit, parallel, timeout, no_cache=False, logs=None, env=None):
@@ -1283,27 +1280,29 @@ def run_many(hit, parallel, timeout, no_cache=False, logs=None, env=None):
         if root and not no_cache:
             share_states(unit_dir(c, root) / 'states', Path(root) / '_pool' / 'states')
         return c, status, detail
-    # 롬을 스스로 빌드하는 검사는 다른 검사가 읽는 롬을 다시 쓸 수 있어 다른 검사보다 먼저 돌린다. 빌드 검사끼리는
-    # 서로 만드는 것을 건드리지 않는 것만 함께 돈다(build_batches). CI 조각에서 미리 만든 출하 롬으로 바뀌는 빌드 단계는
-    # 폴더를 미리 맞춰 두면 아무것도 쓰지 않으므로 빌드로 치지 않는다. 빌드 검사가 그 폴더에 무언가 더하거나 고칠 수
-    # 있어, 나머지 검사를 띄우기 전에 다시 맞춘다
+    # 롬을 스스로 빌드하는 검사는 다른 검사가 읽는 롬을 다시 쓸 수 있어, 그것을 읽거나 만드는 검사보다 먼저 돌린다
+    # (run_order). CI 조각에서 미리 만든 출하 롬으로 바뀌는 빌드 단계는 폴더를 미리 맞춰 두면 아무것도 쓰지 않으므로
+    # 빌드로 치지 않는다. 빌드 검사가 그 폴더에 무언가 더하거나 고칠 수 있어, 끝나면 그 폴더를 다시 맞춘다(그 폴더를
+    # 건드리는 검사는 모두 그 빌드 검사를 기다리므로 그동안 도는 것이 없다)
     places = prebuilt_places(hit, env or os.environ)
     builders = [c for c in hit if built_paths(c['run'], places)]
+    order, after = run_order(hit, builders, places, shard_weights(hit))
     pool = concurrent.futures.ThreadPoolExecutor(max(1, parallel))
     try:
-        done = []
         place_prebuilt(places)
-        for batch in build_batches(builders, places):
-            done += [f.result() for f in [pool.submit(one, c) for c in batch]]
-        if builders:
-            place_prebuilt(places)
-        # 긴 것부터 띄워 마지막에 긴 검사 하나만 혼자 도는 꼬리를 줄인다. 결과는 명단 차례로
-        rest = [c for c in hit if c not in builders]
-        weights = shard_weights(rest)
-        futures = {}
-        for i in sorted(range(len(rest)), key=lambda i: (-held_weight(rest[i], weights), i)):
-            futures[i] = pool.submit(one, rest[i])
-        done += [futures[i].result() for i in range(len(rest))]
+        results, running, left = {}, {}, list(range(len(order)))
+        while left or running:
+            for i in [i for i in left if after[i] <= results.keys()][:max(1, parallel) - len(running)]:
+                left.remove(i)
+                running[pool.submit(one, order[i])] = i
+            finished, _ = concurrent.futures.wait(running, return_when=concurrent.futures.FIRST_COMPLETED)
+            for f in finished:
+                i = running.pop(f)
+                results[i] = f.result()
+                made = built_paths(order[i]['run'], places)
+                place_prebuilt({p: d for p, d in places.items() if any(under(m, p) or under(p, m) for m in made)})
+        at = {id(c): i for i, c in enumerate(order)}
+        done = [results[at[id(c)]] for c in builders + [c for c in hit if c not in builders]]
     except BaseException:
         # Ctrl-C 등: 도는 검사 그룹을 모두 끄고 남은 일을 버린다
         for proc in list(RUNNING):

@@ -126,16 +126,21 @@ class GuardsTest(unittest.TestCase):
             _, problems = load(bad + GOOD)
             self.assertTrue(any('full' in p for p in problems), bad)
 
-    def test_build_batches_keep_builders_that_share_outputs_apart(self):
-        """다른 것을 만드는 빌드 검사끼리만 함께 돈다. 한쪽이 만드는 것을 다른 쪽이 읽거나 만들면 명단 차례대로 따로 돈다."""
+    def test_run_order_keeps_builders_that_share_outputs_apart(self):
+        """다른 것을 만드는 빌드 검사끼리만 함께 돈다. 한쪽이 만드는 것을 다른 쪽이 읽거나 만들면 명단 차례대로 따로 돈다.
+        빌드하지 않는 검사는 자기가 읽는 것을 만드는 빌드 검사만 기다린다."""
         def b(name, run):
             return {'name': name, 'run': run}
         ch1 = b('a', 'x.py --out work/ch1 && y.py --rom work/ch1/r.sfc --out work/fa')
         ch1b = b('b', 'x.py --out work/ch1 && z.py --rom work/ch1/r.sfc --out work/fb')
         groups = b('c', 'g.py --out work/groups && z.py --rom work/groups/g.sfc --out work/fc')
         reader = b('d', 'g.py --out work/groups2 && z.py --rom work/ch1/r.sfc --old work/groups2/x --out work/fd')
-        batches = [[c['name'] for c in batch] for batch in guards.build_batches([ch1, groups, ch1b, reader])]
-        self.assertEqual(batches, [['a', 'c'], ['b'], ['d']])
+        plain = b('e', 'z.py --rom work/ch1/r.sfc --out work/fe')
+        other = b('f', 'z.py --rom work/x.sfc --out work/ff')
+        builders = [ch1, groups, ch1b, reader]
+        order, after = guards.run_order([ch1, plain, groups, other, ch1b, reader], builders, {}, {'e': 1.0, 'f': 9.0})
+        self.assertEqual([c['name'] for c in order], ['a', 'c', 'b', 'd', 'f', 'e'])
+        self.assertEqual(after, [set(), set(), {0}, {0, 2}, set(), {0, 2}])
         self.assertFalse(guards.build_conflict(ch1, groups))
         self.assertTrue(guards.build_conflict(ch1, reader))
 
@@ -946,6 +951,31 @@ class ShardTest(unittest.TestCase):
             rows = guards.run_many(units, 1, 30, logs=Path(d))
         self.assertEqual(started, ['a 1,2,3,4/4', 'c', 'b'])
         self.assertEqual([guards.unit_name(c) for c, _, _ in rows], ['a 1/4', 'a 2/4', 'a 3/4', 'a 4/4', 'b', 'c'])
+
+    def test_run_many_runs_readers_beside_builders_they_do_not_wait_for(self):
+        """빌드 검사가 도는 동안 그것과 부딪치지 않는 검사는 함께 돌고, 그것이 만드는 것을 읽는 검사는 끝난 뒤에 돈다."""
+        import tempfile
+        import threading
+        import time as clock
+        log, lock = [], threading.Lock()
+
+        def fake(c, *a, **k):
+            with lock:
+                log.append(('start', c['name']))
+            clock.sleep(0.2 if c['name'] == 'g' else 0.05)
+            with lock:
+                log.append(('end', c['name']))
+            return 'passed', '1초'
+        g = {'name': 'g', 'run': 'g.py --out work/groups && z.py --rom work/groups/g.sfc --out work/fg'}
+        r = {'name': 'r', 'run': 'z.py --rom work/groups/g.sfc --out work/fr'}
+        x = {'name': 'x', 'run': 'z.py --rom work/ch1/r.sfc --out work/fx'}
+        with tempfile.TemporaryDirectory() as d, redirect_stdout(io.StringIO()), \
+                mock.patch.object(guards, 'run_check', side_effect=fake), \
+                mock.patch.object(guards, 'shard_weights', return_value={'g': 1.0, 'r': 9.0, 'x': 1.0}):
+            rows = guards.run_many([r, x, g], 2, 30, logs=Path(d))
+        self.assertEqual([c['name'] for c, _, _ in rows], ['g', 'r', 'x'])
+        self.assertLess(log.index(('start', 'x')), log.index(('end', 'g')))
+        self.assertLess(log.index(('end', 'g')), log.index(('start', 'r')))
 
     def test_part_set_runs_only_parts_without_a_pass_record(self):
         import tempfile
