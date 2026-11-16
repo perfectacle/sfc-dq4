@@ -618,6 +618,56 @@ def with_prebuilt(command, env):
     return DQ4BUILD.sub('python tools/ci_cache.py prebuilt', command)
 
 
+# 미리 만든 빌드로 바뀌는 단계: 앞에 환경 변수 없이 dq4build.py --out 폴더 뒤에 인자만
+PREBUILT_STAGE = re.compile(r'\s*uv run --locked python sfc/dq4/tools/dq4build\.py --out (\S+)((?:\s+--[\w-]+)*)\s*')
+
+
+def prebuilt_places(checks, env):
+    """{빌드 폴더: 미리 만든 폴더}. env 의 DQ4_PREBUILT 에 그 단계의 인자와 이 커밋·롬이 맞는 빌드가 있는 dq4build 단계의
+    --out 들. 같은 폴더를 다른 인자로 만드는 단계가 있으면 그 폴더는 뺀다(어느 빌드가 거기 있어야 하는지 정할 수 없음)."""
+    if not env.get('DQ4_PREBUILT'):
+        return {}
+    import ci_cache
+    saved = os.environ.get('DQ4_PREBUILT')
+    os.environ['DQ4_PREBUILT'] = env['DQ4_PREBUILT']
+    try:
+        seen, found = {}, {}
+        for c in checks:
+            for st in c['run'].split('&&')[:-1]:
+                m = PREBUILT_STAGE.fullmatch(st)
+                if m:
+                    seen.setdefault(m[1], set()).add(tuple(m[2].split()))
+        for out, args in seen.items():
+            hit = ci_cache.prebuilt_dir(next(iter(args))) if len(args) == 1 else None
+            if hit:
+                found[out] = hit[0]
+        return found
+    finally:
+        if saved is None:
+            os.environ.pop('DQ4_PREBUILT', None)
+        else:
+            os.environ['DQ4_PREBUILT'] = saved
+
+
+def place_prebuilt(places):
+    """prebuilt_places 의 폴더마다 미리 만든 빌드와 같게 맞춘다. 그 뒤로 그 단계는 아무것도 쓰지 않아(ci_cache.sync_tree)
+    롬을 읽기만 하는 검사가 된다."""
+    import ci_cache
+    for out, d in places.items():
+        ci_cache.sync_tree(d, ROOT / out)
+
+
+def built_paths(run, places):
+    """명령이 실제로 만드는 경로: made_paths 가운데 places 에 맞춰 둔 미리 만든 빌드 단계의 --out 을 뺀 것."""
+    out = []
+    for st in run.split('&&')[:-1]:
+        m = PREBUILT_STAGE.fullmatch(st)
+        if m and m[1] in places:
+            continue
+        out += re.findall(r'--out\s+(\S+)', st)
+    return out
+
+
 def spawn(command, log, timeout, env):
     """bash 로 명령 하나를 돌려 로그에 덧붙인다. 종료 코드, 시간을 넘기면 None."""
     command = with_prebuilt(command, env)
@@ -894,6 +944,11 @@ def unit_weight(check, weights):
     """단위 무게: 검사(스윕) 시간을 하위 조각·시드 단위 수로 나눈 것."""
     of = check['part'][1] if check.get('part') else check['seed_unit'][1] if check.get('seed_unit') else 1
     return weights.get(check['name'], 1.0) / of
+
+
+def held_weight(check, weights):
+    """group_parts 로 묶은 단위의 무게: 든 하위 조각마다 unit_weight."""
+    return unit_weight(check, weights) * len(part_ks(check) or (1,))
 
 
 def shard_part(checks, k, n, weights):
@@ -1185,25 +1240,22 @@ def work_paths(run):
     return set(re.findall(r'(?<![\w/])(?:\$PWD/)?(work/[^\s;&|]+)', run))
 
 
-def build_conflict(a, b):
-    """두 빌드 검사가 함께 돌면 안 되는가: 한쪽이 만드는 것(made_paths)을 다른 쪽 명령이 읽거나 쓰거나 만든다."""
+def build_conflict(a, b, places=None):
+    """두 빌드 검사가 함께 돌면 안 되는가: 한쪽이 만드는 것(built_paths)을 다른 쪽 명령이 읽거나 쓰거나 만든다."""
     def touches(x, y):
-        return any(under(t, m) or under(m, t) for m in made_paths(x['run']) for t in work_paths(y['run']))
+        return any(under(t, m) or under(m, t) for m in built_paths(x['run'], places or {}) for t in work_paths(y['run']))
     return touches(a, b) or touches(b, a)
 
 
-def build_batches(builders):
-    """빌드 검사를 차례대로, 서로 부딪치지 않는 것끼리 묶는다. 앞 묶음이 다 끝나야 다음 묶음이 돈다. 부딪치는 검사는 이전 것이
-    든 묶음보다 뒤에 둬 명단 차례를 지킨다."""
-    batches = []
-    for c in builders:
-        after = max((i for i, b in enumerate(batches) if any(build_conflict(c, x) for x in b)), default=-1)
-        for b in batches[after + 1:]:
-            b.append(c)
-            break
-        else:
-            batches.append([c])
-    return batches
+def run_order(hit, builders, places, weights):
+    """(띄울 차례, 앞서 끝나야 하는 것). 빌드 검사는 명단 차례로 먼저, 나머지는 무게(held_weight)가 큰 것부터. 빌드 검사는
+    앞의 빌드 검사 가운데 부딪치는 것(build_conflict)이 끝나야, 나머지 검사는 자기가 읽거나 쓰는 것을 만드는 빌드 검사가
+    끝나야 돈다. 부딪치지 않는 검사는 빌드 검사가 도는 동안에도 돈다."""
+    rest = [c for c in hit if c not in builders]
+    order = builders + sorted(rest, key=lambda c: (-held_weight(c, weights), rest.index(c)))
+    after = [{j for j in range(min(i, len(builders))) if build_conflict(c, order[j], places)}
+             for i, c in enumerate(order)]
+    return order, after
 
 
 def run_many(hit, parallel, timeout, no_cache=False, logs=None, env=None):
@@ -1228,16 +1280,29 @@ def run_many(hit, parallel, timeout, no_cache=False, logs=None, env=None):
         if root and not no_cache:
             share_states(unit_dir(c, root) / 'states', Path(root) / '_pool' / 'states')
         return c, status, detail
-    # 롬을 스스로 빌드하는 검사는 다른 검사가 읽는 롬을 다시 쓸 수 있어 다른 검사보다 먼저 돌린다. 빌드 검사끼리는
-    # 서로 만드는 것을 건드리지 않는 것만 함께 돈다(build_batches)
-    builders = [c for c in hit if builds(c['run'])]
+    # 롬을 스스로 빌드하는 검사는 다른 검사가 읽는 롬을 다시 쓸 수 있어, 그것을 읽거나 만드는 검사보다 먼저 돌린다
+    # (run_order). CI 조각에서 미리 만든 출하 롬으로 바뀌는 빌드 단계는 폴더를 미리 맞춰 두면 아무것도 쓰지 않으므로
+    # 빌드로 치지 않는다. 빌드 검사가 그 폴더에 무언가 더하거나 고칠 수 있어, 끝나면 그 폴더를 다시 맞춘다(그 폴더를
+    # 건드리는 검사는 모두 그 빌드 검사를 기다리므로 그동안 도는 것이 없다)
+    places = prebuilt_places(hit, env or os.environ)
+    builders = [c for c in hit if built_paths(c['run'], places)]
+    order, after = run_order(hit, builders, places, shard_weights(hit))
     pool = concurrent.futures.ThreadPoolExecutor(max(1, parallel))
     try:
-        done = []
-        for batch in build_batches(builders):
-            done += [f.result() for f in [pool.submit(one, c) for c in batch]]
-        futures = [pool.submit(one, c) for c in hit if c not in builders]
-        done += [f.result() for f in futures]
+        place_prebuilt(places)
+        results, running, left = {}, {}, list(range(len(order)))
+        while left or running:
+            for i in [i for i in left if after[i] <= results.keys()][:max(1, parallel) - len(running)]:
+                left.remove(i)
+                running[pool.submit(one, order[i])] = i
+            finished, _ = concurrent.futures.wait(running, return_when=concurrent.futures.FIRST_COMPLETED)
+            for f in finished:
+                i = running.pop(f)
+                results[i] = f.result()
+                made = built_paths(order[i]['run'], places)
+                place_prebuilt({p: d for p, d in places.items() if any(under(m, p) or under(p, m) for m in made)})
+        at = {id(c): i for i, c in enumerate(order)}
+        done = [results[at[id(c)]] for c in builders + [c for c in hit if c not in builders]]
     except BaseException:
         # Ctrl-C 등: 도는 검사 그룹을 모두 끄고 남은 일을 버린다
         for proc in list(RUNNING):
@@ -1434,8 +1499,7 @@ def main():
             if args.pending_only:
                 units = [c for c in units if not all_passed(c)]
             weights = shard_weights(units)
-            units.sort(key=lambda c: (-weights[c['name']] * len(part_ks(c) or (1,)) / (c['part'][1] if c.get('part')
-                                                                                       else 1), unit_name(c)))
+            units.sort(key=lambda c: (-held_weight(c, weights), unit_name(c)))
             slots = unit_slots(units, root)
             if len(slots) > args.slots:
                 print(f'::warning::단위 캐시 자리 {len(slots)}개 가운데 무거운 {args.slots}개만: '

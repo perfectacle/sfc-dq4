@@ -135,6 +135,32 @@ class CiCacheTest(unittest.TestCase):
             self.quiet(ci_cache.prebuilt, out, ['--chapter2'])           # 커밋이 다름
             self.assertTrue(run.called)
 
+    def test_sync_tree_writes_nothing_when_the_build_is_already_in_place(self):
+        """조각의 검사들이 같은 롬 폴더를 함께 읽는 동안 다른 검사의 prebuilt 단계가 그 폴더를 비우거나 다시 쓰지 않는다."""
+        src = self.tmp / 'pre'
+        (src / 'title' / 'deep').mkdir(parents=True)
+        (src / 'rom.sfc').write_bytes(b'rom')
+        (src / 'title' / 'deep' / 'x').write_bytes(b'1')
+        (src / ci_cache.MANIFEST).write_text('{}')
+        out = self.tmp / 'work' / 'ch1'
+        ci_cache.sync_tree(src, out)
+        self.assertEqual(sorted(p.relative_to(out).as_posix() for p in out.rglob('*')),
+                         ['rom.sfc', 'title', 'title/deep', 'title/deep/x'])
+        before = {p: (p.stat().st_ino, p.stat().st_mtime_ns) for p in out.rglob('*')}
+        ci_cache.sync_tree(src, out)
+        self.assertEqual(before, {p: (p.stat().st_ino, p.stat().st_mtime_ns) for p in out.rglob('*')})
+        # 다른 검사가 고치거나 더한 것은 미리 만든 빌드대로 돌린다
+        (out / 'rom.sfc').write_bytes(b'changed')
+        (out / 'title' / 'extra').mkdir()
+        (out / 'title' / 'extra' / 'y').write_bytes(b'2')
+        (out / 'npc.sfc').write_bytes(b'n')
+        ci_cache.sync_tree(src, out)
+        self.assertEqual((out / 'rom.sfc').read_bytes(), b'rom')
+        self.assertEqual(sorted(p.relative_to(out).as_posix() for p in out.rglob('*')),
+                         ['rom.sfc', 'title', 'title/deep', 'title/deep/x'])
+        self.assertEqual(before[out / 'title' / 'deep' / 'x'], ((out / 'title' / 'deep' / 'x').stat().st_ino,
+                                                                (out / 'title' / 'deep' / 'x').stat().st_mtime_ns))
+
     def _build(self, name, rom=b'rom', leader=b'l'):
         out = self.tmp / name
         (out / 'leader').mkdir(parents=True)

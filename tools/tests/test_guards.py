@@ -1,4 +1,6 @@
+import io
 import os
+from contextlib import redirect_stdout
 import re
 import sys
 import unittest
@@ -124,18 +126,50 @@ class GuardsTest(unittest.TestCase):
             _, problems = load(bad + GOOD)
             self.assertTrue(any('full' in p for p in problems), bad)
 
-    def test_build_batches_keep_builders_that_share_outputs_apart(self):
-        """다른 것을 만드는 빌드 검사끼리만 함께 돈다. 한쪽이 만드는 것을 다른 쪽이 읽거나 만들면 명단 차례대로 따로 돈다."""
+    def test_run_order_keeps_builders_that_share_outputs_apart(self):
+        """다른 것을 만드는 빌드 검사끼리만 함께 돈다. 한쪽이 만드는 것을 다른 쪽이 읽거나 만들면 명단 차례대로 따로 돈다.
+        빌드하지 않는 검사는 자기가 읽는 것을 만드는 빌드 검사만 기다린다."""
         def b(name, run):
             return {'name': name, 'run': run}
         ch1 = b('a', 'x.py --out work/ch1 && y.py --rom work/ch1/r.sfc --out work/fa')
         ch1b = b('b', 'x.py --out work/ch1 && z.py --rom work/ch1/r.sfc --out work/fb')
         groups = b('c', 'g.py --out work/groups && z.py --rom work/groups/g.sfc --out work/fc')
         reader = b('d', 'g.py --out work/groups2 && z.py --rom work/ch1/r.sfc --old work/groups2/x --out work/fd')
-        batches = [[c['name'] for c in batch] for batch in guards.build_batches([ch1, groups, ch1b, reader])]
-        self.assertEqual(batches, [['a', 'c'], ['b'], ['d']])
+        plain = b('e', 'z.py --rom work/ch1/r.sfc --out work/fe')
+        other = b('f', 'z.py --rom work/x.sfc --out work/ff')
+        builders = [ch1, groups, ch1b, reader]
+        order, after = guards.run_order([ch1, plain, groups, other, ch1b, reader], builders, {}, {'e': 1.0, 'f': 9.0})
+        self.assertEqual([c['name'] for c in order], ['a', 'c', 'b', 'd', 'f', 'e'])
+        self.assertEqual(after, [set(), set(), {0}, {0, 2}, set(), {0, 2}])
         self.assertFalse(guards.build_conflict(ch1, groups))
         self.assertTrue(guards.build_conflict(ch1, reader))
+
+    def test_prebuilt_build_stages_do_not_serialize_the_shard(self):
+        """CI 조각에서 미리 만든 롬으로 맞춘 dq4build 단계는 만드는 것으로 치지 않아, 그 롬을 읽는 검사끼리 함께 돈다. 그 뒤에
+        다른 것을 만드는 단계는 그대로 빌드로 남는다."""
+        build = 'uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1'
+        a = {'name': 'a', 'run': f'{build} && y.py --rom work/ch1/r.sfc --out work/fa'}
+        b = {'name': 'b', 'run': f'{build} && z.py --rom work/ch1/r.sfc --out work/fb'}
+        c = {'name': 'c', 'run': f'{build} && m.py --rom work/ch1/o.sfc --out work/ch1/m.sfc && z.py --out work/fc'}
+        places = {'work/ch1': '/pre/ch1'}
+        self.assertEqual(guards.built_paths(a['run'], places), [])
+        self.assertEqual(guards.built_paths(a['run'], {}), ['work/ch1'])
+        self.assertEqual(guards.built_paths(c['run'], places), ['work/ch1/m.sfc'])
+        self.assertTrue(guards.build_conflict(a, b))
+        self.assertFalse(guards.build_conflict(a, b, places))
+        self.assertTrue(guards.build_conflict(a, c, places))
+        # 환경 변수가 붙은 단계나 같은 폴더를 다른 인자로 만드는 단계는 미리 만든 빌드로 치지 않는다
+        env_stage = {'name': 'e', 'run': f'X=1 {build} && y.py --out work/fe'}
+        other = {'name': 'o', 'run': f'{build} --chapter2 && y.py --out work/fo'}
+        found = (Path('/pre/ch1'), {})
+        with mock.patch('ci_cache.prebuilt_dir', return_value=found) as pd:
+            self.assertEqual(guards.prebuilt_places([a, b, env_stage], {'DQ4_PREBUILT': '/pre/ch1'}),
+                             {'work/ch1': Path('/pre/ch1')})
+            pd.assert_called_once_with(())
+            self.assertEqual(guards.prebuilt_places([a, other], {'DQ4_PREBUILT': '/pre/ch1'}), {})
+            self.assertEqual(guards.prebuilt_places([a], {}), {})
+        with mock.patch('ci_cache.prebuilt_dir', return_value=None):
+            self.assertEqual(guards.prebuilt_places([a], {'DQ4_PREBUILT': '/pre/ch1'}), {})
 
     def test_only_picks_named_checks_and_flags_unknown(self):
         """--only 는 걸린 것과 상관없이 이름으로 고르고, 모르는 이름은 문제로 낸다."""
@@ -900,6 +934,48 @@ class ShardTest(unittest.TestCase):
             {'prefix': 'guard-unit-a~1of4', 'dir': '/u/a~1,3of4'}, {'prefix': 'guard-unit-a~3of4', 'dir': '/u/a~1,3of4'},
             {'prefix': 'guard-unit-c', 'dir': '/u/c'}])
         self.assertTrue(all(',' not in s['prefix'] for s in guards.unit_slots(units, '/u')))
+
+    def test_run_many_starts_the_heaviest_checks_first_and_keeps_list_order(self):
+        """조각 안에서 긴 검사가 마지막에 혼자 도는 꼬리를 막으려 무거운 단위부터 띄우되, 결과 행은 명단 차례."""
+        import tempfile
+        started = []
+
+        def fake(c, *a, **k):
+            started.append(guards.unit_name(c))
+            return 'passed', '1초'
+        units = guards.group_parts(guards.expand_parts([{'name': 'a', 'run': 'a.py', 'parts': 4},
+                                                        {'name': 'b', 'run': 'b.py'}, {'name': 'c', 'run': 'c.py'}]))
+        with tempfile.TemporaryDirectory() as d, redirect_stdout(io.StringIO()), \
+                mock.patch.object(guards, 'run_check', side_effect=fake), \
+                mock.patch.object(guards, 'shard_weights', return_value={'a': 400.0, 'b': 50.0, 'c': 300.0}):
+            rows = guards.run_many(units, 1, 30, logs=Path(d))
+        self.assertEqual(started, ['a 1,2,3,4/4', 'c', 'b'])
+        self.assertEqual([guards.unit_name(c) for c, _, _ in rows], ['a 1/4', 'a 2/4', 'a 3/4', 'a 4/4', 'b', 'c'])
+
+    def test_run_many_runs_readers_beside_builders_they_do_not_wait_for(self):
+        """빌드 검사가 도는 동안 그것과 부딪치지 않는 검사는 함께 돌고, 그것이 만드는 것을 읽는 검사는 끝난 뒤에 돈다."""
+        import tempfile
+        import threading
+        import time as clock
+        log, lock = [], threading.Lock()
+
+        def fake(c, *a, **k):
+            with lock:
+                log.append(('start', c['name']))
+            clock.sleep(0.2 if c['name'] == 'g' else 0.05)
+            with lock:
+                log.append(('end', c['name']))
+            return 'passed', '1초'
+        g = {'name': 'g', 'run': 'g.py --out work/groups && z.py --rom work/groups/g.sfc --out work/fg'}
+        r = {'name': 'r', 'run': 'z.py --rom work/groups/g.sfc --out work/fr'}
+        x = {'name': 'x', 'run': 'z.py --rom work/ch1/r.sfc --out work/fx'}
+        with tempfile.TemporaryDirectory() as d, redirect_stdout(io.StringIO()), \
+                mock.patch.object(guards, 'run_check', side_effect=fake), \
+                mock.patch.object(guards, 'shard_weights', return_value={'g': 1.0, 'r': 9.0, 'x': 1.0}):
+            rows = guards.run_many([r, x, g], 2, 30, logs=Path(d))
+        self.assertEqual([c['name'] for c, _, _ in rows], ['g', 'r', 'x'])
+        self.assertLess(log.index(('start', 'x')), log.index(('end', 'g')))
+        self.assertLess(log.index(('end', 'g')), log.index(('start', 'r')))
 
     def test_part_set_runs_only_parts_without_a_pass_record(self):
         import tempfile
