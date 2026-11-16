@@ -268,6 +268,20 @@ class HookRowsStairsTest(unittest.TestCase):
         self.assertEqual(arrivals, [(0x40, 100, 50, 0, 10, 13, layer, 0), (0x40, 101, 50, 0, 2, 5, layer, 0)])
         self.assertEqual(leaving, [(0x40, 0, 0, 200, 107, 13, 13), (0x40, 0, 0x1F, 100, 53)])
 
+    def test_stair_on_another_map_enters_and_leaves_that_map(self):
+        # 터널 42: (79,5D) 는 도착 칸이 있는 42/00 으로, (84,5A) 는 42/01 의 계단 (1F,02) 로 들어가고 그 계단 줄에서만
+        # (84,5A) 로 나간다. 그 밖의 줄은 첫 입구 옆으로.
+        links = {0x47: [{"fc": 0x42, "field": [(0x79, 0x5D), (0x84, 0x5A)], "arrival": (0x05, 0x0B),
+                         "stairs": {(0x84, 0x5A): (0x1F, 0x02, 1)}}]}
+        place = {(0x42, 0): (0x47, 0), (0x42, 1): (0x47, 1)}
+        entrances = {0x42: ([(0x79, 0x5D), (0x84, 0x5A)], (242, 189))}
+        each = {(0x42, 0x84, 0x5A): ([(0x84, 0x5A)], (266, 181))}
+        arrivals, leaving = build.hook_rows(links, place, entrances, each)
+        layer = build.LAYER
+        self.assertEqual(arrivals, [(0x47, 0x84, 0x5A, 1, 0x3E, 0x05, layer, 0), (0x47, 0x79, 0x5D, 0, 0x0A, 0x17, layer, 0)])
+        self.assertEqual(leaving, [(0x47, 1, 1, 266, 181, 0x05, 0x05), (0x47, 0, 0x1F, 242, 189)])
+        self.assertEqual(build.stair(links[0x47][0], (0x84, 0x5A)), (1, 0x1F, 0x02))
+
     def test_part_without_a_field_entrance_adds_nothing(self):
         links = {0x40: [{"fc": 0x10, "field": None}]}
         self.assertEqual(build.hook_rows(links, {(0x10, 0): (0x40, 0)}, {}), ([], []))
@@ -483,8 +497,13 @@ class DungeonZonesTest(unittest.TestCase):
         want = {(0x30, 0): 0x42, (0x30, 1): 0x42, (0x30, 2): 0x43, (0x30, 3): 0x43, (0x41, 0): 0x40,
                 **{(0x3A, k): 0x41 for k in range(7)},
                 # Chapter 2: 西の塔 (its top 2E/00 and the inn floor 2E/04 have none) and the cave south of フレノール.
-                (0x2E, 1): 0x4F, (0x2E, 2): 0x4E, (0x2E, 3): 0x4E, (0x2E, 5): 0x4F, (0x39, 0): 0x4D, (0x39, 1): 0x4C}
+                (0x2E, 1): 0x4F, (0x2E, 2): 0x4E, (0x2E, 3): 0x4E, (0x2E, 5): 0x4F, (0x39, 0): 0x4D, (0x39, 1): 0x4C,
+                # Chapter 3: きたのどうくつ (only 3D/00 and 3D/05 have one) and the cave of the silver goddess.
+                (0x3D, 0): 0x48, (0x3D, 5): 0x49, **{(0x40, k): 0x4A if k < 3 else 0x4B for k in range(6)}}
         self.assertEqual(zones, want)
+        # 장 차례(장 안에서는 구역 번호 차례)라, 3장 구역이 번호로 앞서도 2장 구역 뒤에 DQ5 구역을 받는다.
+        self.assertEqual(list(dict.fromkeys(zones.values())),
+                         [0x40, 0x41, 0x42, 0x43, 0x4C, 0x4D, 0x4E, 0x4F, 0x48, 0x49, 0x4A, 0x4B])
 
 
 @unittest.skipUnless(ROM.is_file(), "local source ROM not present")
@@ -498,7 +517,9 @@ class RecordsTest(unittest.TestCase):
     # lead to 3D/00, whose stairs lead to 3D/01 until $62AA bit7 turns them to 3D/02 (08:$B397).
     # モンバーバラ 15/03(41/03)은 밤의 15/02 다. FC 는 15/00 의 계단을 밤이면 15/03 으로 돌리지만(08:$B397) 옮기지 않아
     # 15/00 의 계단은 늘 15/02 로 간다.
-    ONE_WAY = {"3E/05", "41/03"}
+    # 은의 여신상 동굴 40/02(48/04)는 40/01 의 단추(1D 이벤트 5E)로만 들어가는 맵이라, 그 계단이 가는 40/00 의 계단은
+    # 40/01 로 돌아간다.
+    ONE_WAY = {"3E/05", "41/03", "48/04"}
 
     def test_stairs_lead_back(self):
         records = {}
@@ -524,8 +545,10 @@ class RecordsTest(unittest.TestCase):
             areas.update(build.area_records(self.prg, group))
         # エンドール's 04/00 doors to 04/02-04/04 and 04/02's bottom edge back to 04/00 are FC exit-table cells too.
         # ハバリア(43)·キングレオ(44)도 출구 표 칸이 있다. 43/00 (13,08) 은 왼쪽으로 걸어 들어가는 칸이다.
+        # 은의 여신상 동굴 40/00(48/02)과 40/03(48/05)도 서로 오가는 출구 표 칸이다.
         self.assertEqual(sorted(areas), ["36/00", "36/01", "40/00", "40/02", "40/03", "40/04", "43/00", "43/03",
-                                         "43/05", "44/00", "44/01", "44/02", "45/00", "45/02", "45/03", "45/04"])
+                                         "43/05", "44/00", "44/01", "44/02", "45/00", "45/02", "45/03", "45/04",
+                                         "48/02", "48/05"])
         for rows in areas.values():
             for row in rows:
                 x0, y0, x1, y1 = row["rect"]

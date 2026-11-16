@@ -36,7 +36,7 @@ import dq4fieldport  # noqa: E402
 import dq4talk  # noqa: E402
 from dq4environmentmap import block_prop  # noqa: E402
 from dq4environmentrom import GATE_KIND, objects  # noqa: E402
-from dq4groupbuild import LINKS, cell, chapter, doors, entrance_doors, exit_order, fc_numbers, placement, tag  # noqa: E402
+from dq4groupbuild import LINKS, cell, chapter, doors, entrance_doors, exit_order, fc_numbers, placement, stair, tag  # noqa: E402
 from dq5exitcheck import dp86_allowed, warp_exit  # noqa: E402
 from dq5progresscheck import environment  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
@@ -207,8 +207,9 @@ def stair_scenes(prg, groups, rom_data=None):
                     # cell to expect (dq4groupbuild.exit_rows refuses it in a group of several FC groups).
                     if not link["field"]:
                         continue
-                    by_stair = {s: b for b, s in link.get("stairs", {}).items()}
-                    leave = each[(fc_group, *by_stair[x, y])][1] if (x, y) in by_stair else found[fc_group][1]
+                    by_stair = {stair(link, b): b for b in link.get("stairs", {})}
+                    on = (fc_number, x, y)
+                    leave = each[(fc_group, *by_stair[on])][1] if on in by_stair else found[fc_group][1]
                     yield f"stair-{group:02X}{number:02X}-{i}", starts, {"field": list(leave)}
                     continue
                 there_group, there_number = place[dest["group"], dest["index"]]
@@ -253,10 +254,13 @@ def scene_units(prg, groups, rom_data=None):
         stairs = link.get("stairs", {})
         for part in [[b] for b in link["field"]] if stairs else [link["field"]]:
             blocks = dq4fieldport.entrance_blocks(props, part)
-            ex, ey = cell(*stairs[part[0]]) if stairs else (x, y)
+            there, ex, ey = arrival, x, y
+            if part[0] in stairs:
+                k, sx, sy = stair(link, part[0])
+                there, (ex, ey) = f"{group:02X}/{placement(prg)[link['fc'], k][1]:02X}", cell(sx, sy)
             for (sx, sy), d in enter_starts(props, blocks):
                 jobs.append((f"enter-{tag(group, link)}-{sx},{sy}-{d}", [{"field": (sx, sy), "TEST": f"{d}:{PRESS},wait:400"}],
-                             {"map": arrival, "cell": [ex, ey]}))
+                             {"map": there, "cell": [ex, ey]}))
     if placement(prg)[0x02, 0][0] in groups:
         jobs.append((AREA, AREA, None))
     return jobs

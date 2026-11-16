@@ -60,7 +60,8 @@ class FakeRom:
 class SyntheticPortTest(unittest.TestCase):
     """롬 없이 port 가 FC 가게 목록·여관 값을 DQ5 목록·여관 표로 엮는 것을 본다. FC·DQ5 표 읽기는 바꿔 끼운다."""
     PLACE = {(0x10, 0): (0x36, 0), (0x10, 1): (0x36, 1), (0x11, 0): (0x37, 0)}
-    NAMES = ["やくそう", "こんぼう", "いばらのむち", "うまのふん", "かわのよろい", "どくけしそう", "てつのやり"]
+    # 7 은 1 과 이름이 같은 다른 FC 물건(제 값이 다름)
+    NAMES = ["やくそう", "こんぼう", "いばらのむち", "うまのふん", "かわのよろい", "どくけしそう", "てつのやり", "こんぼう"]
     ITEMS = {"ヤクソウ": 0x60, "コンボウ": 0x02, "イバラノムチ": 0x06, "カワノヨロイ": 0x40, "ドクケシソウ": 0x61,
              "テツノヤリ": 0x01}
 
@@ -84,7 +85,8 @@ class SyntheticPortTest(unittest.TestCase):
                 mock.patch.object(shopport.ines, "prg", lambda data: b"prg"), \
                 mock.patch.object(shopport.dq5item, "Rom", lambda data: FakeRom()), \
                 mock.patch.object(shopport.dq5item, "item_name", lambda rom, i: f"item{i:02X}"), \
-                mock.patch.object(shopport.dq4shop, "item_names", lambda prg: (self.NAMES, None)), \
+                mock.patch.object(shopport.dq4shop, "item_names",
+                                  lambda prg: (self.NAMES, {i: 10 * i + 5 for i in range(len(self.NAMES))})), \
                 mock.patch.object(shopport.dq4shop, "lookup", lambda prg, k, g, n: lookup[k, g, n]), \
                 mock.patch.object(shopport.dq4shop, "price", lambda prg, g, n, i: prices.get((g, n, i), 10 * i + 5)), \
                 mock.patch.object(shopport.dq4shop, "inn_price", lambda prg, g, n: inn.get((g, n))), \
@@ -132,15 +134,23 @@ class SyntheticPortTest(unittest.TestCase):
         self.assertEqual(writes[-1], {"at": "23:B000", "hex": "00"})
         self.assertEqual(report["prices"]["02 item02"], 15)
 
+    def test_place_price_leaves_the_item_out(self):
+        # FC 15:$B2F7 이 그 장소에서만 다른 값을 주는 물건(여우 마을의 はがねのつるぎ 10G)은 DQ5 값이 물건마다 하나라
+        # 목록에서 빠지고 보고에 남는다
+        _, shops, _, report = self.run_port(prices={(0x10, 0, 1): 10})
+        first = shopport.dq4shopkey.KEY_FIRST
+        self.assertEqual(shops[0], {"kind": 2, "index": 2, "key": first, "items": [0x06]})
+        self.assertEqual(report["local_prices"], ["36/00 こんぼう 10"])
+        self.assertEqual(self.itemwrites.call_args.args[2][0x06], 25)
+
     def test_refusals(self):
         with self.assertRaisesRegex(ValueError, "bank 40"):
             self.run_port(inn_at=0x40F000)
         with self.assertRaisesRegex(ValueError, "inn price"):
             self.run_port(inn={(0x10, 0): 0x80, (0x11, 0): 6})
-        # 같은 DQ5 도구를 두 가게가 다른 FC 값으로 팔면 값 하나를 고를 수 없다
+        # 제 값이 다른 FC 물건 둘이 같은 DQ5 물건이 되면 값 하나를 고를 수 없다
         with self.assertRaisesRegex(ValueError, "FC prices"):
-            self.run_port(prices={(0x10, 0, 1): 15, (0x11, 0, 1): 20},
-                          lookup={(1, 0x10, 0): [0x01], (3, 0x10, 1): [0x04], (2, 0x11, 0): [0x01]})
+            self.run_port(lookup={(1, 0x10, 0): [0x01], (3, 0x10, 1): [0x04], (2, 0x11, 0): [0x07]})
         with self.assertRaisesRegex(ValueError, "more than"):
             self.run_port(lookup={(1, 0x10, 0): [0x01] * 7, (3, 0x10, 1): [0x04], (2, 0x11, 0): [0x00]})
 
@@ -190,6 +200,11 @@ class PortTest(unittest.TestCase):
         found = shopport.merchants(shopport.ines.prg(DQ4.read_bytes()), 0x0E, 0)
         self.assertEqual(found[0x0C, 0x18, False], 5)
 
+    def test_fox_village_sells_only_what_has_its_own_price(self):
+        # 여우 마을(18/00) 도구점의 はがねのつるぎ 는 그 마을에서만 10G 라 빠지고 やくそう 만 남는다
+        self.assertEqual(self.report["local_prices"], ["48/00 はがねのつるぎ 10"])
+        self.assertEqual([s["fc"] for s in self.report["shops"] if s["map"] == "48/00"], [["やくそう", "はがねのつるぎ"]])
+
     def test_lists_keyed_by_fc_group(self):
         # 3D holds three FC groups: テンペ (inn, church) and フレノール (item shop) get keys of their own.
         # エンドール (40) sells armour on 40/00 and 40/09 and has inns on 40/00 and 40/0E: two keys, split at 40/09.
@@ -199,7 +214,7 @@ class PortTest(unittest.TestCase):
                                                "3E/00-02": "64", "3F/00-01": "65", "40/00-08": "66", "40/09-0E": "67",
                                                "41/00-03": "68", "42/00-01": "69", "43/00-05": "6A",
                                                "45/05-05": "6B", "45/00-02": "6C", "45/03-04": "6D", "45/0F-0F": "6E",
-                                               "45/06-0B": "6F", "46/00-03": "70"})
+                                               "45/06-0B": "6F", "46/00-03": "70", "48/00-01": "71"})
         weapons = next(s for s in self.shops if s["key"] == 0x60 and s["kind"] == 2)
         self.assertEqual(weapons["items"], [0x02, 0x06, 0x1C, 0x07])  # いばらのむち = DQ5 いばらのムチ
         # てつのやり sells in DQ5 slot 01 (dq4itemport.BORROWED), after くさりがま as in FC.

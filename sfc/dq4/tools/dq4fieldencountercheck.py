@@ -34,6 +34,7 @@ import dq4balance  # noqa: E402
 import dq4encounter  # noqa: E402
 import dq4fieldencounter  # noqa: E402
 import dq4fieldport  # noqa: E402
+import dq4groupbuild  # noqa: E402
 import dq4groupcheck  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
@@ -46,7 +47,12 @@ ZONES = {"castle-04": (0, (0x0A, 0x02)), "imuru-05": (0, (0x09, 0x01)), "south-0
          # 2장 무대: サントハイム·サラン 07, 사막의 바자·탑 0B, 사막 0A, エンドール 0C(기본 24)
          "santeem-07": (0, (0x02, 0x04)), "bazaar-0B": (0, (0x03, 0x04)), "desert-0A": (0, (0x04, 0x04)),
          "endor-0C": (0, (0x06, 0x05))}
-RATE_SCENES = ("castle-04", "imuru-05", "west-09", "west-08", "santeem-07", "endor-0C")
+# 3장 flag(dq4fieldencounter.CHAPTER3_FLAG)를 켜고 서는 칸: 격자 훅이 고른 3장 지도의 구역 14~17. 모두 3장 일행이 걷는
+# 범위 안이고 1·2·4장 지도에서는 다른 구역인 칸이다(14 ← 09, 15 ← 0A, 16 ← 0C, 17 ← 0C).
+CH3_ZONES = {"ch3-14": (0, (0x06, 0x02)), "ch3-15": (0, (0x06, 0x04)), "ch3-16": (0, (0x05, 0x05)),
+             "ch3-17": (0, (0x07, 0x05))}
+ZONES.update(CH3_ZONES)
+RATE_SCENES = ("castle-04", "imuru-05", "west-09", "west-08", "santeem-07", "endor-0C", "ch3-16")
 # Frames waited before the walk: each starts the random numbers elsewhere, for another fight.
 DELAYS = (0, 7, 13)
 RATES = "11EA44=FFFFFFFFFFFFFFFF"
@@ -113,15 +119,17 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     subprocess.run([sys.executable, str(DQ5_TOOLS / "dq5encounterwrite.py"), args.dq5, "dump", "-o",
                     out / "encounter-orig.json"], check=True, capture_output=True)
+    # 던전 구역도 빌드와 같이 넘겨야 그 뒤에 받는 3장 필드 구역의 DQ5 번호가 빌드와 같다
     _, _, report = dq4fieldencounter.docs(prg, args.dq5.read_bytes(),
-                                          json.loads((out / "encounter-orig.json").read_text(encoding="utf-8")))
+                                          json.loads((out / "encounter-orig.json").read_text(encoding="utf-8")),
+                                          dq4groupbuild.dungeon_zones(prg).values())
     dq4groupcheck.WARP = DQ5_TOOLS / "lua" / "dq5warptrace.lua"
 
-    def place(field, cell):
+    def place(field, cell, key=dq4fieldencounter.FC_MAP):
         grid, props = dq4fieldport.fc_field(prg, field)
         x, y = stand(grid, props, cell)
         if field == 0:
-            _, rows = dq4encounter.zone_map(prg, 0)
+            _, rows = dq4encounter.zone_map(prg, key)
             fc = rows[cell[1]][cell[0]] & 0x3F
         else:
             fc = dq4fieldencounter.FIELD3 if field == 3 else \
@@ -130,9 +138,13 @@ def main():
 
     def run(name, rates, delay=0):
         field, cell = ZONES[name]
-        (x, y), grid, props, fc = place(field, cell)
+        ch3 = name in CH3_ZONES
+        (x, y), grid, props, fc = place(field, cell, dq4fieldencounter.FC_MAP3 if ch3 else dq4fieldencounter.FC_MAP)
         world = dq4fieldport.WORLDS[field]
         extra = {"POKE": f"7E1949={world:02X}"} if world else {}
+        if ch3:
+            flag, bit = dq4fieldencounter.CHAPTER3_FLAG
+            extra["SET"] = f"{flag & 0xFFFF:04X}|{bit:02X}"
         patch = dq4fieldport.warp_patch(data, *dq4fieldport.stand(x, y))
         scene = f"{name}-rate" if rates else f"{name}-zone{delay}"
         got = dq4groupcheck.scene(mesence, rom, state, out, scene, FIELD="{},{}".format(*dq4fieldport.stand(x, y)),

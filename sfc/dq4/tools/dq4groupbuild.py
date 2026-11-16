@@ -102,10 +102,11 @@ LINKS = {
     # Chapter 3: レイクナバ and the cave where its iron safe lies (きたのどうくつ, arrival on its stair to the field),
     # ボンモール, and エンドール. Each town leads a DQ5 group, so each takes a ルーラ slot (dq4fieldtravel). Their
     # people and sellers are those of chapter 3's start ($615A = 2).
+    # FC plays 恐怖の洞窟 (FC song 06, DQ5 slot 09) in groups 34-43, the caves of chapter 3 among them.
     0x3E: [{"fc": 0x16, "arrival": (0x00, 0x0D), "attrs": "03/00", "field": [(0x68, 0x24)], "out": "left:64",
             "chapter": 3},
-           {"fc": 0x3D, "arrival": (0x0B, 0x03), "attrs": "03/00", "field": [(0x71, 0x14)],
-            "out": "down:32,wait:60,up:32", "chapter": 3}],
+           {"fc": 0x3D, "arrival": (0x0B, 0x03), "attrs": "21/02", "music": 0x09, "dungeon": True,
+            "field": [(0x71, 0x14)], "out": "down:32,wait:60,up:32", "chapter": 3}],
     0x3F: [{"fc": 0x05, "arrival": (0x11, 0x1F), "map": 1, "attrs": "03/00", "field": [(0x74, 0x46)], "out": "down:64",
             "chapter": 3}],
     # エンドール is FC map branch 0 (castle song 01) but for its casino 04/01 (FC song 04 楽しいカジノ, slot 07), the
@@ -142,17 +143,23 @@ LINKS = {
             "out": "down:64", "chapter": 2},
            {"fc": 0x1F, "arrival": (0x07, 0x0D), "attrs": "03/00", "music": 0x18, "field": [(0x57, 0x52)],
             "out": "down:64", "chapter": 2}],
-    # 5장 시작 지역: ブランカ 와 きこりのいえ(20). 인물과 판매자는 5장 시작 상태($615A = 4)의 것. 여우가 홀리는
-    # 마을(18)은 자고 나면 사라지는 이벤트와 장소별 값(はがねのつるぎ 10G)이 있어 뺀다.
+    # 5장 시작 지역: ブランカ 와 きこりのいえ(20). 인물과 판매자는 5장 시작 상태($615A = 4)의 것.
     0x46: [{"fc": 0x06, "arrival": (0x10, 0x1D), "attrs": "03/00", "field": [(0x99, 0x45)], "out": "down:64",
             "chapter": 5},
            {"fc": 0x20, "arrival": (0x06, 0x0C), "attrs": "03/00", "field": [(0x92, 0x3A)], "out": "down:64",
             "chapter": 5}],
-    # ブランカ 에서 エンドール 로 가는 터널. 3장에 뚫린 뒤(5장)의 42/01 만 옮긴다. FC 는 입구마다 그 쪽 계단으로
-    # 들여보낸다(08:$AF99).
-    0x47: [{"fc": 0x42, "arrival": (0x1F, 0x02), "map": 1, "attrs": "03/00", "field": [(0x84, 0x5A), (0x79, 0x5D)],
-            "stairs": {(0x84, 0x5A): (0x1F, 0x02), (0x79, 0x5D): (0x05, 0x0F)}, "out": "down:32,wait:60,up:32",
-            "chapter": 5}],
+    # ブランカ 에서 エンドール 로 가는 터널: 3장에 공사 중인 막힌 42/00 과 뚫린 42/01. FC 입구 표는 두 입구 모두
+    # 42/00 (05,0B) 이고, $62AA bit3(터널이 뚫림)이면 08:$AF99 가 입구마다 42/01 의 그 쪽 계단으로 바꾼다. 그
+    # flag 는 3장 끝 사건 몫이라 엔돌 쪽 (79,5D) 은 42/00 으로, 3장에 닿지 않는 ブランカ 쪽 (84,5A) 은 42/01 (1F,02)
+    # 로 둔다. 인물은 3장 시작 상태(42/01 의 레코드는 장마다 같고 대사만 다름).
+    0x47: [{"fc": 0x42, "arrival": (0x05, 0x0B), "attrs": "03/00", "music": 0x09, "field": [(0x79, 0x5D), (0x84, 0x5A)],
+            "stairs": {(0x84, 0x5A): (0x1F, 0x02, 1)}, "out": "up:32,wait:60,down:32", "chapter": 3}],
+    # 3장 엔돌 쪽의 여우 마을(18)과 은의 여신상 동굴(40). 마을은 FC 맵 갈래 1(街でのひととき, DQ5 06).
+    # 여우 마을은 계단 없이 아래 통로의 맵 끝으로 나간다.
+    0x48: [{"fc": 0x18, "arrival": (0x0A, 0x1D), "attrs": "03/00", "music": 0x06, "field": [(0x7C, 0x34)],
+            "out": "left:200", "chapter": 3},
+           {"fc": 0x40, "arrival": (0x03, 0x13), "attrs": "21/02", "music": 0x09, "dungeon": True,
+            "field": [(0x81, 0x40)], "out": "up:32,wait:60,down:32", "chapter": 3}],
 }
 # The attribute table grows by 6 bytes a map and outgrows its own bank (108 spare bytes), so it moves whole; the
 # map pointer table (3 bytes a map) outgrew bank 0F with chapter 3's maps and moves the same way. The entrance and
@@ -169,8 +176,9 @@ RECORDS_AT = ((0x348000, 0x350000), (0x318000, 0x320000), (0x3F8000, 0x400000), 
 RECORD_PLACEHOLDER = "03/00"
 EXIT_AT = ("--exits-at", "2A:D812", "--records-at", "3C:A000")
 ENTRANCES_AT = ("--entrances-at", "3C:8000")
-# dq5textwrite writes the whole walking text again, so it takes banks of its own.
-TEXT_AT = ("--at", "35:8000")
+# dq5textwrite writes the whole walking text again, so it takes banks of its own: past the original 3 MB, as the
+# chapter-1 build (in 30-3F the ported people's lines grew into the field map at 3A:8000).
+TEXT_AT = ("--at", "60:8000")
 # Talk scripts 900- (the prologue's and the ported people's, dq4npcport.talk_doc). Bank 30-3F: the hook reads
 # them with DB set to their bank. Not 3A: the chapter-1 build fills it with new-map records. Not 3C: the 0x800 bytes
 # before the inn table (3C:F000) overflowed once chapter 2's people talked (0xC4F bytes with the travel-door shrines).
@@ -336,6 +344,13 @@ def doors(prg):
     return out
 
 
+def stair(part, block):
+    """(FC map, x, y) of the stair a "stairs" entrance enters onto: a value (x, y) is on the part's arrival map
+    ("map"), (x, y, map) on that FC map of the group."""
+    x, y, *number = part["stairs"][block]
+    return (number[0] if number else part.get("map", 0)), x, y
+
+
 def entrance_doors(prg):
     """{(FC group, FC field x, y): doors value of that one entrance} of the LINKS parts with "stairs"."""
     _, props = dq4fieldport.fc_field(prg)
@@ -348,21 +363,23 @@ def hook_rows(links, place, entrances, each=None):
     (entrances[FC group] = (cells, leave cell), as doors) leads to its arrival, and its maps leave onto the leave
     cell. A DQ5 group of one FC group leaves from any map. A part with "leave_rows" ([{rows: (min, max), block}])
     leaves its arrival map from those hero cell rows onto the stand cell of that FC block. A part with "stairs"
-    ({FC field entrance: FC stair}) enters each entrance onto its stair and leaves each stair by its entrance (each = entrance_doors); other
-    hero rows of its maps leave onto the leave cell."""
+    ({FC field entrance: FC stair}, see stair) enters each entrance onto its stair and leaves each stair by its entrance
+    (each = entrance_doors); its other entrances enter onto the arrival, and other hero rows of its maps leave onto the
+    leave cell."""
     arrivals, leaving = [], []
     for group, parts in links.items():
         for part in parts:
             if not part["field"]:
                 continue
             found, (lx, ly) = entrances[part["fc"]]
-            stairs = part.get("stairs", {})
             number = place[part["fc"], part.get("map", 0)][1]
-            for b, stair in stairs.items():
+            for b in part.get("stairs", {}):
                 cells, (sx, sy) = each[(part["fc"], *b)]
-                arrivals += [(group, fx, fy, number, *cell(*stair), LAYER, 0) for fx, fy in cells]
-                row = cell(*stair)[1]
-                leaving.append((group, number, number, sx, sy, row, row))
+                k, x, y = stair(part, b)
+                there = place[part["fc"], k][1]
+                arrivals += [(group, fx, fy, there, *cell(x, y), LAYER, 0) for fx, fy in cells]
+                row = cell(x, y)[1]
+                leaving.append((group, there, there, sx, sy, row, row))
             done = {(r[1], r[2]) for r in arrivals if r[0] == group}
             for fx, fy in found:
                 if (fx, fy) not in done:
@@ -658,7 +675,9 @@ def map_attrs(dq5, link, zone=None, fc_map=None):
 
 def dungeon_zones(prg):
     """{(FC group, FC map): FC zone} of the ported maps of the LINKS "dungeon" parts, from the chapters 1-4 dungeon
-    list (18:$A069, indexed by the FC map number); maps without a zone are left out."""
+    list (18:$A069, indexed by the FC map number); maps without a zone are left out. Ordered by (chapter, FC zone):
+    dq4fieldencounter.dungeon_zones gives DQ5 zones in that order, so a later chapter's caves keep the earlier
+    chapters' zones where they are."""
     import dq4encounter
     _, _, recs = dq4encounter.dungeon_lists(prg)[0]
     lists = dict(recs)
@@ -670,7 +689,7 @@ def dungeon_zones(prg):
                 for k in fc_numbers(prg, part["fc"]):
                     if k < len(zones) and zones[k] != 0xFF:
                         out[part["fc"], k] = zones[k]
-    return out
+    return dict(sorted(out.items(), key=lambda kv: (chapter(kv[0][0]), kv[1], kv[0])))
 
 
 def records_pass(dq5, out, manifests, k, sources):
@@ -866,7 +885,7 @@ def _build(pool, dq5, dq4, out, with_people):
     import dq4wellswitch
     manifests.append(_save(out / "rates.dq5patch.json", {
         "format": "dq5patch/1", "name": "dq4-encounter-rates",
-        "writes": [dq4fieldencounter.terrain_rates(prg, dq5.read_bytes()),
+        "writes": [dq4fieldencounter.terrain_rates(prg, dq5.read_bytes()), *dq4fieldencounter.grid_hook_writes(),
                    *dq4wellswitch.writes(WELL_SWITCH_AT, prg, placement(prg)),
                    *dq4dungeonrate.writes(DUNGEON_RATE_AT, prg, placement(prg), dq5_zone, fc_zones),
                    *dq4balance.writes()]}))

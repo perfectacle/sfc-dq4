@@ -770,6 +770,13 @@ class GroupTests(unittest.TestCase):
             self.assertLessEqual(end, start)
 
 
+class EnvironmentLibraryTests(unittest.TestCase):
+    def test_environment_library_ends_at_the_set_palettes(self):
+        # 환경 패치의 라이브러리(바꾼 맵 표·문 물체 항목)가 이 단계의 세트 팔레트 표 앞에서 끝나는지 그 패치가 본다
+        import dq4environmentrom as env
+        self.assertEqual(f"{env.LIB_AT >> 16:02X}:{env.LIB_END:04X}", P.PALETTES_AT)
+
+
 class TileAreaTests(unittest.TestCase):
     def test_empty_areas_keep_their_start(self):
         areas = P.tile_areas(bytes(0x400000))

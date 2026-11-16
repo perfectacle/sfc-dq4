@@ -53,6 +53,7 @@ MONSTERS = {
     0x13: 0x12,  # ~ キラースコップ -> まほうつかい
     0x14: 0x1E,  # ホイミスライム
     0x16: 0x1B,  # ~ いしにんぎょう -> がいこつへい
+    0x17: 0x12,  # ~ エレフローパー -> まほうつかい
     0x18: 0x0B,  # ~ あばれこまいぬ -> スカルサーペント
     0x19: 0x12,  # ~ ダックスビル -> まほうつかい
     0x1A: 0x12,  # ~ ひとくいそう -> まほうつかい
@@ -127,16 +128,34 @@ FORMATION_SLOT = 12
 # reachable, so the DQ5 groups are taken from 0.
 FIXED_GROUPS, FIXED_MEMBERS = 9, 3
 COUNT_BASE, COUNT_WIDTH, COUNT_CODES = 0x23EA63, 0x23EA73, 15
-# DQ5 field grids (dq5encounterwrite field_grids, 01:A6D9): index -> ($1949 world, rows, the FC zone-map rows read
+# FC field-0 zone maps by $615A (fc/dq4/tools/dq4encounter.zone_map): chapters 1, 2 and 4 share one, chapter 3 has
+# its own of 8 rows (the dungeon list follows it).
+FC_MAP, FC_MAP3 = 0, 2
+CH3_ROWS = 8
+# DQ5 field grids (dq5encounterwrite field_grids, 01:A6D9): index -> ($1949 world, rows, the (FC zone map, row) read
 # there). World 0 picks its grid by $1948 and 01:854F does not clamp the row, so with $1948 = 0 rows 7-15 of
-# grid 0 read rows 0-8 of grid 1: grid 1 holds FC rows 7-15 there and serves $1948 = 1 only from its row 9.
-GRIDS = {0: (0, 7, list(range(0, 7))),
-         1: (0, 17, list(range(7, 16)) + list(range(9, 16)) + [None]),
-         2: (0, 17, list(range(0, 16)) + [None]),
+# grid 0 read rows 0-8 of grid 1: grid 1 holds FC rows 7-15 there and serves $1948 = 1 only from its row 9. This port
+# never sets $1948 to 2, so grid 2 is chapter 3's: the grid hook (grid_hook_writes) picks it while the chapter-3 flag
+# is on. Its rows past the chapter-3 map take the shared map's rows.
+GRIDS = {0: (0, 7, [(FC_MAP, r) for r in range(0, 7)]),
+         1: (0, 17, [(FC_MAP, r) for r in [*range(7, 16), *range(9, 16)]] + [None]),
+         2: (0, 17, [(FC_MAP3 if r < CH3_ROWS else FC_MAP, r) for r in range(16)] + [None]),
          3: (1, 5, None), 4: (2, 4, None)}
+CH3_GRID = 2
+WORLD0_GRIDS = (0x23F1FC, 0x23F273, 0x23F394)
+# 01:A6E3 (LDA $1948 / BNE) -> JSL to the hook, then BRA to 01:A711, where the grid's X (address) and A (bank) are
+# taken. The hook runs with 8-bit A and 16-bit X (01:A6DA).
+GRID_SITE, GRID_ORIG, GRID_BACK = 0x01A6E3, bytes((0xAD, 0x48, 0x19, 0xD0, 0x07, 0xA2)), 0x01A711
+GRID_HOOK_AT = 0x57C000
+# 7E:2208 bit3: chapter 3 is being played (dq4ch3event.CHAPTER3, set at the end of chapter 2).
+CHAPTER3_FLAG = (0x7E2208, 0x08)
 GRID_WIDTH = 17
 SEA_ZONE = 0x00
-SEA_AREAS = (81, 82, 83, 84)   # 01:85D8: the ship's two rectangles take these four
+# 01:85D8: the ship's two rectangles take these four, the second pair only while $1948 = 2 (never in this port).
+SEA_AREAS = (81, 82, 83, 84)
+# The 32 DQ5 zones only the field grids use ran out with chapter 3, so later zones take these: the unused sea pair
+# and 78, which only DQ5 54/52 uses (group 54 is reached by DQ5 15/0A only, and every DQ5 entrance is parked).
+SPARE_AREAS = (83, 84, 78)
 # FC fields 1 and 3 have no zone map (18:$9C3F): field 1 is zone 35 above Y = 0C and 34 below, field 3 zone 36.
 # A DQ5 grid row is 16 blocks, so field 1's first row takes 35.
 FIELD1_TOP, FIELD1, FIELD3 = 0x35, 0x34, 0x36
@@ -163,38 +182,62 @@ def _fc(prg):
     return dq4encounter
 
 
+def _rows(prg, key):
+    return _fc(prg).zone_map(prg, key)[1]
+
+
 def fc_zones(prg):
     """FC zones of the zone map chapters 1, 2 and 4 use on field 0, and of fields 1 and 3."""
-    _, rows = _fc(prg).zone_map(prg, 0)
-    return sorted({v & 0x3F for row in rows for v in row} | {FIELD1_TOP, FIELD1, FIELD3})
+    return sorted({v & 0x3F for row in _rows(prg, FC_MAP) for v in row} | {FIELD1_TOP, FIELD1, FIELD3})
+
+
+def chapter3_zones(prg):
+    """FC zones of chapter 3's field-0 grid rows that fc_zones lacks."""
+    rows = _rows(prg, FC_MAP3)[:CH3_ROWS]
+    return sorted({v & 0x3F for row in rows for v in row} - set(fc_zones(prg)))
+
+
+def _pool(enc):
+    """DQ5 zones the FC zones take, in order: those only the field grids use (enc is the dq5encounterwrite dump of
+    the original ROM), then SPARE_AREAS."""
+    used = {a for m in enc["maps"] for a in m["areas"]}
+    field = sorted({a for g in enc["field_grids"] for row in g["rows"] for a in row} - used - set(SEA_AREAS))
+    return field + [a for a in SPARE_AREAS if a not in field]
 
 
 def zones(prg, enc):
-    """{FC zone: DQ5 zone}: the FC zones in order on the DQ5 zones only the field grids use (enc is the
-    dq5encounterwrite dump of the original ROM), in order."""
-    used = {a for m in enc["maps"] for a in m["areas"]}
-    field = sorted({a for g in enc["field_grids"] for row in g["rows"] for a in row} - used - set(SEA_AREAS))
-    fc = fc_zones(prg)
+    """{FC zone: DQ5 zone}: the FC zones in order on the DQ5 zones of _pool, in order."""
+    field, fc = _pool(enc), fc_zones(prg)
     if len(fc) > len(field):
-        raise ValueError(f"{len(fc)} FC zones, {len(field)} field-only DQ5 zones")
+        raise ValueError(f"{len(fc)} FC zones, {len(field)} DQ5 zones")
     return dict(zip(fc, field))
 
 
 def dungeon_zones(prg, enc, fc):
-    """{FC dungeon zone: DQ5 zone}: the FC zones `fc` on the field-only DQ5 zones that zones() leaves, in order.
-    The field grids written by grids() hold only zones()'s zones and the sea, so these are no longer read there."""
-    used = {a for m in enc["maps"] for a in m["areas"]}
-    field = sorted({a for g in enc["field_grids"] for row in g["rows"] for a in row} - used - set(SEA_AREAS))
-    left = [a for a in field if a not in zones(prg, enc).values()]
-    fc = sorted(set(fc))
+    """{FC dungeon zone: DQ5 zone}: the FC zones `fc`, in the order they first come, on the _pool zones that zones()
+    leaves, in order. The caller orders `fc` so that zones added later come last and the earlier ones keep their DQ5
+    zones. The field grids written by grids() hold only field zones and the sea, so these are not read there."""
+    taken = zones(prg, enc).values()
+    left = [a for a in _pool(enc) if a not in taken]
+    fc = list(dict.fromkeys(fc))
     if len(fc) > len(left):
         raise ValueError(f"{len(fc)} FC dungeon zones, {len(left)} DQ5 zones left")
     return dict(zip(fc, left))
 
 
+def chapter3_assign(prg, enc, dungeon):
+    """{FC zone: DQ5 zone} of chapter3_zones on the _pool zones left after zones() and dungeon_zones(dungeon)."""
+    taken = {*zones(prg, enc).values(), *dungeon_zones(prg, enc, dungeon).values()}
+    left = [a for a in _pool(enc) if a not in taken]
+    fc = chapter3_zones(prg)
+    if len(fc) > len(left):
+        raise ValueError(f"{len(fc)} chapter-3 FC zones, {len(left)} DQ5 zones left")
+    return dict(zip(fc, left))
+
+
 def grids(prg, assign):
     """dq5encounter/1 field_grids: every cell of the five grids from the FC zone maps."""
-    _, fc_rows = _fc(prg).zone_map(prg, 0)
+    maps = {key: _rows(prg, key) for key in (FC_MAP, FC_MAP3)}
     sea = assign[SEA_ZONE]
     out = []
     for index, (world, count, source) in GRIDS.items():
@@ -207,10 +250,32 @@ def grids(prg, assign):
             elif source[r] is None:
                 row = [sea] * GRID_WIDTH
             else:
-                row = [assign[v & 0x3F] for v in fc_rows[source[r]]] + [sea] * (GRID_WIDTH - 16)
+                key, k = source[r]
+                row = [assign[v & 0x3F] for v in maps[key][k]] + [sea] * (GRID_WIDTH - 16)
             rows.append(row)
         out.append({"index": index, "rows": rows})
     return out
+
+
+def grid_hook_writes(at=GRID_HOOK_AT):
+    """dq5patch/1 writes: 01:A6E3 jumps to a hook that picks grid CH3_GRID while CHAPTER3_FLAG is on and else the
+    grid of $1948 as the original (0, 1, or 2 and up), then goes on at GRID_BACK with X = the grid and A = its bank."""
+    from dq4environmentrom import _Asm
+    flag, bit = CHAPTER3_FLAG
+    grid = {k: (addr >> 16, addr & 0xFFFF) for k, addr in enumerate(WORLD0_GRIDS)}
+    asm = _Asm(at)
+    asm.label("hook").b(0xAF, *flag.to_bytes(3, "little"), 0x29, bit).rel(0xD0, "ch3")
+    asm.b(0xAF, 0x48, 0x19, 0x7E).rel(0xD0, "stage")
+    asm.b(0xA2, *grid[0][1].to_bytes(2, "little"), 0xA9, grid[0][0], 0x6B)
+    asm.label("stage").b(0xC9, 0x01).rel(0xD0, "ch3")
+    asm.b(0xA2, *grid[1][1].to_bytes(2, "little"), 0xA9, grid[1][0], 0x6B)
+    asm.label("ch3").b(0xA2, *grid[CH3_GRID][1].to_bytes(2, "little"), 0xA9, grid[CH3_GRID][0], 0x6B)
+    code, _ = asm.assemble()
+    site = bytes((0x22, *at.to_bytes(3, "little"), 0x80, GRID_BACK - (GRID_SITE + 6)))
+    return [{"at": f"{at >> 16:02X}:{at & 0xFFFF:04X}", "hex": code.hex(" ").upper(),
+             "note": "3장 flag 면 필드 조우 격자 2(3장 지도)를 고름"},
+            {"at": f"{GRID_SITE >> 16:02X}:{GRID_SITE & 0xFFFF:04X}", "hex": site.hex(" ").upper(),
+             "orig": GRID_ORIG.hex(" ").upper(), "note": "필드 조우 격자 고르기를 훅으로"}]
 
 
 def _coefs(dq5):
@@ -379,13 +444,15 @@ def record(prg, dq5, z, dungeon=None, kinds=LAND_KINDS):
 
 
 def docs(prg, dq5, enc, dungeon=()):
-    """(dq5progress/1, dq5encounter/1, report) for the FC field zones and the FC dungeon zones `dungeon`
-    (dungeon_zones). The terrain rates are terrain_rates."""
+    """(dq5progress/1, dq5encounter/1, report) for the FC field zones (with chapter 3's, chapter3_assign) and the FC
+    dungeon zones `dungeon` (dungeon_zones). The terrain rates are terrain_rates; the grid hook is grid_hook_writes."""
     assign = zones(prg, enc)
+    late = chapter3_assign(prg, enc, dungeon)
     fixed = dungeon_fixed(prg, dungeon)
     groups = fixed_groups(prg, dq5, fixed)
     records, report = [], {}
-    for kind, found in (("field", assign), ("dungeon", dungeon_zones(prg, enc, dungeon))):
+    found_dungeon = dungeon_zones(prg, enc, dungeon)
+    for kind, found in (("field", {**assign, **late}), ("dungeon", found_dungeon)):
         for fc, area in found.items():
             fields, dropped = record(prg, dq5, fc, fixed if kind == "dungeon" else None)
             records.append({"index": area, **fields})
@@ -396,9 +463,10 @@ def docs(prg, dq5, enc, dungeon=()):
                                    "rate_index": fields["rate_index"], "fixed": fields["fixed"],
                                    "monsters": sorted(monsters)}
     sea, _ = record(prg, dq5, SEA_ZONE, kinds=SEA_KINDS)
-    records += [{"index": area, **sea} for area in SEA_AREAS]
+    taken = {*assign.values(), *late.values(), *found_dungeon.values()}
+    records += [{"index": area, **sea} for area in SEA_AREAS if area not in taken]
     return ({"format": "dq5progress/1", "encounters": records},
-            {"format": "dq5encounter/1", "field_grids": grids(prg, assign), "fixed_groups": groups}, report)
+            {"format": "dq5encounter/1", "field_grids": grids(prg, {**assign, **late}), "fixed_groups": groups}, report)
 
 
 # DQ5 몬스터 표(23:8000, dq5tables MONSTER_FIELDS)의 비트 수. FC 레코드(18:$8046)는 HP·공격·수비·금화가 10비트다.
