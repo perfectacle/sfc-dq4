@@ -946,6 +946,11 @@ def unit_weight(check, weights):
     return weights.get(check['name'], 1.0) / of
 
 
+def held_weight(check, weights):
+    """group_parts 로 묶은 단위의 무게: 든 하위 조각마다 unit_weight."""
+    return unit_weight(check, weights) * len(part_ks(check) or (1,))
+
+
 def shard_part(checks, k, n, weights):
     """checks(expand_parts 로 펼친 것)를 무게가 고르게 n 조각으로 나눠 k 번째(1부터) 조각을 원래 차례대로. 긴 것부터
     가장 가벼운 조각에 넣고 같은 무게는 이름 차례라, 같은 입력이면 같은 결과다. 같은 검사의 하위 조각은 그 검사가 아직
@@ -1292,8 +1297,13 @@ def run_many(hit, parallel, timeout, no_cache=False, logs=None, env=None):
             done += [f.result() for f in [pool.submit(one, c) for c in batch]]
         if builders:
             place_prebuilt(places)
-        futures = [pool.submit(one, c) for c in hit if c not in builders]
-        done += [f.result() for f in futures]
+        # 긴 것부터 띄워 마지막에 긴 검사 하나만 혼자 도는 꼬리를 줄인다. 결과는 명단 차례로
+        rest = [c for c in hit if c not in builders]
+        weights = shard_weights(rest)
+        futures = {}
+        for i in sorted(range(len(rest)), key=lambda i: (-held_weight(rest[i], weights), i)):
+            futures[i] = pool.submit(one, rest[i])
+        done += [futures[i].result() for i in range(len(rest))]
     except BaseException:
         # Ctrl-C 등: 도는 검사 그룹을 모두 끄고 남은 일을 버린다
         for proc in list(RUNNING):
@@ -1490,8 +1500,7 @@ def main():
             if args.pending_only:
                 units = [c for c in units if not all_passed(c)]
             weights = shard_weights(units)
-            units.sort(key=lambda c: (-weights[c['name']] * len(part_ks(c) or (1,)) / (c['part'][1] if c.get('part')
-                                                                                       else 1), unit_name(c)))
+            units.sort(key=lambda c: (-held_weight(c, weights), unit_name(c)))
             slots = unit_slots(units, root)
             if len(slots) > args.slots:
                 print(f'::warning::단위 캐시 자리 {len(slots)}개 가운데 무거운 {args.slots}개만: '

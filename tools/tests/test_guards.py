@@ -1,4 +1,6 @@
+import io
 import os
+from contextlib import redirect_stdout
 import re
 import sys
 import unittest
@@ -927,6 +929,23 @@ class ShardTest(unittest.TestCase):
             {'prefix': 'guard-unit-a~1of4', 'dir': '/u/a~1,3of4'}, {'prefix': 'guard-unit-a~3of4', 'dir': '/u/a~1,3of4'},
             {'prefix': 'guard-unit-c', 'dir': '/u/c'}])
         self.assertTrue(all(',' not in s['prefix'] for s in guards.unit_slots(units, '/u')))
+
+    def test_run_many_starts_the_heaviest_checks_first_and_keeps_list_order(self):
+        """조각 안에서 긴 검사가 마지막에 혼자 도는 꼬리를 막으려 무거운 단위부터 띄우되, 결과 행은 명단 차례."""
+        import tempfile
+        started = []
+
+        def fake(c, *a, **k):
+            started.append(guards.unit_name(c))
+            return 'passed', '1초'
+        units = guards.group_parts(guards.expand_parts([{'name': 'a', 'run': 'a.py', 'parts': 4},
+                                                        {'name': 'b', 'run': 'b.py'}, {'name': 'c', 'run': 'c.py'}]))
+        with tempfile.TemporaryDirectory() as d, redirect_stdout(io.StringIO()), \
+                mock.patch.object(guards, 'run_check', side_effect=fake), \
+                mock.patch.object(guards, 'shard_weights', return_value={'a': 400.0, 'b': 50.0, 'c': 300.0}):
+            rows = guards.run_many(units, 1, 30, logs=Path(d))
+        self.assertEqual(started, ['a 1,2,3,4/4', 'c', 'b'])
+        self.assertEqual([guards.unit_name(c) for c, _, _ in rows], ['a 1/4', 'a 2/4', 'a 3/4', 'a 4/4', 'b', 'c'])
 
     def test_part_set_runs_only_parts_without_a_pass_record(self):
         import tempfile
