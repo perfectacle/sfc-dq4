@@ -47,7 +47,7 @@ ZONES = {"castle-04": (0, (0x0A, 0x02)), "imuru-05": (0, (0x09, 0x01)), "south-0
          # 2장 무대: サントハイム·サラン 07, 사막의 바자·탑 0B, 사막 0A, エンドール 0C(기본 24)
          "santeem-07": (0, (0x02, 0x04)), "bazaar-0B": (0, (0x03, 0x04)), "desert-0A": (0, (0x04, 0x04)),
          "endor-0C": (0, (0x06, 0x05))}
-# 3장 flag(dq4fieldencounter.CHAPTER3_FLAG)를 켜고 서는 칸: 격자 훅이 고른 3장 지도의 구역 14~17. 모두 3장 일행이 걷는
+# 3장 flag(dq4fieldencounter.chapter3_flag())를 켜고 서는 칸: 격자 훅이 고른 3장 지도의 구역 14~17. 모두 3장 일행이 걷는
 # 범위 안이고 1·2·4장 지도에서는 다른 구역인 칸이다(14 ← 09, 15 ← 0A, 16 ← 0C, 17 ← 0C).
 CH3_ZONES = {"ch3-14": (0, (0x06, 0x02)), "ch3-15": (0, (0x06, 0x04)), "ch3-16": (0, (0x05, 0x05)),
              "ch3-17": (0, (0x07, 0x05))}
@@ -143,7 +143,7 @@ def main():
         world = dq4fieldport.WORLDS[field]
         extra = {"POKE": f"7E1949={world:02X}"} if world else {}
         if ch3:
-            flag, bit = dq4fieldencounter.CHAPTER3_FLAG
+            flag, bit = dq4fieldencounter.chapter3_flag()
             extra["SET"] = f"{flag & 0xFFFF:04X}|{bit:02X}"
         patch = dq4fieldport.warp_patch(data, *dq4fieldport.stand(x, y))
         scene = f"{name}-rate" if rates else f"{name}-zone{delay}"

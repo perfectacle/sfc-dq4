@@ -147,8 +147,15 @@ WORLD0_GRIDS = (0x23F1FC, 0x23F273, 0x23F394)
 # taken. The hook runs with 8-bit A and 16-bit X (01:A6DA).
 GRID_SITE, GRID_ORIG, GRID_BACK = 0x01A6E3, bytes((0xAD, 0x48, 0x19, 0xD0, 0x07, 0xA2)), 0x01A711
 GRID_HOOK_AT = 0x57C000
-# 7E:2208 bit3: chapter 3 is being played (dq4ch3event.CHAPTER3, set at the end of chapter 2).
-CHAPTER3_FLAG = (0x7E2208, 0x08)
+# Event flags are bytes from 7E:2190 (dq4ch2slots 「flag 자리」).
+FLAG_BASE = 0x7E2190
+
+
+def chapter3_flag():
+    """(address, bit) of the chapter-3 flag (dq4ch3event.CHAPTER3, set at the end of chapter 2)."""
+    import dq4ch3event
+    index, bit = dq4ch3event.CHAPTER3
+    return FLAG_BASE + index, bit
 GRID_WIDTH = 17
 SEA_ZONE = 0x00
 # 01:85D8: the ship's two rectangles take these four, the second pair only while $1948 = 2 (never in this port).
@@ -258,10 +265,10 @@ def grids(prg, assign):
 
 
 def grid_hook_writes(at=GRID_HOOK_AT):
-    """dq5patch/1 writes: 01:A6E3 jumps to a hook that picks grid CH3_GRID while CHAPTER3_FLAG is on and else the
+    """dq5patch/1 writes: 01:A6E3 jumps to a hook that picks grid CH3_GRID while chapter3_flag() is on and else the
     grid of $1948 as the original (0, 1, or 2 and up), then goes on at GRID_BACK with X = the grid and A = its bank."""
     from dq4environmentrom import _Asm
-    flag, bit = CHAPTER3_FLAG
+    flag, bit = chapter3_flag()
     grid = {k: (addr >> 16, addr & 0xFFFF) for k, addr in enumerate(WORLD0_GRIDS)}
     asm = _Asm(at)
     asm.label("hook").b(0xAF, *flag.to_bytes(3, "little"), 0x29, bit).rel(0xD0, "ch3")

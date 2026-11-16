@@ -205,9 +205,12 @@ class GridHookTests(unittest.TestCase):
         self.assertEqual(site[4], 0x80)
         self.assertEqual((enc.GRID_SITE & 0xFFFF) + 6 + site[5], enc.GRID_BACK & 0xFFFF)
 
+    def test_chapter3_flag_is_7e2208_bit3(self):
+        self.assertEqual(enc.chapter3_flag(), (0x7E2208, 0x08))
+
     def test_hook_reads_the_chapter3_flag_and_returns_every_grid(self):
         code = bytes.fromhex(self.hook["hex"])
-        flag, bit = enc.CHAPTER3_FLAG
+        flag, bit = enc.chapter3_flag()
         self.assertEqual(code[:6], bytes((0xAF, *flag.to_bytes(3, "little"), 0x29, bit)))
         for addr in enc.WORLD0_GRIDS:
             self.assertIn(bytes((0xA2, *(addr & 0xFFFF).to_bytes(2, "little"), 0xA9, addr >> 16, 0x6B)), code)
