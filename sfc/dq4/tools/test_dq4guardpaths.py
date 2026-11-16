@@ -15,6 +15,19 @@ class GuardPathsTest(unittest.TestCase):
         self.assertEqual(by_group, {})
         self.assertEqual(by_check, {})
 
+    def test_ch3_content_checks_list_module_files(self):
+        """3장 사건 모듈은 빌드가 importlib 로 들여 묶음(ch1-build)으로만 덮이고, 묶음은 PR 에서 검사를 걸지 않는다. 그래서
+        dq4-ch3-* 와 CH3_CONTENT_CHECKS 는 모듈 파일(모듈만 닿는 dq4boulder 등 포함)을, dq4-ch3-* 는 3장 맵·인물 목록
+        파일도 paths 에 직접 적는다. 빠진 것은 `dq4guardpaths.py` 가 찍는다."""
+        mods = gp.ch3_module_files()
+        self.assertIn('sfc/dq4/tools/dq4ch3safe.py', mods)
+        self.assertIn('sfc/dq4/tools/dq4boulder.py', mods)
+        self.assertNotIn('sfc/dq4/tools/dq4chapter1.py', mods)
+        checks, _ = gp.load()
+        names = {c['name'] for c in checks}
+        self.assertLessEqual(set(gp.CH3_CONTENT_CHECKS), names)
+        self.assertEqual(gp.ch3_missing(checks), {})
+
     def test_closure_follows_every_kind_of_reach(self):
         """뿌리에서 닿는 길: 함수 안 import(dq4ch1walkcheck → dq4readset), 저장소 tools/ 모듈(headless_slots),
         띄우는 Lua(dq4walkstate.lua, 머리말 dq4readset.lua), asar 에 넣는 asm(dq4titlelayers.asm·dq4windowname.asm),

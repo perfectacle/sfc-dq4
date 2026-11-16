@@ -399,6 +399,8 @@ paths = [
   "sfc/dq4/tools/lua/dq4walkstate.lua",
   "sfc/dq4/tools/lua/dq4warpmsg.lua",
   "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3open && uv run --locked python sfc/dq4/tools/dq4ch3opencheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3open --repeat 2"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -419,6 +421,8 @@ paths = [
   "sfc/dq4/tools/lua/dq4walkstate.lua",
   "sfc/dq4/tools/lua/dq4warpmsg.lua",
   "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3walk && uv run --locked python sfc/dq4/tools/dq4ch3walkcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3walk --repeat 2"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태·3장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -444,6 +448,7 @@ paths = [
   "sfc/dq4/tools/lua/dq4shipstate.lua",
   "sfc/dq5/tools/dq5npcrecordcheck.py",
   "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4boulder.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4chapter1.py build --rom work/ch3/menu.sfc --keep work/ch3/keep --chapter3 --out work/ch3/npc.sfc && rm -rf work/ch3npc && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter3 --rom work/ch3/npc.sfc --build work/ch3/keep/groups --layout work/ch3/keep/npc-layout.json --texts work/ch3/messages.json --out work/ch3npc --jobs 4"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태·3장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -462,6 +467,8 @@ paths = [
   "sfc/dq4/tools/lua/dq4heroblock.lua",
   "sfc/dq4/tools/lua/dq4walkstate.lua",
   "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3heroblock && uv run --locked python sfc/dq4/tools/dq4heroblockcheck.py --chapter3 --rom work/ch3/dq4-ch1-full.sfc --out work/ch3heroblock --jobs 6"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태·3장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -493,6 +500,7 @@ paths = [
   "sfc/dq4/tools/lua/dq4shipstate.lua",
   "sfc/dq5/tools/dq5npcrecordcheck.py",
   "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4boulder.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4chapter1.py build --rom work/ch3/menu.sfc --keep work/ch3/keep --chapter3 --out work/ch3/npc.sfc && uv run --locked python sfc/dq4/tools/dq4ch3townscheck.py --keep work/ch3/keep --texts work/ch3/messages.json && rm -rf work/ch3towns && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter3 --rom work/ch3/npc.sfc --build work/ch3/keep/groups --layout work/ch3/keep/npc-layout.json --texts work/ch3/messages.json --out work/ch3towns --states towns_son_freed,towns_foxed,towns_letter,towns_prince,towns_shop --jobs 4"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태·3장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -516,6 +524,8 @@ paths = [
   "sfc/dq4/tools/lua/dq4walkstate.lua",
   "sfc/dq4/tools/lua/dq4warpmsg.lua",
   "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3lakanaba && uv run --locked python sfc/dq4/tools/dq4ch3lakanabacheck.py --rom work/ch3/dq4-ch1-full.sfc --messages work/ch3/messages.json --out work/ch3lakanaba --repeat 2 --jobs 6"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태·3장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -541,6 +551,8 @@ paths = [
   "sfc/dq4/tools/dq4pins.py",
   "sfc/dq4/tools/dq4prologuecheck.py",
   "sfc/dq4/tools/dq4brkscan.py",
+  "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3compat && uv run --locked python sfc/dq4/tools/dq4compatcheck.py walk --chapter3 --rom work/ch3/dq4-ch1-full.sfc --out work/ch3compat --jobs 4"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]
@@ -571,6 +583,9 @@ paths = [
   "sfc/dq5/tools/lua/dq5battle.lua",
   "sfc/dq5/tools/lua/dq5cdldump.lua",
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3safe && uv run --locked python sfc/dq4/tools/dq4ch3safecheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3safe"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -592,6 +607,8 @@ paths = [
   "sfc/dq4/tools/lua/dq4walkstate.lua",
   "sfc/dq4/tools/lua/dq4warpmsg.lua",
   "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3endor && uv run --locked python sfc/dq4/tools/dq4ch3endorcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3endor --repeat 2"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태·3장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -807,7 +824,7 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-rom-ledger"
-why = "빌드 단계끼리 앞 단계가 쓴 바이트를 몰래 다시 쓰거나, 원래 DQ5 코드·자료를 허용 목록에 없이 크게 덮거나, 뱅크 경계를 넘는 쓰기·코드, 가게·여관·출구·메시지·인물 표·벡터·체크섬·훅 대상이 깨지는 일, 곡이 끝나기를 기다리는 자리(24:FF0F·25:FD00)에 되풀이하는 곡이 드는 일과 24:FF0F 반복 곡 가드·표가 롬 시퀀스와 어긋나는 일(dq4songwait, 교회 치료 뒤 멈춤, 1장·2장 빌드 둘 다)을 에뮬레이터 없이 롬 바이트로 잡는다. 곡·인물 단계가 빠진 장부(자원 저장소 없는 빌드)는 실패"
+why = "빌드 단계끼리 앞 단계가 쓴 바이트를 몰래 다시 쓰거나, 원래 DQ5 코드·자료를 허용 목록에 없이 크게 덮거나, 뱅크 경계를 넘는 쓰기·코드, 가게·여관·출구·메시지·인물 표·벡터·체크섬·훅 대상이 깨지는 일, 곡이 끝나기를 기다리는 자리(24:FF0F·25:FD00)에 되풀이하는 곡이 드는 일과 24:FF0F 반복 곡 가드·표가 롬 시퀀스와 어긋나는 일(dq4songwait, 교회 치료 뒤 멈춤, 1장·2장·3장 빌드 모두. 3장 사건 모듈의 코드 자리·훅도 3장 장부로 봄)을 에뮬레이터 없이 롬 바이트로 잡는다. 곡·인물 단계가 빠진 장부(자원 저장소 없는 빌드)는 실패"
 paths = [
   "sfc/dq4/tools/**",
   "sfc/dq4/ledger-allow.toml",
@@ -815,7 +832,7 @@ paths = [
   "fc/dq4/tools/*.py",
   "uv.lock",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4romledgercheck.py --ledger work/ch1/ledger.json --report work/ledgercheck/report.json && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4romledgercheck.py --ledger work/ch2/ledger.json --report work/ledgercheck/report-ch2.json"
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4romledgercheck.py --ledger work/ch1/ledger.json --report work/ledgercheck/report.json && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4romledgercheck.py --ledger work/ch2/ledger.json --report work/ledgercheck/report-ch2.json && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4romledgercheck.py --ledger work/ch3/ledger.json --report work/ledgercheck/report-ch3.json"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 groups = ["ch1-build"]
 
@@ -1584,6 +1601,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
   "sfc/dq4/tools/dq4ch3endor.py",
+  "sfc/dq4/tools/dq4ch3*.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/wrapcheck && uv run --locked python sfc/dq4/tools/dq4wrapcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/wrapcheck --jobs 4"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI"]
@@ -1750,6 +1768,8 @@ paths = [
   "sfc/dq5/tools/dq5npc.py",
   "sfc/dq5/tools/dq5npcrelocate.py",
   "fc/dq4/tools/dq4talk.py",
+  "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4ch3*.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4peoplematchcheck.py --rom work/ch1/dq4-ch1-full.sfc --json work/peoplematch/match.json"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
@@ -1874,6 +1894,8 @@ paths = [
   "sfc/dq5/tools/lua/dq5npcrecordcheck.lua",
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
+  "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4ch3*.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4msgbankcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-msgbank"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -3341,6 +3363,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
   "sfc/dq4/tools/dq4ch3endor.py",
+  "sfc/dq4/tools/dq4ch3*.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/peopleevent1 work/peopleevent2 work/peopleevent3 && uv run --locked python sfc/dq4/tools/dq4peopleeventcheck.py --chapter 1 --rom work/ch1/dq4-ch1-full.sfc --out work/peopleevent1 --json work/peopleevent/ch1.json && uv run --locked python sfc/dq4/tools/dq4peopleeventcheck.py --chapter 2 --rom work/ch2/dq4-ch1-full.sfc --out work/peopleevent2 --json work/peopleevent/ch2.json && uv run --locked python sfc/dq4/tools/dq4peopleeventcheck.py --chapter 3 --rom work/ch3/dq4-ch1-full.sfc --out work/peopleevent3 --json work/peopleevent/ch3.json"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
