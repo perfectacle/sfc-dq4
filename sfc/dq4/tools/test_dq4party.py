@@ -12,7 +12,9 @@ HAVE_ROMS = party.DQ4.exists() and party.DQ5.exists()
 
 def run_equip(data, labels, person, item, flag_on, table, dq5_bits=0x5A):
     """장비 훅을 명령 하나씩 따라 돈다(M·X 8, 이 훅이 쓰는 명령만). (RTL 때 Z 가 꺼져 있는지 = 장비 가능, 지난 길
-    'fc'·'dq5'). DQ5 길의 23:B591 값은 dq5_bits, 21:A632 는 모든 비트가 켜진 것으로 본다."""
+    'fc'·'dq5'). DQ5 길의 23:B591 값은 dq5_bits, 21:A632 는 모든 비트가 켜진 것으로 본다. flag_on 은 7E:2208 의 값이고,
+    True 는 2장 flag 만 켜진 것이다."""
+    flags = (dq4growth.CHAPTER2[1] if flag_on is True else 0) if isinstance(flag_on, bool) else flag_on
     pc = labels['equip'] - party.EQUIP_AT
     a, x, z, stack, path = 0, item, False, [], None
     signed = lambda b: b - 0x100 if b & 0x80 else b  # noqa: E731
@@ -25,7 +27,7 @@ def run_equip(data, labels, person, item, flag_on, table, dq5_bits=0x5A):
             z = a == 0
         elif op == 0xAF:
             addr = int.from_bytes(data[pc + 1:pc + 4], 'little')
-            a, pc = (dq4growth.CHAPTER2[1] if flag_on else 0) if addr == dq4growth.CHAPTER2[0] else 0, pc + 4
+            a, pc = flags if addr == dq4growth.CHAPTER2[0] else 0, pc + 4
         elif op == 0x29:
             a, pc = a & data[pc + 1], pc + 2
             z = a == 0
@@ -79,6 +81,14 @@ class EquipCodeTest(unittest.TestCase):
                     ok, path = run_equip(self.data, self.labels, person, item, on, self.table)
                     self.assertEqual((ok, path), (bool(item & bit), 'fc'))
 
+    def test_chapter_three_hero_uses_torneko_bits(self):
+        torneko, alena = 1 << dq4growth.FC_TORNEKO, 1 << dq4growth.FC_ALENA
+        ch3 = dq4growth.CHAPTER3[1]
+        for item in (torneko, torneko | alena, alena, 0):
+            with self.subTest(item=item):
+                self.assertEqual(run_equip(self.data, self.labels, 0, item, ch3, self.table),
+                                 (bool(item & torneko), 'fc'))
+
     def test_chapter_one_hero_and_others_use_dq5_bits(self):
         for person, on in ((0, False), (3, True), (0x0B, True)):
             with self.subTest(person=person):
@@ -87,8 +97,9 @@ class EquipCodeTest(unittest.TestCase):
                 ok, _ = run_equip(self.data, self.labels, person, 0x80, on, self.table, dq5_bits=0)
                 self.assertFalse(ok)
 
-    def test_fits_before_growth(self):
-        self.assertLessEqual(party.EQUIP_AT + len(self.data), dq4growth.GROWTH_AT)
+    def test_fits_after_growth(self):
+        self.assertGreaterEqual(party.EQUIP_AT, dq4growth.SPACE_END)
+        self.assertLessEqual(party.EQUIP_AT + len(self.data), party.PARTY_END)
 
 
 class RecruitTest(unittest.TestCase):
@@ -241,7 +252,7 @@ class SpellCodeTest(unittest.TestCase):
         _, labels = party.bank20_code(far)
         data, _ = party.spell_code(bank20=labels)
         self.assertNotIn(bytes.fromhex('00 a4'), data)
-        self.assertLessEqual(party.SPELL_AT + len(data), dq4growth.GROWTH_AT)
+        self.assertLessEqual(party.SPELL_AT + len(data), party.PARTY_END)
 
     def test_field_code_fits(self):
         data, labels = party.field_code(18)

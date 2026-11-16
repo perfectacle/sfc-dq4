@@ -26,7 +26,7 @@ def _flag_constants(mod):
 
 class SlotTest(unittest.TestCase):
     def test_code_areas_are_disjoint_inside_one_bank_and_off_the_base(self):
-        areas = [(k, s.code) for k, s in SLOTS.items()] + [('base', slots.BASE_CODE)] + \
+        areas = [(k, s.code) for k, s in SLOTS.items()] + [('base', slots.BASE_CODE), ('ch3', slots.CHAPTER3_CODE)] + \
             [(f'spare{i}', c) for i, c in enumerate(slots.SPARE['code'])]
         for k, (lo, hi) in areas:
             self.assertLess(lo, hi, k)
@@ -44,6 +44,9 @@ class SlotTest(unittest.TestCase):
             self.assertFalse(lo <= dq4chapterbox.CODE_AT < hi, k)
             self.assertFalse(lo <= ev.CODE_AT < hi, k)
         self.assertEqual(slots.BASE_CODE[0], ev.CODE_AT)
+        import dq4ch3event
+        self.assertEqual(slots.CHAPTER3_CODE, (dq4ch3event.CODE_AT, dq4ch3event.CODE_END))
+        self.assertEqual(slots.CHAPTER3_BITS, (dq4ch3event.CHAPTER3, dq4ch3event.OPENING))
 
     def test_flag_bytes_are_owned_once_and_stay_in_the_free_stretch(self):
         seen = {}
@@ -69,6 +72,10 @@ class SlotTest(unittest.TestCase):
         for bit in slots.SPARE['flag_bits']:
             self.assertNotIn(bit, earlier)
         self.assertNotIn(slots.BATTLE_WON, slots.SPARE['flag_bits'])
+        for bit in slots.CHAPTER3_BITS:
+            self.assertNotIn(bit, earlier)
+            self.assertNotIn(bit, slots.SPARE['flag_bits'])
+            self.assertNotEqual(bit, slots.BATTLE_WON)
 
     def test_no_tool_names_a_reserved_flag_byte(self):
         # 다른 도구가 이 자리를 롱 주소로 직접 읽고 쓰면 예약이 깨진다. 이 표와 사건 모듈만 쓸 수 있다

@@ -6,13 +6,16 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import dq4ch2event  # noqa: E402
+import dq4ch3event  # noqa: E402
 import dq4groupbuild  # noqa: E402
 import dq4soundpatch as patch  # noqa: E402
 from dq5map import lorom  # noqa: E402
 
 ARGS = Path(__file__).resolve().parent / 'dq4sound-game.args'
 CH2_FLAG = 0x7E2190 + dq4ch2event.CHAPTER2[0]
-GAME_PICKS = [(0x01, 0x30, ('night',)), (0x06, 0x31, ('night',)), (0x02, 0x05, ('flag', CH2_FLAG, dq4ch2event.CHAPTER2[1]))]
+CH3_FLAG = 0x7E2190 + dq4ch3event.CHAPTER3[0]
+GAME_PICKS = [(0x01, 0x30, ('night',)), (0x06, 0x31, ('night',)), (0x02, 0x05, ('flag', CH2_FLAG, dq4ch2event.CHAPTER2[1])),
+              (0x02, 0x0E, ('flag', CH3_FLAG, dq4ch3event.CHAPTER3[1]))]
 
 
 def run_pick(code, base, a, *, night=False, wram=None, m16=False, high=0x12):
@@ -84,10 +87,16 @@ class SongPickTests(unittest.TestCase):
 
     def test_field_song_follows_the_chapter_flag(self):
         on = {CH2_FLAG: dq4ch2event.CHAPTER2[1] | 0x40}
-        off = {CH2_FLAG: 0xFF & ~dq4ch2event.CHAPTER2[1]}
+        off = {CH2_FLAG: 0xFF & ~dq4ch2event.CHAPTER2[1] & ~dq4ch3event.CHAPTER3[1]}
         self.assertEqual(self.pick_of(0x02, wram=on), 0x05)
         self.assertEqual(self.pick_of(0x02, wram=on, night=True), 0x05)
         self.assertEqual(self.pick_of(0x02, wram=off), 0x02)
+        # 3장 flag 만 켜져 있으면 3장 필드 곡. 2장 flag 와 같은 바이트라 2장 flag 를 끈 값으로 본다
+        ch3 = {CH3_FLAG: dq4ch3event.CHAPTER3[1] | 0x40}
+        self.assertEqual(self.pick_of(0x02, wram=ch3), 0x0E)
+        self.assertEqual(self.pick_of(0x02, wram=ch3, night=True), 0x0E)
+        self.assertEqual(self.pick_of(0x02, wram={CH3_FLAG: 0xFF & ~dq4ch3event.CHAPTER3[1] & ~dq4ch2event.CHAPTER2[1]}),
+                         0x02)
 
     def test_other_songs_pass(self):
         for song in (0x09, 0x0A, 0x17, 0x1D, 0x30, 0x31, 0x05):
@@ -148,11 +157,11 @@ class InstallSiteTests(unittest.TestCase):
             self.assertEqual(out[lorom(site):lorom(site) + 4], bytes([0x5C]) + stubs[site].to_bytes(3, 'little'))
         vehicle = patch.vehicle_song_code(pick)
         self.assertEqual(out[lorom(patch.VEHICLE_SONG):lorom(patch.VEHICLE_SONG) + len(vehicle)], vehicle)
-        self.assertEqual(report['song_picks'], ['01=30@night', '06=31@night', '02=05@7E2208&10'])
+        self.assertEqual(report['song_picks'], ['01=30@night', '06=31@night', '02=05@7E2208&10', '02=0E@7E2208&08'])
 
 
 class GameArgsTests(unittest.TestCase):
-    def test_game_args_pick_night_and_chapter2_field_songs(self):
+    def test_game_args_pick_night_and_chapter_field_songs(self):
         lines = ARGS.read_text(encoding='utf-8').split()
         picks = [patch.parse_song_pick(lines[i + 1]) for i, v in enumerate(lines) if v == '--song-pick']
         self.assertEqual(picks, GAME_PICKS)

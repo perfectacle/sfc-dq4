@@ -9,7 +9,8 @@ FC 차례(fc/dq4/docs/dq4-save-format.md 「장 끝」, dq4-story-format.md 2장
 
 포팅은 우승 flag(dq4ch2endor.CHAMPION)로 세 맵을 빈 성 목록으로 바꾸고, 두 말은 보이지 않는 인물의 스크립트가 띄운다.
 본 flag 가 켜진 성 앞마당 3D/00 의 목록에는 끝내는 인물이 있어, 1장에서 끝내는 판처럼 화면을 검게 하고 서술 뒤
-dq4chapterbox.ENDING2(「제3장 무기상인 톨네코 / ― 다음에 계속 ―」)를 띄운 뒤 타이틀로 돌아간다. 3장으로 잇지 않는다.
+dq4chapterbox.ENDING2(「제3장 무기상인 톨네코 / ― 다음에 계속 ―」)를 띄운 뒤 타이틀로 돌아간다. --chapter3 빌드면 끝
+상자 대신 dq4ch3event 의 transfer 로 3장에 넘어간다.
 
 마을 사람: 앞 사건 모듈이 다루지 않은, flag 로 말이 바뀌는 FC 인물을 옮긴다. 산트하임 밤의 대신·왕의 방 사람은 대화
 스크립트의 flag 조건으로, 우승 뒤 엔돌은 우승 flag 로 고르는 대체 목록으로 바꾼다. 형식은
@@ -229,6 +230,9 @@ def scripts(ctx):
     lo, hi = (lambda v: v & 0xFF), (lambda v: v >> 8)
     msg = lambda k: _cmd('21', lo(ctx.msg[k]), hi(ctx.msg[k])) if ctx.msg else _cmd('21', 0, 0)  # noqa: E731
     end_box = (ctx.points or {}).get(END_SCENE, 0)
+    if ctx.chapter3:
+        import dq4ch3event
+        end_box = dq4ch3event.native()[1]['transfer']
     darken = ctx.at['darken_song']
 
     def voice(name, flag):
@@ -237,7 +241,8 @@ def scripts(ctx):
     out = {
         'brey': voice('brey', SEEN_BREY),
         'kiryl': voice('kiryl', SEEN_KIRYL),
-        # 1장에서 끝내는 판과 같은 끊기: 검은 화면·엔딩 곡 → 서술 → 「다음에 계속」 상자, 버튼을 누르면 타이틀(돌아오지 않음)
+        # 1장에서 끝내는 판과 같은 끊기: 검은 화면·엔딩 곡 → 서술 → 「다음에 계속」 상자, 버튼을 누르면 타이틀(돌아오지 않음).
+        # 3장으로 넘기는 빌드면 끝 상자 대신 3장 넘김(돌아오지 않음: 이벤트가 맵을 옮긴다)
         'ender': [_cmd('28'), _cmd('52'), _cmd('3F'), _cmd('37', *_al(darken)), msg('end'),
                   _cmd('37', *_al(end_box)), _cmd('16')],
     }

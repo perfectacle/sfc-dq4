@@ -13,9 +13,9 @@
 끝나면 단계마다 바뀐 바이트 범위를 --out 의 ledger.json 에 적는다(dq4romledger.py, 검사는 dq4romledgercheck.py).
 
 1장 끝은 기본으로 끝맺음 서술과 「다음에 계속」 상자 뒤 타이틀로 돌아간다(1장까지의 배포판). --chapter2 를 주면
-2장으로 넘어간다.
+2장으로 넘어가고, --chapter3 을 주면 2장 끝에서도 3장으로 넘어간다(--chapter2 를 함께 켬).
 
-  python sfc/dq4/tools/dq4build.py --out work/ch1 [--no-prologue] [--chapter2] [--assets 폴더 | --no-sound]
+  python sfc/dq4/tools/dq4build.py --out work/ch1 [--no-prologue] [--chapter2 | --chapter3] [--assets 폴더 | --no-sound]
 """
 import argparse
 import hashlib
@@ -49,7 +49,7 @@ def step(tool, *args):
     dq4buildcache.run(script(tool), *args, echo_stderr=True)
 
 
-def build(out, dq5, dq4, prologue=True, assets=None, chapter2=False):
+def build(out, dq5, dq4, prologue=True, assets=None, chapter2=False, chapter3=False):
     out.mkdir(parents=True, exist_ok=True)
     stages = []
 
@@ -75,7 +75,7 @@ def build(out, dq5, dq4, prologue=True, assets=None, chapter2=False):
     stage('menu', out / 'menu.sfc')
     step('dq4chapter1.py', 'build', '--rom', out / 'menu.sfc', '--dq5', dq5, '--dq4', dq4,
          '--out', out / 'dq4-ch1.sfc', *([] if prologue else ['--no-prologue']),
-         *(['--chapter2'] if chapter2 else []))
+         *(['--chapter2'] if chapter2 else []), *(['--chapter3'] if chapter3 else []))
     stage('chapter1', out / 'dq4-ch1.sfc')
     if assets is None:
         return done(out / 'dq4-ch1.sfc')
@@ -110,6 +110,7 @@ def main():
     ap.add_argument('--dq4', default='rom/dq4.nes', type=Path)
     ap.add_argument('--no-prologue', action='store_true', help='NDS 서장 없이 새 게임을 1장으로 시작')
     ap.add_argument('--chapter2', action='store_true', help='1장 끝에서 2장으로 넘어감(기본은 1장에서 끝냄)')
+    ap.add_argument('--chapter3', action='store_true', help='2장 끝에서 3장으로 넘어감(--chapter2 를 함께 켬)')
     ap.add_argument('--assets', type=Path, default=os.environ.get('DQ4_ASSETS'),
                     help='곡 묶음의 NDS 곡을 읽을 자원 저장소(기본 DQ4_ASSETS)')
     ap.add_argument('--no-sound', action='store_true', help='곡 묶음을 얹지 않음')
@@ -117,7 +118,7 @@ def main():
     assets = None if args.no_sound else args.assets
     if assets is None and not args.no_sound:
         print('자원 저장소(--assets, DQ4_ASSETS)가 없어 곡 묶음 없이 만든다', file=sys.stderr)
-    rom = build(args.out, args.dq5, args.dq4, not args.no_prologue, assets, args.chapter2)
+    rom = build(args.out, args.dq5, args.dq4, not args.no_prologue, assets, args.chapter2, args.chapter3)
     print(f'{rom} sha1={hashlib.sha1(rom.read_bytes()).hexdigest()}')
 
 

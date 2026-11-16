@@ -122,7 +122,7 @@ jobs:
           for k in $(seq 1 "$SHARDS"); do cat "$RUNNER_TEMP/shard-list-$k.txt"; done
           exit "$ok"
 
-  # The ship ROMs the guards build (dq4build.py --out work/ch1 and --out work/ch2 --chapter2),
+  # The ship ROMs the guards build (dq4build.py --out work/ch1, --out work/ch2 --chapter2 and --out work/ch3 --chapter3),
   # each built once in parallel; shards copy them in place of every guard's own build.
   rom:
     name: ship ROM ${{ matrix.variant }}
@@ -137,6 +137,8 @@ jobs:
             args: ''
           - variant: ch2
             args: --chapter2
+          - variant: ch3
+            args: --chapter3
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -344,6 +346,20 @@ jobs:
           uv run --frozen python tools/ci_cache.py digest --dir "work/cold/$VARIANT" --variant "$VARIANT" --kind cold \
             --out "work/ci-digest/cold-$VARIANT.json"
 
+      # ch3 goes in the ch1 job after ch1: a job of its own would add a runner beside the shards, and the ch1 job
+      # ends well before the Python-path ch2 job
+      - name: Build the ch3 ship ROM with every cache off and hash it
+        if: matrix.variant == 'ch1'
+        env:
+          DQ4_ASSETS: ${{ github.workspace }}/assets
+          DQ4_READSET: 'off'
+          DQ4_BUILD_CACHE: 'off'
+          DQ4_SOUND_CACHE: 'off'
+        run: |
+          uv run --frozen python sfc/dq4/tools/dq4build.py --out work/cold/ch3 --chapter3
+          uv run --frozen python tools/ci_cache.py digest --dir work/cold/ch3 --variant ch3 --kind cold \
+            --out work/ci-digest/cold-ch3.json
+
       - name: Check the digest upload for ROM data
         id: digestcheck
         run: uv run --frozen python tools/ci_artifact_check.py work/ci-digest --hashes "$RUNNER_TEMP/rom-hashes.txt"
@@ -367,6 +383,7 @@ jobs:
           ok=0
           uv run --frozen python sfc/dq4/tools/dq4buildkeys.py || ok=1
           uv run --frozen python sfc/dq4/tools/dq4buildkeys.py --chapter2 || ok=1
+          uv run --frozen python sfc/dq4/tools/dq4buildkeys.py --chapter3 || ok=1
           exit "$ok"
 
   # Fails the run as soon as both builds are in when the caches gave other bytes than the cold build.
@@ -457,15 +474,24 @@ jobs:
           dir: work/ci-prebuilt/ch2
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
 
-      # Some guards read work/ch1 or work/ch2 without building it (the local checkout keeps them);
+      - name: Restore the ch3 ship ROM built for this run
+        uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+        with:
+          op: restore
+          name: ship-rom-ch3
+          prefix: ship-rom-ch3-${{ github.run_id }}
+          dir: work/ci-prebuilt/ch3
+          age_key: ${{ secrets.CI_ROM_AGE_KEY }}
+
+      # Some guards read work/ch1, work/ch2 or work/ch3 without building it (the local checkout keeps them);
       # the others' dq4build.py calls become copies of these (DQ4_PREBUILT, guards.with_prebuilt).
       - name: Put the ship ROMs in place
         run: |
-          for v in ch1 ch2; do
+          for v in ch1 ch2 ch3; do
             test -s "work/ci-prebuilt/$v/.prebuilt.json" || { echo "::error::rom job's $v build was not restored"; exit 1; }
             rm -rf "work/$v" && cp -R "work/ci-prebuilt/$v" "work/$v"
           done
-          echo "DQ4_PREBUILT=$PWD/work/ci-prebuilt/ch1:$PWD/work/ci-prebuilt/ch2" >> "$GITHUB_ENV"
+          echo "DQ4_PREBUILT=$PWD/work/ci-prebuilt/ch1:$PWD/work/ci-prebuilt/ch2:$PWD/work/ci-prebuilt/ch3" >> "$GITHUB_ENV"
 
       # What this shard's guards really use, for the report job's comparison with the cold build
       - name: Hash the ship ROMs this shard got
@@ -473,7 +499,7 @@ jobs:
           K: ${{ matrix.k }}
         run: |
           mkdir -p work/ci-gate
-          for v in ch1 ch2; do
+          for v in ch1 ch2 ch3; do
             uv run --frozen python tools/ci_cache.py digest --dir "work/ci-prebuilt/$v" --variant "$v" --kind "shard-$K" \
               --out "work/ci-gate/prebuilt-$v.json"
           done

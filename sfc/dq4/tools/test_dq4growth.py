@@ -36,7 +36,9 @@ def run_pick(data, labels, name, y, flag_on, x=0):
             z, pc = y == word(pc + 1), pc + 3
         elif op == 0xAF:
             addr = data[pc + 1] | data[pc + 2] << 8 | data[pc + 3] << 16
-            a = (g.CHAPTER2[1] if flag_on else 0) if addr == g.CHAPTER2[0] else 0
+            # flag_on: 7E:2208 의 값. True 는 2장 flag 만 켜진 것
+            value = (g.CHAPTER2[1] if flag_on else 0) if isinstance(flag_on, bool) else flag_on
+            a = value if addr == g.CHAPTER2[0] else 0
             pc += 4
         elif op == 0x29:
             a, pc = a & word(pc + 1), pc + 3
@@ -127,14 +129,18 @@ class CodeTest(unittest.TestCase):
 
     def test_pick_moves_x_into_the_person_table(self):
         data, labels = g.code(fake_chapters())
-        cases = {(0, False): 0, (0, True): 1, (9, False): 2, (9, True): 2, (5, False): 3, (5, True): 3}
+        ch2, ch3 = g.CHAPTER2[1], g.CHAPTER3[1]
+        # (사람, 7E:2208 값, table_index 의 장): 표 번호
+        cases = {(0, 0, 0): 0, (0, ch2, 2): 1, (9, 0, 0): 2, (9, ch2, 2): 2, (5, 0, 0): 3, (5, ch2, 2): 3,
+                 (0, ch3, 3): 4, (9, ch3, 3): 2, (5, ch3, 3): 3}
         for name in ('stat_pick', 'exp_pick', 'reach_pick'):
             self.assertEqual(data[labels[name] - g.GROWTH_AT] in (0xBF, 0xA0), True, name)
-            for (person, on), k in cases.items():
-                with self.subTest(name=name, person=person, chapter2=on):
-                    got = run_pick(data, labels, name, g.record_of(person), on, x=0x24)
+            for (person, flags, chapter), k in cases.items():
+                with self.subTest(name=name, person=person, flags=flags):
+                    got = run_pick(data, labels, name, g.record_of(person), flags, x=0x24)
                     self.assertEqual(got, 0x24 + k * g.table_size())
-                    self.assertEqual(g.table_index(person, int(on)), k)
+                    self.assertEqual(g.table_index(person, chapter), k)
+        self.assertEqual(g.table_index(0, 1), 1)
         self.assertIsNone(g.table_index(3))
         self.assertIsNone(g.table_index(0x85))
 

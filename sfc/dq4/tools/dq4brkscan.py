@@ -62,10 +62,12 @@ def blobs():
     """[(이름, 시작 주소, 바이트, 진입점 목록)]. 롬 없이 만든다. 진입점을 못 가른 이름이 있으면 ValueError."""
     import dq4ch1event
     import dq4ch2event
+    import dq4ch3event
     import dq4chapterbox as box
     import dq4prologue
     out = []
-    for name, mod in (('prologue', dq4prologue), ('ch1event', dq4ch1event), ('ch2event', dq4ch2event)):
+    for name, mod in (('prologue', dq4prologue), ('ch1event', dq4ch1event), ('ch2event', dq4ch2event),
+                      ('ch3event', dq4ch3event)):
         blob, at = mod.native()
         entries, problems = entries_of(name, mod.CODE_AT, blob, at)
         if problems:

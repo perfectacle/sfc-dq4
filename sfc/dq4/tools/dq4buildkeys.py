@@ -15,7 +15,7 @@
 파이썬이 아닌 프로그램(asar 등)은 훅이 닿지 않으므로 EXTERNAL 에 적은 것만 받고, 그 인자로 넘긴 경로는 호출이 먼저
 쓴 것이거나 키 입력이어야 한다.
 
-  uv run --locked python sfc/dq4/tools/dq4buildkeys.py [--chapter2]   # 롬·ASAR·DQ4_GALMURI 필요, 빠진 입력이 있으면 1
+  uv run --locked python sfc/dq4/tools/dq4buildkeys.py [--chapter2 | --chapter3]   # 롬·ASAR·DQ4_GALMURI 필요, 빠진 입력이 있으면 1
 """
 import argparse
 import json
@@ -309,7 +309,7 @@ def check_calls(log_root, temp_roots=()):
     return names, problems
 
 
-def build_traced(out, dq5, dq4, chapter2, work):
+def build_traced(out, dq5, dq4, chapter2, work, chapter3=False):
     """dq4build.build 를 곡 묶음 앞까지 돌리며 dq4buildcache.run 호출을 추적하고 검사. (호출 이름 목록, 문제 목록)."""
     import dq4build
     site = tracer(work)
@@ -323,7 +323,7 @@ def build_traced(out, dq5, dq4, chapter2, work):
 
     dq4buildcache.run = run
     try:
-        dq4build.build(Path(out), Path(dq5), Path(dq4), assets=None, chapter2=chapter2)
+        dq4build.build(Path(out), Path(dq5), Path(dq4), assets=None, chapter2=chapter2, chapter3=chapter3)
     finally:
         dq4buildcache.run = original
     return check_calls(logs, (work,))
@@ -334,10 +334,11 @@ def main():
     ap.add_argument('--dq5', default=str(ROOT / 'rom' / 'dq5.sfc'))
     ap.add_argument('--dq4', default=str(ROOT / 'rom' / 'dq4.nes'))
     ap.add_argument('--chapter2', action='store_true')
+    ap.add_argument('--chapter3', action='store_true')
     a = ap.parse_args()
     work = Path(tempfile.mkdtemp(prefix='dq4buildkeys-'))
     try:
-        names, problems = build_traced(work / 'out', a.dq5, a.dq4, a.chapter2, work)
+        names, problems = build_traced(work / 'out', a.dq5, a.dq4, a.chapter2, work, a.chapter3)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     print(f'빌드 캐시 호출 {len(names)}개 추적: {", ".join(names)}')

@@ -37,6 +37,10 @@ sys.path[:0] = [str(HERE), str(DQ5_TOOLS)]
 
 import dq4chapterbox  # noqa: E402
 from dq4ch2event import ALENA_PICTURE, BREY_PICTURE, CHAPTER2, KIRYL_PICTURE  # noqa: E402
+from dq4ch3event import CHAPTER3, TORNEKO_PICTURE  # noqa: E402
+
+# 전용 줄 깃발 → 그 줄을 덮는 장(dq4groupbuild.LINKS 의 chapter). 표에 없는 깃발은 2장
+FLAG_CHAPTERS = {CHAPTER2: 2, CHAPTER3: 3}
 from dq4chapter1 import apply_writes, lorom  # noqa: E402
 from dq4romassets import set_checksum  # noqa: E402
 import dq5npcrecord  # noqa: E402
@@ -234,6 +238,8 @@ PEOPLE = (
            touch={'down': [(7, 9, (8, 9)), (7, 10, (8, 10)), (10, 9, 'white'), (10, 10, (8, 10)),
                            (6, 9, 'ink'), (9, 9, 'ink'), (5, 9, 'white')]},
            copy=('left', 'right')),                   # 오른쪽 보기는 흰 눈썹에 눈이 가려 왼쪽을 뒤집어 쓴다
+    # 3장 주인공. 마을 사람 톨네코(그림 36)와 같은 시트를 일행 그림으로 따로 싣는다(팔레트 줄 7 을 3장 flag 로)
+    Person((TORNEKO_PICTURE,), None, 'h118', '톨네코', main=True, palette=7, flag=CHAPTER3, leader=True),
     # 2장 그룹(3D·45)의 인물. 시트는 NDS 스크립트 오브젝트의 모습 번호(= 시트 번호)와 그 대사의 화자 이름으로 골랐다
     Person((0x0E,), None, 'h035', '공주', main=True),
     Person((0x3D,), None, 'h013', '죄수', spare=0x9E),
@@ -1307,11 +1313,12 @@ def assemble(base, dq5, assets, out, work, squeeze):
     map_doc = {'format': 'dq5objpalette/1',
                'new_map_palettes': [{'map': f'{g:02X}/FF', 'line': f'{0x08 + line:02X}', 'flag': 'FF', 'mask': '00',
                                      'colors': bgr(row)} for (g, line), row in sorted(board.items())]}
-    # 깃발이 붙은 전용 줄(2장 일행)은 그 장의 그룹과 필드 세계 셋에서 그 깃발이 켜졌을 때 덮는다
-    every = [f'{g:02X}/FF' for g in chapter_groups(2)] + [f'FE/{w:02X}' for w in range(3)]
+    # 깃발이 붙은 전용 줄(2장 일행·3장 톨네코)은 그 장의 그룹과 필드 세계 셋에서 그 깃발이 켜졌을 때 덮는다
+    def every(flag):
+        return [f'{g:02X}/FF' for g in chapter_groups(FLAG_CHAPTERS.get(flag, 2))] + [f'FE/{w:02X}' for w in range(3)]
     map_doc['new_map_palettes'] += [{'map': m, 'line': f'{0x08 + line:02X}', 'flag': f'{p.flag[0]:02X}',
                                      'mask': f'{p.flag[1]:02X}', 'colors': bgr(pal)}
-                                    for p, _, _, _, _, _, line, pal in rows if p.flag is not None for m in every]
+                                    for p, _, _, _, _, _, line, pal in rows if p.flag is not None for m in every(p.flag)]
     maps = dq5objpalette.patch(Rom(base.read_bytes()), map_doc, MAP_PALETTES_AT)
     (work / 'maps.dq5patch.json').write_text(json.dumps(maps, ensure_ascii=False, indent=1) + '\n')
     palettes = dq5objpalette.patch(Rom((work / 'mid.sfc').read_bytes()), pal_doc, PALETTES_AT)

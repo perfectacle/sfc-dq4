@@ -48,9 +48,11 @@ CHAPTER2 = Scene('box2', (0x3D, 0x01), None, '제2장  말괄량이 공주의 �
 ENDING = Scene('end', None, None, CHAPTER2.title, subtitle='― 다음에 계속 ―')
 # 2장 끝(빈 산트하임 성 앞마당, dq4ch2ending): 3장 제목과 「다음에 계속」. 3장 이름은 nds/dq4/tables/adopt.tsv(사용자 결정)
 ENDING2 = Scene('end2', None, None, '제3장  무기상인 톨네코', subtitle=ENDING.subtitle)
+# 2장 끝에서 레이크나바 톨네코의 집(3E/01)으로 옮긴 뒤 첫머리를 마칠 때까지(첫머리 대기 깃발 7E:2208 bit5, --chapter3)
+CHAPTER3 = Scene('box3', (0x3E, 0x01), None, ENDING2.title, since=(0x7E2208, 0x20))
 # 게임에 넣는 장면 차례. 상자·밝히기 네이티브 주소가 이 목록으로 정해지므로, 주소를 부르는 스크립트(서장·1장)와
-# 빌드가 같은 목록을 써야 한다
-GAME_SCENES = (PROLOGUE, CHAPTER1, CHAPTER2, ENDING, ENDING2)
+# 빌드가 같은 목록을 써야 한다. 새 장면은 끝에 더해 앞 장면의 상자 주소를 지킨다
+GAME_SCENES = (PROLOGUE, CHAPTER1, CHAPTER2, ENDING, ENDING2, CHAPTER3)
 SUB_GAP = 1                                 # 상자와 부제 띠 사이 행
 
 # FC 팔레트(MesenCE 색): 0 검정, 1 금색(테두리)·흰색(글자), 2 파랑, 3 흰색
@@ -387,9 +389,19 @@ class Layout:
 
     def build(self):
         # 코드 길이는 자료 주소에 따라 바뀌지 않으므로(즉값 폭 고정) 두 번 짜서 자리를 맞춘다
-        addr = {'tiles': 0, 'maps': [0] * len(self.maps), 'pal': 0, 'blank': 0}
+        addr = {'tiles': 0, 'maps': [0] * len(self.maps), 'pal': 0, 'blank': 0, 'load': 0}
+        # 한 타일맵이 다른 타일맵의 앞머리면(같은 제목의 장 상자와 부제 달린 끝 상자) 긴 것 한 벌만 두고 함께 쓴다
+        kept, where = [], []
+        for m in self.maps:
+            k = next((k for k, o in enumerate(kept) if o.startswith(m) or m.startswith(o)), None)
+            if k is None:
+                kept.append(m)
+                k = len(kept) - 1
+            elif len(m) > len(kept[k]):
+                kept[k] = m
+            where.append(k)
         for _ in range(2):
-            start, hook, boxes, reveal, boot = self.code(addr)
+            start, hook, boxes, reveal, boot, load = self.code(addr)
             self.start_at = self.base
             self.hook_at = self.start_at + len(start)
             at = self.hook_at + len(hook)
@@ -399,12 +411,14 @@ class Layout:
                 at += len(box)
             self.reveal_at = at
             self.boot_at = self.reveal_at + len(reveal)
-            data_at = self.boot_at + len(boot)
+            self.load_at = self.boot_at + len(boot)
+            self.data_at = data_at = self.load_at + len(load)
             maps_at = data_at + 2 + len(self.pal)
-            addr = {'blank': data_at, 'pal': data_at + 2,
-                    'maps': [maps_at + sum(map(len, self.maps[:k])) for k in range(len(self.maps))],
-                    'tiles': maps_at + sum(map(len, self.maps))}
-        self.blob = (start + hook + b''.join(boxes) + reveal + boot + b'\x00\xff' + self.pal + b''.join(self.maps) +
+            kept_at = [maps_at + sum(map(len, kept[:k])) for k in range(len(kept))]
+            addr = {'blank': data_at, 'pal': data_at + 2, 'load': self.load_at,
+                    'maps': [kept_at[k] for k in where],
+                    'tiles': maps_at + sum(map(len, kept))}
+        self.blob = (start + hook + b''.join(boxes) + reveal + boot + load + b'\x00\xff' + self.pal + b''.join(kept) +
                      self.tiles)
         if (self.base & 0xFFFF) + len(self.blob) > 0x10000:
             raise ValueError('뱅크를 넘음')
@@ -437,12 +451,15 @@ class Layout:
         restore = bytes((0xC2, 0x30, 0x3B, 0x1A, 0xAA, 0xA0, *le((CGRAM_BUFFER + pal_off) & 0xFFFF, 2),
                          0xA9, *le(n - 1, 2), 0x54, CGRAM_BUFFER >> 16, 0x00,     # TSC / INC / TAX / LDY / MVN $7E,$00
                          0x3B, 0x18, 0x69, *le(n, 2), 0x1B)) + DB0 + bytes((0xE2, 0x20))  # TSC / CLC / ADC #n / TCS
+        # 상자 타일·팔레트 싣기는 모든 상자가 같아 한 벌만 두고 JSR 로 부른다(M 8·X 16, 화면을 끈 채, DB 0 으로 돌아감)
+        load = (dma_vram(BG3_CHR + CANVAS * 8, a['tiles'], len(self.tiles)) +
+                dma_cgram(PAL_BORDER * 4, a['pal'], len(self.pal)) +
+                bytes((0xC2, 0x30)) + mvn(a['pal'], CGRAM_BUFFER + pal_off, len(self.pal)) + DB0 +
+                bytes((0xE2, 0x20, 0x60)))                                   # SEP #$20 / RTS
+        call_load = bytes((0x20, *le(a['load'] & 0xFFFF, 2)))               # JSR load
         def box(map_at):
             return (ENTER + save + bytes((0x9C, 0x1D, 0x00)) + screen_off() + bytes((0xC2, 0x10)) +   # STZ $001D
-                   dma_vram(BG3_CHR + CANVAS * 8, a['tiles'], len(self.tiles)) +
-                   dma_cgram(PAL_BORDER * 4, a['pal'], len(self.pal)) +
-                   bytes((0xC2, 0x30)) + mvn(a['pal'], CGRAM_BUFFER + pal_off, len(self.pal)) + DB0 +
-                   bytes((0xE2, 0x20)) + map_rows(lambda r: map_at + r * BOX_W * 2) +
+                   call_load + map_rows(lambda r: map_at + r * BOX_W * 2) +
                    dma_vram(BG3_MAP, MAP_BUFFER, 0x800) + screen_on() +
                    fade(1, 15, FADE_STEP) + wait(HOLD) + fade(14, 0, FADE_STEP) +
                    screen_off() + bytes((0xC2, 0x10)) + clear_map +
@@ -455,16 +472,13 @@ class Layout:
             clear_all = (bytes((0xC2, 0x30, 0xA9, *le(BLANK, 2), 0x8F, *le(MAP_BUFFER, 3))) +
                          mvn(MAP_BUFFER, MAP_BUFFER + 2, 0x800 - 2) + DB0 + bytes((0xE2, 0x20)))
             return (ENTER + bytes((0x9C, 0x1D, 0x00)) + screen_off() + bytes((0xC2, 0x10)) +
-                    dma_vram(BG3_CHR + CANVAS * 8, a['tiles'], len(self.tiles)) +
-                    dma_cgram(PAL_BORDER * 4, a['pal'], len(self.pal)) +
-                    bytes((0xC2, 0x30)) + mvn(a['pal'], CGRAM_BUFFER + pal_off, len(self.pal)) + DB0 +
-                    bytes((0xE2, 0x20)) + clear_all + map_rows(lambda r: map_at + r * BOX_W * 2, n) +
+                    call_load + clear_all + map_rows(lambda r: map_at + r * BOX_W * 2, n) +
                     dma_vram(BG3_MAP, MAP_BUFFER, 0x800) + screen_on() +
                     fade(1, 15, FADE_STEP) + wait_button() + fade(14, 0, FADE_STEP) + soft_reset())
         boxes = [ending(map_at, rows(scene.subtitle)) if scene.subtitle else box(map_at)
                  for scene, map_at in zip(self.scenes, a['maps'])]
         reveal = reveal_code()
-        return start, hook, boxes, reveal, soft_boot()
+        return start, hook, boxes, reveal, soft_boot(), load
 
 
 def reveal_code(step=REVEAL_STEP, song_wait=True):
