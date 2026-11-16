@@ -864,27 +864,84 @@ class ShardTest(unittest.TestCase):
         self.assertLessEqual(max(loads) - min(loads), 1)
         self.assertEqual(guards.shard_part(self.CHECKS, 1, 2, weights), guards.shard_part(self.CHECKS, 1, 2, weights))
 
-    def test_parts_expand_up_to_the_shard_count(self):
+    def test_parts_expand_to_the_declared_count(self):
+        """몫 경계는 조각 수와 상관없다: 통과 기록·단위 캐시 이름(~kofn)이 PR·관문·데우기에서 같아야 한다."""
         cs = [dict(self.CHECKS[0], parts=4), self.CHECKS[1]]
-        self.assertEqual([c.get('part') for c in guards.expand_parts(cs, 8)], [(1, 4), (2, 4), (3, 4), (4, 4), None])
-        self.assertEqual([c.get('part') for c in guards.expand_parts(cs, 2)], [(1, 2), (2, 2), None])
-        self.assertEqual([c.get('part') for c in guards.expand_parts(cs, 1)], [None, None])
-        self.assertEqual(guards.unit_name(guards.expand_parts(cs, 8)[2]), 'a 3/4')
+        self.assertEqual([c.get('part') for c in guards.expand_parts(cs)], [(1, 4), (2, 4), (3, 4), (4, 4), None])
+        self.assertEqual(guards.unit_name(guards.expand_parts(cs)[2]), 'a 3/4')
 
     def test_parts_of_one_check_go_to_different_shards(self):
         cs = [dict(self.CHECKS[0], parts=3), dict(self.CHECKS[3], parts=5), *self.CHECKS[4:]]
         weights = {'a': 3000, 'd': 50, 'e': 10, 'f': 10}
-        for n in (3, 5, 8):
-            units = guards.expand_parts(cs, n)
+        units = guards.expand_parts(cs)
+        for n in (1, 2, 3, 5, 8):
             got = [guards.shard_part(units, k, n, weights) for k in range(1, n + 1)]
             self.assertEqual(sorted(map(guards.unit_name, (c for g in got for c in g))),
                              sorted(map(guards.unit_name, units)))
             for g in got:
                 names = [c['name'] for c in g]
-                self.assertEqual(len(names), len(set(names)), g)
+                # 조각이 하위 조각 수보다 적을 때만 한 조각에 같은 검사가 겹친다(run_many 가 한 단위로 묶음)
+                for name in set(names):
+                    if next(c.get('parts', 1) for c in cs if c['name'] == name) <= n:
+                        self.assertEqual(names.count(name), 1, (n, g))
         # 무게는 검사 시간/하위 조각 수라 큰 검사의 하위 조각이 조각마다 하나씩 간다
-        got = [guards.shard_part(guards.expand_parts(cs, 3), k, 3, weights) for k in (1, 2, 3)]
+        got = [guards.shard_part(units, k, 3, weights) for k in (1, 2, 3)]
         self.assertEqual([sorted(c.get('part', (0,))[0] for c in g if c['name'] == 'a') for g in got], [[1], [2], [3]])
+
+    def test_parts_in_one_shard_run_as_one_unit(self):
+        cs = guards.expand_parts([dict(self.CHECKS[0], parts=4), self.CHECKS[2]])
+        units = guards.group_parts([cs[2], cs[4], cs[0]])
+        self.assertEqual([(c['name'], c.get('part')) for c in units], [('a', ((1, 3), 4)), ('c', None)])
+        self.assertEqual((guards.unit_name(units[0]), guards.part_tag(units[0])), ('a 1,3/4', '~1,3of4'))
+        self.assertEqual(guards.record_tags(units[0]), ['~1of4', '~3of4'])
+        self.assertEqual(guards.record_tags(units[1]), [''])
+        self.assertEqual(guards.unit_slots(units, '/u'), [
+            {'prefix': 'guard-unit-a~1of4', 'dir': '/u/a~1,3of4'}, {'prefix': 'guard-unit-a~3of4', 'dir': '/u/a~1,3of4'},
+            {'prefix': 'guard-unit-c', 'dir': '/u/c'}])
+        self.assertTrue(all(',' not in s['prefix'] for s in guards.unit_slots(units, '/u')))
+
+    def test_part_set_runs_only_parts_without_a_pass_record(self):
+        import tempfile
+        c = {'name': 'p', 'file': 'g', 'run': 'echo "$DQ4_GUARD_PART" >> "$OUT"', 'needs': [], 'paths': [],
+             'part': ((1, 3), 4)}
+        with tempfile.TemporaryDirectory() as d:
+            out, rec = Path(d) / 'seen', Path(d) / 'guards'
+            rec.mkdir()
+            (rec / f'p~1of4-{"k" * 24}.json').write_text('{"when": "w", "detail": "1초"}')
+            env = dict(os.environ, OUT=str(out))
+            with mock.patch.object(guards, 'input_key', return_value='k' * 40), \
+                    mock.patch.object(guards, 'cache_dir', return_value=rec), \
+                    mock.patch.object(guards, 'split_built', return_value=None):
+                self.assertEqual(guards.run_check(c, 30, Path(d), env=env)[0], 'passed')
+                self.assertEqual(out.read_text().split(), ['3/4'])
+                self.assertTrue((rec / f'p~3of4-{"k" * 24}.json').is_file())
+                self.assertTrue(guards.all_passed(c))
+                status, detail = guards.run_check(c, 30, Path(d), env=env)
+                self.assertEqual((status, detail.startswith('캐시')), ('passed', True))
+                self.assertEqual(out.read_text().split(), ['3/4'])
+                (rec / f'p~1of4-{"k" * 24}.json').unlink()
+                (rec / f'p~3of4-{"k" * 24}.json').unlink()
+                rows = guards.run_many([dict(c, part=(1, 4)), {**c, 'name': 'q', 'part': None}, dict(c, part=(3, 4))],
+                                       1, 30, logs=Path(d) / 'logs', env=env)
+            self.assertEqual([(r[0]['name'], r[0].get('part'), r[1]) for r in rows],
+                             [('p', (1, 4), 'passed'), ('p', (3, 4), 'passed'), ('q', None, 'passed')])
+            # 한 조각에 든 같은 검사의 하위 조각은 한 프로세스로
+            self.assertEqual(out.read_text().split(), ['3/4', '1,3/4'])
+
+    def test_unit_cache_folders_and_shared_states(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d) / 'units'
+            a, b = guards.expand_parts([{'name': 'a', 'parts': 2}])
+            (root / 'a~1of2' / 'states' / 'prologue').mkdir(parents=True)
+            (root / 'a~1of2' / 'states' / 'prologue' / 'end-abc.mss').write_bytes(b'S')
+            guards.share_states(root / 'a~1of2' / 'states', root / '_pool' / 'states')
+            env = guards.unit_env(b, {'DQ4_UNIT_CACHE': str(root), 'X': '1'})
+            self.assertEqual((env['DQ4_READSET_CACHE'], env['DQ4_STATES_CACHE'], env['DQ4_BUILD_CACHE'], env['X']),
+                             (str(root / 'a~2of2' / 'readset'), str(root / 'a~2of2' / 'states'), str(root / 'a~2of2'), '1'))
+            self.assertEqual((root / 'a~2of2' / 'states' / 'prologue' / 'end-abc.mss').read_bytes(), b'S')
+            self.assertEqual(guards.share_states(root / 'a~1of2' / 'states', root / 'a~2of2' / 'states'), 0)
+            self.assertEqual(guards.unit_env(a, {'X': '1'}), {'X': '1'})
 
     def test_merge_parts(self):
         def row(name, part, status='passed', detail='100초, 롬 SHA-1 abc'):

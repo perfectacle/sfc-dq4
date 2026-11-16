@@ -306,16 +306,6 @@ jobs:
       - name: Mark the job start
         run: touch "$RUNNER_TEMP/job-start"
 
-      - name: Restore the shard's scene and state caches
-        if: inputs.cache
-        uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
-        with:
-          op: restore
-          name: guard-state
-          prefix: guard-state-${{ inputs.mode }}-${{ matrix.k }}of${{ needs.build.outputs.count }}
-          dir: work/cache
-          age_key: ${{ secrets.CI_ROM_AGE_KEY }}
-
       # Pass records (input key, time) only, no ROM data, so a plain cache. The report job saves them.
       - name: Restore earlier guard passes
         if: inputs.cache
@@ -325,10 +315,38 @@ jobs:
           key: guard-results-restore
           restore-keys: guard-results-
 
+      # Scene, start state and build stage caches are kept per guard unit (a guard or one of its parts), keyed by
+      # the unit name, so any mode or shard count reads what another run left. A pull request restores only the
+      # units it will run; the release modes restore every unit so the daily warm run keeps them from expiring.
+      - name: List the shard's cache units
+        if: inputs.cache
+        env:
+          DQ4_ASSETS: ${{ github.workspace }}/assets
+          DQ4_UNIT_CACHE: ${{ github.workspace }}/work/cache/units
+          K: ${{ matrix.k }}
+          N: ${{ needs.build.outputs.count }}
+          GUARDS: ${{ inputs.guards }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          only=() pending=()
+          if [ -n "$GUARDS" ]; then only=(--only "$GUARDS"); fi
+          if [ "$MODE" = pr ]; then pending=(--pending-only); fi
+          uv run --frozen python tools/guards.py --all "${only[@]}" --shard "$K/$N" --exclude-needs "$LOCAL_NEEDS" \
+            --unit-slots "$RUNNER_TEMP/unit-slots.json" "${pending[@]}"
+
+      - name: Restore the units' scene and state caches
+        if: inputs.cache
+        uses: ./.github/actions/unit-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+        with:
+          op: restore
+          slots: ${{ runner.temp }}/unit-slots.json
+          age_key: ${{ secrets.CI_ROM_AGE_KEY }}
+
       - name: Run the shard's guards with caches
         if: inputs.cache
         env:
           DQ4_ASSETS: ${{ github.workspace }}/assets
+          DQ4_UNIT_CACHE: ${{ github.workspace }}/work/cache/units
           HEADLESS_SLOTS: '4'
           DQ4_READSET_MAX_GB: '2'
           K: ${{ matrix.k }}
@@ -360,18 +378,21 @@ jobs:
 
       - name: Drop build stage entries this job did not use
         if: ${{ !cancelled() && inputs.cache }}
-        run: uv run --frozen python tools/ci_cache.py prune --dir work/cache/calls --since "$RUNNER_TEMP/job-start"
+        # Only units that wrote something this job: a restored unit whose guard was skipped keeps its entries.
+        run: |
+          for calls in work/cache/units/*/calls; do
+            [ -d "$calls" ] || continue
+            if [ -n "$(find "$(dirname "$calls")" -newer "$RUNNER_TEMP/job-start" -print -quit)" ]; then
+              uv run --frozen python tools/ci_cache.py prune --dir "$calls" --since "$RUNNER_TEMP/job-start"
+            fi
+          done
 
-      - name: Save the shard's scene and state caches
+      - name: Save the units' scene and state caches
         if: ${{ !cancelled() && inputs.cache }}
-        uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+        uses: ./.github/actions/unit-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
         with:
           op: save
-          name: guard-state
-          prefix: guard-state-${{ inputs.mode }}-${{ matrix.k }}of${{ needs.build.outputs.count }}
-          dir: work/cache
-          exclude: guards
-          max_mb: '1500'
+          slots: ${{ runner.temp }}/unit-slots.json
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
 
       - name: Collect results

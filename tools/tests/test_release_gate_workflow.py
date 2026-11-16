@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools'))
 import ci_artifact_check  # noqa: E402
 import ci_cache  # noqa: E402
+import guards  # noqa: E402
 
 WORKFLOWS = ROOT / '.github' / 'workflows'
 GATE = WORKFLOWS / 'release-gate.yml'
@@ -23,7 +24,8 @@ ACTION = ACTIONS / 'ci-roms' / 'action.yml'
 ENC_CACHE = ACTIONS / 'enc-cache' / 'action.yml'
 SHIP_CACHE = ACTIONS / 'ship-cache' / 'action.yml'
 TOOLS_ACTION = ACTIONS / 'ci-tools' / 'action.yml'
-ALL_ACTIONS = (ACTION, ENC_CACHE, SHIP_CACHE, TOOLS_ACTION)
+UNIT_CACHE = ACTIONS / 'unit-cache' / 'action.yml'
+ALL_ACTIONS = (ACTION, ENC_CACHE, SHIP_CACHE, TOOLS_ACTION, UNIT_CACHE)
 # 평문 actions/cache 에 넣어도 되는 자리: 롬과 무관한 도구 빌드와 검사 통과 기록(입력 키·시간)
 PLAIN_CACHE_PATHS = ('${{ runner.temp }}/gate-tools/', 'work/cache/guards')
 SETUP = ROOT / 'tools' / 'ci_gate_setup.sh'
@@ -218,6 +220,7 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
     def test_rom_derived_folders_go_only_through_enc_cache(self):
         """롬 파생 폴더(work/·assets/·rom/)를 캐시하는 단계는 enc-cache·ship-cache 뿐이다."""
         steps = [s for st in self.jobs.values() for s in st] + action_steps(SHIP_CACHE.read_text(encoding='utf-8'))
+        steps += action_steps(UNIT_CACHE.read_text(encoding='utf-8'))
         dirs = 0
         for step in steps:
             d = with_value(step, 'dir') or with_value(step, 'calls')
@@ -277,7 +280,7 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
 
     def test_guards_run_without_cache_and_local_needs_are_excluded(self):
         """캐시 없는 실행이 기본(inputs.cache 가 false)이고, 캐시를 쓰는 실행 단계는 inputs.cache 일 때만."""
-        runs = [s for s in self.jobs['shard'] if 'tools/guards.py --all' in run_texts(s)]
+        runs = [s for s in self.jobs['shard'] if 'tools/guards.py --all' in run_texts(s) and '--run' in run_texts(s)]
         plain = [s for s in runs if '--no-cache' in run_texts(s)]
         cached = [s for s in runs if '--no-cache' not in run_texts(s)]
         self.assertEqual((len(plain), len(cached)), (1, 1))
@@ -290,9 +293,39 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         build = ''.join(self.jobs['rom'])
         self.assertIn("DQ4_BUILD_CACHE: ${{ inputs.cache && format('{0}/work/cache', github.workspace) || 'off' }}", build)
         for s in self.jobs['rom'] + self.jobs['shard']:
-            if 'ship-cache' in s or 'guard-state' in s or 'guard-results-' in s:
+            if 'ship-cache' in s or 'unit-cache' in s or '--unit-slots' in s or 'guard-results-' in s:
                 cond = with_value(s, 'if') or ''
                 self.assertIn('inputs.cache', cond, s)
+
+    def test_unit_caches_are_keyed_by_unit_not_mode_or_shard(self):
+        """장면·상태 캐시는 단위 이름(guards.py --unit-slots) 열쇠라 PR 이 매일 데우기·관문 연습이 남긴 것을 읽는다.
+        모드·조각 번호·조각 수를 열쇠에 넣으면 조각 수가 다른 실행끼리 빗나간다."""
+        shard = ''.join(self.jobs['shard'])
+        self.assertNotIn('guard-state', shard)
+        units = [s for s in self.jobs['shard'] if 'unit-cache' in s]
+        self.assertEqual([with_value(s, 'op') for s in units], ['restore', 'save'])
+        for s in units:
+            self.assertEqual(with_value(s, 'slots'), '${{ runner.temp }}/unit-slots.json')
+            self.assertNotRegex(s, r'matrix\.k|inputs\.(mode|shards)')
+        listing = next(s for s in self.jobs['shard'] if '--unit-slots' in run_texts(s))
+        self.assertIn('--unit-slots "$RUNNER_TEMP/unit-slots.json"', run_texts(listing))
+        order = [i for i, s in enumerate(self.jobs['shard']) if 'guard-results-restore' in s or s in (listing, units[0])]
+        self.assertEqual(len(order), 3)
+        self.assertEqual(order, sorted(order), '통과 기록 → 자리 목록 → 되살리기 차례(PR 은 돌 단위만 되살림)')
+        run = next(s for s in self.jobs['shard'] if '--run' in run_texts(s) and with_value(s, 'if') == 'inputs.cache')
+        # 자리 목록과 실행이 같은 조각을 골라야 되살린 폴더를 검사가 쓴다
+        for key in ('DQ4_UNIT_CACHE', 'K', 'N', 'GUARDS'):
+            self.assertEqual(with_value(run, key), with_value(listing, key), key)
+        plain = next(s for s in self.jobs['shard'] if '--no-cache' in run_texts(s))
+        self.assertNotIn('DQ4_UNIT_CACHE', plain)
+        steps = action_steps(UNIT_CACHE.read_text(encoding='utf-8'))
+        slots = [s for s in steps if './.github/actions/enc-cache' in s]
+        self.assertEqual(len(slots), guards.UNIT_SLOTS)
+        self.assertIn(f'--count {guards.UNIT_SLOTS}', run_texts(steps[0]))
+        for i, s in enumerate(slots):
+            self.assertEqual(with_value(s, 'prefix'), f'${{{{ steps.slots.outputs.p{i} }}}}')
+            self.assertEqual(with_value(s, 'name'), f'unit-{i}')
+            self.assertEqual(with_value(s, 'if'), f"steps.slots.outputs.p{i} != ''")
 
     def test_ship_roms_are_built_once_for_every_guard_variant(self):
         """가드가 부르는 dq4build.py 의 인자 조합(--out 빼고)은 모두 rom 잡 행렬에 있고, 조각은 빌드하지 않고

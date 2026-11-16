@@ -50,10 +50,17 @@ PR 에서는 바뀐 파일이 그 검사의 paths 에 바로 맞을 때, 또는 
 --shard 는 검사마다 지난 실행 시간(guardshard-times.json, 없으면 이 체크아웃의 검사 결과 캐시, 둘 다 없으면 아는 시간의
 평균)으로 긴 것부터 가장 가벼운 조각에 넣는다. 같은 목록·같은 시간 파일이면 어느 머신에서든 같은 조각이 나온다.
 --exclude-needs 로 뺀 검사는 「로컬 몫」 으로 찍고 --json 에 남긴다(배포 관문이 로컬에서 돌린다).
-parts = n 인 검사는 --shard 때 하위 조각 min(n, 조각 수) 개로 펼친다(expand_parts). 하위 조각 k 는 환경 변수
+parts = n 인 검사는 --shard 때 조각 수와 상관없이 하위 조각 n 개로 펼친다(expand_parts). 하위 조각 k 는 환경 변수
 DQ4_GUARD_PART=k/n 으로 돌고, 검사 도구가 장면 목록의 k 번째 몫만 돈다(sfc/dq4/tools/dq4shards.part_of). 무게는 검사
-시간/n, 같은 검사의 하위 조각은 서로 다른 조각에 들어간다(작업 폴더가 같아서). 결과 행은 part 를 달고, 보고(merge_parts)가
-검사 하나로 합친다: 하위 조각이 모두 통과해야 통과.
+시간/n, 같은 검사의 하위 조각은 되도록 서로 다른 조각에 넣는다. 조각이 n 보다 적어 한 조각에 같은 검사의 하위 조각이
+여럿 들면 한 프로세스로 함께 돈다(DQ4_GUARD_PART=1,3/4, 작업 폴더가 같아서). 통과 기록은 하위 조각마다 「이름~kofn」 으로
+남아, 조각 수가 다른 실행(PR·배포 관문·매일 데우기)도 그대로 맞는다. 결과 행은 하위 조각마다 part 를 달고,
+보고(merge_parts)가 검사 하나로 합친다: 하위 조각이 모두 통과해야 통과.
+
+DQ4_UNIT_CACHE=DIR 이면(CI 조각, 캐시 켬) 검사 단위(검사, 하위 조각이면 그 몫)마다 장면·상태·빌드 단계 캐시를
+DIR/<단위>/ 아래 따로 둔다(readset·states·calls). CI 가 단위마다 enc-cache 로 되살리고 저장해(--unit-slots), 조각 수·모드가
+다른 실행의 캐시를 단위 이름으로 찾는다. 캐시 안 항목은 롬 바이트·코드 지문으로 찾으므로 어느 실행이 남긴 것이든 맞을
+때만 쓰인다. 상태 캐시 파일은 DIR/_pool 을 거쳐 같은 조각의 단위끼리 나눈다(share_states).
 
 --run 은 같은 입력(.md 를 뺀 추적 파일 내용, 명령, --rom 롬 SHA-1)으로 이미 통과한 검사를 건너뛴다. [cache] key = "paths"
 인 트랙은 추적 파일 가운데 그 검사의 paths·묶음에 맞는 것, 그 트랙의 어느 검사도 paths 에 적지 않은 자료 파일
@@ -95,6 +102,8 @@ FIELDS = {'name': str, 'why': str, 'paths': list, 'run': str, 'needs': list}
 OPTIONAL = {'groups': list, 'tier': str, 'parts': int}
 PARTS_MAX = 64
 PART_ENV = 'DQ4_GUARD_PART'
+# .github/actions/unit-cache 의 자리 수와 같아야 한다(test_release_gate_workflow 가 지킨다)
+UNIT_SLOTS = 12
 TIERS = ('pr', 'release')
 CACHE_KEYS = ('all', 'paths')
 # 이 값이 바뀌면 검사 결과가 바뀔 수 있다(why 는 설명, paths·groups 는 고르는 데만 씀)
@@ -618,6 +627,87 @@ def spawn(command, log, timeout, env):
             RUNNING.discard(proc)
 
 
+def part_ks(check):
+    """하위 조각 번호들(차례대로). 하위 조각이 아니면 ()."""
+    if not check.get('part'):
+        return ()
+    k = check['part'][0]
+    return tuple(k) if isinstance(k, (tuple, list)) else (k,)
+
+
+def with_parts(check, ks):
+    """check 를 하위 조각 ks 의 단위로(하나면 (k, n), 여럿이면 ((k…), n))."""
+    ks, n = tuple(sorted(ks)), check['part'][1]
+    return dict(check, part=(ks[0] if len(ks) == 1 else ks, n))
+
+
+def record_tags(check):
+    """통과 기록 이름 꼬리: 하위 조각마다 하나(함께 돌아도 몫마다 따로 남겨 조각 수가 다른 실행이 쓴다)."""
+    return [f'~{k}of{check["part"][1]}' for k in part_ks(check)] or ['']
+
+
+def unit_dir(check, root):
+    return Path(root) / f'{check["name"]}{part_tag(check)}'
+
+
+def share_states(src, dest):
+    """src 의 상태 캐시 파일 가운데 dest 에 없는 것을 복사한다(임시 이름에 쓴 뒤 이름 바꿈, 함께 도는 검사가 반쯤 쓴
+    파일을 읽지 않게). 상태 캐시 파일은 롬 SHA-1·코드 지문이 이름에 들어 같은 이름이면 같은 내용이다. 복사한 수."""
+    src, dest, n = Path(src), Path(dest), 0
+    for f in sorted(src.rglob('*')) if src.is_dir() else ():
+        to = dest / f.relative_to(src)
+        if not f.is_file() or f.name.startswith('.') or to.exists():
+            continue
+        to.parent.mkdir(parents=True, exist_ok=True)
+        tmp = to.with_name(f'.{to.name}.{os.getpid()}.{time.monotonic_ns()}')
+        shutil.copy2(f, tmp)
+        os.replace(tmp, to)
+        n += 1
+    return n
+
+
+def unit_env(check, env):
+    """DQ4_UNIT_CACHE 가 있으면 이 단위의 캐시 폴더를 가리키는 env(상태 캐시는 _pool 에서 받아 둔다). 없으면 env."""
+    root = env.get('DQ4_UNIT_CACHE')
+    if not root:
+        return env
+    u = unit_dir(check, root)
+    share_states(Path(root) / '_pool' / 'states', u / 'states')
+    return dict(env, DQ4_READSET_CACHE=str(u / 'readset'), DQ4_STATES_CACHE=str(u / 'states'), DQ4_BUILD_CACHE=str(u))
+
+
+def unit_slots(checks, root, prefix='guard-unit'):
+    """단위 캐시 enc-cache 자리: [{'prefix', 'dir'}]. 하위 조각 여럿을 함께 도는 단위는 몫마다 자리 하나(같은 폴더로
+    되살리고, 저장도 몫마다 해 다른 묶음으로 도는 실행이 몫 이름으로 찾는다). 키 접두어는 「쉼표 없음」 이라는
+    actions/cache 규칙을 지킨다."""
+    out = []
+    for c in checks:
+        d = str(unit_dir(c, root))
+        out += [{'prefix': f'{prefix}-{c["name"]}{tag}', 'dir': d} for tag in record_tags(c)]
+    return out
+
+
+def group_parts(checks):
+    """같은 검사의 하위 조각(같은 조각에 든 것)을 단위 하나로 묶는다(첫 자리, 번호 차례)."""
+    out, seen = [], {}
+    for c in checks:
+        if not c.get('part'):
+            out.append(c)
+        elif c['name'] in seen:
+            g = out[seen[c['name']]]
+            out[seen[c['name']]] = with_parts(g, part_ks(g) + part_ks(c))
+        else:
+            seen[c['name']] = len(out)
+            out.append(c)
+    return out
+
+
+def all_passed(check, root=ROOT):
+    """하위 조각 모두 같은 입력의 통과 기록이 있는가(--run 이 건너뛸 단위)."""
+    key = input_key(check, root)
+    return bool(key) and all((cache_dir() / f'{check["name"]}{t}-{key[:24]}.json').is_file() for t in record_tags(check))
+
+
 def run_check(check, timeout, logs, no_cache=False, env=None):
     """검사 하나를 돌린다. (결과 'passed'|'failed'|'skipped', 본문 괄호 안 글). env 를 주면 그 환경으로 돈다(배포 관문이
     모든 단계에 같은 환경을 쓸 때).
@@ -633,11 +723,17 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
     if unset:
         return 'skipped', f'설정 안 된 환경 변수 {", ".join(unset)}'
     key = input_key(check, ROOT)
-    tag = part_tag(check)
-    hit = cache_dir() / f'{name}{tag}-{key[:24]}.json' if key else None
-    if hit and hit.is_file() and not no_cache:
-        old = json.loads(hit.read_text(encoding='utf-8'))
+    hits = {t: cache_dir() / f'{name}{t}-{key[:24]}.json' for t in record_tags(check)} if key else {}
+    done = [] if no_cache else [t for t, f in hits.items() if f.is_file()]
+    if hits and len(done) == len(hits):
+        old = json.loads(hits[done[0]].read_text(encoding='utf-8'))
         return 'passed', f'캐시: 같은 입력으로 {old["when"]} 통과, {old["detail"]}'
+    # 단위 캐시 폴더는 조각이 고른 묶음 그대로(CI 가 그 이름으로 되살렸다), 도는 몫만 통과 기록이 없는 것으로 좁힌다
+    unit = check
+    if done:
+        check = with_parts(check, [k for k, t in zip(part_ks(check), record_tags(check)) if t not in done])
+        hits = {t: f for t, f in hits.items() if t not in done}
+    tag = part_tag(check)
     # 같은 크기로 같은 초 안에 고친 원본은 옛 .pyc 를 그대로 쓰므로, 단계마다 빈 곳에서 새로 컴파일한다
     pycaches = []
 
@@ -649,9 +745,12 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
         shown = log.relative_to(ROOT) if log.is_relative_to(ROOT) else log
         log.write_text('', encoding='utf-8')
         env = dict(env or (no_cache_env(logs) if no_cache else os.environ))
+        if no_cache:
+            env.pop('DQ4_UNIT_CACHE', None)
+        env = unit_env(unit, env)
         env.pop(PART_ENV, None)
         if check.get('part'):
-            env[PART_ENV] = '{}/{}'.format(*check['part'])
+            env[PART_ENV] = '{}/{}'.format(','.join(map(str, part_ks(check))), check['part'][1])
         t0 = time.time()
         parts = None if no_cache or key is None or shadowed() else split_built(check)
         built = reads = None
@@ -662,7 +761,8 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
             if code:
                 return 'failed', f'종료 코드 {code}, 로그 {shown}'
             built = input_key(check, ROOT, built=True)
-            old = built and built_hit(name + tag, built, ROOT)
+            olds = [built and built_hit(name + t, built, ROOT) for t in hits]
+            old = all(olds) and olds[0]
             if old:
                 return 'passed', f'캐시: 빌드 결과와 검사 코드가 같아 {old["when"]} 통과, {old["detail"]}'
             reads = logs / f'{name}{tag}.reads'
@@ -691,13 +791,16 @@ def run_check(check, timeout, logs, no_cache=False, env=None):
                                if rom and (ROOT / rom).is_file() else '')
         # 도는 동안 입력이 바뀌었으면 그 결과는 어느 입력의 것인지 모르므로 캐시하지 않는다
         if key is not None and input_key(check, ROOT) == key:
-            write_atomic(hit, json.dumps({'when': time.strftime('%Y-%m-%d %H:%M'), 'detail': detail}, ensure_ascii=False))
+            for f in hits.values():
+                write_atomic(f, json.dumps({'when': time.strftime('%Y-%m-%d %H:%M'), 'detail': detail},
+                                           ensure_ascii=False))
             trace = (read_trace(reads, CHECK_STAGE.match(parts[1])['script'])
                      if reads and not Path(f'{reads}.broken').exists() else None)
             entry = trace and trace_entry(trace, ROOT)
             # 검사 단계가 빌드 결과를 고쳐 썼으면 키가 달라져 남기지 않는다
             if built and entry and input_key(check, ROOT, built=True) == built:
-                save_built(name + tag, built, detail, entry)
+                for t in hits:
+                    save_built(name + t, built, detail, entry)
         return 'passed', detail
     finally:
         for d in pycaches:
@@ -754,20 +857,21 @@ def shard_weights(checks, times=None, cached=None):
 
 def part_tag(check):
     """하위 조각의 이름 꼬리(캐시·로그 파일 이름). 「~」 는 NAME 에 없어 cached_seconds 가 검사 이름으로 읽지 않는다."""
-    return '~{}of{}'.format(*check['part']) if check.get('part') else ''
+    return '~{}of{}'.format(','.join(map(str, part_ks(check))), check['part'][1]) if check.get('part') else ''
 
 
 def unit_name(check):
     """조각에 넣는 단위의 이름: 검사 이름, 하위 조각이면 「이름 k/n」."""
-    return '{} {}/{}'.format(check['name'], *check['part']) if check.get('part') else check['name']
+    return ('{} {}/{}'.format(check['name'], ','.join(map(str, part_ks(check))), check['part'][1]) if check.get('part')
+            else check['name'])
 
 
-def expand_parts(checks, n):
-    """parts 가 있는 검사를 하위 조각 min(parts, n) 개로 펼친다(차례 유지). 조각 하나에 같은 검사의 하위 조각이 둘
-    들어가지 않게 조각 수보다 많이 나누지 않는다."""
+def expand_parts(checks):
+    """parts 가 있는 검사를 하위 조각 parts 개로 펼친다(차례 유지). 몫의 경계를 조각 수에 묶지 않아야 하위 조각마다
+    남긴 통과 기록·단위 캐시가 조각 수가 다른 실행에서도 맞는다."""
     out = []
     for c in checks:
-        p = min(c.get('parts', 1), n)
+        p = c.get('parts', 1)
         out += [dict(c, part=(k, p)) for k in range(1, p + 1)] if p > 1 else [c]
     return out
 
@@ -779,7 +883,8 @@ def unit_weight(check, weights):
 def shard_part(checks, k, n, weights):
     """checks(expand_parts 로 펼친 것)를 무게가 고르게 n 조각으로 나눠 k 번째(1부터) 조각을 원래 차례대로. 긴 것부터
     가장 가벼운 조각에 넣고 같은 무게는 이름 차례라, 같은 입력이면 같은 결과다. 같은 검사의 하위 조각은 그 검사가 아직
-    없는 조각 가운데 가장 가벼운 곳에 넣는다(같은 작업 폴더를 쓰므로). 조각을 모두 모으면 checks 와 같다."""
+    없는 조각 가운데 가장 가벼운 곳에 넣는다(한 조각에 둘이 들면 run_many 가 한 프로세스로 묶는다). 조각을 모두 모으면
+    checks 와 같다."""
     loads, owner, held = [0.0] * n, {}, [set() for _ in range(n)]
     for c in sorted(checks, key=lambda c: (-unit_weight(c, weights), unit_name(c))):
         free = [i for i in range(n) if c['name'] not in held[i]] or list(range(n))
@@ -911,11 +1016,20 @@ def run_many(hit, parallel, timeout, no_cache=False, logs=None, env=None):
     if no_cache and env is None:
         shutil.rmtree(logs / 'states', ignore_errors=True)
     shown = logs.relative_to(ROOT) if logs.is_relative_to(ROOT) else logs
+    hit = group_parts(hit)
     print(f'검사 {len(hit)}개를 {parallel}개씩 돌림(로그 {shown})', flush=True)
+    root = (env or os.environ).get('DQ4_UNIT_CACHE')
+    if root and not no_cache:
+        # 되살린 단위 캐시의 출발 상태를 모아 둔다(아직 아무 검사도 돌지 않아 반쯤 쓴 파일이 없다)
+        for d in sorted(Path(root).iterdir()) if Path(root).is_dir() else ():
+            if d.name != '_pool':
+                share_states(d / 'states', Path(root) / '_pool' / 'states')
 
     def one(c):
         status, detail = run_check(c, timeout, logs, no_cache, env)
         print(f'  {unit_name(c)}: {status} ({detail})', flush=True)
+        if root and not no_cache:
+            share_states(unit_dir(c, root) / 'states', Path(root) / '_pool' / 'states')
         return c, status, detail
     # 롬을 스스로 빌드하는 검사는 다른 검사가 읽는 롬을 다시 쓸 수 있어 다른 검사보다 먼저 돌린다. 빌드 검사끼리는
     # 서로 만드는 것을 건드리지 않는 것만 함께 돈다(build_batches)
@@ -934,7 +1048,11 @@ def run_many(hit, parallel, timeout, no_cache=False, logs=None, env=None):
         pool.shutdown(wait=False, cancel_futures=True)
         raise
     pool.shutdown()
-    return done
+    # 결과 행은 하위 조각마다(merge_parts·통과 기록과 같은 단위)
+    rows = []
+    for c, s, d in done:
+        rows += [(with_parts(c, [k]), s, d) for k in part_ks(c)] or [(c, s, d)]
+    return rows
 
 
 def full_files(checks, changed):
@@ -1063,6 +1181,12 @@ def main():
     ap.add_argument('--exclude-needs', metavar='이름,…', default='',
                     help='--all 에서 needs 에 이 이름이 든 검사를 빼 「로컬 몫」 으로 찍는다(리눅스 CI 에서 결과가 다른 검사의 macos 등)')
     ap.add_argument('--json', type=Path, help='--all --run 결과(커밋·조각·결과·로컬 몫)를 이 파일에')
+    ap.add_argument('--unit-slots', type=Path, metavar='OUT',
+                    help='--all --shard 로 고른 단위의 캐시 자리(JSON [{prefix, dir}], 무거운 것부터 --slots 개)를 OUT 에. '
+                         '폴더 뿌리는 DQ4_UNIT_CACHE')
+    ap.add_argument('--slots', type=int, default=UNIT_SLOTS, help=f'--unit-slots 자리 수(기본 {UNIT_SLOTS})')
+    ap.add_argument('--pending-only', action='store_true',
+                    help='--unit-slots 에서 하위 조각 모두 같은 입력의 통과 기록이 있는 단위를 뺀다(돌 것만 되살림)')
     ap.add_argument('--plan', type=Path, metavar='OUT',
                     help='--base 에서 걸린 검사를 CI 몫·로컬 몫으로 나눠 guards=·local=·shards= 줄을 OUT 에 더한다')
     ap.add_argument('--local-only', action='store_true',
@@ -1092,11 +1216,28 @@ def main():
             problems += bad
         hit, local = split_local(hit, [n for n in args.exclude_needs.split(',') if n])
         if shard:
-            hit = shard_part(expand_parts(hit, shard[1]), *shard, shard_weights(hit))
+            hit = shard_part(expand_parts(hit), *shard, shard_weights(hit))
         print(f'고른 검사 {len(hit)}개' + (f'(조각 {shard[0]}/{shard[1]})' if shard else '') + ': '
               + (', '.join(map(unit_name, hit)) or '없음'))
         if local:
             print(f'로컬 몫 {len(local)}개(needs 에 {args.exclude_needs}): ' + ', '.join(c['name'] for c in local))
+        if args.unit_slots and not problems:
+            root = os.environ.get('DQ4_UNIT_CACHE')
+            if not root:
+                ap.error('--unit-slots 는 DQ4_UNIT_CACHE 가 있어야 한다')
+            units = group_parts(hit)
+            if args.pending_only:
+                units = [c for c in units if not all_passed(c)]
+            weights = shard_weights(units)
+            units.sort(key=lambda c: (-weights[c['name']] * len(part_ks(c) or (1,)) / (c['part'][1] if c.get('part')
+                                                                                       else 1), unit_name(c)))
+            slots = unit_slots(units, root)
+            if len(slots) > args.slots:
+                print(f'::warning::단위 캐시 자리 {len(slots)}개 가운데 무거운 {args.slots}개만: '
+                      + ', '.join(s['prefix'] for s in slots[args.slots:]))
+            write_atomic(args.unit_slots, json.dumps(slots[:args.slots], ensure_ascii=False) + '\n')
+            print(f'단위 캐시 자리 {min(len(slots), args.slots)}개: ' + (', '.join(s['prefix'] for s in slots[:args.slots])
+                                                                     or '없음'))
         if args.run and not problems:
             parallel = args.parallel or headless_slots.limit() or os.cpu_count() or 2
             return run_all(hit, parallel, args.timeout, args.no_cache, args.json, local, shard)

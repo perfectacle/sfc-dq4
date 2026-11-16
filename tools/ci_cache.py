@@ -17,6 +17,8 @@ ship-cache)이 부른다. 형식: sfc/dq4/docs/dq4-release-check-format.md 「CI
                                                            단계 시간([stage])을 찍고 미리 만든 빌드 표시를 남김
   python tools/ci_cache.py prebuilt --out DIR [dq4build 인자…]
                                                            DQ4_PREBUILT 의 같은 빌드를 복사, 없으면 dq4build.py
+  python tools/ci_cache.py slots --file F --count N        guards.py --unit-slots 목록을 p0=…·d0=… 줄로(GITHUB_OUTPUT 용,
+                                                           빈 자리는 빈 값). composite action unit-cache 가 부른다
 """
 import argparse
 import hashlib
@@ -158,6 +160,23 @@ def prune(folder, since):
     print(f'{folder}: 이 잡에서 쓰지 않은 칸 {gone}개 지움')
 
 
+SLOT_PREFIX = re.compile(r'guard-unit-[\w.~-]+')
+
+
+def slots(file, count):
+    """unit-cache 의 자리 출력 줄. 접두어는 단위 이름 꼴(쉼표·공백 없음), 폴더는 줄바꿈 없는 경로만 받는다."""
+    items = json.loads(Path(file).read_text(encoding='utf-8')) if Path(file).is_file() else []
+    if len(items) > count:
+        raise SystemExit(f'자리 {len(items)}개가 {count}개를 넘음')
+    lines = []
+    for i in range(count):
+        s = items[i] if i < len(items) else {'prefix': '', 'dir': ''}
+        if s['prefix'] and (not SLOT_PREFIX.fullmatch(s['prefix']) or not s['dir'] or re.search(r'[\r\n]', s['dir'])):
+            raise SystemExit(f'자리 {i} 가 이상함: {s!r}')
+        lines += [f'p{i}={s["prefix"]}', f'd{i}={s["dir"]}']
+    return lines
+
+
 def label(tool, args):
     stem = Path(tool).stem.removeprefix('dq4')
     sub = args[0] if args and not args[0].startswith('-') else ''
@@ -284,6 +303,9 @@ def main():
     p.add_argument('--chunks', required=True)
     p = sub.add_parser('prebuilt')
     p.add_argument('--out', required=True)
+    p = sub.add_parser('slots')
+    p.add_argument('--file', required=True)
+    p.add_argument('--count', type=int, required=True)
     a, extra = ap.parse_known_args()
     if a.cmd not in ('ship-build', 'prebuilt') and extra:
         ap.error(f'모르는 인자 {extra}')
@@ -297,6 +319,8 @@ def main():
         prune(a.dir, a.since)
     elif a.cmd == 'prebuilt':
         sys.exit(prebuilt(a.out, extra))
+    elif a.cmd == 'slots':
+        print('\n'.join(slots(a.file, a.count)))
     else:
         ship_build(a.out, a.chunks, extra)
 

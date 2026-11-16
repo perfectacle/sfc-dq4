@@ -12,6 +12,9 @@ guards.py 는 하위 조각마다 DQ4_GUARD_PART=k/n 을 주고, 검사 도구�
 
   dq4shards.add_part_arg(ap)                    # --part k/n(기본 DQ4_GUARD_PART)
   mine = dq4shards.part_of(units, a.part, key=lambda u: u.name)   # k 번째 몫(원래 순서), part 가 None 이면 전부
+
+n 은 늘 guards.toml 의 parts 다. CI 조각이 n 보다 적으면 한 조각이 몫 여럿을 한 번에 돈다(DQ4_GUARD_PART=1,3/4: 1 번과
+3 번 몫의 합). 몫의 경계가 조각 수에 따라 바뀌지 않아, 몫마다 남긴 통과 기록·캐시를 조각 수가 다른 실행이 그대로 쓴다.
 """
 import argparse
 import concurrent.futures
@@ -39,14 +42,29 @@ def pmap(fn, items, n=None):
 PART_ENV = 'DQ4_GUARD_PART'
 
 
+class Parts(tuple):
+    """몫 번호 여럿(차례대로, 겹침 없음). 글자로는 「1,3」 이라 도구들이 찍는 f'{k}/{n}' 이 「1,3/4」 가 된다."""
+
+    def __format__(self, spec):
+        return format(','.join(map(str, self)), spec)
+
+    __str__ = __format__
+
+
 def parse_part(text):
-    """'k/n' → (k, n), 1 ≤ k ≤ n. 빈 값·None 은 None(나누지 않음)."""
+    """'k/n' → (k, n), 1 ≤ k ≤ n. 'k1,k2,…/n' → (Parts((k1, k2, …)), n): 그 몫들의 합. 빈 값·None 은 None(나누지 않음)."""
     if not text:
         return None
-    m = re.fullmatch(r'(\d+)/(\d+)', text)
-    if not m or not 1 <= int(m[1]) <= int(m[2]):
-        raise argparse.ArgumentTypeError(f'--part 는 k/n(1 ≤ k ≤ n): {text!r}')
-    return int(m[1]), int(m[2])
+    m = re.fullmatch(r'(\d+(?:,\d+)*)/(\d+)', text)
+    ks = [int(x) for x in m[1].split(',')] if m else []
+    if not m or not all(1 <= k <= int(m[2]) for k in ks) or len(set(ks)) != len(ks):
+        raise argparse.ArgumentTypeError(f'--part 는 k/n 또는 k1,k2/n(1 ≤ k ≤ n, 겹침 없음): {text!r}')
+    return (ks[0] if len(ks) == 1 else Parts(sorted(ks))), int(m[2])
+
+
+def part_numbers(part):
+    """part 의 몫 번호 집합."""
+    return set(part[0]) if isinstance(part[0], tuple) else {part[0]}
 
 
 def add_part_arg(ap):
@@ -62,7 +80,7 @@ def add_part_arg(ap):
 
 
 def part_of(items, part, key=str, weight=None):
-    """items 를 n 몫으로 나눈 k 번째(part=(k, n)) 를 원래 순서대로. part 가 None 이면 전부. 무게(weight(item), 기본 1)가
+    """items 를 n 몫으로 나눈 k 번째(part=(k, n), k 가 Parts 면 그 몫들의 합) 를 원래 순서대로. part 가 None 이면 전부. 무게(weight(item), 기본 1)가
     큰 것부터, 같으면 key 차례로 가장 가벼운 몫에 넣는다(같으면 앞 몫). 같은 items 면 어디서든 같은 몫이 나오고, 몫을
     모두 모으면 겹침 없이 items 와 같다. key 는 서로 달라야 한다."""
     items = list(items)
@@ -78,6 +96,7 @@ def part_of(items, part, key=str, weight=None):
         j = loads.index(min(loads))
         owner[i] = j
         loads[j] += w[i]
-    mine = [x for i, x in enumerate(items) if owner[i] == k - 1]
+    ks = part_numbers(part)
+    mine = [x for i, x in enumerate(items) if owner[i] + 1 in ks]
     print(f'[part] {k}/{n}: {len(mine)}/{len(items)}개', file=sys.stderr, flush=True)
     return mine

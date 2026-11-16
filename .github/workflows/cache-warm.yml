@@ -1,6 +1,6 @@
 name: cache-warm
 
-# Fills the main-scope caches every guard reads (pass records, build stages, scene and start
+# Fills the main-scope caches every guard reads (pass records, build stages, unit scene and start
 # states, sound) with a cached rehearsal of every CI guard, so pull requests and the main push
 # run start warm. A rehearsal verdict, not release evidence. It passes the ROM bundle secrets
 # to guard-shards.yml, so it runs only on a schedule or by hand from main, never for pull

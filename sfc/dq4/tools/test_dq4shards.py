@@ -1,4 +1,5 @@
 """dq4shards: 기본 병렬 수가 HEADLESS_SLOTS 를 따르고, 결과가 끝난 순서와 상관없이 넣은 순서인지."""
+import argparse
 import os
 import threading
 import unittest
@@ -73,6 +74,19 @@ class PartTests(unittest.TestCase):
             with self.assertRaises(argparse.ArgumentTypeError):
                 dq4shards.parse_part(bad)
         self.assertIsNone(dq4shards.parse_part(''))
+
+    def test_part_sets_are_unions_of_parts(self):
+        items = [f'u{i}' for i in range(11)]
+        one = {k: dq4shards.part_of(items, (k, 4)) for k in range(1, 5)}
+        part = dq4shards.parse_part('3,1/4')
+        self.assertEqual(part, ((1, 3), 4))
+        self.assertEqual(f'{part[0]}/{part[1]}', '1,3/4')
+        self.assertEqual(dq4shards.parse_part('2/4'), (2, 4))
+        self.assertEqual(sorted(dq4shards.part_of(items, part)), sorted(one[1] + one[3]))
+        self.assertEqual(dq4shards.part_of(items, part), [x for x in items if x in one[1] + one[3]])
+        for bad in ('1,1/4', '1,5/4', '0,1/4', ',1/4'):
+            with self.assertRaises(argparse.ArgumentTypeError):
+                dq4shards.parse_part(bad)
 
     def test_part_arg_reads_env_once(self):
         import argparse
