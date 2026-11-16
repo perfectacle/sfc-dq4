@@ -15,6 +15,12 @@ MesenCE --testrunner 는 --timeout=초 를 주지 않으면 벽시계로 약 100
 옮기고 lua/dq4bigenv.lua 를 앞에 붙여 스크립트의 os.getenv 가 그 내용을 그대로 받게 한다(with_bigenv). 인자를 그대로
 넘기는 testrunner 는 하지 않는다.
 
+run 은 스크립트 앞에 심장 박동 Lua(with_heartbeat)를 붙인다. 시작할 때와 HEARTBEAT_FRAMES 프레임마다 프레임 수·PC·맵
+($BC/$BD)·$BE·세계($1949)·메시지 스트림($F0~$F2)을 임시 파일에 덮어 쓴다. 시간 초과면 TimeoutExpired 의 heartbeat 에
+마지막 박동을 달아 올린다(timeout_detail). 박동이 없으면 MesenCE 가 Lua 를 부르기 전에 멈췄고, 프레임이 적으면 에뮬레이션이
+멈췄고, 프레임이 장면의 MAXF 를 넘었으면 Lua 가 끝내지 못한 것이다. 박동은 WRAM·CPU 상태를 읽기만 하고 출력 폴더 밖에
+쓰므로 장면 출력·읽은 롬 바이트에 닿지 않는다.
+
   run(mesence, rom, script, cwd=dest, env=env, stdout=log, timeout=600)
 
 롬을 복사하지 않고 받은 인자 그대로 띄우려면 testrunner 를 쓴다. 셸 스크립트는
@@ -44,6 +50,8 @@ TIMEOUT_MARGIN = 60
 # (dq4compatcheck.py scenes). 범위는 DQ4_OPENBUS_RANGES(dq4openbus.lua 의 OPENBUS_RANGES)
 OPENBUS = Path(__file__).resolve().parent / 'lua' / 'dq4openbus.lua'
 BIGENV = Path(__file__).resolve().parent / 'lua' / 'dq4bigenv.lua'
+# 심장 박동 사이 프레임 수(60fps 로 10초)
+HEARTBEAT_FRAMES = 600
 # 리눅스 MAX_ARG_STRLEN(131072, 「이름=값」 과 끝 NUL 포함)보다 넉넉히 아래
 ENV_LIMIT = 120_000
 
@@ -75,6 +83,63 @@ def with_bigenv(script, kwargs):
         files.append(Path(path))
     env.update(BIGENV=','.join(big), BIGENV_TARGET=str(script))
     return BIGENV, {**kwargs, 'env': env}, files
+
+
+def with_heartbeat(script):
+    """(박동 Lua, 지울 임시 파일, 박동 파일). 박동 Lua 는 박동을 걸고 script 를 이어 돈다."""
+    fd, beat = tempfile.mkstemp(prefix='dq4beat-', suffix='.txt')
+    os.close(fd)
+    Path(beat).unlink()
+    fd, lua = tempfile.mkstemp(prefix='dq4beat-', suffix='.lua')
+    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+        f.write(HEARTBEAT_LUA.replace('@BEAT@', _lua_string(beat)).replace('@TARGET@', _lua_string(script))
+                .replace('@EVERY@', str(HEARTBEAT_FRAMES)))
+    return Path(lua), [Path(lua), Path(beat)], Path(beat)
+
+
+def _lua_string(path):
+    return '"' + str(path).replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+HEARTBEAT_LUA = """local path, n, m = @BEAT@, 0, emu.memType.snesMemory
+local function beat()
+  local s = emu.getState()
+  local f = io.open(path, "w")
+  if not f then return end
+  f:write(string.format("frame=%d pc=%02X:%04X map=%02X/%02X BE=%02X 1949=%02X F0=%02X%02X%02X",
+    n, s["cpu.k"] or 0, s["cpu.pc"] or 0, emu.read(0x7E00BC, m), emu.read(0x7E00BD, m), emu.read(0x7E00BE, m),
+    emu.read(0x7E1949, m), emu.read(0x7E00F2, m), emu.read(0x7E00F1, m), emu.read(0x7E00F0, m)))
+  f:close()
+end
+beat()
+emu.addEventCallback(function()
+  n = n + 1
+  if n % @EVERY@ == 0 then beat() end
+end, emu.eventType.endFrame)
+dofile(@TARGET@)
+"""
+
+
+def last_beat(path):
+    try:
+        return Path(path).read_text(encoding='utf-8', errors='replace').strip() or None
+    except OSError:
+        return None
+
+
+def timeout_detail(error, log=None):
+    """시간 초과 TimeoutExpired 와 MesenCE 출력 파일에서 까닭을 가를 글: 마지막 박동과 출력 끝 줄."""
+    beat = getattr(error, 'heartbeat', None)
+    parts = [f'마지막 박동 {beat}' if beat else '박동 없음(Lua 를 부르기 전에 멈춤)']
+    tail = ''
+    if log is not None:
+        try:
+            lines = [ln for ln in Path(log).read_text(encoding='utf-8', errors='replace').splitlines() if ln.strip()]
+            tail = ' / '.join(lines[-3:])[-300:]
+        except OSError:
+            pass
+    parts.append(f'MesenCE 출력 끝: {tail}' if tail else 'MesenCE 출력 없음')
+    return '; '.join(parts)
 
 
 def _unlink(files):
@@ -188,16 +253,20 @@ def run(mesence, rom, script, folder=None, tag='probe', extra=ARGS, **kwargs):
     folder = Path(folder or kwargs.get('cwd') or Path(rom).parent)
     script, kwargs = with_openbus(script, kwargs)
     script, kwargs, bigenv = with_bigenv(script, kwargs)
+    script, temps, beat = with_heartbeat(script)
     copy = unique_copy(rom, folder, tag)
     clear_saves(copy, mesence)
     try:
         with headless_slots.slot(f'MesenCE {tag}'):
             return subprocess.run([str(mesence), '--testrunner', str(copy), str(script), *extra,
                                    *timeout_args(extra, kwargs.get('timeout'))], **kwargs)
+    except subprocess.TimeoutExpired as e:
+        e.heartbeat = last_beat(beat)
+        raise
     finally:
         clear_saves(copy, mesence)
         copy.unlink(missing_ok=True)
-        _unlink(bigenv)
+        _unlink(bigenv + temps)
 
 
 def testrunner(mesence, *args, tag=None, **kwargs):

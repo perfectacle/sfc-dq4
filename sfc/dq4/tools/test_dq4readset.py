@@ -442,6 +442,8 @@ class RunTests(unittest.TestCase):
             info, _ = self.go()
         self.assertTrue(info['timed_out'])
         self.assertIn('끝나지 않음', err.getvalue())
+        self.assertIn('시간 초과:', err.getvalue())
+        self.assertTrue(info['timeout_detail'].startswith('박동 없음'))
         self.assertNotIn('Lua 오류', err.getvalue())
         self.fake.timeout = False
         self.assertFalse(self.go()[0]['cached'])

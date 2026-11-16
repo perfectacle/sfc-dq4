@@ -292,7 +292,10 @@ class RunFailureTests(unittest.TestCase):
         self.assertIsNone(wc.run_failure({'cached': False, 'returncode': 0, 'timed_out': False}, 60))
         timeout = wc.run_failure({'cached': False, 'returncode': None, 'timed_out': True}, 60)
         self.assertIn('60초', timeout)
+        self.assertTrue(timeout.startswith('시간 초과:'))
         self.assertTrue(timeout.timed_out)
+        detail = wc.run_failure({'cached': False, 'timed_out': True, 'timeout_detail': '마지막 박동 frame=600'}, 60)
+        self.assertIn('마지막 박동 frame=600', detail)
         self.assertFalse(wc.run_failure({'cached': False, 'returncode': 3}, 60).timed_out)
         self.assertIn('시간 제한', wc.run_failure({'cached': False, 'returncode': dq4readset.LUA_WATCHDOG}, 60))
         self.assertIn('Lua 오류', wc.run_failure({'cached': False, 'returncode': dq4readset.LUA_ERROR}, 60))
@@ -316,7 +319,7 @@ class RunFailureTests(unittest.TestCase):
             with mock.patch.object(wc, 'run', return_value=wc.run_failure({'cached': False, 'timed_out': True}, 300)):
                 r = wc.segment(Path('m'), Path('r.sfc'), Path('x.mss'), dest, seg, '')
             self.assertEqual(r['status'], 'failed')
-            self.assertEqual(r['problems'], ['MesenCE 실행: 300초 안에 끝나지 않음'])
+            self.assertEqual(r['problems'], ['MesenCE 실행: 시간 초과: 300초 안에 끝나지 않음(까닭 기록 없음)'])
 
 
 if __name__ == '__main__':

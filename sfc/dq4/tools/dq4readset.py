@@ -499,13 +499,15 @@ def _execute(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag
             p = mesen.run(mesence, rom_path, entry, folder=dest, tag=tag, extra=(*extra, *FIXED_ARGS), env=full,
                           cwd=cwd, stdout=fp, stderr=subprocess.STDOUT, timeout=timeout, check=False)
             rc = p.returncode
-    except subprocess.TimeoutExpired:
-        timed_out = True
+    except subprocess.TimeoutExpired as e:
+        # 참인 글로 돌려 시간 초과의 까닭(마지막 박동·MesenCE 출력 끝)을 info['timeout_detail'] 로 넘긴다
+        timed_out = mesen.timeout_detail(e, dest / log)
     text = out.read_text() if out.exists() else None
     ranges = parse_ranges(text) if text is not None else None
     done = text is not None and text.split()[-1:] == [DONE]
     if timed_out:
-        print(f'[dq4readset] {dest}: {timeout}초 안에 끝나지 않음(캐시에 넣지 않음)', file=sys.stderr)
+        print(f'[dq4readset] {dest}: 시간 초과: {timeout}초 안에 끝나지 않음(캐시에 넣지 않음). {timed_out}',
+              file=sys.stderr)
     if err.exists() or (text is not None and not done and not timed_out):
         why = err.read_text(errors='replace').strip() if err.exists() else '읽은 집합 끝줄이 OK 가 아님'
         print(f'[dq4readset] {dest}: 장면 Lua 오류(캐시에 넣지 않음): {why[:500]}', file=sys.stderr)
@@ -580,7 +582,7 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
         rc, timed_out, ranges = _snapshot_run(snapshot, rom, mesence, script, dest, env, timeout, extra, log, cwd, tag)
         # 다시 돌린 실행이 끝까지 가지 못했으면 출력을 견줄 수 없다. 항목은 두고 그 실패로 알린다
         if timed_out:
-            raise SystemExit(f'읽은 바이트 캐시 재검증이 {timeout}초 안에 끝나지 않음: {dest}(항목은 그대로 둠)')
+            raise SystemExit(f'읽은 바이트 캐시 재검증이 시간 초과: {timeout}초 안에 끝나지 않음: {dest}(항목은 그대로 둠). {timed_out}')
         # 0 이 아닌 종료(시간 제한·Lua 오류·MesenCE 가 죽음·emu.stop(n))는 키와 상관없는 실패일 수 있다. 캐시에는 0 으로
         # 끝난 실행만 들어가므로 견주지 않는다
         if rc != 0:
@@ -598,7 +600,7 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
                   '판정에 쓰지 않는 출력)', file=sys.stderr)
         return {**info, 'verified': True, 'screens_differ': shots}
     rc, timed_out, ranges = _snapshot_run(snapshot, rom, mesence, script, dest, env, timeout, extra, log, cwd, tag)
-    info = {'cached': False, 'returncode': rc, 'timed_out': timed_out,
+    info = {'cached': False, 'returncode': rc, 'timed_out': bool(timed_out), 'timeout_detail': timed_out or '',
             'readset': sum(n for _, n in ranges) if ranges is not None else None, 'ranges': len(ranges or ()),
             'key': key}
     # 0 이 아닌 종료(스크립트 오류·끝까지 못 감)나 읽은 집합이 없는 실행은 넣지 않는다. DQ4_READSET_STORE=off 면 넣지

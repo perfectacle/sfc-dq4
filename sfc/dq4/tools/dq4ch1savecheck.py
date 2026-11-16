@@ -106,7 +106,7 @@ def church(mesence, rom, state, dest):
 def run_failure(info, timeout):
     """dq4readset.run 결과가 실패면 그 까닭, 아니면 None."""
     if info['timed_out']:
-        return f'MesenCE 가 {timeout}초 안에 끝나지 않음'
+        return f'시간 초과: MesenCE 가 {timeout}초 안에 끝나지 않음({info.get("timeout_detail") or "까닭 기록 없음"})'
     if info['returncode'] == dq4readset.LUA_WATCHDOG:
         return 'MesenCE 가 Lua 콜백을 시간 제한으로 끊음(머신이 바쁠 때, 다시 돌릴 것)'
     if info['returncode'] == dq4readset.LUA_ERROR:

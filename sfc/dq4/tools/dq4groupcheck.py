@@ -73,7 +73,7 @@ def scene(mesence, rom, state, out, name, **extra):
                 **({"SET": sets} if sets else {}), **extra})
     info = dq4readset.run(mesence, rom, WARP, dest, env, timeout=300, accept=dq4readset.warp_finished)
     if info["timed_out"]:
-        return {"error": "MesenCE 가 300초 안에 끝나지 않음"}
+        return {"error": f"시간 초과: MesenCE 가 300초 안에 끝나지 않음({info.get('timeout_detail') or '까닭 기록 없음'})"}
     if info["returncode"] != 0:
         return {"error": f"MesenCE 종료 코드 {info['returncode']}"}
     if not (dest / "warp.txt").is_file():

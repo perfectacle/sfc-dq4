@@ -178,17 +178,49 @@ class BigEnvTests(unittest.TestCase):
         with mock.patch.object(tempfile, 'tempdir', str(tmp)):
             mesen.run(self.fake, self.rom, 'probe.lua', folder=self.dir / 'w', env=env, check=True)
             mesen.Runner(self.fake, self.rom, 'probe.lua', self.dir / 'w', env=env).wait()
-        for line in self.log.read_text().splitlines():
+        # run 은 심장 박동 Lua(dq4beat-*.lua)를 바깥에 둔다. Runner 는 두지 않는다
+        for line, outer in zip(self.log.read_text().splitlines(), ('dq4beat-', 'dq4bigenv.lua')):
             script, inline, names, size, target = line.split()
-            self.assertEqual((script, inline, names, int(size), target), ('dq4bigenv.lua', 'False', 'DUMP', len(big),
-                                                                           'probe.lua'))
+            self.assertTrue(script.startswith(outer), script)
+            self.assertEqual((inline, names, int(size), target), ('False', 'DUMP', len(big), 'probe.lua'))
         self.assertEqual(len(self.log.read_text().splitlines()), 2)
         self.assertEqual(list(tmp.iterdir()), [])
 
     def test_short_value_stays_in_the_environment(self):
         mesen.run(self.fake, self.rom, 'probe.lua', folder=self.dir / 'w', env=dict(os.environ, DUMP='1:7E0000:60'),
                   check=True)
-        self.assertEqual(self.log.read_text().split()[:3], ['probe.lua', 'True', '-'])
+        script, *rest = self.log.read_text().split()[:3]
+        self.assertTrue(script.startswith('dq4beat-'), script)
+        self.assertEqual(rest, ['True', '-'])
+
+    def test_heartbeat_wraps_the_script_and_reaches_timeouts(self):
+        """심장 박동 Lua 는 박동 파일에 쓰고 원래 스크립트를 이어 돈다. 시간 초과면 TimeoutExpired.heartbeat 에 마지막
+        박동을 달고, timeout_detail 이 박동과 MesenCE 출력 끝을 한 줄로 만든다. 임시 파일은 남지 않는다."""
+        lua, temps, beat = mesen.with_heartbeat('/a/probe.lua')
+        text = lua.read_text()
+        self.assertIn('dofile("/a/probe.lua")', text)
+        self.assertIn(f'"{beat}"', text)
+        self.assertIn(f'n % {mesen.HEARTBEAT_FRAMES} == 0', text)
+        for f in temps:
+            f.unlink(missing_ok=True)
+        tmp = self.dir / 'tmp'
+        tmp.mkdir()
+
+        def hang(args, **kwargs):
+            beat_file = next(t for t in Path(args[3]).read_text().split('"') if t.endswith('.txt'))
+            Path(beat_file).write_text('frame=1200 pc=2B:BECF map=36/00')
+            raise subprocess.TimeoutExpired(args, 5)
+        with mock.patch.object(tempfile, 'tempdir', str(tmp)), mock.patch.object(mesen.subprocess, 'run', hang), \
+                self.assertRaises(subprocess.TimeoutExpired) as caught:
+            mesen.run(self.fake, self.rom, 'probe.lua', folder=self.dir / 'w', env=dict(os.environ), timeout=5)
+        self.assertEqual(caught.exception.heartbeat, 'frame=1200 pc=2B:BECF map=36/00')
+        self.assertEqual(list(tmp.iterdir()), [])
+        log = self.dir / 'mesen.log'
+        log.write_text('a\n\nb\nc\nd\n')
+        self.assertEqual(mesen.timeout_detail(caught.exception, log),
+                         '마지막 박동 frame=1200 pc=2B:BECF map=36/00; MesenCE 출력 끝: b / c / d')
+        self.assertEqual(mesen.timeout_detail(subprocess.TimeoutExpired('x', 1)),
+                         '박동 없음(Lua 를 부르기 전에 멈춤); MesenCE 출력 없음')
 
     @unittest.skipUnless(shutil.which('lua5.4') or shutil.which('lua'), 'lua 없음')
     def test_lua_wrapper_restores_getenv(self):
