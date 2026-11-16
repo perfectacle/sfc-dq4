@@ -265,9 +265,18 @@ def chapter3_cases():
     # 뒤에는 설 수 없고, 순간이동으로 세우면 「その方向には誰もいない」(129)만 떴다. 순간이동은 TO 한 셀 아래에 내린다.
     # 말이 끝나면 위 줄로 돌아 방 오른쪽으로 걸어 간다(오른쪽 칸은 침대). 말이 끝난 뒤 A 를 더 누르면 다시 말을 걸어
     # 창이 남으므로 닫기만 누른다. distinct 1: 129 밖의 메시지가 하나
-    return {'nene-above': {'hop': CH3_HOP, 'warp': f'{ch3.HOUSE},{nx},{ny - 3}', 'set': '',
-                           'walk': f'{wc.talk("down", 12)};wait:120;{close};{close};{nx},{ny - 4}', 'free': f'{nx + 4},{ny - 4}',
-                           'want': [], 'map': ch3.HOUSE, 'distinct': 1, 'maxf': 2500}}
+    out = {'nene-above': {'hop': CH3_HOP, 'warp': f'{ch3.HOUSE},{nx},{ny - 3}', 'set': '',
+                          'walk': f'{wc.talk("down", 12)};wait:120;{close};{close};{nx},{ny - 4}', 'free': f'{nx + 4},{ny - 4}',
+                          'want': [], 'map': ch3.HOUSE, 'distinct': 1, 'maxf': 2500}}
+    # 북쪽 동굴 수문 앞 칸(FC 한 칸 = 주인공 두 열)마다: 아래에서 올라서 「예」 면 물살에 밀려 옮겨 가고 조작이 돌아온다
+    import dq4ch3safe as safe
+    yes = 'up:40;wait:230;a:8;wait:60;a:8;wait:1300'
+    for side, spec, free, want in (('right', safe.RIGHT, '18,47', []), ('left', safe.LEFT, '20,27', [('SAFE_DRAINED', safe.DRAINED)])):
+        x0, _, _, y1 = spec['rect']
+        for x in (x0, x0 + 1):
+            out[f'safe-{side}-{x}'] = {'warp': f'{safe.GATES},{x},{y1 + 2}', 'set': '', 'walk': yes, 'free': free,
+                                       'want': want, 'map': spec['to'][0], 'maxf': 4000}
+    return out
 
 
 def overlaps(text):

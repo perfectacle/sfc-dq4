@@ -28,6 +28,7 @@ import dq4ch1walkcheck as wc  # noqa: E402
 import dq4ch2walkcheck as cw  # noqa: E402
 import dq4ch3event as ch3  # noqa: E402
 import dq4ch3opencheck as opening  # noqa: E402
+import dq4ch3safe as safe  # noqa: E402
 import dq4chapterwalk as cwk  # noqa: E402
 
 talk, taps = wc.talk, wc.taps
@@ -37,6 +38,11 @@ CLOSE = wc.pc.CLOSE
 # 여기에 한 줄씩: 'NAME': wc.flag(모듈.FLAG)
 FLAGS = {
     **cw.FLAGS,
+    'SAFE_DRAINED': wc.flag(safe.DRAINED),
+    'SAFE_ANSWERED': wc.flag(safe.ANSWERED),
+    'SAFE_YES': wc.flag(safe.YES),
+    # 톨네코 물건 칸 2(칸 0 옷, 칸 1 도시락 다음): 금고 상자를 열면 철 금고가 들어오는 칸
+    'SAFE_SLOT': (0x7E2056 + 2, 0xFF),
 }
 
 TOWN = '3E/00'                 # FC 16/00 레이크나바
@@ -69,6 +75,18 @@ TOWN_ARRIVAL = (0, 27)
 # 집 계단(FC 16/01 (21,07))으로 내려서는 마을 칸
 HOUSE_OUT = (56, 55)
 
+# 북쪽 동굴: 오른쪽·왼쪽 수문 앞 주인공 셀(dq4ch3safe.RIGHT·LEFT 의 사각형 왼쪽 아래). 순간이동은 두 셀 아래에 내려
+# 위로 걸어 선다. 바닥 글은 세 쪽 뒤 「예」 에 커서
+SAFE_RIGHT = (safe.RIGHT['rect'][0], safe.RIGHT['rect'][3])
+SAFE_LEFT = (safe.LEFT['rect'][0], safe.LEFT['rect'][3])
+SAFE_OFF = ['SAFE_ANSWERED', 'SAFE_YES']
+SAFE_ASK = 'wait:30'
+SAFE_FLOOR = 'a:8;wait:80;a:8;wait:80;a:8;wait:120'
+SAFE_FACE_UP = '7E31E0=88'
+# 명령 창 → しらべる(dq4chestcheck.SEARCH), 상자 메시지를 넘기고 창을 닫는다
+SAFE_SEARCH = ('a:8;wait:60;down:6;wait:25;down:6;wait:25;down:6;wait:25;right:6;wait:25;a:8;wait:200;'
+               'a:4;wait:150;a:4;wait:150;b:4;wait:220')
+
 # (이름, 방법, 인자, 선택). 꼴은 dq4ch2walkcheck.SEGMENTS 와 같다(선택은 dq4chapterwalk 머리말)
 SEGMENTS = [
     # 첫머리 뒤 침대(시작 칸)에서 침대 아래로 내려서 방을 지나 문(FC (1F,07))을 열고 계단(FC (21,07))으로 마을에
@@ -80,6 +98,25 @@ SEGMENTS = [
     # 필드에서는 7E:00BC·00BD 가 떠난 맵 그대로라 맵 바뀜으로 잡히지 않는다. 실내(field False)와 끝 셀로 본다
     ('town_in', 'walk', f'{FIELD_OUT[0]},{FIELD_OUT[1] - 2}', {'map': TOWN, 'field': False, 'cell': TOWN_ARRIVAL,
                                                                 'poke': wc.DAY}),
+    # 북쪽 동굴(dq4ch3safe). 수문 앞 칸에 서면 묻고, 「아니요」 면 그대로, 칸을 떠났다 다시 서서 「예」 면 물살에 계단으로
+    ('safe_gates', 'warp', f'{safe.GATES},{SAFE_RIGHT[0]},{SAFE_RIGHT[1] + 2}', {'map': safe.GATES}),
+    ('safe_no', 'walk', f'up:40;wait:200;{SAFE_ASK};down:4;wait:30;a:8;wait:200;{CLOSE}',
+     {'map': safe.GATES, 'cell': SAFE_RIGHT, 'off': SAFE_OFF}),
+    ('safe_right', 'walk', f'down:20;wait:60;up:30;wait:200;{SAFE_ASK};a:8;wait:60;a:8;wait:1300',
+     {'map': safe.ENTRY, 'cell': safe.RIGHT['to'][1], 'off': SAFE_OFF, 'changes': 1, 'after': 60}),
+    # 왼쪽 수문은 통로 끝 구덩이로 떨어뜨리고 물이 빠졌다는 flag 를 켠다
+    ('safe_left_side', 'warp', f'{safe.GATES},{SAFE_LEFT[0]},{SAFE_LEFT[1] + 2}', {'map': safe.GATES}),
+    ('safe_left', 'walk', f'up:40;wait:200;{SAFE_ASK};a:8;wait:60;a:8;wait:1300',
+     {'map': safe.PIT, 'cell': safe.LEFT['to'][1], 'want': ['SAFE_DRAINED'], 'changes': 1, 'after': 60}),
+    # 물이 빠진 뒤 입구 층의 계단(출구 번호 1)은 3E/04 대신 3E/05 의 같은 계단으로
+    ('safe_dry_side', 'warp', f'{safe.ENTRY},6,34', {'map': safe.ENTRY}),
+    ('safe_dry', 'walk', 'left:40;wait:300', {'map': safe.DRY, 'cell': (22, 29), 'want': ['SAFE_DRAINED']}),
+    # 금고 상자 아래에서 위를 보고 しらべる → 철 금고. 상자 칸을 떠났다 밟으면 바닥 글, 「예」 면 되돌리고 상자가 닫힘
+    ('safe_vault', 'warp', f'{safe.VAULT},8,8', {'map': safe.VAULT}),
+    ('safe_open', 'walk', SAFE_SEARCH, {'poke': SAFE_FACE_UP, 'items': [safe.IRON_SAFE]}),
+    ('safe_return', 'walk', f'8,9;wait:60;8,8;wait:300;{SAFE_FLOOR};a:8;wait:200;a:8;wait:200;{CLOSE}',
+     {'map': safe.VAULT, 'cell': (8, 8), 'bytes': {'SAFE_SLOT': 0xFF}, 'off': SAFE_OFF}),
+    ('safe_reopen', 'walk', f'8,9;wait:60;{SAFE_SEARCH}', {'poke': SAFE_FACE_UP, 'items': [safe.IRON_SAFE]}),
 ]
 
 
