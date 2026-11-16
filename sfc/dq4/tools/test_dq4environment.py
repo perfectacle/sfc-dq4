@@ -121,6 +121,7 @@ class DoorBankTests(unittest.TestCase):
         self.assertEqual(rom.DOOR_BANK, rom.LIB_AT >> 16)
         self.assertEqual(rom.DOOR_BANK << 16 | rom.DOOR_TABLES[0], 0x3DFD97)
 
+
     def test_built_rom_copy_check(self):
         import dq4environmentrom as rom
         import dq4groupbuild
@@ -151,18 +152,20 @@ class DoorBankTests(unittest.TestCase):
 
     def test_bank_01_tail_does_not_grow_with_entries(self):
         import dq4environmentrom as rom
-        # As many entries a map as fit before the table copy (the count shrinks as maps are added).
-        free = rom.DOOR_TABLES[0] - (rom.LIB_AT & 0xFFFF) - len(self.code(self.entries(0))[0])
+        # As many entries a map as fit before the person palettes (the count shrinks as maps are added).
+        free = rom.LIB_END - (rom.LIB_AT & 0xFFFF) - len(self.code(self.entries(0))[0])
         _, few, _ = self.code(self.entries(1))
         _, many, _ = self.code(self.entries(max(2, free // (5 * (len(rom.MAPS) // 2)) - 1)))
         self.assertEqual(len(few), len(many))
         self.assertLessEqual(rom.HOOK_AT + len(many), rom.HOOK_END)
 
-    def test_overflow_into_the_table_copy_is_rejected(self):
+    def test_overflow_into_the_person_palettes_is_rejected(self):
         import dq4environmentrom as rom
-        free = rom.DOOR_TABLES[0] - (rom.LIB_AT & 0xFFFF) - len(self.code(self.entries(0))[0])
+        # 인물 팔레트(3D:EA00)가 표 복사(3D:FD97) 앞이라 그 한계 하나로 둘 다 지킨다
+        self.assertLess(rom.LIB_END, rom.DOOR_TABLES[0])
+        free = rom.LIB_END - (rom.LIB_AT & 0xFFFF) - len(self.code(self.entries(0))[0])
         per_map = free // (5 * (len(rom.MAPS) // 2)) + 1
-        with self.assertRaisesRegex(ValueError, "overflow into the bank-01 table copy"):
+        with self.assertRaisesRegex(ValueError, "overflow into the person palettes"):
             self.code(self.entries(per_map))
 
 

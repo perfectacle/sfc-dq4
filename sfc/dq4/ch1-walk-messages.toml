@@ -30,9 +30,9 @@ check = "2dc514f83c6a"
 variant = "chapter1"
 seed = 0
 name = "night_child"
-messages = ["E65"]
-reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
-check = "2446a892c4bc"
+messages = ["E71"]
+reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
+check = "319244523c51"
 
 [[segment]]
 variant = "chapter1"
@@ -46,9 +46,9 @@ check = "d41d0e98b825"
 variant = "chapter1"
 seed = 0
 name = "flare"
-messages = ["E69", "129"]
-reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
-check = "5487d7517379"
+messages = ["E75", "129"]
+reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
+check = "b04e61cbb8e6"
 
 [[segment]]
 variant = "chapter1"
@@ -70,9 +70,9 @@ check = "d8324ef89aae"
 variant = "chapter1"
 seed = 0
 name = "reunion"
-messages = ["E6A", "E6B", "129"]
-reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
-check = "6bc8fcc1e835"
+messages = ["E76", "E77", "129"]
+reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
+check = "f30b096cf658"
 
 [[segment]]
 variant = "chapter1"
@@ -94,9 +94,9 @@ check = "129cd6c7bffc"
 variant = "chapter1"
 seed = 0
 name = "hoimin"
-messages = ["E6F", "E70", "129"]
-reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
-check = "737601f079c8"
+messages = ["E7B", "E7C", "129"]
+reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
+check = "2815351016b1"
 
 [[segment]]
 variant = "chapter1"
@@ -150,9 +150,9 @@ check = "1c2fe002a11a"
 variant = "chapter1"
 seed = 0
 name = "kidnap"
-messages = ["129", "E72"]
-reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
-check = "2b520b1bf95d"
+messages = ["129", "E7E"]
+reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
+check = "1fc35d7ba34e"
 
 [[segment]]
 variant = "chapter1"
@@ -166,9 +166,9 @@ check = "c0be38b95488"
 variant = "chapter1"
 seed = 0
 name = "boss"
-messages = ["E85", "E73", "E74", "129", "E75"]
-reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
-check = "b1c7008b3b6e"
+messages = ["E91", "E7F", "E80", "129", "E81"]
+reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
+check = "d25799c00373"
 
 [[segment]]
 variant = "chapter1"
@@ -182,9 +182,9 @@ check = "fc1f7e6095c1"
 variant = "chapter1"
 seed = 0
 name = "soldier"
-messages = ["E76"]
-reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
-check = "bb6624f231be"
+messages = ["E82"]
+reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
+check = "db0d2415279b"
 
 [[segment]]
 variant = "chapter1"
@@ -198,9 +198,9 @@ check = "c96a3b061ffc"
 variant = "chapter1"
 seed = 0
 name = "imuru"
-messages = ["E77"]
-reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
-check = "a03d688515d9"
+messages = ["E83"]
+reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
+check = "ac361b014ca8"
 
 [[segment]]
 variant = "chapter1"
@@ -222,6 +222,6 @@ check = "990bb6f41a1b"
 variant = "chapter1"
 seed = 0
 name = "king"
-messages = ["E79", "E7D", "E94", "E7E", "E7F", "E80", "E82", "E83", "E81", "E7A"]
-reason = "여행의 문 사당 45/0E·0F 의 인물 대사(FC 07E0·07EB·0633·0540·0541)가 그룹 메시지에 들어 1장 사건 메시지 번호가 4 씩 밀림"
-check = "590faf89b9c8"
+messages = ["E85", "E89", "EA0", "E8A", "E8B", "E8C", "E8E", "E8F", "E8D", "E86"]
+reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
+check = "9f7f4ef6e890"

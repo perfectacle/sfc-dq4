@@ -657,8 +657,9 @@ def group_build(dq5, dq4, out):
     dq4groupbuild.RECORDS_AT = RECORDS_AT
     dq4groupbuild.FIELD_AT = FIELD_AT
     # 그룹 빌드의 인물·보행 대사 패치는 1장 빌드에 얹지 않지만(npc_doc 과 메뉴 빌드가 다시 만든다), 그룹 빌드 안에서
-    # 32:C400~·36:9E00~ 레코드와 겹치지 않아야 한다.
-    dq4groupbuild.NPC_AT = ('--base', '33:8000', '--alt', '38:8000')
+    # 새 맵 레코드(RECORDS_AT, 3장 맵부터 33 까지 참)와 겹치지 않아야 한다. 35 는 이 빌드 안에서 아무도 쓰지 않는다
+    # (TEXT_AT 를 60 으로 돌림).
+    dq4groupbuild.NPC_AT = ('--base', '35:8000', '--alt', '38:8000')
     dq4groupbuild.TEXT_AT = ('--at', '60:8000')
     dq4groupbuild.TALK_AT = TALK_AT
     return dq4groupbuild.build(dq5, dq4, out)
@@ -746,7 +747,7 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False, chapter3=False):
     (work / 'npc.json').write_text(json.dumps(doc, ensure_ascii=False, indent=1))
     base = npc_base(work / 'groups' / GROUP_PATCHES[0])
     run_tool(DQ5_TOOLS / 'dq5npcrelocate.py', dq5, 'patch', work / 'npc.json', '--base', base, '--alt', NPC_ALT,
-             '--allow-growth', *new_maps, '-o', work / 'npc.dq5patch.json')
+             '--allow-growth', *new_maps, '-o', work / 'npc.dq5patch.json', '--report', work / 'npc-layout.json')
     patches = [work / 'groups' / p for p in (*GROUP_PATCHES, *summary['record_patches'])] + [
         work / 'npc.dq5patch.json', work / 'boss.dq5patch.json', work / 'boss-monsters.dq5patch.json',
         work / 'learn.dq5patch.json', work / 'growth.dq5patch.json', work / 'party.dq5patch.json']

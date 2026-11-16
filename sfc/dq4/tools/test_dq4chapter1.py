@@ -391,7 +391,7 @@ class WrapperTests(unittest.TestCase):
                                           TALK_AT=()):
             self.assertEqual(ch.group_build('a', 'b', 'c'), {'ok': 1})
         self.assertEqual(seen, {'dq5': 'a', 'dq4': 'b', 'out': 'c', 'records': ch.RECORDS_AT, 'field': ch.FIELD_AT,
-                                'npc': ('--base', '33:8000', '--alt', '38:8000'), 'text': ('--at', '60:8000'),
+                                'npc': ('--base', '35:8000', '--alt', '38:8000'), 'text': ('--at', '60:8000'),
                                 'talk': ('--extra-at', '36:8000', '--hook-at', '06:FE10')})
 
     def test_run_tool_echoes_stderr(self):

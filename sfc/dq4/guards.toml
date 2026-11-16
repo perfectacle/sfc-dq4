@@ -451,7 +451,7 @@ paths = [
   "sfc/dq5/tools/dq5npcrecordcheck.py",
   "tools/mesence_settings.py",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4chapter1.py build --rom work/ch2/menu.sfc --keep work/ch2/keep --chapter2 --out work/ch2/npc.sfc && rm -rf work/ch2npc && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter2 --rom work/ch2/npc.sfc --build work/ch2/keep/groups --texts work/ch2/messages.json --out work/ch2npc --jobs 4 && rm -rf work/ch2npc-states && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter2 --states king_ill,king_cured,champion --rom work/ch2/npc.sfc --build work/ch2/keep/groups --texts work/ch2/messages.json --out work/ch2npc-states --jobs 4"
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4chapter1.py build --rom work/ch2/menu.sfc --keep work/ch2/keep --chapter2 --out work/ch2/npc.sfc && rm -rf work/ch2npc && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter2 --rom work/ch2/npc.sfc --build work/ch2/keep/groups --layout work/ch2/keep/npc-layout.json --texts work/ch2/messages.json --out work/ch2npc --jobs 4 && rm -rf work/ch2npc-states && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter2 --states king_ill,king_cured,champion --rom work/ch2/npc.sfc --build work/ch2/keep/groups --layout work/ch2/keep/npc-layout.json --texts work/ch2/messages.json --out work/ch2npc-states --jobs 4"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-build", "ch1-walk"]
 

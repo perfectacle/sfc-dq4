@@ -202,11 +202,12 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
     prg = ines.prg(Path(dq4_path).read_bytes())
     rom = dq5item.Rom(Path(dq5_path).read_bytes())
     items = dq5_items(rom)
-    names, _ = dq4shop.item_names(prg)
+    names, own_prices = dq4shop.item_names(prg)
     progress = json.loads(_dump_progress(dq5_path))
     counts = {k: sum(1 for s in progress["shops"] if s["kind"] == k) for k in range(4)}
     services, shops, inns, prices = {}, [], {}, {}
-    report = {"shops": [], "missing_items": [], "inns": {}, "keys": {}, "prices": {}, "event_sellers": {}}
+    report = {"shops": [], "missing_items": [], "local_prices": [], "inns": {}, "keys": {}, "prices": {},
+              "event_sellers": {}}
     maps = sorted(GROUPS.values())
     for group, number in maps:
         fc_group, fc_number = fc_map(prg, group, number)
@@ -240,9 +241,13 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
                 picked = []
                 for i in fc_items:
                     item = names[i & 0x7F]
-                    if _fold(item) in items:
+                    price = dq4shop.price(prg, fc_group, fc_number, i & 0x7F)
+                    if price != own_prices.get(i & 0x7F):
+                        # 장소별 값(여우 마을 18 의 はがねのつるぎ 10G·うまのふん 2G, FC 15:$B2F7): DQ5 는 물건마다 값이
+                        # 하나라 그 물건을 목록에서 뺀다
+                        report["local_prices"].append(f"{group:02X}/{number:02X} {item} {price}")
+                    elif _fold(item) in items:
                         picked.append(items[_fold(item)])
-                        price = dq4shop.price(prg, fc_group, fc_number, i & 0x7F)
                         if prices.setdefault(picked[-1], price) != price:
                             raise ValueError(f"{item}: FC prices {prices[picked[-1]]} and {price}")
                     else:

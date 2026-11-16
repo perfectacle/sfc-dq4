@@ -136,9 +136,14 @@ class MapDocumentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '14 position bits'):
             self.document(TARGET_NAME, [[FLOOR] * 65] * 65)
 
-    def test_chest_without_floor_is_rejected(self):
+    def test_chest_between_walls_takes_the_wall_block(self):
+        # FC 는 걸어서 닿지 않는 상자도 그린다(은의 여신상 동굴 40/04 (36,19)는 벽 사이). 상자 밑에는 가장 가까운 칸을 쓴다.
+        source = Source([[WALL, WALL, WALL], [WALL, CHEST, WALL], [WALL, WALL, WALL]])
+        self.assertEqual(env.chest_floor(source, 1, 1), WALL)
+
+    def test_chest_with_only_chests_around_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'no floor'):
-            self.document(GROUP_NAME, [[WALL, WALL, WALL], [WALL, CHEST, WALL], [WALL, WALL, WALL]])
+            self.document(GROUP_NAME, [[CHEST] * 3] * 3)
 
 
 ROM = Path(__file__).resolve().parents[3] / 'rom' / 'dq4.nes'

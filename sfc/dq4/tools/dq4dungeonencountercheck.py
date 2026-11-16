@@ -111,6 +111,13 @@ SCENES = {
     "45-tower-field": (("field", 0x45, 0x2E), SIDEWAYS),
     "45-cave-field": (("field", 0x45, 0x39), SIDEWAYS + ",wait:90,left:16"),
     "45-09": (("to", "45/09,42,57"), SIDEWAYS), "45-0D": (("to", "45/0D,70,23"), SIDEWAYS),
+    # Chapter 3: きたのどうくつ (FC 3D) in group 3E and the cave of the silver goddess (FC 40) in group 48. Both
+    # arrivals are stairs to the field with a wall below; the walks step off them first and keep off them. 3E/04
+    # (3D/01) has no zone, and the fox village (48/00, FC 18) shares group 48 with the cave and meets nothing.
+    "3E-cave-field": (("field", 0x3E, 0x3D), "left:24," + UPDOWN),
+    "3E-08": (("to", "3E/08,16,29"), SIDEWAYS), "3E-04": (("to", "3E/04,16,9"), SIDEWAYS),
+    "48-cave-field": (("field", 0x48, 0x40), "up:24," + SIDEWAYS),
+    "48-05": (("to", "48/05,40,33"), SIDEWAYS), "48-00": (("to", "48/00,38,31"), SIDEWAYS),
 }
 
 
@@ -192,6 +199,9 @@ def main():
             fc = fc_zones.get((fc_group, k))
             want_of[f"{group:02X}/{number:02X}"] = {"fc_zone": None if fc is None else f"{fc:02X}",
                                                     "zone": dq5_zone.get(fc), "song": part["music"]}
+        elif "music" in part and any(p.get("dungeon") for p in LINKS[group]):
+            # A town in a group that counts steps indoors (its dungeon parts) must still meet nothing.
+            want_of[f"{group:02X}/{number:02X}"] = {"fc_zone": None, "zone": None, "song": part["music"]}
     zones, region_maps = dq4dungeonrate.rows(prg, placement(prg), dq5_zone, fc_zones)
 
     def chances(steps, region=None):

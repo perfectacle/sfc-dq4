@@ -25,9 +25,14 @@ class GridTest(unittest.TestCase):
         # 01:854F does not clamp the row: with $1948 = 0, row r >= 7 is grid 1's row r - 7.
         _, rows0, src0 = enc.GRIDS[0]
         _, _, src1 = enc.GRIDS[1]
-        self.assertEqual(src0 + src1[:16 - rows0], list(range(16)))
-        _, _, src2 = enc.GRIDS[2]
-        self.assertEqual(src2[:16], list(range(16)))
+        self.assertEqual(src0 + src1[:16 - rows0], [(enc.FC_MAP, r) for r in range(16)])
+
+    def test_chapter3_grid_reads_the_chapter3_map_then_the_shared_one(self):
+        # 3장 지도는 8줄뿐이고 그 뒤는 던전 목록이라, 격자 2 의 줄 8~15 는 1·2·4장 지도를 읽는다.
+        _, _, src2 = enc.GRIDS[enc.CH3_GRID]
+        self.assertEqual(src2[:16], [(enc.FC_MAP3, r) for r in range(enc.CH3_ROWS)]
+                         + [(enc.FC_MAP, r) for r in range(enc.CH3_ROWS, 16)])
+        self.assertIsNone(src2[16])
 
     def test_grid_sizes_stay(self):
         self.assertEqual([enc.GRIDS[i][1] for i in range(5)], [7, 17, 17, 5, 4])
@@ -142,15 +147,76 @@ class ZoneAssignmentTests(PatchedFC):
 
     def test_too_few_dq5_zones_is_an_error(self):
         short = {"maps": [], "field_grids": [{"rows": [[5, 6, 7]]}]}
-        with self.assertRaisesRegex(ValueError, "6 FC zones, 3 field-only"):
+        with mock.patch.object(enc, "SPARE_AREAS", ()), self.assertRaisesRegex(ValueError, "6 FC zones, 3 DQ5 zones"):
             enc.zones(PRG, short)
 
     def test_dungeon_zones_use_the_zones_left_over(self):
         self.assertEqual(enc.dungeon_zones(PRG, self.ENC, [0x50, 0x50, 0x51]), {0x50: 11, 0x51: 12})
 
+    def test_dungeon_zones_go_in_the_given_order(self):
+        # 뒤 장에 더한 동굴의 구역이 번호로 앞서도 앞 장 구역의 DQ5 번호를 밀어내지 않는다.
+        self.assertEqual(enc.dungeon_zones(PRG, self.ENC, [0x50, 0x52, 0x51]), {0x50: 11, 0x52: 12, 0x51: 13})
+
+    def test_spare_areas_follow_the_field_only_zones(self):
+        self.assertEqual(enc.dungeon_zones(PRG, self.ENC, [0x50, 0x51, 0x52, 0x53, 0x54]),
+                         {0x50: 11, 0x51: 12, 0x52: 13, 0x53: enc.SPARE_AREAS[0], 0x54: enc.SPARE_AREAS[1]})
+
     def test_too_many_dungeon_zones_is_an_error(self):
-        with self.assertRaisesRegex(ValueError, "4 FC dungeon zones, 3 DQ5 zones left"):
-            enc.dungeon_zones(PRG, self.ENC, [0x50, 0x51, 0x52, 0x53])
+        many = list(range(0x50, 0x50 + 3 + len(enc.SPARE_AREAS) + 1))
+        with self.assertRaisesRegex(ValueError, f"{len(many)} FC dungeon zones, {3 + len(enc.SPARE_AREAS)} DQ5 zones left"):
+            enc.dungeon_zones(PRG, self.ENC, many)
+
+
+class Chapter3ZoneTests(unittest.TestCase):
+    ENC = ZoneAssignmentTests.ENC
+    # 3장 지도에만 있는 구역 9 와 1·2·4장 지도에도 있는 3
+    CH3 = [[3] * 8 + [9] * 8] * 8
+
+    def setUp(self):
+        maps = {enc.FC_MAP: MAP_ROWS, enc.FC_MAP3: self.CH3}
+        fc = SimpleNamespace(zone_map=lambda prg, key: (None, maps[key]))
+        patcher = mock.patch.object(enc, "_fc", lambda prg: fc)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_only_zones_the_shared_map_lacks_are_new(self):
+        self.assertEqual(enc.chapter3_zones(PRG), [9])
+
+    def test_new_zones_come_after_the_dungeon_zones(self):
+        self.assertEqual(enc.chapter3_assign(PRG, self.ENC, [0x50]), {9: 12})
+
+    def test_chapter3_grid_holds_its_zones(self):
+        assign = {enc.SEA_ZONE: 100, 3: 103, 4: 104, 9: 109, enc.FIELD1_TOP: 135, enc.FIELD1: 134, enc.FIELD3: 136}
+        grid2 = enc.grids(PRG, assign)[enc.CH3_GRID]["rows"]
+        self.assertEqual(grid2[:enc.CH3_ROWS], [[103] * 8 + [109] * 8 + [100]] * enc.CH3_ROWS)
+        self.assertEqual(grid2[enc.CH3_ROWS:16], [[104] * 16 + [100]] * (16 - enc.CH3_ROWS))
+
+
+class GridHookTests(unittest.TestCase):
+    def setUp(self):
+        self.hook, self.site = enc.grid_hook_writes(0x57C000)
+
+    def test_site_jumps_to_the_hook_and_on_to_the_grid_store(self):
+        site = bytes.fromhex(self.site["hex"])
+        self.assertEqual(self.site["at"], "01:A6E3")
+        self.assertEqual(bytes.fromhex(self.site["orig"]), enc.GRID_ORIG)
+        self.assertEqual(site[:4], bytes((0x22, 0x00, 0xC0, 0x57)))
+        # BRA 다음 주소 + 거리 = 01:A711(STX $1A9D)
+        self.assertEqual(site[4], 0x80)
+        self.assertEqual((enc.GRID_SITE & 0xFFFF) + 6 + site[5], enc.GRID_BACK & 0xFFFF)
+
+    def test_chapter3_flag_is_7e2208_bit3(self):
+        self.assertEqual(enc.chapter3_flag(), (0x7E2208, 0x08))
+
+    def test_hook_reads_the_chapter3_flag_and_returns_every_grid(self):
+        code = bytes.fromhex(self.hook["hex"])
+        flag, bit = enc.chapter3_flag()
+        self.assertEqual(code[:6], bytes((0xAF, *flag.to_bytes(3, "little"), 0x29, bit)))
+        for addr in enc.WORLD0_GRIDS:
+            self.assertIn(bytes((0xA2, *(addr & 0xFFFF).to_bytes(2, "little"), 0xA9, addr >> 16, 0x6B)), code)
+        # 갈래마다 RTL 로 끝난다
+        self.assertEqual(code.count(0x6B), 3)
+        self.assertEqual(code[-1], 0x6B)
 
 
 class GridBuildTests(PatchedFC):
@@ -335,9 +401,27 @@ class RomTest(unittest.TestCase):
         cls.dungeon = (0x40, 0x41, 0x42, 0x43)
         cls.progress, cls.grids, cls.report = enc.docs(cls.prg, cls.dq5, cls.orig, cls.dungeon)
 
+    def test_chapter3_zones_keep_the_earlier_dq5_zones(self):
+        # 1·2장 동굴(40~43, 4C~4F)의 DQ5 구역은 3장 동굴(48~4B)과 3장 필드 구역 16 을 더해도 그대로다.
+        import dq4groupbuild
+        fc = dq4groupbuild.dungeon_zones(self.prg).values()
+        got = enc.dungeon_zones(self.prg, self.orig, fc)
+        self.assertEqual({z: got[z] for z in (0x40, 0x41, 0x42, 0x43, 0x4C, 0x4D, 0x4E, 0x4F)},
+                         {0x40: 44, 0x41: 50, 0x42: 54, 0x43: 55, 0x4C: 56, 0x4D: 58, 0x4E: 63, 0x4F: 65})
+        self.assertEqual({z: got[z] for z in (0x48, 0x49, 0x4A, 0x4B)}, {0x48: 72, 0x49: 73, 0x4A: 83, 0x4B: 84})
+        self.assertEqual(enc.chapter3_zones(self.prg), [0x16])
+        self.assertEqual(enc.chapter3_assign(self.prg, self.orig, fc), {0x16: 78})
+        progress, grids, _ = enc.docs(self.prg, self.dq5, self.orig, fc)
+        areas = [r["index"] for r in progress["encounters"]]
+        self.assertEqual(len(areas), len(set(areas)))
+        # 바다 레코드는 빌려 쓴 83·84 를 덮지 않는다
+        self.assertEqual(areas[-2:], [81, 82])
+        ch3 = grids["field_grids"][enc.CH3_GRID]["rows"]
+        self.assertEqual(ch3[5][5:10], [78, 78, 35, 35, 35])      # 3장 지도 줄 5: 16 16 17 17 17
+
     def test_every_monster_has_a_placeholder(self):
         import dq4encounter
-        for z in (*enc.fc_zones(self.prg), *self.dungeon):
+        for z in (*enc.fc_zones(self.prg), *self.dungeon, *enc.chapter3_zones(self.prg), 0x48, 0x49, 0x4A, 0x4B):
             slots = dq4encounter.zone(self.prg, z)["slots"]
             for i in (*enc.GROUP_SLOTS, *enc.SOLO_SLOTS, *enc.ONE_SLOTS):
                 if slots[i] != 0xFF:

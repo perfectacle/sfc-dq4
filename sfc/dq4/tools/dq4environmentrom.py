@@ -79,7 +79,9 @@ GROUPS = {
     **{f"2E-{k:02X}": (0x45, 6 + k) for k in range(6)}, **{f"39-{k:02X}": (0x45, 12 + k) for k in range(2)},
     "1E-00": (0x45, 14), "1F-00": (0x45, 15),
     **{f"06-{k:02X}": (0x46, k) for k in range(4)}, "20-00": (0x46, 0x04),
-    "42-01": (0x47, 0x00),
+    "42-00": (0x47, 0x00), "42-01": (0x47, 0x01),
+    # 3장 여우 마을과 은의 여신상 동굴.
+    "18-00": (0x48, 0x00), "18-01": (0x48, 0x01), **{f"40-{k:02X}": (0x48, 2 + k) for k in range(6)},
 }
 MAPS = {**TARGETS, **GROUPS}
 # Further banks for map records once the first one reaches the library.
@@ -141,7 +143,9 @@ FOUNTAIN_SLOT = 0xC2
 # The water routine uses these slots directly: a battle reuses 7E:6000 (CHR id -> slot) as work
 # memory, and reading it after a battle sent the water frames to slot 0, the blank BG1 tile.
 WATER_SLOT = 0xBE
-LIB_AT = BLOCK_BANK << 16 | 0xE000
+# The library ends before the person palette table dq4people puts at 3D:EA00 (PALETTES_AT); the map records before
+# it give way to the next bank (records).
+LIB_AT, LIB_END = BLOCK_BANK << 16 | 0xDE00, 0xEA00
 # FC door properties and the DQ5 objects (01:D2FC kinds) that replace them. The record under an
 # object is the map's floor so the cell is walkable once the object opens; closed objects block
 # their last row themselves (cell +1 bit7).
@@ -377,19 +381,21 @@ def object_entries(found):
 def chest_floor(source, x, y):
     """FC block of the nearest walkable cell that is not a chest or a stair, above first on ties. A stair block
     carries the exit mark (+4 = 85), which would add an exit to the map's count under the chest (エンドール 04/03
-    (4,1), two cells from its stair)."""
-    best = None
-    for ny in range(max(0, y - 3), min(source.h, y + 4)):
-        for nx in range(max(0, x - 3), min(source.w, x + 4)):
-            prop = _prop(source, nx, ny)
-            if prop & 0x80 or prop & 0x7F == CHEST_KIND or prop in STAIRS:
-                continue
-            key = (abs(nx - x) + abs(ny - y), ny > y, abs(nx - x))
-            if best is None or key < best[0]:
-                best = (key, source.cell(nx, ny) & 31)
-    if best is None:
-        raise ValueError(f"({x},{y}): no floor near the chest")
-    return best[1]
+    (4,1), two cells from its stair). A chest with no walkable cell near takes the nearest blocked one: 은의 여신상
+    동굴 40/01 (3,8) sits in the room its button opens (the walkable 40/02), and 40/04 (36,19) between walls."""
+    for walkable in (True, False):
+        best = None
+        for ny in range(max(0, y - 3), min(source.h, y + 4)):
+            for nx in range(max(0, x - 3), min(source.w, x + 4)):
+                prop = _prop(source, nx, ny)
+                if (walkable and prop & 0x80) or prop & 0x7F == CHEST_KIND or prop in STAIRS:
+                    continue
+                key = (abs(nx - x) + abs(ny - y), ny > y, abs(nx - x))
+                if best is None or key < best[0]:
+                    best = (key, source.cell(nx, ny) & 31)
+        if best is not None:
+            return best[1]
+    raise ValueError(f"({x},{y}): no floor near the chest")
 
 
 def map_document(name, source, local, target):
@@ -685,9 +691,10 @@ def engine_code(block_count, water_ids, palettes, entries, waters, lids, nights=
     if HOOK_AT + len(stub_code) > HOOK_END:
         raise ValueError(f"bank 01 tail overflows by {HOOK_AT + len(stub_code) - HOOK_END} bytes")
     end = (LIB_AT & 0xFFFF) + len(lib_code)
-    if end > DOOR_TABLES[0]:
-        raise ValueError(f"library and object entries overflow into the bank-01 table copy at "
-                         f"{DOOR_BANK:02X}:{DOOR_TABLES[0]:04X} by {end - DOOR_TABLES[0]} bytes")
+    # LIB_END comes before the bank-01 table copy (DOOR_TABLES), so the entries stay readable from $D2FC.
+    if end > LIB_END:
+        raise ValueError(f"library and object entries overflow into the person palettes at "
+                         f"{BLOCK_BANK:02X}:{LIB_END:04X} by {end - LIB_END} bytes")
     sites = [
         (0x01936E, bytes((0x28, 0xAB, 0x60)), bytes((0x4C,)) + (stub_labels["s_load"] & 0xFFFF).to_bytes(2, "little")),
         (0x0193B2, bytes((0x20, 0x6A, 0x99)), bytes((0x20,)) + (stub_labels["s_pal"] & 0xFFFF).to_bytes(2, "little")),

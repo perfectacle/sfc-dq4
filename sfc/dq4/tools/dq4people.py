@@ -310,7 +310,7 @@ LENT_LINES = {PROLOGUE: (5, 6), **{g: (7,) for g in range(0x36, 0x3C)}}
 HOOK_SITES = ('1F:CF45', '03:D202')
 LOAD_SET = bytes.fromhex('bf d0 86 25')                  # LDA $2586D0,X
 MAP_GROUP = 0x7E00BC
-DQ4_GROUPS = frozenset(range(0x36, 0x48))            # dq4groupbuild 가 만드는 DQ4 맵 그룹
+DQ4_GROUPS = frozenset(range(0x36, 0x49))            # dq4groupbuild 가 만드는 DQ4 맵 그룹
 FIRST_GROUPS = frozenset(range(0x36, 0x46))          # 첫 차례 인물(서장·1·2장)의 줄과 칸을 정한 때의 그룹
 # 원래 자리에 들어가지 않는 타일 자료를 나눠 담는 곳(뱅크 3F 이하여야 레코드가 가리킴). 곡 롬의 0 끝 줄 안. 3F 는 앞쪽을
 # 인물 목록(dq4chapter1.NPC_BANK, 인라인 스크립트 포함)이 쓰므로 그 끝과 겹치지 않게 띄운다

@@ -52,6 +52,9 @@ GOLD, SPECIAL = 0x100, 0xD000
 OPEN_BITS = range(0x2210, 0x2250)
 CHEST_BITS = range(0x2210, 0x222C)
 DRAWER_BITS = 0x222C
+# FC 가 그리지만 걸어서 닿을 칸이 옆에 없는 상자 (DQ5 맵, FC X, Y): 그 이유. 같은 상자(같은 FC 열림 번호)는 다른 맵에서 연다.
+UNREACHABLE = {("48/03", 3, 8): "은의 여신상 동굴 40/01: 단추가 여는 방 안(같은 상자를 40/02 에서 염)",
+               ("48/06", 36, 19): "은의 여신상 동굴 40/04: 벽 사이(같은 상자를 40/03 (7,16) 에서 염)"}
 
 
 def fc_maps(prg):
@@ -122,7 +125,7 @@ def main():
     state = dq4freshstate.resolve(args.state, mesence, rom, out / "start")
     sources = fc_maps(ines.prg(args.dq4.read_bytes()))
     place = json.loads((args.build / "chests.json").read_text(encoding="utf-8"))
-    jobs = []
+    jobs, skipped = [], {}
     only = set(args.maps.split(",")) if args.maps else None
     for row in place["maps"]:
         if only and row["map"] not in only:
@@ -132,15 +135,18 @@ def main():
             for e in row.get(kind, []):
                 x, y = e["x"] // 2, e["y"] // 2
                 message = CHEST_MESSAGE if kind == "chests" else DRAWER_MESSAGE[block_prop(source, source.cell(x, y) & 31)]
-                (hx, hy), facing = stand(source, x, y)
                 name = f"{kind}-{row['map'].replace('/', '')}-{e['x']}-{e['y']}"
+                if (row["map"], x, y) in UNREACHABLE:
+                    skipped[name] = UNREACHABLE[row["map"], x, y]
+                    continue
+                (hx, hy), facing = stand(source, x, y)
                 drawer = (e["flag_index"], e["mask"]) if kind == "furniture" else None
                 jobs.append((name, f"{row['map']},{hx},{hy}", facing, e["reward"], message, drawer))
     with ThreadPoolExecutor(args.jobs) as pool:
         results = dict(zip((j[0] for j in jobs),
                            pool.map(lambda j: run_entry(mesence, rom, state, out, args.set, *j), jobs)))
     failed = {k: v for k, v in results.items() if not v["passed"]}
-    report = {"status": "failed" if failed else "passed", "entries": len(results), "failed": failed}
+    report = {"status": "failed" if failed else "passed", "entries": len(results), "failed": failed, "skipped": skipped}
     (out / "results.json").write_text(json.dumps(results, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False))
     raise SystemExit(1 if failed else 0)
