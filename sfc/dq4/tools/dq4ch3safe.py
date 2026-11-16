@@ -215,6 +215,17 @@ def hooks(ctx):
             (boulder.AREA_SITE, boulder.AREA_ORIG, boulder.area_hook(at)), (RAFT_CODE[0], bytes(len(raft)), raft)]
 
 
+
+def absent(ctx):
+    """{(맵, DQ5 셀 x, y, 밤)}: 말 걸기 검사가 건너뛸 탈 수 있는 배. 배 칸은 주인공이 걸어 들어가 타는 칸이라(FC 와 같음)
+    말을 걸려고 다가서면 탄다. 배를 보고 말 걸면 DQ5 의 「아무도 없다」(129)가 뜬다(FC 는 같은 뜻의 CD7)."""
+    out = set()
+    for k, (_, start) in raft.MAPS.items():
+        if start:
+            out |= {(f'{raft.GROUP:02X}/{k:02X}', 2 * start[0], 2 * start[1] + 1, night) for night in (False, True)}
+    return out
+
+
 @functools.cache
 def raft_natives():
     """여신상 동굴 배 네이티브([(이름, 바이트)], {이름: 주소}). RAFT_CODE 에 hooks 로 둔다(빈 자리 확인). 물 표는 FC 롬에서

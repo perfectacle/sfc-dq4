@@ -8,10 +8,12 @@ FC: 겉모습 22 이고 $70E0 아래 비트 1 인 인물이 배다. 배 인물 �
 실측은 fc/dq4/docs/dq4-chapter3-format.md 사건 16.
 
 SFC: DQ5 실내 이동 판정은 셀 +1 의 층 비트와 주인공 층 마스크(7E:31A0)의 AND 다(00:AC4D). 이 동굴 맵들의 셀 +1 은
-08·01·11 뿐이라 bit1(층 2)을 물 표시로 쓴다. 맵에 들면 주인공 마스크를 03 으로 두고, 내린 동안은 배가 선 FC 칸의 셀에만
-bit1 을 켜 배 칸 밖의 물로는 못 들어가게 한다. 배 칸에 들어서면(주인공 셀에 bit1) 그 맵 FC 물 칸 전부에 켜고, 땅에
-내리면 다 끈 뒤 배 칸에만 다시 켠다. 탄 동안 배 인물을 주인공 셀로 옮긴다(차지 비트 없음). 부리는 인물이 맵에 들 때
-reset, 그 뒤 명령 05 로 ctl 을 되풀이한다(8프레임마다).
+08·01·11 뿐이다. 내린 동안은 배가 선 FC 칸의 셀에만 bit0(층 1)을 켜 주인공(마스크 01)이 그 칸에만 들게 한다. 배 칸에
+들어서면 주인공 마스크를 03 으로 바꾸고 그 맵 FC 물 칸 전부에 bit1(층 2)을 켠다. 인물(마스크 01)은 bit1 칸에 들지
+못해 탄 동안에도 물로 오지 않는다. 땅(bit1 없는 칸)에 서면 마스크를 01 로 되돌리고 bit1 을 다 끈 뒤 배 칸에 bit0 을
+켠다. 마스크가 03 인 동안은 말 걸기가 같은 층 인물을 찾지 못하므로(실측: 129) 내린 동안은 늘 01 이다. 마스크를 바꿀
+때는 주인공 차지 비트를 지웠다가 다시 켠다(옛 마스크 비트가 칸에 남으면 다음에 그 칸이 막힘). 탄 동안 배 인물을 주인공
+셀로 옮긴다(차지 비트 없음). 부리는 인물이 맵에 들 때 reset, 그 뒤 명령 05 로 ctl 을 되풀이한다(8프레임마다).
 """
 from dq4chapterbox import ENTER, LEAVE
 
@@ -23,11 +25,13 @@ ISLAND = (0x0E, (0x0E, 0x09))         # 40/04: 주인공 X 0E 로 들면 배를 
 # 40/03 에는 탄 채 넘어올 때만 (02,1A)의 배를 쓴다(FC $70E0 = 82 로 걸어서는 타지 못하는 배)
 CROSS = {'map': 0x02, 'x': 0x18, 'rows': (0x0E, 0x0F), 'to': 0x05, 'to_x': 0x07, 'dy': 0x10, 'raft': (0x02, 0x1A)}
 CELL_AT = 0x25FA15
-CLEAR_CELLS = 0x00DEB5
+CLEAR_CELLS = 0x00DEB5                 # Y = 슬롯: 지금 자리의 셀 차지 비트를 지움
+SET_CELLS = 0x00DF37                   # Y = 슬롯: 켬
 SLOT_X, SLOT_X2, SLOT_Y, SLOT_Y2, SLOT_GFX = 0x7E3020, 0x7E30E0, 0x7E3080, 0x7E3140, 0x7E3220
 HERO_MASK = 0x7E31A0
 SLOTS = 0x20                           # 인물 표 한 칸의 슬롯 수(dq5npclists.SLOT_END)
-WATER_BIT = 0x02
+WATER_BIT = 0x02                       # 탄 동안 물 칸(층 2)
+RAFT_BIT = 0x01                        # 내린 동안 배 칸(층 1)
 # 변수(var_at 부터): 배 FC X·Y, 배 인물 슬롯(FF 없음)
 RX, RY, RS = range(3)
 
@@ -77,13 +81,13 @@ class Code:
         return 0x7E2190 + f[0]
 
     def cellbits(self):
-        """JSR 로 부름(M8·X8): DP $08 = FC X, $09 = FC Y, $0A = 0 이면 끄고 아니면 켬. 그 칸의 셀 2×2 의 +1 bit1."""
+        """JSR 로 부름(M8·X8): DP $08 = FC X, $09 = FC Y, $0F = 비트, $0A = 0 이면 끄고 아니면 켬. 그 칸의 셀 2×2 의 +1."""
         from dq4ch2endor import BEQ
         a = _asm()
         for dy in (0, 1):
             for dx in (0, 1):
                 a(0xA5, 0x08, 0x0A, 0x18, 0x69, dx, 0xAA, 0xA5, 0x09, 0x0A, 0x18, 0x69, dy, 0xA8, 0x22, _al(CELL_AT))
-                a(0xA0, 0x01, 0xB7, 0x00, 0x29, ~WATER_BIT & 0xFF, 0xA6, 0x0A).br(BEQ, f'w{dy}{dx}')(0x09, WATER_BIT)
+                a(0xE2, 0x30, 0xA0, 0x01, 0xA5, 0x0F, 0x49, 0xFF, 0x37, 0x00, 0xA6, 0x0A).br(BEQ, f'w{dy}{dx}')(0x05, 0x0F)
                 a.label(f'w{dy}{dx}')(0x97, 0x00)
         a(0x60)
         return a
@@ -118,16 +122,22 @@ class Code:
         a(0xAF, _al(self.v(RY)), 0x0A, 0x1A, 0x9F, _al(SLOT_Y), 0x9F, _al(SLOT_Y2))
         a.label(label)
 
-    def raft_cell(self, a, on):
-        """M8·X8: 배 칸(RX, RY)의 셀 bit1 을 켜거나 끔(배가 없으면 아무것도)."""
+    def raft_cell(self, a, on, label):
+        """M8·X8: 배 칸(RX, RY)의 셀 bit0 을 켜거나 끔(배가 없으면 아무것도)."""
         from dq4ch2endor import BEQ
-        a(0xAF, _al(self.v(RS)), 0xC9, 0xFF).br(BEQ, f'rc{on}')
+        a(0xAF, _al(self.v(RS)), 0xC9, 0xFF).br(BEQ, label)
         a(0xAF, _al(self.v(RX)), 0x85, 0x08, 0xAF, _al(self.v(RY)), 0x85, 0x09, 0xA9, int(on), 0x85, 0x0A)
-        a(0x20, *(self.at.get('cellbits', 0) & 0xFFFF).to_bytes(2, 'little')).label(f'rc{on}')
+        a(0xA9, RAFT_BIT, 0x85, 0x0F)
+        a(0x20, *(self.at.get('cellbits', 0) & 0xFFFF).to_bytes(2, 'little')).label(label)
 
     def all_cells(self, a, on):
         """M8: 지금 맵 물 칸 모두의 bit1 을 켜거나 끔."""
-        a(0xA9, int(on), 0x85, 0x0A, 0x20, *(self.at.get('mark_all', 0) & 0xFFFF).to_bytes(2, 'little'))
+        a(0xA9, WATER_BIT, 0x85, 0x0F, 0xA9, int(on), 0x85, 0x0A, 0x20, *(self.at.get('mark_all', 0) & 0xFFFF).to_bytes(2, 'little'))
+
+    def set_mask(self, a, mask):
+        """M8·X8: 주인공 층 마스크를 바꾼다. 옛 마스크로 켠 차지 비트를 지우고 새 마스크로 다시 켠다."""
+        a(0xA0, 0x00, 0x22, _al(CLEAR_CELLS), 0xE2, 0x30, 0xA9, mask, 0x8F, _al(HERO_MASK))
+        a(0xA0, 0x00, 0x22, _al(SET_CELLS), 0xE2, 0x30)
 
     def riding_test(self, a, branch, label):
         from dq4ch2endor import lda
@@ -197,7 +207,6 @@ def natives(code, base, tbls):
         # reset(명령 37): 마스크 03, 탄 채 40/03 에 들었으면 이어 타고, 아니면 맵별 배 처음 자리
         a = _asm()(ENTER, DP_SAVE)
         _in_map(a, 'r_out')
-        a(0xA9, 0x03, 0x8F, _al(HERO_MASK))
         code.hero_fc(a)
         code.riding_test(a, BNE, 'r_rid')
         a.brl('r_walk')
@@ -211,6 +220,7 @@ def natives(code, base, tbls):
         a(lda(code.v(RS)), 0xC9, 0xFF).br(BEQ, 'r_fa')(0xAA, 0x9B, 0x22, _al(CLEAR_CELLS)).label('r_fa')
         a(0xA5, 0x0C, sta(code.v(RX)), 0xA5, 0x0D, sta(code.v(RY)))
         code.move_raft(a, 'mv1')
+        code.set_mask(a, 0x03)
         code.all_cells(a, True)
         a.brl('r_out')
         a.label('r_walk')
@@ -239,7 +249,7 @@ def natives(code, base, tbls):
         a.brl('r_out')
         a.label('r_place')(lda(code.v(RS)), 0xC9, 0xFF).br(BEQ, 'r_out2')(0xAA, 0x9B, 0x22, _al(CLEAR_CELLS))
         code.move_raft(a, 'mv2')
-        code.raft_cell(a, True)
+        code.raft_cell(a, True, 'rc_r')
         a.label('r_out2')
         a.label('r_out')(DP_RESTORE)
         put('reset', a.bytes() + LEAVE)
@@ -247,20 +257,23 @@ def natives(code, base, tbls):
         a = _asm()(ENTER, DP_SAVE)
         _in_map(a, 'c_out')
         code.hero_fc(a)
-        # 주인공 셀(X, Y)의 +1 bit1 = 물 표시가 켜진 칸
-        a(0xAF, _al(SLOT_X), 0x29, 0x7F, 0xAA, 0xAF, _al(SLOT_Y), 0x29, 0x7F, 0xA8, 0x22, _al(CELL_AT))
-        a(0xA0, 0x01, 0xB7, 0x00, 0x29, WATER_BIT, 0x85, 0x0E)
         code.riding_test(a, BNE, 'c_ride')
-        # 내린 채: 물 표시 칸(= 배 칸)에 들어섰으면 탐
-        a(0xA5, 0x0E).br(BEQ, 'c_out1')
+        # 내린 채: 배 칸(RX, RY)에 들어섰으면 탐
+        a(lda(code.v(RS)), 0xC9, 0xFF).br(BEQ, 'c_out1')
+        a(lda(code.v(RX)), 0xC5, 0x0C).br(BNE, 'c_out1')(lda(code.v(RY)), 0xC5, 0x0D).br(BNE, 'c_out1')
         code.set_riding(a, True)
+        code.raft_cell(a, False, 'rc_b')
+        code.set_mask(a, 0x03)
         code.all_cells(a, True)
         a.label('c_out1').brl('c_out')
-        a.label('c_ride')(0xA5, 0x0E).br(BNE, 'c_water')
-        # 땅: 내림. 물 표시를 다 끄고 배 칸만 다시 켬
+        # 탄 채: 주인공 셀(X, Y)의 +1 bit1 이 없으면 땅
+        a.label('c_ride')(0xAF, _al(SLOT_X), 0x29, 0x7F, 0xAA, 0xAF, _al(SLOT_Y), 0x29, 0x7F, 0xA8, 0x22, _al(CELL_AT))
+        a(0xE2, 0x30, 0xA0, 0x01, 0xB7, 0x00, 0x29, WATER_BIT).br(BNE, 'c_water')
+        # 땅: 내림. 마스크 01, 물 표시를 다 끄고 배 칸에 bit0
         code.set_riding(a, False)
+        code.set_mask(a, 0x01)
         code.all_cells(a, False)
-        code.raft_cell(a, True)
+        code.raft_cell(a, True, 'rc_l')
         a.brl('c_out')
         a.label('c_water')(0xA5, 0x0C, sta(code.v(RX)), 0xA5, 0x0D, sta(code.v(RY)))
         code.move_raft(a, 'mv3')

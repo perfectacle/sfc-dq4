@@ -73,6 +73,7 @@ class NativeTest(unittest.TestCase):
             rom[lorom(cls.at[name]):lorom(cls.at[name]) + len(code)] = code
         rom[lorom(raft.CELL_AT)] = 0x6B
         rom[lorom(raft.CLEAR_CELLS)] = 0x6B
+        rom[lorom(raft.SET_CELLS)] = 0x6B
         cls.rom = bytes(rom)
         prg = _prg()
         cls.water = {k: {(x, y) for y, x0, x1 in raft.water_runs(prg, fc) for x in range(x0, x1 + 1)}
@@ -117,9 +118,13 @@ class NativeTest(unittest.TestCase):
         return c.wram, crossed
 
     @staticmethod
-    def marked(w):
-        """bit1 이 켜진 FC 칸(FC 칸 (x, y)는 셀 (2x~2x+1, 2y~2y+1))."""
-        return {(x // 2, y // 2) for y in range(0x80) for x in range(0x80) if w[cell_plus1(x, y)] & raft.WATER_BIT}
+    def marked(w, bit=raft.WATER_BIT):
+        """셀 +1 에 bit 가 켜진 FC 칸(FC 칸 (x, y)는 셀 (2x~2x+1, 2y~2y+1))."""
+        return {(x // 2, y // 2) for y in range(0x80) for x in range(0x80) if w[cell_plus1(x, y)] & bit}
+
+    @staticmethod
+    def mask(w):
+        return w[raft.HERO_MASK & 0xFFFF]
 
     def var(self, w, k):
         return w[(safe.RAFT_VARS + k) & 0xFFFF]
@@ -129,30 +134,32 @@ class NativeTest(unittest.TestCase):
 
     def test_reset_marks_only_the_raft_cell(self):
         w, _ = self.call(self.wram(0x02, (0x22, 0x09), (0x2C, 0x0B)), 'reset')
-        self.assertEqual(w[raft.HERO_MASK & 0xFFFF], 0x03)
+        self.assertEqual(self.mask(w), 0x00)          # 내린 채 들면 엔진이 둔 마스크(01)를 바꾸지 않는다
         self.assertEqual((self.var(w, raft.RX), self.var(w, raft.RY), self.var(w, raft.RS)), (0x16, 0x05, RAFT_SLOT))
-        self.assertEqual(self.marked(w), {(0x16, 0x05)})
+        self.assertEqual(self.marked(w, raft.RAFT_BIT), {(0x16, 0x05)})
+        self.assertEqual(self.marked(w), set())
 
     def test_reset_after_the_button_removes_the_raft(self):
         w, _ = self.call(self.wram(0x02, (0x22, 0x09), (0x2C, 0x0B), button=True), 'reset')
         self.assertEqual(self.var(w, raft.RS), 0xFF)
         self.assertEqual(w[(raft.SLOT_X & 0xFFFF) + RAFT_SLOT], 0x80)
-        self.assertEqual(self.marked(w), set())
+        self.assertEqual(self.marked(w, raft.RAFT_BIT | raft.WATER_BIT), set())
 
     def test_reset_clears_riding_left_over_from_another_map(self):
         w, _ = self.call(self.wram(0x06, (0x3C, 0x39), (0x3A, 0x37), riding=True), 'reset')
         self.assertFalse(self.riding(w))
-        self.assertEqual(self.marked(w), {(0x1D, 0x1B)})
+        self.assertEqual(self.marked(w, raft.RAFT_BIT), {(0x1D, 0x1B)})
 
     def test_island_stairs_put_the_raft_beside_the_island(self):
         w, _ = self.call(self.wram(0x06, (2 * raft.ISLAND[0], 0x0D), (0x3A, 0x37)), 'reset')
         self.assertEqual((self.var(w, raft.RX), self.var(w, raft.RY)), raft.ISLAND[1])
-        self.assertEqual(self.marked(w), {raft.ISLAND[1]})
+        self.assertEqual(self.marked(w, raft.RAFT_BIT), {raft.ISLAND[1]})
 
     def test_riding_across_keeps_riding_on_the_lower_floor(self):
         w, _ = self.call(self.wram(0x05, (0x0E, 0x3F), (0x04, 0x35), riding=True), 'reset')
         self.assertTrue(self.riding(w))
         self.assertEqual((self.var(w, raft.RX), self.var(w, raft.RY)), (0x07, 0x1F))
+        self.assertEqual(self.mask(w), 0x03)
         self.assertEqual(self.marked(w), self.water[0x05])
 
     def test_walking_into_the_raft_boards_and_marks_all_water(self):
@@ -160,7 +167,9 @@ class NativeTest(unittest.TestCase):
         w[raft.SLOT_X & 0xFFFF], w[raft.SLOT_Y & 0xFFFF] = 0x2C, 0x0B
         w, _ = self.call(w, 'ctl')
         self.assertTrue(self.riding(w))
+        self.assertEqual(self.mask(w), 0x03)
         self.assertEqual(self.marked(w), self.water[0x02])
+        self.assertEqual(self.marked(w, raft.RAFT_BIT), set())
 
     def test_raft_follows_and_stays_where_the_hero_lands(self):
         w, _ = self.call(self.wram(0x02, (0x2C, 0x0B), (0x2C, 0x0B)), 'reset')
@@ -171,7 +180,9 @@ class NativeTest(unittest.TestCase):
         w[raft.SLOT_X & 0xFFFF] = 0x2A
         w, _ = self.call(w, 'ctl')
         self.assertFalse(self.riding(w))
-        self.assertEqual(self.marked(w), {(0x17, 0x05)})
+        self.assertEqual(self.mask(w), 0x01)
+        self.assertEqual(self.marked(w), set())
+        self.assertEqual(self.marked(w, raft.RAFT_BIT), {(0x17, 0x05)})
 
     def test_lake_end_starts_the_crossing(self):
         for row in raft.CROSS['rows']:
