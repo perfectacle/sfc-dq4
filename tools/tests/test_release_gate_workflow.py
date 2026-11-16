@@ -126,6 +126,13 @@ def needs_of(text):
     return out
 
 
+def runners(text, job):
+    """잡이 띄우는 러너 수: 행렬 include 항목 수, 행렬이 없으면 1."""
+    block = re.search(rf'^  {re.escape(job)}:\n((?:    .*\n|\n)*)', '\n'.join(top_block(text, 'jobs')) + '\n', re.M)
+    include = re.search(r'^      matrix:\n        include:\n((?:          .*\n)*)', block[1], re.M) if block else None
+    return len(re.findall(r'^          - ', include[1], re.M)) if include else 1
+
+
 def beside_shards(text):
     """조각 행렬과 함께 돌 수 있는 잡: 조각이 (거쳐서라도) 기다리지 않고, 조각을 기다리지도 않는 잡."""
     needs = needs_of(text)
@@ -364,7 +371,7 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
     def test_cold_build_runs_with_every_cache_off_beside_the_shards(self):
         cold = self.jobs['cold-build']
         text = ''.join(cold)
-        self.assertRegex(self.text, r"\n  cold-build:\n    needs: build\n    if: inputs.mode == 'release'\n")
+        self.assertRegex(self.text, r"\n  cold-build:\n    name: [^\n]+\n    needs: build\n    if: inputs.mode == 'release'\n")
         for banned in ('./.github/actions/ci-tools', './.github/actions/enc-cache', './.github/actions/ship-cache',
                        'actions/cache', 'DQ4_PREBUILT', 'ci_cache.py ship-build', 'ci_cache.py prebuilt'):
             self.assertNotIn(banned, text, banned)
@@ -374,14 +381,17 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         build = next(s for s in cold if 'dq4build.py' in run_texts(s))
         for line in ("DQ4_BUILD_CACHE: 'off'", "DQ4_SOUND_CACHE: 'off'", "DQ4_READSET: 'off'"):
             self.assertIn(line, build)
-        self.assertIn('dq4build.py --out work/cold/ch1 >', run_texts(build))
-        self.assertIn('DQ4_NATIVE=off uv run --frozen python sfc/dq4/tools/dq4build.py --out work/cold/ch2 --chapter2',
+        self.assertIn('uv run --frozen python sfc/dq4/tools/dq4build.py --out "work/cold/$VARIANT" "${args[@]}"',
                       run_texts(build))
+        self.assertIn('if [ -n "$NATIVE" ]; then export DQ4_NATIVE="$NATIVE"; fi', run_texts(build))
         keys = next(s for s in cold if 'dq4buildkeys.py' in run_texts(s))
         self.assertIn('dq4buildkeys.py --chapter2', run_texts(keys))
         self.assertIn('--kind cold', text)
-        # 무캐시 빌드의 변형(work/cold/ch1·ch2) = rom 행렬의 변형
-        self.assertEqual(re.findall(r'^\s+- variant: (\S+)$', self.text, re.M), ['ch1', 'ch2'])
+        # 무캐시 빌드의 변형 = rom 행렬의 변형(같은 인자), 그 가운데 하나는 파이썬 경로
+        rom = '\n'.join(top_block(self.text, 'jobs'))
+        matrices = re.findall(r'- variant: (\S+)\n\s+args: (\S*)\n(?:\s+native: (\S*)\n)?', rom)
+        self.assertEqual(matrices, [('ch1', "''", ''), ('ch2', '--chapter2', ''),
+                                    ('ch1', "''", "''"), ('ch2', '--chapter2', "'off'")])
 
     def test_build_verify_and_report_fail_on_other_bytes(self):
         self.assertRegex(self.text, r'\n  build-verify:\n    needs: \[build, rom, cold-build\]\n')
@@ -435,8 +445,8 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         있는 잡(조각이 기다리는 잡도, 조각을 기다리는 잡도 아닌 것) 수 이상이어야 한다."""
         self.assertIn('  JOB_LIMIT: 20\n', self.text)
         fixed = int(re.search(r'^  FIXED_JOBS: (\d+)$', self.text, re.M)[1])
-        self.assertGreaterEqual(fixed, len(beside_shards(self.text)),
-                                f'조각과 함께 돌 수 있는 잡 {sorted(beside_shards(self.text))}')
+        beside = sum(runners(self.text, j) for j in beside_shards(self.text))
+        self.assertGreaterEqual(fixed, beside, f'조각과 함께 돌 수 있는 잡 {sorted(beside_shards(self.text))}: 러너 {beside}')
         self.assertEqual(self.text.count('inputs.shards'), 1, '입력 조각 수는 Plan shards 만 읽는다')
         shard = ''.join(self.jobs['shard'])
         self.assertNotIn('inputs.shards', shard)
@@ -451,6 +461,8 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
 
     def test_jobs_beside_the_shards_are_the_release_build_check(self):
         self.assertEqual(beside_shards(self.text), {'cold-build', 'build-verify'})
+        self.assertEqual((runners(self.text, 'cold-build'), runners(self.text, 'rom'), runners(self.text, 'report')),
+                         (2, 2, 1))
         self.assertEqual(needs_of(self.text)['shard'], {'build', 'rom'})
 
     def test_mesence_unpacks_its_libraries_before_guards(self):
