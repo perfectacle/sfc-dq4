@@ -5,6 +5,8 @@
           가 있으면 그 파일을 쓴다(코어 바이너리는 저장소에 두지 않음).
           --chapter2 는 dq4build.py --chapter2 롬으로 서장 → 1장 왕 보고 → 2장 첫머리(dq4ch2walkcheck 머리)를 이어 걷고,
           그 끝 상태(2장 출발 상태)에서 2장 구간 묶음(dq4ch2walkcheck.units)을 따로 걷는다(--jobs 2 이상).
+          --chapter3 은 dq4build.py --chapter3 롬으로 2장 출발 상태까지 같이 걷고, 3장 머리(dq4ch3walkcheck.head_segments:
+          빈 성 → 2장 끝 → 3장 첫머리)를 이어 3장 출발 상태를 만든 뒤 3장 구간 묶음(dq4ch3walkcheck.units)을 따로 걷는다.
   probe : MesenCE 1장 걷기 검사에 lua/dq4openbus.lua 를 붙여, 뱅크 40~7D 아래 절반(열린 버스·롬 거울) 접근과
           뱅크 40 이상 코드가 부른 BRK 를 기록한다. SRAM(뱅크 70~7D)을 낮은 뱅크 코드가 쓰는 것 말고 접근이 있거나,
           dq4brkscan.ALLOWED 밖의 BRK 가 불리면 실패. MESENCE·LIBDIR 필요.
@@ -179,18 +181,44 @@ def chapter2_groups():
             [[i + cw.KING_INDEX for i in u] for u in cw.units()])
 
 
+def chapter3_parts():
+    """3장 길의 구간 표와 묶음: (구간 표, 묶음들, 2장 사건 구간 자리, 3장 사건 구간 자리). 표는 1장 표의 왕 보고 앞까지에
+    3장 머리 구간 표(2장 표의 빈 성 계단까지 + 3장 첫머리)와 3장 사건 구간을 잇는다. 묶음은 서장, 2장 머리, 3장 머리,
+    3장 사건 묶음들이다. 3장 검사 모듈은 2장 flag 표에 3장 것을 더하므로(dq4ch3opencheck) 3장 길에서만 불러온다."""
+    import dq4ch3walkcheck as tw
+    head, unit = tw.head_segments()
+    k = cw.KING_INDEX
+    segs = wc.SEGMENTS[:k] + head + tw.SEGMENTS
+    ch3_at = k + len(head)
+    groups = ([[0], list(range(k, k + cw.HEAD)), [k + i for i in unit]] +
+              [[ch3_at + i for i in u] for u in tw.units()])
+    return segs, groups, k + cw.HEAD, ch3_at
+
+
 class Walker:
     """한 코어에서 구간을 차례로 걷는다."""
 
-    def __init__(self, core_path, rom_in, out, seed=0, chapter2=False):
-        self.out, self.seed, self.chapter2 = out, seed, chapter2
-        # 걷는 구간 표. 2장은 1장 표의 왕 보고 앞까지에 2장 표(머리 + 사건 구간)를 잇는다
-        self.segs = wc.SEGMENTS[:cw.KING_INDEX] + cw.SEGMENTS if chapter2 else wc.SEGMENTS
-        self.flags = cw.FLAGS if chapter2 else wc.FLAGS
-        # 2장 사건 구간이 시작하는 자리(그 앞 묶음은 서장 끝 상태, 뒤 묶음은 2장 출발 상태에서 시작)
-        self.ch2_at = cw.KING_INDEX + cw.HEAD if chapter2 else None
-        # 걷는 구간 수: 2장 길은 서장 뒤 1장 구간을 걷지 않고 왕 보고부터 잇는다
-        self.expected = 1 + len(cw.SEGMENTS) if chapter2 else len(wc.SEGMENTS)
+    def __init__(self, core_path, rom_in, out, seed=0, chapter=1):
+        self.out, self.seed, self.chapter = out, seed, chapter
+        # 3장 사건 구간이 시작하는 자리(그 뒤 묶음은 3장 출발 상태에서 시작). 3장 길이 아니면 None
+        self.ch3_at = None
+        if chapter == 3:
+            import dq4ch3walkcheck as tw
+            self.segs, self.groups, self.ch2_at, self.ch3_at = chapter3_parts()
+            self.flags = tw.FLAGS
+            # 서장 + 2장 머리 + 3장 머리 + 3장 사건 구간
+            self.expected = sum(len(u) for u in self.groups)
+        elif chapter == 2:
+            # 걷는 구간 표. 2장은 1장 표의 왕 보고 앞까지에 2장 표(머리 + 사건 구간)를 잇는다
+            self.segs, self.groups = wc.SEGMENTS[:cw.KING_INDEX] + cw.SEGMENTS, chapter2_groups()
+            self.flags = cw.FLAGS
+            # 2장 사건 구간이 시작하는 자리(그 앞 묶음은 서장 끝 상태, 뒤 묶음은 2장 출발 상태에서 시작)
+            self.ch2_at = cw.KING_INDEX + cw.HEAD
+            # 걷는 구간 수: 2장 길은 서장 뒤 1장 구간을 걷지 않고 왕 보고부터 잇는다
+            self.expected = 1 + len(cw.SEGMENTS)
+        else:
+            self.segs, self.groups, self.flags = wc.SEGMENTS, wc.units(wc.SEGMENTS), wc.FLAGS
+            self.ch2_at, self.expected = None, len(wc.SEGMENTS)
         data = bytearray(Path(rom_in).read_bytes())
         # 조우를 끄고 보스를 약하게(MesenCE 판은 보스 패치를 보스 구간에만 둠. 다른 구간에서 그 몬스터를 만나지 않음)
         for tok in (wc.NO_ENCOUNTERS + ';' + wc.boss_patch(bytes(data))).split(';'):
@@ -408,7 +436,7 @@ class Walker:
                 first, mates = (extra, party) if k == 0 else ('', '')
                 # 서장은 시드와 상관없이 시드 0(서장 끝 상태를 시드끼리 나눠 쓴다)
                 seed = 0 if i == 0 else self.seed
-                start = ';'.join(v for v in (wc.pins(opt, seed), first) if v)
+                start = ';'.join(v for v in (wc.pins(opt, seed), first, opt.get('set', '')) if v)
                 if how == 'warp':
                     maps = self.warp(arg, start, sets(wc.pins(opt, seed)), mates)
                 else:
@@ -416,7 +444,11 @@ class Walker:
                     apply_sets(self.c, start)
                     # 2장 사건 전투 구간만 그 몬스터를 덮는다(걷기 검사의 battle 선택과 같음)
                     if 'battle' in opt:
-                        self.rom_cheats = {'battle': [x for tok in cw.battle_patch(self.data, opt['battle']).split(';')
+                        battle = cw.battle_patch
+                        if self.ch3_at is not None and i >= self.ch3_at:
+                            import dq4ch3walkcheck as tw
+                            battle = tw.battle_patch
+                        self.rom_cheats = {'battle': [x for tok in battle(self.data, opt['battle']).split(';')
                                                       for x in rom_codes(int(tok.split('=')[0], 16),
                                                                          bytes.fromhex(tok.split('=')[1]))]}
                     maps = self.walk(arg, opt)
@@ -430,7 +462,10 @@ class Walker:
         return results
 
     def setup(self, first):
-        """first 구간 앞까지의 flag·기록(SET)과 동료. 2장 사건 구간은 2장 출발 상태 뒤의 구간만 센다."""
+        """first 구간 앞까지의 flag·기록(SET)과 동료. 2장(3장) 사건 구간은 2장(3장) 출발 상태 뒤의 구간만 센다."""
+        if self.ch3_at is not None and first >= self.ch3_at:
+            import dq4ch3walkcheck as tw
+            return wc.setup(self.segs[self.ch3_at:], first - self.ch3_at, self.flags, tw.effects(self.rom.read_bytes()))
         if self.ch2_at is not None and first >= self.ch2_at:
             return wc.setup(self.segs[self.ch2_at:], first - self.ch2_at, self.flags, cw.effects(self.rom.read_bytes()))
         return wc.setup(self.segs, first, self.flags)
@@ -441,6 +476,9 @@ class Walker:
         name, how, arg, _ = self.segs[indices[0]]
         here, hops = ((cw.ch2.THRONE, cw.HOPS) if self.ch2_at is not None and indices[0] >= self.ch2_at
                       else (wc.SEGMENTS[0][3]['map'], wc.HOPS))
+        if self.ch3_at is not None and indices[0] >= self.ch3_at:
+            import dq4ch3walkcheck as tw
+            here, hops = tw.ch3.HOUSE, tw.HOPS
         if how == 'warp' and arg.split(',')[0] == here:
             # 같은 맵 안의 순간이동은 도착을 알아보지 못하므로 이웃 맵을 거친다
             hop = hops[arg.split(',')[0]]
@@ -480,10 +518,10 @@ class Walker:
                 raise SystemExit('--jobs 1 은 시드 하나만')
             self.seed = seeds[0]
             self.boot()
-            if self.chapter2:
-                raise SystemExit('--chapter2 는 --jobs 2 이상(2장 사건 구간은 2장 출발 상태에서 묶음마다 시작)')
+            if self.chapter > 1:
+                raise SystemExit(f'--chapter{self.chapter} 는 --jobs 2 이상(사건 구간은 장 출발 상태에서 묶음마다 시작)')
             return self.finish({self.seed: self.segments(range(len(wc.SEGMENTS)))}, None, t0)
-        groups = chapter2_groups() if self.chapter2 else wc.units(wc.SEGMENTS)
+        groups = self.groups
         # 키: 롬 SHA-1(캐시 폴더) + 코어 SHA-256 + 서장 입력 상수(부팅 입력 START_AT·TAP_UNTIL 포함) + 검사 코드
         key = wc.fingerprint(Path(__file__), Path(dq4libretro.__file__), Path(wc.__file__), Path(pc.__file__),
                              Path(sys.modules[warp_exit.__module__].__file__),
@@ -504,14 +542,19 @@ class Walker:
             base.write_bytes(n.to_bytes(8, 'little') + raw)
             if cache:
                 cache.put(kind, key, '.state', base, pro)
-        if self.chapter2:
+        runs_head = []
+        if self.chapter > 1:
             base, head, cached = self.chapter2_base(base, groups[1], cache, kind, key)
             if any(r['status'] != 'passed' for r in head) or len(head) != len(groups[1]):
                 return self.finish({s: head for s in seeds}, pro, t0, 'off' if cache is None else 'miss')
             groups = [groups[0], *groups[2:]]
             runs_head = head
-        else:
-            runs_head = []
+        if self.chapter == 3:
+            base, head, cached = self.chapter3_base(base, groups[1], cache, kind, key)
+            runs_head = runs_head + head
+            if any(r['status'] != 'passed' for r in head) or len(head) != len(groups[1]):
+                return self.finish({s: runs_head for s in seeds}, pro, t0, 'off' if cache is None else 'miss')
+            groups = [groups[0], *groups[2:]]
         # 묶음 프로세스마다 코어가 자리를 잡는다. 이 코어는 그동안 쉬므로 자리를 내놓아야 자리가 적을 때 막히지 않는다
         self.c.close()
 
@@ -521,7 +564,7 @@ class Walker:
             dest.mkdir(parents=True, exist_ok=True)
             cmd = [sys.executable, __file__, '_unit', '--rom', str(rom), '--out', str(dest), '--core-path', str(core_path),
                    '--base', str(base), '--unit', ','.join(map(str, u)), '--seed', str(seed),
-                   *(['--chapter2'] if self.chapter2 else [])]
+                   *([f'--chapter{self.chapter}'] if self.chapter > 1 else [])]
             why = '묶음 프로세스가 결과를 남기지 않음'
             (dest / STARTED).unlink(missing_ok=True)
             with (dest / 'log.txt').open('w') as log:
@@ -538,6 +581,27 @@ class Walker:
                 runs[seed] += part
         return self.finish(runs, pro, t0, 'off' if cache is None else 'hit' if hit else 'miss')
 
+
+    def chapter3_base(self, chapter2_state, head, cache, kind, key):
+        """2장 출발 상태에서 3장 머리(빈 성 → 2장 끝 → 3장 첫머리)를 시드 0 으로 걸어 3장 출발 상태를 만든다. 2장
+        출발 상태와 같은 캐시에 3장 머리 구간 표를 더한 키로 둔다. (상태 경로, 머리 결과, 캐시 적중)"""
+        key3 = wc.fingerprint(key, repr(cw.SEGMENTS[:cw.HEAD]), repr([self.segs[i] for i in head])) if cache else None
+        hit = cache.get(f'{kind}-ch3', key3, '.state', self.out / 'chapter3.state') if cache else None
+        if hit:
+            return hit[0], [{**r, 'cached': True} for r in hit[1]['segments']], True
+        data = chapter2_state.read_bytes()
+        # 2장 출발 상태가 캐시에서 왔으면 코어는 아직 한 프레임도 돌지 않았다. chapter2_base 와 같이 한 프레임 돌린 뒤 불러온다
+        self.c.run(set())
+        self.c.load((data[8:], int.from_bytes(data[:8], 'little')))
+        self.seed = 0
+        results = self.unit(head)
+        base = self.out / 'chapter3.state'
+        if len(results) == len(head) and all(r['status'] == 'passed' for r in results):
+            raw, n = self.c.save()
+            base.write_bytes(n.to_bytes(8, 'little') + raw)
+            if cache:
+                cache.put(f'{kind}-ch3', key3, '.state', base, {'segments': results})
+        return base, results, False
 
     def chapter2_base(self, prologue_state, head, cache, kind, key):
         """서장 끝 상태에서 머리(1장 왕 보고 → 2장 첫머리)를 시드 0 으로 걸어 2장 출발 상태를 만든다. 서장과 같은
@@ -610,12 +674,12 @@ def probe(rom, out, jobs=6, seeds='0'):
             'records': len(lines)}
 
 
-def core_report(name, rom, out, jobs, seeds=(0,), state_cache=True, chapter2=False):
+def core_report(name, rom, out, jobs, seeds=(0,), state_cache=True, chapter=1):
     path = dq4cores.core_path(name)
     if not path.exists():
         raise SystemExit(f'{path} 가 없음: sfc/dq4/tools/dq4cores.py 로 빌드하거나 {CORES[name]} 로 코어 파일을 줌')
     cache = wc.StateCache(Path(rom).read_bytes()) if state_cache else None
-    report = Walker(path, rom, out, chapter2=chapter2).run(jobs, path, rom, seeds, cache, f'compat-{name}')
+    report = Walker(path, rom, out, chapter=chapter).run(jobs, path, rom, seeds, cache, f'compat-{name}')
     built = path == dq4cores.core_path(name, dq4cores.cores_dir()) and not os.environ.get(dq4cores.ENV[name])
     # 환경 변수로 다른 파일을 주면 빌드 기록은 그 파일의 것이 아니다
     return {**report, 'core_sha256': dq4cores.sha256(path), 'core_build': dq4cores.stamp(name) if built else None}
@@ -632,15 +696,19 @@ def main():
     ap.add_argument('--base', type=Path, help=argparse.SUPPRESS)
     ap.add_argument('--unit', help=argparse.SUPPRESS)
     ap.add_argument('--chapter2', action='store_true', help='walk: 2장 길(dq4build.py --chapter2 롬)')
+    ap.add_argument('--chapter3', action='store_true', help='walk: 3장 길(dq4build.py --chapter3 롬)')
     wc.add_seed_args(ap)
     args = ap.parse_args()
     seeds = wc.seeds_of(args)
+    if args.chapter2 and args.chapter3:
+        raise SystemExit('--chapter2 와 --chapter3 은 서로 다른 롬: 하나만')
+    chapter = 3 if args.chapter3 else 2 if args.chapter2 else 1
     out, rom = args.out.resolve(), args.rom.resolve()
     if args.mode in ('_core', '_unit'):
         die_with_parent(group=args.mode == '_core')
     if args.mode == '_unit':
         # 묶음 하나: 서장 끝 상태를 불러 걷고 unit.json 에 결과
-        w = Walker(args.core_path, rom, out, seeds[0], args.chapter2)
+        w = Walker(args.core_path, rom, out, seeds[0], chapter)
         data = args.base.read_bytes()
         w.c.run(set())
         w.c.load((data[8:], int.from_bytes(data[:8], 'little')))
@@ -648,7 +716,7 @@ def main():
         (out / 'unit.json').write_text(json.dumps(results, ensure_ascii=False))
         return 0
     if args.mode == '_core':
-        report = core_report(args.core, rom, out, args.jobs, seeds, not args.no_state_cache, args.chapter2)
+        report = core_report(args.core, rom, out, args.jobs, seeds, not args.no_state_cache, chapter)
         (out / 'core.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
         return 0 if report['status'] == 'passed' else 1
     if out.exists() and any(out.iterdir()):
@@ -673,7 +741,7 @@ def main():
                                                 '--out', str(out / name), '--jobs', str(args.jobs),
                                                 '--seeds', ','.join(map(str, seeds)),
                                                 *(['--no-state-cache'] if args.no_state_cache else []),
-                                                *(['--chapter2'] if args.chapter2 else [])],
+                                                *([f'--chapter{chapter}'] if chapter > 1 else [])],
                                                stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         report = {'rom_sha1': rom_sha, 'cores': {}}
         for name, proc in procs.items():
@@ -687,7 +755,8 @@ def main():
         report['status'] = 'passed' if all(r['status'] == 'passed' for r in report['cores'].values()) else 'failed'
     report['seconds'] = round(time.time() - t0, 1)
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
-    total = 1 + len(cw.SEGMENTS) if args.chapter2 else len(wc.SEGMENTS)
+    total = (sum(len(u) for u in chapter3_parts()[1]) if chapter == 3 else 1 + len(cw.SEGMENTS) if chapter == 2
+             else len(wc.SEGMENTS))
     summary = ({k: {r['seed']: f'{r["status"]} {sum(s["status"] == "passed" for s in r["segments"])}/{total}'
                     for r in v.get('seeds', [])} or v['status'] for k, v in report.get('cores', {}).items()}
                or {'problems': report.get('problems')})

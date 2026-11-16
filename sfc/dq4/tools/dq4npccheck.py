@@ -21,6 +21,8 @@ read the plain build's list addresses, which a chapter-1 ROM does not have.
 --chapter2 checks the chapter-2 groups (CHAPTER2_GROUPS) of a dq4build.py --chapter2 ROM with the chapter-2 flag on
 (as after the end of chapter 1): the people of those maps answer as dq4ch1event and dq4ch2event say, and --maps
 defaults to every map of those groups. Build the people folder with dq4chapter1.py build --chapter2 --keep DIR.
+--chapter3 does the same for the chapter-3 groups (CHAPTER3_GROUPS) of a dq4build.py --chapter3 ROM with the chapter-3
+flag on (people of dq4ch3event's start table answer as it says), the people folder from dq4chapter1.py build --chapter3.
 """
 
 import argparse
@@ -238,8 +240,13 @@ def staged(source, fc, person):
     return (*fc, x, y) in STAGED or (talk_cell(person) == (x, y) and not walkable(source, x, y))
 
 
-# 2장 시작 상태로 옮긴 FC 그룹(dq4groupbuild.LINKS 의 "chapter": 2)이 든 DQ5 그룹
-CHAPTER2_GROUPS = tuple(f"{g:02X}" for g, parts in LINKS.items() if any(p.get("chapter") == 2 for p in parts))
+def chapter_groups(n):
+    """n 장 시작 상태로 옮긴 FC 그룹(dq4groupbuild.LINKS 의 "chapter": n)이 든 DQ5 그룹."""
+    return tuple(f"{g:02X}" for g, parts in LINKS.items() if any(p.get("chapter") == n for p in parts))
+
+
+CHAPTER2_GROUPS = chapter_groups(2)
+CHAPTER3_GROUPS = chapter_groups(3)
 
 
 # 에뮬레이터를 띄우지 않고 결과만 적는 장면
@@ -278,16 +285,32 @@ def main():
                     help="the ROM is the chapter-1 build: people its events change answer as dq4ch1event says")
     ap.add_argument("--chapter2", action="store_true",
                     help="the ROM is the --chapter2 build: check the chapter-2 groups with the chapter-2 flag on")
+    ap.add_argument("--chapter3", action="store_true",
+                    help="the ROM is the --chapter3 build: check the chapter-3 groups with the chapter-3 flag on")
     ap.add_argument("--states", help="with --chapter2: later states (dq4ch2event.state_messages names, comma-separated). "
                     "Each sets its flags too and talks only to the people its table lists")
     args = ap.parse_args()
-    sets, lift = None, 0
-    if args.chapter2:
+    sets, lift, groups = None, 0, None
+    if args.chapter2 and args.chapter3:
+        raise SystemExit("--chapter2 and --chapter3 are two builds: give one")
+    if args.chapter2 or args.chapter3:
+        # The --chapter3 build is the --chapter2 one with the chapter-2 end going on, so its warps land as there
         lift = 1
-        import dq4ch2event
         args.chapter1 = True
-        index, mask = dq4ch2event.CHAPTER2
+        if args.chapter2:
+            import dq4ch2event
+            (index, mask), groups = dq4ch2event.CHAPTER2, CHAPTER2_GROUPS
+        else:
+            import dq4ch3event
+            (index, mask), groups = dq4ch3event.CHAPTER3, CHAPTER3_GROUPS
         sets = f"{0x2190 + index:04X}|{mask:02X}"
+        if args.chapter3:
+            # 3장 시작 표(dq4ch3event.start_messages)는 톨네코 처음 상태를 가정한다(네네는 도시락을 가졌으면 말이
+            # 다르다). 새 게임 상태의 주인공 물건 칸을 톨네코 처음 소지품으로 덮는다(빈 칸은 FF)
+            import dq4ch2event
+            items = [item for item, _ in dq4ch3event.start(TOOLS.parents[2] / "rom" / "dq5.sfc", args.dq4)["items"]]
+            at = (dq4ch2event.PARTY_AT + 0x16) & 0xFFFF
+            sets += "".join(f";{at + k:04X}={items[k] if k < len(items) else 0xFF:02X}" for k in range(12))
     mesence = Path(os.environ["MESENCE"])
     out = args.out.resolve()
     if out.exists() and any(out.iterdir()):
@@ -319,6 +342,15 @@ def main():
         import dq4ch2event
         events.update(dq4ch2event.start_messages(first + len(dq4ch1event.MESSAGES)))
         gone = dq4ch2event.absent()
+        if args.chapter3:
+            # 3장 메시지는 2장 메시지(사건 모듈 것까지) 바로 뒤(dq4chapter1.chapter3_message). 3장 사건이 말을 바꾼
+            # 인물은 dq4ch3event 의 시작 표(start_messages)와 없앤 인물(absent)로 본다
+            import dq4ch3event
+            third = first + len(dq4ch1event.MESSAGES) + dq4ch2event.message_count()
+            if hasattr(dq4ch3event, "start_messages"):
+                events.update(dq4ch3event.start_messages(third))
+            if hasattr(dq4ch3event, "absent"):
+                gone |= dq4ch3event.absent()
     states = {}
     if args.states:
         if not args.chapter2:
@@ -342,7 +374,7 @@ def main():
             continue
         if states and not any(k[0] == m for _, table in states.values() for k in table):
             continue
-        if args.chapter2 and not args.maps and not states and m[:2] not in CHAPTER2_GROUPS:
+        if groups and not args.maps and not states and m[:2] not in groups:
             continue
         group, number = int(m[:2], 16), int(m[3:], 16)
         fc = fc_map(prg, group, number)

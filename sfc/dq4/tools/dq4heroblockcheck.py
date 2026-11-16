@@ -14,6 +14,9 @@
   (--only 사례이름,… 은 그 사례만, --base 는 1단계 출발 상태를 다시 쓴다)
   --chapter2 는 2장 사건 사례(CHAPTER2_CASES)만 돈다. 롬은 dq4build.py --chapter2 의 것이고, 1단계 출발 상태는 성 마을
   대신 2장 걷기 검사의 2장 출발 상태(dq4ch2walkcheck.head, 2장 왕좌의 방, 주인공 기록이 아리나)다.
+  --chapter3 은 3장 사건 사례(chapter3_cases)만 돈다. 롬은 dq4build.py --chapter3 의 것이고, 출발 상태는 3장 걷기 검사의
+  3장 출발 상태(dq4ch3walkcheck.head, 톨네코 집 3E/01, 주인공 기록이 톨네코)다. 출발 상태와 같은 맵으로 가는 사례는
+  hop(먼저 들를 'GG/MM,x,y')을 단다.
   --seed N·--seeds 0,5,9 는 2·3단계 난수(dq4ch1walkcheck.rng_for)를 고른다. 1단계 출발 상태는 늘 시드 0 이고 롬
   SHA-1 별로 work/cache/states/prologue 에 두어 다시 만들지 않는다(--no-state-cache 로 끔). 여러 시드면 seed-N/ 아래에 사례 폴더.
 """
@@ -248,6 +251,25 @@ def king_cases(ch2):
     return out
 
 
+# 3장 톨네코 집(3E/01): 출발 상태가 그 맵이라 마을(3E/00) 왼쪽 가장자리를 거쳐 들어간다
+CH3_HOP = '3E/00,4,26'
+
+
+def chapter3_cases():
+    """3장 사건 사례. 출발 상태는 3장 톨네코 집(dq4ch3walkcheck.head). 사건 모듈이 주인공 칸으로 거는 사건을 더하면
+    그 사건을 걸 수 있는 칸마다 여기에 사례를 둔다(꼴은 chapter2_cases 와 같고, 같은 맵이면 hop)."""
+    import dq4ch3event as ch3
+    close = pc.CLOSE
+    nx, ny = ch3.NENE_CELL
+    # 네네(낮, 침대 머리 위 칸)에게 위 칸에서 아래로 말을 건다. 침대(시작 칸)는 FC 에서 막힌 블록이라 맵을 다시 불러온
+    # 뒤에는 설 수 없고, 순간이동으로 세우면 「その方向には誰もいない」(129)만 떴다. 순간이동은 TO 한 셀 아래에 내린다.
+    # 말이 끝나면 위 줄로 돌아 방 오른쪽으로 걸어 간다(오른쪽 칸은 침대). 말이 끝난 뒤 A 를 더 누르면 다시 말을 걸어
+    # 창이 남으므로 닫기만 누른다. distinct 1: 129 밖의 메시지가 하나
+    return {'nene-above': {'hop': CH3_HOP, 'warp': f'{ch3.HOUSE},{nx},{ny - 3}', 'set': '',
+                           'walk': f'{wc.talk("down", 12)};wait:120;{close};{close};{nx},{ny - 4}', 'free': f'{nx + 4},{ny - 4}',
+                           'want': [], 'map': ch3.HOUSE, 'distinct': 1, 'maxf': 2500}}
+
+
 def overlaps(text):
     """track.txt(lua/dq4heroblock.lua 의 TRACK)에서 두 인물이 겹쳐 보인 프레임 수와 처음 몇 프레임.
     인물은 16×16 점(2×2 셀)을 차지하므로 X·Y 점 차가 둘 다 16 보다 작으면 겹친다. 그리지 않는 슬롯은 빼고 일행과 인물
@@ -282,6 +304,15 @@ def run_case(mesence, rom, base, out, name, case, exit_at, seed=0):
     dest = out / name
     rng = wc.rng_for(seed)
     pins = f'{rng};{wc.DAY_SET}'
+    if case.get('hop'):
+        # dq5warp.lua 는 같은 맵 안의 순간이동이면 목적지 칸에 꼭 맞게 서야 도착으로 본다. 이웃 맵을 거친다
+        wc.run(mesence, rom, wc.WARP, dest / 'hop', {
+            'STATE': str(base), 'TO': case['hop'], 'SAVE': 'end.mss', 'SETTLE': '60', 'MAXF': '1500',
+            'WARPEXIT': f'{exit_at:X}', 'ANYWHERE': '1', 'ROMPATCH': wc.NO_ENCOUNTERS, 'SET': pins, 'LATESET': pins},
+            300, readset=True)
+        base = dest / 'hop' / 'end.mss'
+        if not base.exists() or not dq4readset.warp_finished(dest / 'hop'):
+            return {'name': name, 'seed': seed, 'status': 'failed', 'problems': [f"{case['hop']} 들르기 실패"]}
     wc.run(mesence, rom, wc.WARP, dest / 'warp', {
         'STATE': str(base), 'TO': case['warp'], 'SAVE': 'end.mss', 'SETTLE': '60', 'MAXF': '1500',
         'WARPEXIT': f'{exit_at:X}', 'ANYWHERE': '1', 'ROMPATCH': wc.NO_ENCOUNTERS,
@@ -399,8 +430,10 @@ def main():
     ap.add_argument('--out', required=True, type=Path)
     ap.add_argument('--jobs', type=int, default=6)
     ap.add_argument('--only', help='이 사례만(쉼표로 여럿, 앞부분이 같으면 모두: supper)')
-    ap.add_argument('--base', type=Path, help='같은 롬으로 만든 출발 상태(hub/end.mss, --chapter2 면 opening/end.mss)')
+    ap.add_argument('--base', type=Path, help='같은 롬으로 만든 출발 상태(hub/end.mss, --chapter2 면 opening/end.mss, '
+                    '--chapter3 이면 head/ch3_open/end.mss)')
     ap.add_argument('--chapter2', action='store_true', help='2장 사건 사례만(dq4build.py --chapter2 롬)')
+    ap.add_argument('--chapter3', action='store_true', help='3장 사건 사례만(dq4build.py --chapter3 롬)')
     wc.add_seed_args(ap)
     args = ap.parse_args()
     seeds = wc.seeds_of(args)
@@ -415,15 +448,20 @@ def main():
     cache = None if args.no_state_cache else wc.StateCache(rom.read_bytes())
     if args.base:
         base, cached = args.base.resolve(), None
-    elif args.chapter2:
+    elif args.chapter2 or args.chapter3:
+        if args.chapter2 and args.chapter3:
+            raise SystemExit('--chapter2 와 --chapter3 은 서로 다른 롬: 하나만')
         import dq4ch2walkcheck
-        base, head = dq4ch2walkcheck.head(mesence, rom, rom.read_bytes(), out, cache)
+        import dq4ch3walkcheck
+        walk = dq4ch2walkcheck if args.chapter2 else dq4ch3walkcheck
+        base, head = walk.head(mesence, rom, rom.read_bytes(), out, cache)
         if base is None:
-            raise SystemExit(f'2장 출발 상태를 만들지 못함: {[r["problems"] for r in head if r["status"] != "passed"]}')
+            raise SystemExit(f'{2 if args.chapter2 else 3}장 출발 상태를 만들지 못함: '
+                             f'{[r["problems"] for r in head if r["status"] != "passed"]}')
         cached = bool(head and head[0].get('cached'))
     else:
         base, cached = make_base(mesence, rom, out, cache)
-    todo = chapter2_cases() if args.chapter2 else cases()
+    todo = chapter2_cases() if args.chapter2 else chapter3_cases() if args.chapter3 else cases()
     if args.only:
         keys = args.only.split(',')
         todo = {k: v for k, v in todo.items() if any(k == p or k.startswith(p + '-') for p in keys)}

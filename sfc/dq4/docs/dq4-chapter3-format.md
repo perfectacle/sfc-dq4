@@ -206,3 +206,61 @@ FC 는 그날 일했으면(일삯을 받은 뒤) 도시락이 있어도 재우�
 - 사건 물건을 버리려 할 때의 동작(물건 표는 2장 사건 물건과 같음, 버리기는 재지 않음)과 FC おべんとう 를 썼을 때의 효과.
 - CI 의 `ch3` 출하 롬 행렬(롬 잡·cold-build·`dq4buildkeys.py --chapter3`·build-verify). 지금은 `dq4-ch3-open` 가드가 자기 빌드로 `--chapter3` 롬을 만듭니다.
 - 5장에서 맡긴 아리나 일행 기록을 되살리기.
+
+## 검사
+
+3장 사건이 늘 때마다 아래 검사에 그 사건의 구간·사례를 붙입니다. 모두 `dq4build.py --chapter3` 롬으로 돌고, 난수·시각·조우를 묶어 같은 입력이면 같은 기록을 냅니다([2장 검사](dq4-chapter2-format.md#검사에-구간-붙이기)와 같은 틀). 가드는 [`guards.toml`](../guards.toml) 의 `dq4-ch3-*` 이고 `paths` 에 `sfc/dq4/tools/dq4ch3*.py` 가 있어 3장 사건 모듈을 새로 만들어도 걸립니다.
+
+| 검사 | 보는 것 | 가드 |
+| --- | --- | --- |
+| `dq4ch3walkcheck.py` | 사건 구간을 3장 출발 상태에서 묶음마다 따로 걸어 flag·끝 맵·필드인지·끝 셀·바이트. `--repeat 2` 로 머리와 묶음을 두 번 걸어 기록 SHA-1 이 같은지 | `dq4-ch3-walk` |
+| `dq4npccheck.py --chapter3` | 3장 그룹(`3E`·`3F`·`40`) 인물을 3장 flag 를 켜고 말 걸어 첫 메시지·가게 품목·인물 표 | `dq4-ch3-npc` |
+| `dq4heroblockcheck.py --chapter3` | 주인공이 선 칸에 따라 사건이 멈추거나 엇나가지 않는지(`chapter3_cases`) | `dq4-ch3-heroblock` |
+| `dq4compatcheck.py walk --chapter3` | 같은 머리·구간을 libretro bsnes·snes9x 에서 | `dq4-ch3-compat-walk` |
+| `dq4peopleeventcheck.py --chapter 3` | 걷기 구간 동안 인물 공용 OBJ 팔레트 줄 | `dq4-people-event-lines` |
+
+걷기 틀(묶음 나누기, 묶음 첫 구간의 SET·PARTY, 끝 셀·바이트 판정, 두 번 걸어 견주기)은 2장과 함께 `dq4chapterwalk.py` 에 있습니다.
+
+### 3장 출발 상태
+
+2장 출발 상태(`dq4ch2walkcheck.head`)에서 [첫머리 검사](#검증)의 구간(`dq4ch3opencheck.segments` 의 `ch3_open` 까지: 빈 왕좌의 방 → 계단 → 2장 끝 → 3장 넘김 → 첫머리)을 시드 0 으로 걸은 끝 상태입니다. 톨네코 집 `3E/01` 침대(셀 (54,11)), 3장 flag 켜짐, 첫머리 대기 꺼짐, 조작 풀림. 서장 캐시와 같은 폴더(`work/cache/states/prologue/<롬 SHA-1>/ch3-start-<지문>.mss`, `DQ4_STATES_CACHE`)에 두고, 지문은 2장 출발 상태의 키에 `dq4ch3walkcheck.head` 의 코드, `dq4chapterwalk.py`, 머리 묶음 구간 표와 그 시작 flag, flag 표를 더한 것입니다. 사건 구간(`SEGMENTS`)은 넣지 않아 구간을 붙여도 머리를 다시 걷지 않습니다. 캐시는 `--repeat 2` 로 머리를 두 번 걸어 기록이 같을 때만 넣습니다. 호환성 검사는 코어마다 같은 머리를 걸어 `compat-<코어>-ch3` 로 둡니다.
+
+### 붙이는 법
+
+1. **flag**: 사건 모듈의 flag 를 `dq4ch3walkcheck.FLAGS` 에 한 줄(`'NAME': wc.flag(모듈.FLAG)`). 바이트 전체를 볼 칸은 `(주소, 0xFF)` 로 두고 선택 `bytes` 로 봅니다.
+2. **걷기 구간**: `dq4ch3walkcheck.SEGMENTS` 에 사건 하나를 「순간이동 구간 하나 + 걷기 구간 여럿」 으로 더합니다. 순간이동 구간마다 새 묶음이고, 묶음 첫 구간에는 앞 구간들의 `want` 가 켜지고 `off` 가 꺼진 채로 놓입니다. 선택은 [2장 표](dq4-chapter2-format.md#걷기-검사에-구간-붙이기)와 같고 `set`(그 구간 시작에 한 번 두는 SET, 뒤 묶음에 잇지 않음)을 더했습니다. 일행·물건처럼 뒤 묶음까지 이어져야 하는 기록은 `dq4ch3walkcheck.effects` 에 `구간 이름 → {'set': …}` 으로 둡니다. 출발 상태와 같은 맵(`3E/01`)으로 순간이동하면 `HOPS`(마을 왼쪽 가장자리)를 먼저 들릅니다. 순간이동은 `TO` 의 한 셀 아래에 내립니다. 사건 전투는 선택 `battle`(모듈 `BATTLES` 의 몬스터를 덮음, `dq4ch3walkcheck.battle_patch`).
+3. **말 걸기 기대값**: npccheck 는 3장 flag 를 켜고 주인공 물건 칸을 톨네코 처음 소지품(`dq4ch3event.start` 의 `items`)으로 둔 상태에서 말을 겁니다. 사건이 말을 바꾼 인물은 `dq4ch3event.start_messages(first)`(`(맵, FC 대화 번호, 밤 또는 None) → 메시지 번호`)에, 처음 목록에서 뺀 인물은 `dq4ch3event.absent()` 에 둡니다. npccheck 는 두 함수가 있으면 씁니다. `first` 는 3장 메시지 첫 번호(`dq4chapter1.chapter3_message`)입니다. 그 밖의 인물은 옮긴 일본어 임시 대사의 번호(인물 보고서 `npc-report.json` 의 `message`)를 기대합니다.
+4. **주인공 막기**: 주인공 칸으로 거는 사건은 `dq4heroblockcheck.chapter3_cases` 에 그 사건을 걸 수 있는 칸마다 사례를 둡니다(`warp`·`set`·`walk`·`want`·`free`·`hero_at`·`distinct`, 같은 맵이면 `hop`).
+5. **호환성·인물 팔레트**: `dq4ch3walkcheck.SEGMENTS` 를 그대로 걸으므로 따로 붙일 것이 없습니다.
+
+```sh
+uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3
+MESENCE=… LIBDIR=… uv run --locked python sfc/dq4/tools/dq4ch3walkcheck.py --rom work/ch3/dq4-ch1-full.sfc \
+    --out work/ch3walk --only town_side --seeds 0,5,9 --repeat 2
+```
+
+### 지금 구간과 사례
+
+| 묶음·사례 | 길 | 끝에 보는 것 |
+| --- | --- | --- |
+| `house` | 침대 (54,11) → 아래 (54,13) → (58,13) → (58,15) → 문 → 계단 (66,15) | 맵 `3E/00`·셀 (56,55), 3장 flag, 첫머리 대기 꺼짐 |
+| `town_side` → `town_out` → `town_in` | 마을 왼쪽 도착 칸 옆 (4,27)에서 왼쪽으로 나가 필드, 위로 걸어 입구 블록으로 | 필드·셀 (208,75) / 실내·셀 (0,27) |
+| npccheck | `3E`·`3F`·`40` 인물 222장면(표 54, 말 걸기 140, 가게 11, 건너뜀 17) | 첫 메시지·가게 품목·인물 표 |
+| heroblock `nene-above` | 네네 위 칸 (54,7)에서 아래로 말 걸고 위 줄로 돌아 (58,5) | 129 밖의 메시지 하나(도시락 견본의 「뭐 두고 간 거라도」), 다시 걸음 |
+
+- 침대 칸은 FC 에서 막힌 블록(속성 `80`)이라, 맵을 다시 불러온 뒤 순간이동으로 침대에 세우면 위의 네네에게 말을 걸어도 「その方向には誰もいない」(`129`)만 떴습니다. 첫머리 직후(맵을 다시 부르기 전) 침대에서 말 거는 것은 첫머리 검사가 봅니다.
+- 필드에서는 `7E:00BC`·`00BD` 가 떠난 맵 번호 그대로라, 필드에서 마을로 드는 구간은 끝 맵 대신 `field: False` 와 끝 셀로 봅니다.
+
+| 실행(3장 롬 SHA-1 `4ff849d1…`, 사건 등록 뒤 `00ba02e5…`, Apple M4 Pro, 다른 세션과 MesenCE 자리를 나눠 씀) | 결과 |
+| --- | --- |
+| 걷기 `--repeat 2 --seeds 0,5,9`, 3장 출발 상태 캐시 없음 | 머리 4구간을 두 번 걸어 같음, 2묶음 4구간 × 3시드 × 2회 통과, 구간 기록 SHA-1 이 실행·시드끼리 같음, 43초 |
+| 같은 명령, 캐시 있음 | 통과, 9초. 머리 기록 SHA-1 이 캐시 없이 걸은 것과 같음 |
+| npccheck `--chapter3 --jobs 4` | 222장면 통과, 176초. 사건 등록 뒤 롬에서 네네가 「도시락을 준다」(`11E8`)로 하나 실패해 물건 칸을 톨네코 처음 소지품으로 두니 통과 |
+| heroblock `--chapter3 --seeds 0,5,9 --no-state-cache` 두 번(사건 등록 뒤 롬) | 1사례 × 3시드 통과 |
+| 호환성 `walk --chapter3 --jobs 4` | bsnes·snes9x 12/12, 108초. `--seeds 0,5,9`(캐시 있음) 12/12 × 3시드 |
+| peopleevent `--chapter 3` | 걷기 구간 3개 표본 346 통과 |
+
+### 남은 것(검사)
+
+- 첫머리 검사(`dq4-ch3-open`)와 걷기 검사의 머리가 같은 구간을 걷습니다. 첫머리 검사 뒤 구간(사건 견본)을 걷기 검사 구간으로 옮기면 첫머리 검사를 걷기 검사에 합칠 수 있습니다.
+- 마을 안 인물 말 걸기는 npccheck 가 보고, 걷기 검사는 메시지 번호를 견주지 않습니다(2장과 같음).

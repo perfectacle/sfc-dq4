@@ -1,6 +1,6 @@
 """사건 연출이 도는 동안 인물의 공용 OBJ 팔레트 줄이 덮이거나 인물 밖 OBJ 가 그 줄을 쓰는지 본다(MesenCE 헤드리스).
 
-걷기 검사(1장 dq4ch1walkcheck.py --units, 2장 dq4ch2walkcheck.py)를 그대로 돌리되, 걷기 구간마다 프레임 표본을 남기는
+걷기 검사(1장 dq4ch1walkcheck.py --units, 2장 dq4ch2walkcheck.py, 3장 dq4ch3walkcheck.py)를 그대로 돌리되, 걷기 구간마다 프레임 표본을 남기는
 Lua(lua/dq4peoplesample.lua)를 얹는다. 표본은 구간 폴더의 lines.bin(4프레임마다 CGRAM OBJ 절반·OAM·맵 번호)과 full-<프레임>.bin(120프레임마다 WRAM
 앞쪽·OBJ VRAM)이다.
 
@@ -17,7 +17,8 @@ Lua(lua/dq4peoplesample.lua)를 얹는다. 표본은 구간 폴더의 lines.bin(
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4peopleeventcheck.py --chapter 2 --rom work/ch2/dq4-ch1-full.sfc \\
       --out work/peopleevent2 [--jobs 6] [--only 구간,…] [--json OUT]
 
---chapter 1 의 롬은 dq4build.py 의 1장 롬, --chapter 2 는 dq4build.py --chapter2 의 롬이다.
+--chapter 1 의 롬은 dq4build.py 의 1장 롬, --chapter 2 는 dq4build.py --chapter2, --chapter 3 은 dq4build.py --chapter3
+의 롬이다.
 """
 import argparse
 import json
@@ -148,7 +149,7 @@ def sampled_run(run):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--chapter', type=int, choices=(1, 2), default=2, help='걸을 장')
+    ap.add_argument('--chapter', type=int, choices=(1, 2, 3), default=2, help='걸을 장')
     ap.add_argument('--rom', required=True, type=Path)
     ap.add_argument('--out', required=True, type=Path)
     ap.add_argument('--jobs', type=int, default=6)
@@ -160,8 +161,13 @@ def main():
         ch2walk.wc.run = sampled_run(ch2walk.wc.run)
         sys.argv = [sys.argv[0], '--rom', str(args.rom), '--out', str(args.out), '--jobs', str(args.jobs),
                     *(('--units',) if args.chapter == 1 else ()), *(('--only', args.only) if args.only else ())]
+        walk = ch2walk.wc if args.chapter == 1 else ch2walk
+        if args.chapter == 3:
+            # 3장 검사는 2장 flag 표에 3장 것을 더하므로(dq4ch3opencheck) 3장일 때만 불러온다
+            import dq4ch3walkcheck
+            walk = dq4ch3walkcheck
         try:
-            (ch2walk.wc if args.chapter == 1 else ch2walk).main()
+            walk.main()
         except SystemExit as e:
             if e.code:
                 raise
