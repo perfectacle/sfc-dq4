@@ -53,8 +53,10 @@ PRESSED = (IDX2, 0x04)         # 그 대답이 「예」(인물 스크립트가 
 GAVE_SWORDS = (IDX2, 0x08)     # 이번에 칼을 받음
 GAVE_ARMORS = (IDX2, 0x10)     # 이번에 갑옷을 받음
 FULL = (IDX2, 0x20)            # 칼·갑옷이 다 참
+LEFT_SWORDS = (IDX2, 0x40)     # 아직 받을 칼이 남음(남은 수 줄을 띄움)
+LEFT_ARMORS = (IDX2, 0x80)     # 아직 받을 갑옷이 남음
 FLAGS = (ALLOWED, SHOP, ORDER, DELIVERED, SOLD, SON_CHEER, NOTICE, OPENED, BUTTON, ASKED, PRESSED,
-         GAVE_SWORDS, GAVE_ARMORS, FULL)
+         GAVE_SWORDS, GAVE_ARMORS, FULL, LEFT_SWORDS, LEFT_ARMORS)
 
 # 본몰 모듈(dq4ch3bonmalmo)의 편지 flag. test_dq4ch3endor 가 그 모듈이 있으면 같은지 본다
 LETTER1 = (0x73, 0x10)         # 왕자의 편지를 모니카에게 전함(FC $6280&01)
@@ -222,7 +224,8 @@ MESSAGES = {
 TALKS = ('king', 'seller', 'son', 'nene', 'deliver', 'guide', 'collector', 'button')
 CALLS = {'pay_shop': ('pay', SHOP_PRICE), 'earn_statue': ('earn', STATUE_PRICE), 'take_statue': ('take', STATUE),
          'earn_delivery': ('earn', DELIVERY_PAY), 'move_in': ('move_in', 0), 'sleep': ('sleep', 0),
-         'deliver': ('deliver', 0), 'show_swords': ('show', GAVE_SWORD), 'show_armors': ('show', GAVE_ARMOR),
+         'deliver': ('deliver', 0), 'count': ('deliver', 1),
+         'show_swords': ('show', GAVE_SWORD), 'show_armors': ('show', GAVE_ARMOR),
          'left_swords': ('left', 0), 'left_armors': ('left', 4)}
 
 
@@ -310,15 +313,19 @@ def _left():
 
 
 def _deliver(ctx):
-    """대화 호출(납품 「예」): 일행 기록 0~3 의 소지품에서 강철 검·철 갑옷을 주문 수가 찰 때까지 하나씩 빼고 납품 수 니블에
-    더한다. 이번에 받은 수를 변수 칸 +1·+2 에, 받았으면 GAVE_SWORDS·GAVE_ARMORS, 둘 다 7 이면 FULL 을 켠다."""
+    """대화 호출. 인자 0(납품 「예」): 일행 기록 0~3 의 소지품에서 철 갑옷, 그다음 강철 검을 주문 수 7 이 찰 때까지 빼고
+    (넘는 몫은 소지품에 남음, 맡긴 물건은 세지 않음. FC 15:$A212 실측) 납품 수 니블에 더한다. 이번에 받은 수를 변수 칸
+    +1·+2 에, 받았으면 GAVE_SWORDS·GAVE_ARMORS, 둘 다 7 이면 FULL. 인자 1(「아니요」)은 빼지 않는다. 끝에 아직 남은
+    종류마다 LEFT_SWORDS·LEFT_ARMORS(FC 는 남은 수가 0 인 줄을 띄우지 않음, 15:$A159·$A196)."""
     from dq4ch2endor import BCC, BCS, BEQ, lda, sta, take_item
     vars_at = ctx.vars_at
     a = _asm()(ENTER, 0xE2, 0x30)
-    a(lda(_flag_addr(FULL)), 0x29, ~(FULL[1] | GAVE_SWORDS[1] | GAVE_ARMORS[1]) & 0xFF, sta(_flag_addr(FULL)))
+    clear = FULL[1] | GAVE_SWORDS[1] | GAVE_ARMORS[1] | LEFT_SWORDS[1] | LEFT_ARMORS[1]
+    a(lda(_flag_addr(FULL)), 0x29, ~clear & 0xFF, sta(_flag_addr(FULL)))
     a(0xA9, 0x00, sta(vars_at + GAVE_SWORD), sta(vars_at + GAVE_ARMOR))
-    for k, (item, gave, flag, shift) in enumerate(((STEEL_SWORD, GAVE_SWORD, GAVE_SWORDS, 0),
-                                                    (IRON_ARMOR, GAVE_ARMOR, GAVE_ARMORS, 4))):
+    a(lda(ch3.ARG)).br(BEQ, 'give').brl('left').label('give')
+    for k, (item, gave, flag, shift) in enumerate(((IRON_ARMOR, GAVE_ARMOR, GAVE_ARMORS, 4),
+                                                    (STEEL_SWORD, GAVE_SWORD, GAVE_SWORDS, 0))):
         a.label(f'k{k}')(0xE2, 0x30, lda(vars_at + VARS))
         if shift:
             a(0x4A, 0x4A, 0x4A, 0x4A)
@@ -332,7 +339,11 @@ def _deliver(ctx):
             a(lda(_flag_addr(flag)), 0x09, flag[1], sta(_flag_addr(flag))).brl(f'k{k}')
             a.label(f'miss{k}{r}')
         a.label(f'done{k}')
-    a(0xE2, 0x30, lda(vars_at + VARS), 0xC9, ORDERED << 4 | ORDERED).br(0xD0, 'end')
+    a.label('left')(0xE2, 0x30)
+    for flag, shift in ((LEFT_SWORDS, 0), (LEFT_ARMORS, 4)):
+        a(lda(vars_at + VARS), *([0x4A] * shift), 0x29, 0x0F, 0xC9, ORDERED).br(BCS, f'full{shift}')
+        a(lda(_flag_addr(flag)), 0x09, flag[1], sta(_flag_addr(flag))).label(f'full{shift}')
+    a(lda(vars_at + VARS), 0xC9, ORDERED << 4 | ORDERED).br(0xD0, 'end')
     a(lda(_flag_addr(FULL)), 0x09, FULL[1], sta(_flag_addr(FULL)))
     a.label('end')
     return a.bytes() + LEAVE
@@ -520,17 +531,18 @@ def talk_scripts(ctx):
     nene = when(flag(NOTICE), [say_('nene_notice'), when(YES, [say_('nene_quiet')], [say_('nene_lie')]),
                                say_('nene_farewell'), on(OPENED)], [
         when(DAY, [say_('nene_rest'), when(YES, sleep, [say_('nene_shopkeep')])], [say_('nene_late'), *sleep])])
-    tally = [say_('deliver_left'), call('left_swords'), say_('left_swords'), call('left_armors'),
-             say_('left_armors'), say_('deliver_more')]
-    armors = [call('show_armors'), say_('deliver_armors')]
-    got = when(flag(GAVE_SWORDS),
-               [say_('deliver_take'), call('show_swords'), say_('deliver_swords'),
-                when(flag(GAVE_ARMORS), armors), say_('deliver_got')],
-               [when(flag(GAVE_ARMORS), [say_('deliver_take'), *armors, say_('deliver_got')], [say_('deliver_none')])])
+    # FC 15:$A118 실측: 「예」 면 받을 것이 없어도 0874 부터. 받은 수·남은 수 줄은 그 종류가 0 이면 빠진다
+    tally = [say_('deliver_left'), when(flag(LEFT_SWORDS), [call('left_swords'), say_('left_swords')]),
+             when(flag(LEFT_ARMORS), [call('left_armors'), say_('left_armors')]), say_('deliver_more')]
+    got = [when(flag(GAVE_SWORDS), [call('show_swords'), say_('deliver_swords')]),
+           when(flag(GAVE_ARMORS), [call('show_armors'), say_('deliver_armors')]),
+           when(flag(GAVE_SWORDS), [say_('deliver_got')],
+                [when(flag(GAVE_ARMORS), [say_('deliver_got')], [say_('deliver_none')])])]
     done = when(flag(FULL), [say_('deliver_full'), call('earn_delivery'), on(DELIVERED), say_('deliver_thanks')],
                 tally)
     deliver = when(flag(DELIVERED), [say_('deliver_thanks')], [
-        when(flag(ORDER), [say_('deliver_ask'), when(YES, [call('deliver'), got, done], tally)],
+        when(flag(ORDER), [say_('deliver_ask'), when(YES, [say_('deliver_take'), call('deliver'), *got, done],
+                                                     [call('count'), *tally])],
              [say_('deliver_idle')])])
     guide = when(flag(DELIVERED), [say_('guide_done')],
                  [when(flag(ORDER), [say_('guide_order')], [say_('guide_idle')])])

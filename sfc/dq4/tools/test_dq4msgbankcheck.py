@@ -21,7 +21,8 @@ class TestRomTests(unittest.TestCase):
         index = index_table(moved, relocated(moved)[1])[0]
         banks = {Rom(moved).u24(index + 3 * g['group']) >> 19 for g in groups}
         self.assertEqual(banks, {0x1E, 0x1F})
-        self.assertTrue(any(moved[lorom(0x55C000):lorom(0x55C000) + 16]))
+        self.assertTrue(any(moved[groups[0]['at']:groups[0]['at'] + 16]))
+        self.assertEqual(groups[0]['at'], lorom(0x558000))     # 합성 롬은 넷째 자리가 비어 있음
         for g in groups:
             first = g['group'] * 16
             self.assertEqual(g['expected'][:2], original(None, first))
@@ -37,10 +38,15 @@ class TestRomTests(unittest.TestCase):
         bad[o:o + 10] = bytes.fromhex('20 8d 8c a5 f2 09 60 85 f2 60')
         with self.assertRaisesRegex(ValueError, '표 꼴'):
             mb.test_rom(bytes(bad))
+        # 넷째 자리에 놓인 메시지 뒤로 비켜 두고, 자리가 모자라면 멈춘다
         taken = bytearray(self.rom)
-        taken[lorom(0x56A000)] = 1
-        with self.assertRaisesRegex(ValueError, '비어 있지 않음'):
-            mb.test_rom(bytes(taken))
+        taken[lorom(0x55A000)] = 1
+        moved, groups = mb.test_rom(bytes(taken))
+        self.assertEqual(groups[0]['at'], lorom(0x55A100))
+        full = bytearray(self.rom)
+        full[lorom(0x56F000)] = 1
+        with self.assertRaisesRegex(ValueError, '빈 곳이 모자람'):
+            mb.test_rom(bytes(full))
 
 
 if __name__ == '__main__':
