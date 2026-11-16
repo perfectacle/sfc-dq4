@@ -176,7 +176,8 @@ class ListTest(unittest.TestCase):
         self.assertEqual(table[(L.HOUSE, L.FC_NENE, False)], c.msg['home'])
         gone = L.absent(c)
         self.assertIn((L.TOWN, *L.COUNTER_IN, False), gone)
-        self.assertEqual(len(gone), 1 + len(L.STRAYS))
+        self.assertEqual(len(gone), 2 + len(L.STRAYS))
+        self.assertIn((L.HOUSE, *L.NENE_WALKER[2], False), gone)
         # 공용 표는 모든 모듈의 것을 모은다: 이 모듈 몫이 다 들어 있으면 된다
         self.assertLessEqual(gone, ev.absent())
 
@@ -195,6 +196,9 @@ class PortedListTest(unittest.TestCase):
             self.assertIn(L._src(name), froms, name)
         self.assertFalse([e for e in town if (e['time'], (e['fields']['x'], e['fields']['y'])) in
                           {(t, c_) for _, t, c_ in L.STRAYS}])
+        house = by[L.HOUSE]['entries']
+        nenes = [e for e in house if e['time'] == 'day' and e['fields']['talk'] == c.talk['nene']]
+        self.assertEqual([(e['fields']['x'], e['fields']['y']) for e in nenes], [L.NENE['day']])
 
 
 if __name__ == '__main__':
