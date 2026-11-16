@@ -137,6 +137,33 @@ class GuardsTest(unittest.TestCase):
         self.assertFalse(guards.build_conflict(ch1, groups))
         self.assertTrue(guards.build_conflict(ch1, reader))
 
+    def test_prebuilt_build_stages_do_not_serialize_the_shard(self):
+        """CI 조각에서 미리 만든 롬으로 맞춘 dq4build 단계는 만드는 것으로 치지 않아, 그 롬을 읽는 검사끼리 함께 돈다. 그 뒤에
+        다른 것을 만드는 단계는 그대로 빌드로 남는다."""
+        build = 'uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1'
+        a = {'name': 'a', 'run': f'{build} && y.py --rom work/ch1/r.sfc --out work/fa'}
+        b = {'name': 'b', 'run': f'{build} && z.py --rom work/ch1/r.sfc --out work/fb'}
+        c = {'name': 'c', 'run': f'{build} && m.py --rom work/ch1/o.sfc --out work/ch1/m.sfc && z.py --out work/fc'}
+        places = {'work/ch1': '/pre/ch1'}
+        self.assertEqual(guards.built_paths(a['run'], places), [])
+        self.assertEqual(guards.built_paths(a['run'], {}), ['work/ch1'])
+        self.assertEqual(guards.built_paths(c['run'], places), ['work/ch1/m.sfc'])
+        self.assertTrue(guards.build_conflict(a, b))
+        self.assertFalse(guards.build_conflict(a, b, places))
+        self.assertTrue(guards.build_conflict(a, c, places))
+        # 환경 변수가 붙은 단계나 같은 폴더를 다른 인자로 만드는 단계는 미리 만든 빌드로 치지 않는다
+        env_stage = {'name': 'e', 'run': f'X=1 {build} && y.py --out work/fe'}
+        other = {'name': 'o', 'run': f'{build} --chapter2 && y.py --out work/fo'}
+        found = (Path('/pre/ch1'), {})
+        with mock.patch('ci_cache.prebuilt_dir', return_value=found) as pd:
+            self.assertEqual(guards.prebuilt_places([a, b, env_stage], {'DQ4_PREBUILT': '/pre/ch1'}),
+                             {'work/ch1': Path('/pre/ch1')})
+            pd.assert_called_once_with(())
+            self.assertEqual(guards.prebuilt_places([a, other], {'DQ4_PREBUILT': '/pre/ch1'}), {})
+            self.assertEqual(guards.prebuilt_places([a], {}), {})
+        with mock.patch('ci_cache.prebuilt_dir', return_value=None):
+            self.assertEqual(guards.prebuilt_places([a], {'DQ4_PREBUILT': '/pre/ch1'}), {})
+
     def test_only_picks_named_checks_and_flags_unknown(self):
         """--only 는 걸린 것과 상관없이 이름으로 고르고, 모르는 이름은 문제로 낸다."""
         checks, _ = load(GOOD + GOOD.replace('dq4-walk', 'dq4-talk'))

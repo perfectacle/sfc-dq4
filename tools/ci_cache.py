@@ -263,21 +263,65 @@ def ship_build(out, chunks, extra):
     print('빌드 단계 칸: ' + ', '.join(f'{n}={k[:12]}' for n, k in used))
 
 
-def prebuilt(out, extra):
-    """dq4build.py --out OUT [인자] 대신. DQ4_PREBUILT(폴더 목록, os.pathsep) 가운데 같은 커밋·인자·롬으로 ship-build 가
-    만든 폴더가 있으면 OUT 에 복사하고 dq4build 와 같은 끝 줄을 찍는다. 없으면 dq4build.py 를 그대로 돌린다."""
+def prebuilt_dir(extra):
+    """DQ4_PREBUILT(폴더 목록, os.pathsep) 가운데 이 커밋·롬으로 dq4build 인자 extra 의 ship-build 가 만든 폴더. 없으면 None."""
     want = {'commit': head_commit(), 'args': list(extra), 'roms': rom_digests()}
     for d in filter(None, os.environ.get('DQ4_PREBUILT', '').split(os.pathsep)):
         try:
             got = json.loads((Path(d) / MANIFEST).read_text(encoding='utf-8'))
         except (OSError, ValueError):
             continue
-        if {k: got.get(k) for k in want} != want:
+        if {k: got.get(k) for k in want} == want:
+            return Path(d), got
+    return None
+
+
+def same_file(a, b):
+    if not b.is_file() or b.is_symlink() or a.stat().st_size != b.stat().st_size:
+        return False
+    with a.open('rb') as fa, b.open('rb') as fb:
+        return hashlib.file_digest(fa, 'sha256').digest() == hashlib.file_digest(fb, 'sha256').digest()
+
+
+def sync_tree(src, out):
+    """out 을 src(MANIFEST 뺌)와 같은 파일들로 맞춘다. 내용이 같은 파일은 건드리지 않고, 다른 파일은 임시 파일에 써서
+    os.replace 로 바꾸며, src 에 없는 것은 지운다. 이미 같으면 아무것도 쓰지 않아, 같은 빌드를 읽는 다른 검사와 함께
+    불러도 그 검사가 반쯤 쓴 파일이나 빈 폴더를 보지 않는다(guards.run_many 가 이것에 기대어 함께 돌린다)."""
+    src, out = Path(src), Path(out)
+    want = {f.relative_to(src) for f in files_of(src)} - {Path(MANIFEST)}
+    for rel in sorted(want):
+        dst = out / rel
+        if same_file(src / rel, dst):
             continue
+        for parent in [*reversed(rel.parents)][1:]:
+            if (out / parent).exists() and not (out / parent).is_dir():
+                (out / parent).unlink()
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.is_dir() and not dst.is_symlink():
+            shutil.rmtree(dst)
+        tmp = dst.with_name(f'.{dst.name}.prebuilt-tmp')
+        shutil.copy2(src / rel, tmp)
+        os.replace(tmp, dst)
+    dirs = {d for w in want for d in w.parents}
+    if out.is_dir():
+        for p in sorted(out.rglob('*'), key=lambda p: len(p.parts), reverse=True):
+            rel = p.relative_to(out)
+            if p.is_dir() and not p.is_symlink():
+                if rel not in dirs:
+                    shutil.rmtree(p)
+            elif rel not in want:
+                p.unlink()
+
+
+def prebuilt(out, extra):
+    """dq4build.py --out OUT [인자] 대신. DQ4_PREBUILT 가운데 같은 커밋·인자·롬으로 ship-build 가 만든 폴더가 있으면 OUT 을
+    그것과 같게 맞추고(sync_tree) dq4build 와 같은 끝 줄을 찍는다. 없으면 dq4build.py 를 그대로 돌린다."""
+    found = prebuilt_dir(extra)
+    if found:
+        d, got = found
         out = Path(out)
-        if out.resolve() != Path(d).resolve():
-            shutil.rmtree(out, ignore_errors=True)
-            shutil.copytree(d, out, ignore=shutil.ignore_patterns(MANIFEST))
+        if out.resolve() != d.resolve():
+            sync_tree(d, out)
         rom = out / got['rom']
         print(f'[prebuilt] {d} → {out}', file=sys.stderr)
         print(f'{rom} sha1={hashlib.sha1(rom.read_bytes()).hexdigest()}')

@@ -618,6 +618,56 @@ def with_prebuilt(command, env):
     return DQ4BUILD.sub('python tools/ci_cache.py prebuilt', command)
 
 
+# 미리 만든 빌드로 바뀌는 단계: 앞에 환경 변수 없이 dq4build.py --out 폴더 뒤에 인자만
+PREBUILT_STAGE = re.compile(r'\s*uv run --locked python sfc/dq4/tools/dq4build\.py --out (\S+)((?:\s+--[\w-]+)*)\s*')
+
+
+def prebuilt_places(checks, env):
+    """{빌드 폴더: 미리 만든 폴더}. env 의 DQ4_PREBUILT 에 그 단계의 인자와 이 커밋·롬이 맞는 빌드가 있는 dq4build 단계의
+    --out 들. 같은 폴더를 다른 인자로 만드는 단계가 있으면 그 폴더는 뺀다(어느 빌드가 거기 있어야 하는지 정할 수 없음)."""
+    if not env.get('DQ4_PREBUILT'):
+        return {}
+    import ci_cache
+    saved = os.environ.get('DQ4_PREBUILT')
+    os.environ['DQ4_PREBUILT'] = env['DQ4_PREBUILT']
+    try:
+        seen, found = {}, {}
+        for c in checks:
+            for st in c['run'].split('&&')[:-1]:
+                m = PREBUILT_STAGE.fullmatch(st)
+                if m:
+                    seen.setdefault(m[1], set()).add(tuple(m[2].split()))
+        for out, args in seen.items():
+            hit = ci_cache.prebuilt_dir(next(iter(args))) if len(args) == 1 else None
+            if hit:
+                found[out] = hit[0]
+        return found
+    finally:
+        if saved is None:
+            os.environ.pop('DQ4_PREBUILT', None)
+        else:
+            os.environ['DQ4_PREBUILT'] = saved
+
+
+def place_prebuilt(places):
+    """prebuilt_places 의 폴더마다 미리 만든 빌드와 같게 맞춘다. 그 뒤로 그 단계는 아무것도 쓰지 않아(ci_cache.sync_tree)
+    롬을 읽기만 하는 검사가 된다."""
+    import ci_cache
+    for out, d in places.items():
+        ci_cache.sync_tree(d, ROOT / out)
+
+
+def built_paths(run, places):
+    """명령이 실제로 만드는 경로: made_paths 가운데 places 에 맞춰 둔 미리 만든 빌드 단계의 --out 을 뺀 것."""
+    out = []
+    for st in run.split('&&')[:-1]:
+        m = PREBUILT_STAGE.fullmatch(st)
+        if m and m[1] in places:
+            continue
+        out += re.findall(r'--out\s+(\S+)', st)
+    return out
+
+
 def spawn(command, log, timeout, env):
     """bash 로 명령 하나를 돌려 로그에 덧붙인다. 종료 코드, 시간을 넘기면 None."""
     command = with_prebuilt(command, env)
@@ -1185,19 +1235,19 @@ def work_paths(run):
     return set(re.findall(r'(?<![\w/])(?:\$PWD/)?(work/[^\s;&|]+)', run))
 
 
-def build_conflict(a, b):
-    """두 빌드 검사가 함께 돌면 안 되는가: 한쪽이 만드는 것(made_paths)을 다른 쪽 명령이 읽거나 쓰거나 만든다."""
+def build_conflict(a, b, places=None):
+    """두 빌드 검사가 함께 돌면 안 되는가: 한쪽이 만드는 것(built_paths)을 다른 쪽 명령이 읽거나 쓰거나 만든다."""
     def touches(x, y):
-        return any(under(t, m) or under(m, t) for m in made_paths(x['run']) for t in work_paths(y['run']))
+        return any(under(t, m) or under(m, t) for m in built_paths(x['run'], places or {}) for t in work_paths(y['run']))
     return touches(a, b) or touches(b, a)
 
 
-def build_batches(builders):
+def build_batches(builders, places=None):
     """빌드 검사를 차례대로, 서로 부딪치지 않는 것끼리 묶는다. 앞 묶음이 다 끝나야 다음 묶음이 돈다. 부딪치는 검사는 이전 것이
     든 묶음보다 뒤에 둬 명단 차례를 지킨다."""
     batches = []
     for c in builders:
-        after = max((i for i, b in enumerate(batches) if any(build_conflict(c, x) for x in b)), default=-1)
+        after = max((i for i, b in enumerate(batches) if any(build_conflict(c, x, places) for x in b)), default=-1)
         for b in batches[after + 1:]:
             b.append(c)
             break
@@ -1229,13 +1279,19 @@ def run_many(hit, parallel, timeout, no_cache=False, logs=None, env=None):
             share_states(unit_dir(c, root) / 'states', Path(root) / '_pool' / 'states')
         return c, status, detail
     # 롬을 스스로 빌드하는 검사는 다른 검사가 읽는 롬을 다시 쓸 수 있어 다른 검사보다 먼저 돌린다. 빌드 검사끼리는
-    # 서로 만드는 것을 건드리지 않는 것만 함께 돈다(build_batches)
-    builders = [c for c in hit if builds(c['run'])]
+    # 서로 만드는 것을 건드리지 않는 것만 함께 돈다(build_batches). CI 조각에서 미리 만든 출하 롬으로 바뀌는 빌드 단계는
+    # 폴더를 미리 맞춰 두면 아무것도 쓰지 않으므로 빌드로 치지 않는다. 빌드 검사가 그 폴더에 무언가 더하거나 고칠 수
+    # 있어, 나머지 검사를 띄우기 전에 다시 맞춘다
+    places = prebuilt_places(hit, env or os.environ)
+    builders = [c for c in hit if built_paths(c['run'], places)]
     pool = concurrent.futures.ThreadPoolExecutor(max(1, parallel))
     try:
         done = []
-        for batch in build_batches(builders):
+        place_prebuilt(places)
+        for batch in build_batches(builders, places):
             done += [f.result() for f in [pool.submit(one, c) for c in batch]]
+        if builders:
+            place_prebuilt(places)
         futures = [pool.submit(one, c) for c in hit if c not in builders]
         done += [f.result() for f in futures]
     except BaseException:
