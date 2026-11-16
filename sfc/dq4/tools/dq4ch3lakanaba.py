@@ -262,6 +262,9 @@ MESSAGES = {
     'son_later': say('그럼 돌려주고/싶어지면 언제든/와 줘./나는 여기 있으니까.'),               # 089C
 }
 
+# 네이티브 안의 자료(dq4brkscan 이 코드로 풀지 않게)
+DATA_ENTRIES = ('ids', 'prices', 'wages', 'close_event', 'sleep_event')
+
 TALKS = ('nene', 'popolo_day', 'popolo_night', 'late', 'master', 'quit', 'buyer_intro', 'buyer', 'seller', 'tom',
          'son', 'son_return')
 # 첫 칸(표 칸 0)은 네네의 잠: dq4ch3opencheck 의 공용 장치 시험이 이 칸을 바꿔 네네 대화로 부른다
