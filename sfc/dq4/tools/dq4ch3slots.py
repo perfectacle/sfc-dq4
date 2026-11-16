@@ -33,7 +33,7 @@ SLOTS = {
               flags=(0x70, 0x71), scripts=(('10:9B81', (0, 1, *range(8, 14))), ('10:A031', tuple(range(6)))), lists='ch3_lakanaba_',
               vars=(4, 10)),
     'S': Slot('북쪽 동굴과 금고', 'dq4ch3safe', (0x5CE000, 0x5CE800), flags=(0x72,),
-              scripts=(('10:C8FF', (0, 1, 4, 6, 7, 8, 9)),), lists='ch3_safe_'),
+              scripts=(('10:C8FF', (0, 1, 4, 6, 7, 8, 9)),), lists='ch3_safe_', vars=(14, 21)),
     'B': Slot('본몰 왕자·감옥·여우 마을·다리·개 토마스', 'dq4ch3bonmalmo', (0x5CE800, 0x5CF000), flags=(0x73, 0x74),
               scripts=(('10:BEE5', (2, *range(4, 10))),), lists='ch3_bonmalmo_'),
     'E': Slot('엔돌: 편지·여신상 동굴·여신상 팔기·가게 사기·납품·용병', 'dq4ch3endor', (0x5CF000, 0x5CFC00),
@@ -51,7 +51,7 @@ COMMON_VARS = (0, 4)
 # dq4-chapter3-format.md 「사건 차례」) 나누지 않고 2장 예비(dq4ch2slots.SPARE)에 둔다
 SPARE = {
     'flags': (0x7A, 0x7B, 0x7C),
-    'vars': (14, 25),
+    'vars': (21, 25),
     'code': (),
 }
 # 3장 넘김·공용 장치 코드(dq4ch3event.CODE_AT~TABLE_AT)와 대화 호출 표(TABLE_AT~CODE_END)

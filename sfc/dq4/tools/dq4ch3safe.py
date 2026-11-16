@@ -23,6 +23,8 @@ import dq4chapter1 as ch1  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 from dq4chapterbox import ENTER, LEAVE  # noqa: E402
 from dq4itemport import IRON_SAFE  # noqa: E402
+import dq4boulder as boulder  # noqa: E402
+from dq4ch3slots import SLOTS as _SLOTS, VARS_AT  # noqa: E402
 
 IDX = 0x72                     # 7E:2202
 DRAINED = (IDX, 0x01)          # 수문을 열어 구덩이로 떨어짐(FC $62AA&80). 3E/04 로 가는 출구가 3E/05 로
@@ -32,7 +34,7 @@ FLAGS = (DRAINED, ANSWERED, YES)
 
 GROUP = 0x3E
 # FC 3D/0k 는 SFC 3E/(03+k). test_dq4ch3safe 가 dq4groupbuild.placement 와 견준다
-ENTRY, GATES, DRY, PIT, VAULT = '3E/03', '3E/04', '3E/05', '3E/06', '3E/09'
+ENTRY, GATES, DRY, PIT, ROLL, PIT_BELOW, VAULT = '3E/03', '3E/04', '3E/05', '3E/06', '3E/07', '3E/08', '3E/09'
 
 
 def _map(name):
@@ -57,7 +59,9 @@ DOWN = 0x04                                                 # 이벤트 걸음 �
 
 # 빌린 인물 스크립트(DQ5 20/04 대체 목록 10:C8FF, dq4ch3slots S 칸 0·1·4). 칸마다 스크립트 길이 바이트 주소
 SCRIPT_LIST = '10:C8FF'
-SCRIPTS = {'right': ('10:C906', 0), 'left': ('10:C922', 1), 'chest': ('10:C946', 4)}
+SCRIPTS = {'right': ('10:C906', 0), 'left': ('10:C922', 1), 'chest': ('10:C946', 4), 'boulder': ('10:C96E', 6)}
+# 바위 변수(dq4ch3slots S 의 변수 칸)
+BOULDER_VARS = boulder.Vars(VARS_AT + _SLOTS['S'].vars[0])
 
 # DQ5 출구 목적지 표의 종류 40(같은 그룹, 도착 맵의 출구 번호) 갈래 2A:F7AB: LDA $01 / STA $BD / INY / BRA $F7D6.
 # F7D6 이 LDA ($84),Y 로 도착 출구 번호를 읽고 PLB/PLP/RTS 한다. 출구 표를 옮긴 롬(dq5exitreloc)은 F7D6 을 [$84],Y 로
@@ -77,7 +81,7 @@ WIPE_ORIG = bytes((0xA5, 0x48, 0x4A, 0x85, 0x45, 0xA5, 0x47, 0x6A, 0x85, 0x44, 0
 CHEST_BANK, CHEST_TABLE, CHEST_MASKS, CHEST_BITS = 0x25FAB5, 0x25FAC4, 0x25FAE9, 0x7E2210
 # dq4brkscan: PHP 로 시작하지 않는 진입점. chest_bit 은 JSR 로 부르는 코드, exit 는 P 를 부른 쪽이 PLP 로 되돌리는
 # 훅, flood_* 는 이벤트 스크립트 자료
-CODE_ENTRIES = ('chest_bit', 'exit')
+CODE_ENTRIES = ('chest_bit', 'exit', 'step', 'area')
 DATA_ENTRIES = ('flood_right', 'flood_left')
 HERO_X, HERO_Y = 0x7E3020, 0x7E3080
 FLAG_AT = 0x7E2190
@@ -188,6 +192,9 @@ def native(ctx):
     a.label('keep')(*restore, 0xA9, 0x00, 0x85, 0x45, 0x85, 0x44, 0x85, 0x43, 0x28, 0x6B)
     a.label('half')(*restore, WIPE_ORIG, 0x28, 0x6B)
     put('wipe', a.bytes())
+    pieces, _ = boulder.natives(BOULDER_VARS, ctx.code_at + len(out), GROUP, _map(ROLL))
+    for name, code in pieces:
+        put(name, code)
     return bytes(out), at
 
 
@@ -196,7 +203,8 @@ def hooks(ctx):
     exit_new = bytes((0x22, *_al(at['exit']), 0x80, EXIT_DONE - (EXIT_SITE + 6), 0xEA))
     skip = len(WIPE_ORIG) - 6
     wipe_new = bytes((0x22, *_al(at['wipe']), 0x80, skip)) + bytes((0xEA,)) * skip
-    return [(EXIT_SITE, EXIT_ORIG, exit_new), (WIPE_SITE, WIPE_ORIG, wipe_new)]
+    return [(EXIT_SITE, EXIT_ORIG, exit_new), (WIPE_SITE, WIPE_ORIG, wipe_new),
+            (boulder.AREA_SITE, boulder.AREA_ORIG, boulder.area_hook(at))]
 
 
 # FC 03B3·0296·037B 를 옮겼다. 바닥 글은 FC 처럼 인용, 앞뒤는 서술
@@ -243,6 +251,9 @@ def scripts(ctx):
                      _cmd('06', *YES, target='push'), _cmd('05', *_al(at[f'away_{side}'])), _cmd('03', target='wait'),
                      {**_off(YES), "label": 'push'}, _cmd('3F'), call(at[f'push_{side}']), _cmd('16')]
     # 금고: 상자를 연 뒤 그 칸을 떠났다가 다시 밟으면 바닥 글. 상자를 여는 동안(그 칸에 선 채)에는 묻지 않는다
+    # 바위: 맵에 들 때 처음 자리로 두고, 매 프레임 ctl(늘 1 을 돌려 그 명령에 머묾)
+    out['boulder'] = [_cmd('28'), _cmd('52'), call(at['reset']),
+                       _cmd('05', *_al(at['ctl']), label='tick'), _cmd('03', target='tick')]
     out['chest'] = [_cmd('28'), _cmd('52'), _cmd('05', *_al(at['away_chest']), label='wait'),
                     _cmd('05', *_al(at['on_chest'])), *wait_answer, _cmd('03', target='wait')]
     return [{"address": SCRIPTS[k][0], "commands": v} for k, v in out.items()]
@@ -260,4 +271,12 @@ def npc_lists(lists, ctx):
     for side in ('right', 'left'):
         lists[GATES]["entries"] += ch2._invisible(_src(side), t['button'])
     lists[VAULT]["entries"] += ch2._invisible(_src('chest'), t['floor'])
+    # 바위를 부리는 보이지 않는 인물과 바위 넷(FC 처음 자리 2×2 칸, 그림은 DQ5 미는 바위). 낮·밤 한 벌씩
+    import dq4npcport
+    x, y = boulder.START
+    rocks = [{"x": 2 * (x + dx), "y": 2 * (y + dy) + 1, "facing": "down", "talk": 0, "gfx": boulder.ROCK_GFX, "layer": 0,
+              "interval": 0} for dy in (0, 1) for dx in (0, 1)]
+    for time in ('day', 'night'):
+        lists[ROLL]["entries"] += [e for e in ch2._invisible(_src('boulder'), t['button']) if e["time"] == time]
+        lists[ROLL]["entries"] += [{"from": dq4npcport.STAND, "time": time, "fields": dict(r)} for r in rocks]
     return [], []

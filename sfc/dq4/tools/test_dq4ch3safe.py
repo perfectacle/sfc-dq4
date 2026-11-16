@@ -73,7 +73,7 @@ class PlaceTest(unittest.TestCase):
 class HookTest(unittest.TestCase):
     def test_hooks_replace_the_whole_sites_and_jump_back(self):
         ctx = _ctx()
-        (ea, eo, en), (wa, wo, wn) = safe.hooks(ctx)
+        (ea, eo, en), (wa, wo, wn), _ = safe.hooks(ctx)
         self.assertEqual((ea, eo), (safe.EXIT_SITE, safe.EXIT_ORIG))
         self.assertEqual(len(en), len(eo))
         self.assertEqual(en[:4], bytes((0x22, *safe._al(ctx.at['exit']))))
