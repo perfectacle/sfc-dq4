@@ -747,7 +747,7 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False, chapter3=False):
     (work / 'npc.json').write_text(json.dumps(doc, ensure_ascii=False, indent=1))
     base = npc_base(work / 'groups' / GROUP_PATCHES[0])
     run_tool(DQ5_TOOLS / 'dq5npcrelocate.py', dq5, 'patch', work / 'npc.json', '--base', base, '--alt', NPC_ALT,
-             '--allow-growth', *new_maps, '-o', work / 'npc.dq5patch.json')
+             '--allow-growth', *new_maps, '-o', work / 'npc.dq5patch.json', '--report', work / 'npc-layout.json')
     patches = [work / 'groups' / p for p in (*GROUP_PATCHES, *summary['record_patches'])] + [
         work / 'npc.dq5patch.json', work / 'boss.dq5patch.json', work / 'boss-monsters.dq5patch.json',
         work / 'learn.dq5patch.json', work / 'growth.dq5patch.json', work / 'party.dq5patch.json']

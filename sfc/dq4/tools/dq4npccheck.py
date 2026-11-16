@@ -14,8 +14,9 @@
   … --part 2/5      장면을 5 몫으로 나눠 둘째 몫만(기본 DQ4_GUARD_PART, CI 가드 하위 조각)
 
 --rom checks another ROM built with the same people (the chapter-1 ROM with dq4chapter1.py build --keep DIR,
---build DIR/groups and --texts its dq4chapter1.py messages JSON); --maps limits the maps, and --no-tables leaves
-out the table scenes, whose list addresses are the plain build's.
+--build DIR/groups, --texts its dq4chapter1.py messages JSON and --layout DIR/npc-layout.json, where that build's
+lists are); --maps limits the maps, and --no-tables leaves out the table scenes. Without --layout the table scenes
+read the plain build's list addresses, which a chapter-1 ROM does not have.
 
 --chapter2 checks the chapter-2 groups (CHAPTER2_GROUPS) of a dq4build.py --chapter2 ROM with the chapter-2 flag on
 (as after the end of chapter 1): the people of those maps answer as dq4ch1event and dq4ch2event say, and --maps
@@ -269,6 +270,8 @@ def main():
     dq4shards.add_part_arg(ap)
     ap.add_argument("--maps", nargs="+", help="only these maps (GG/MM)")
     ap.add_argument("--no-tables", action="store_true", help="leave out the person table scenes")
+    ap.add_argument("--layout", type=Path, help="dq5npcrelocate --report of --rom's people lists (default "
+                    "BUILD/npc-layout.json, the plain build's); the table scenes read the lists there")
     ap.add_argument("--texts", type=Path, help="the ROM's messages: dq5text/1 (default BUILD/text.json) or "
                     "dq4messages/1 (dq4chapter1.py messages, for the chapter-1 ROM)")
     ap.add_argument("--chapter1", action="store_true",
@@ -297,7 +300,7 @@ def main():
     built = Rom(rom_path.read_bytes())
     ret = decoder_return(built)
     texts = expected_codes(args.texts or args.build / "text.json")
-    layout = json.loads((args.build / "npc-layout.json").read_text(encoding="utf-8"))
+    layout = json.loads((args.layout or args.build / "npc-layout.json").read_text(encoding="utf-8"))
     people = json.loads((args.build / "npc-report.json").read_text(encoding="utf-8"))
     shop_report = json.loads((args.build / "shop-report.json").read_text(encoding="utf-8"))
     shop_items = {(s["map"], s["kind"]): s["dq5"] for s in shop_report["shops"]}
