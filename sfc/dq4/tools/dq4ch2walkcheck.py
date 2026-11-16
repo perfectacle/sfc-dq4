@@ -16,21 +16,15 @@
 롬은 dq4build.py --chapter2 의 출력이어야 한다(1장 끝에서 2장으로 넘어감). 구간을 붙이는 법은
 sfc/dq4/docs/dq4-chapter2-format.md 「검사에 구간 붙이기」.
 """
-import argparse
-import concurrent.futures
 import inspect
-import json
-import os
-import re
-import shutil
 import sys
-import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4ch1walkcheck as wc  # noqa: E402
+import dq4chapterwalk as cwk  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 import dq4ch2endor as endor  # noqa: E402
 import dq4ch2tempe as tempe  # noqa: E402
@@ -155,29 +149,9 @@ LEAVE_ALTAR = f'{tempe.CHIEF_TALK_CELL[0]},{tempe.CHIEF_TALK_CELL[1]}'
 
 
 def battle_patch(data, kind):
-    """사건 전투 몬스터(dq4ch2event 모듈의 BATTLES)를 덮는 ROMPATCH. win 은 HP 1·수비 0(1장 boss_patch 와 같음),
-    weak 는 win 에 공격 0·MP 0·행동 여섯 모두 たたかう(일행이 다치지 않음), lose 는 HP 1000·공격 511·민첩 255·행동 모두
-    たたかう(일행이 먼저 쓰러짐). 「weak:5A+lose:4C」 처럼 + 로 잇고 : 뒤에 몬스터(16진, 쉼표)를 주면 그 몬스터만 덮는다."""
+    """사건 전투 몬스터(dq4ch2event 모듈의 BATTLES)를 덮는 ROMPATCH(dq4chapterwalk.battle_patch)."""
     every = sorted({m for _, mod in ch2.modules() for b in getattr(mod, 'BATTLES', ()) for m, _ in b['members']})
-    out = []
-    for piece in kind.split('+'):
-        how, _, only = piece.partition(':')
-        for n in [int(m, 16) for m in only.split(',')] if only else every:
-            base = wc.MONSTERS + n * 25
-            if how in ('win', 'weak'):
-                out += [f'{base + 2:X}=00', f'{base + 3:X}=01',
-                        f'{base + 8:X}={data[base + 8] & ~(0xC0 if how == "weak" else 0x40) & 0xFF:02X}',
-                        f'{base + 10:X}={data[base + 10] & ~0x07 & 0xFF:02X}']
-                if how == 'weak':
-                    out += [f'{base + 1:X}=00', f'{base + 4:X}=00', *(f'{base + k:X}=73' for k in range(17, 23))]
-            elif how == 'lose':
-                out += [f'{base:X}=FF', f'{base + 1:X}=FF', f'{base + 3:X}=E8', f'{base + 8:X}={data[base + 8] | 0x80:02X}',
-                        f'{base + 10:X}={data[base + 10] & ~0x07 | 0x03:02X}']
-                # 행동도 모두 たたかう: 주문·ようすをみる 를 고르면 진 판이 구간 프레임 안에 끝나지 않았다(bsnes, 비비안 8E)
-                out += [f'{base + k:X}=73' for k in range(17, 23)]
-            else:
-                raise ValueError(f'전투 선택 {kind}: win·weak·lose')
-    return ';'.join(out)
+    return cwk.battle_patch(data, kind, every)
 
 
 # 명령 창 → 「조사하기」(dq4chestcheck.SEARCH 를 walk.lua 꼴로)
@@ -359,21 +333,14 @@ SEGMENTS += [
 
 def units(segments=None):
     """머리 뒤 구간을 묶음으로 나눈다: 순간이동 구간마다 새 묶음."""
-    segments = SEGMENTS if segments is None else segments
-    out = []
-    for i in range(HEAD, len(segments)):
-        if segments[i][1] == 'warp' or not out:
-            out.append([i])
-        else:
-            out[-1].append(i)
-    return out
+    return cwk.units(SEGMENTS if segments is None else segments, HEAD)
 
 
 def setup(first, segments=None, data=None):
     """first 번째 구간 앞까지 걸었다면 켜져 있을 flag·기록(SET)과 동료(PARTY). 머리 구간의 flag 는 2장 출발 상태에
     이미 있으므로 머리 뒤 구간만 센다. data(롬 바이트)가 없으면 기록 효과는 두지 않는다."""
-    segments = SEGMENTS if segments is None else segments
-    return wc.setup(segments[HEAD:], first - HEAD, FLAGS, effects(data) if data is not None else {})
+    return cwk.setup(SEGMENTS if segments is None else segments, HEAD, first, FLAGS,
+                     effects(data) if data is not None else {})
 
 
 def head_key(mesence):
@@ -416,146 +383,16 @@ def head(mesence, rom, data, out, cache=None):
 
 def walk_unit(mesence, rom, data, out, unit, base, seed=0, segments=None):
     """한 묶음을 2장 출발 상태에서 걷는다."""
-    segments = SEGMENTS if segments is None else segments
-    extra, party = setup(unit[0], segments, data)
-    state, results = base, []
-    name, how, arg, _ = segments[unit[0]]
-    if how == 'warp' and arg.split(',')[0] == ch2.THRONE:
-        hop = HOPS[ch2.THRONE]
-        r = wc.segment(mesence, rom, state, out / f'{name}-hop', (f'{name}-hop', 'warp', hop, {'map': hop[:5]}),
-                       wc.NO_ENCOUNTERS, extra, party, seed, flags=FLAGS)
-        if r['status'] != 'passed':
-            return [r]
-        state, extra, party = out / f'{name}-hop' / 'end.mss', '', ''
-    for k, i in enumerate(unit):
-        seg = segments[i]
-        patch = wc.NO_ENCOUNTERS + (';' + battle_patch(data, seg[3]['battle']) if 'battle' in seg[3] else '')
-        r = wc.segment(mesence, rom, state, out / seg[0], seg, patch,
-                       *((extra, party) if k == 0 else ('', '')), seed, flags=FLAGS)
-        more = [p for p in (end_cell_problem(out / seg[0], seg), *end_byte_problems(out / seg[0], seg)) if p]
-        if more:
-            r = {**r, 'status': 'failed', 'problems': r['problems'] + more}
-        results.append(r)
-        if r['status'] != 'passed':
-            break
-        state = out / seg[0] / 'end.mss'
-    return results
+    return cwk.walk_unit(mesence, rom, data, out, unit, base, seed, SEGMENTS if segments is None else segments, HEAD,
+                         FLAGS, effects, HOPS, battle_patch)
 
 
-def end_cell_problem(dest, seg):
-    """선택 cell 이 있는 걷기 구간에서 끝에 선 셀이 다르면 그 까닭."""
-    name, how, _, opt = seg
-    if 'cell' not in opt or how != 'walk':
-        return None
-    log = dest / 'walk.txt'
-    found = re.search(r'end map \w\w/\w\w x=(\d+) y=(\d+)', log.read_text(encoding='utf-8')) if log.exists() else None
-    got = (int(found[1]), int(found[2])) if found else None
-    return None if got == tuple(opt['cell']) else f"끝 셀 {got}, 기대 {tuple(opt['cell'])}"
-
-
-def end_byte_problems(dest, seg):
-    """선택 bytes({FLAGS 이름: 값})가 있는 걷기 구간에서 끝 값이 다른 칸들. walk.lua 는 FLAGS 의 바이트를 이름=값으로 찍는다."""
-    name, how, _, opt = seg
-    if 'bytes' not in opt or how != 'walk':
-        return []
-    log = dest / 'walk.txt'
-    seen = dict(re.findall(r'^(\w+)=([0-9A-F]+)$', log.read_text(encoding='utf-8'), re.M)) if log.exists() else {}
-    return [f'{k} = {seen.get(k)}, 기대 {v:02X}' for k, v in opt['bytes'].items()
-            if k not in seen or int(seen[k], 16) & 0xFF != v]
-
-
-def compare_runs(first, second):
-    """두 번 걸은 묶음 결과에서 구간 기록 SHA-1 이 다른 구간의 까닭."""
-    problems = {}
-    for a, b in zip(first, second):
-        if a.get('trace') != b.get('trace') or a['status'] != b['status']:
-            problems[a['name']] = f"두 번 걸은 기록이 다름: {a.get('trace')}/{a['status']} ≠ {b.get('trace')}/{b['status']}"
-    if len(first) != len(second):
-        problems['_'] = f'두 번 걸은 구간 수가 다름: {len(first)} ≠ {len(second)}'
-    return problems
+end_cell_problem, end_byte_problems, compare_runs = cwk.end_cell_problem, cwk.end_byte_problems, cwk.compare_runs
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--rom', required=True, type=Path, help='dq4build.py --chapter2 의 롬')
-    ap.add_argument('--out', required=True, type=Path)
-    ap.add_argument('--jobs', type=int, default=6, help='함께 띄울 MesenCE 수')
-    ap.add_argument('--base', type=Path, help='같은 롬으로 만든 2장 출발 상태(opening/end.mss). 주면 머리를 건너뜀')
-    ap.add_argument('--only', help='이 구간으로 시작하는 묶음만(쉼표로 여럿)')
-    ap.add_argument('--repeat', type=int, default=1, choices=(1, 2), help='2 면 묶음마다 두 번 걸어 기록을 견줌')
-    wc.add_seed_args(ap)
-    args = ap.parse_args()
-    seeds = wc.seeds_of(args)
-    mesence = Path(os.environ['MESENCE'])
-    out = args.out.resolve()
-    if out.exists() and any(out.iterdir()):
-        raise SystemExit(f'{out} is not empty')
-    out.mkdir(parents=True, exist_ok=True)
-    rom = out / 'c.sfc'
-    shutil.copyfile(args.rom.resolve(), rom)
-    data = rom.read_bytes()
-    cache = None if args.no_state_cache else wc.StateCache(data)
-    began = time.monotonic()
-    names = [s[0] for s in SEGMENTS]
-    groups = units()
-    if args.only:
-        wanted = args.only.split(',')
-        unknown = [w for w in wanted if w not in names[HEAD:]]
-        if unknown:
-            raise SystemExit(f'없는 구간: {", ".join(unknown)}')
-        groups = [u for u in groups if names[u[0]] in wanted]
-    if args.base:
-        base, head_results = args.base.resolve(), []
-    else:
-        base, head_results = head(mesence, rom, data, out, cache)
-        for r in head_results:
-            print(json.dumps(r, ensure_ascii=False), flush=True)
-    runs = {s: [] for s in seeds}
-    unit_seconds = {}
-    repeat_problems = {}
-    if base is not None:
-        def one(seed, unit, n):
-            t0 = time.monotonic()
-            dest = wc.seed_dir(out, seed, seeds) / (f'run-{n}' if args.repeat > 1 else '')
-            rs = walk_unit(mesence, rom, data, dest, unit, base, seed)
-            return rs, round(time.monotonic() - t0)
-        with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-            jobs = {(s, tuple(u), n): pool.submit(one, s, u, n)
-                    for s in seeds for u in groups for n in range(1, args.repeat + 1)}
-            for job in concurrent.futures.as_completed(jobs.values()):
-                for r in job.result()[0]:
-                    print(json.dumps(r, ensure_ascii=False), flush=True)
-        for s in seeds:
-            for u in groups:
-                rs, secs = jobs[s, tuple(u), 1].result()
-                unit_seconds[f'{s}:{names[u[0]]}'] = secs
-                if args.repeat > 1:
-                    bad = compare_runs(rs, jobs[s, tuple(u), 2].result()[0])
-                    for r in rs:
-                        if r['name'] in bad:
-                            r['problems'] = r['problems'] + [bad[r['name']]]
-                            r['status'] = 'failed'
-                    if '_' in bad:
-                        repeat_problems[f'{s}:{names[u[0]]}'] = bad['_']
-                runs[s] += rs
-    head_ok = base is not None and all(r['status'] == 'passed' for r in head_results)
-    expected = sum(len(u) for u in groups)
-    per_seed = [{'seed': s, 'rng': wc.rng_for(s),
-                 'status': 'passed' if head_ok and len(rs) == expected and all(r['status'] == 'passed' for r in rs)
-                 and not any(k.startswith(f'{s}:') for k in repeat_problems) else 'failed',
-                 'segments': rs} for s, rs in runs.items()]
-    ok = head_ok and all(r['status'] == 'passed' for r in per_seed)
-    report = {'status': 'passed' if ok else 'failed', 'seconds': round(time.monotonic() - began),
-              'state_cache': 'off' if cache is None or args.base else
-              'hit' if head_results and head_results[0].get('cached') else 'miss',
-              'repeat': args.repeat, 'head': head_results, 'unit_seconds': unit_seconds,
-              'repeat_problems': repeat_problems, 'seeds': per_seed}
-    (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
-    print(json.dumps({'status': report['status'], 'seconds': report['seconds'], 'state_cache': report['state_cache'],
-                      'units': len(groups), 'unit_seconds': unit_seconds,
-                      'failed': [f"{s['seed']}:{r['name']}" for s in per_seed for r in s['segments']
-                                 if r['status'] != 'passed']}, ensure_ascii=False))
-    return 0 if ok else 1
+    return cwk.main(sys.modules[__name__], __doc__, 'dq4build.py --chapter2 의 롬',
+                    '같은 롬으로 만든 2장 출발 상태(opening/end.mss). 주면 머리를 건너뜀')
 
 
 if __name__ == '__main__':
