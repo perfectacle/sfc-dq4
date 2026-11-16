@@ -310,8 +310,10 @@ def execution_trace(seq, ticks, peek=False, chain=None):
     """
     tracks = []
     top = seq
+    # 되풀이·부르기로 같은 자리를 여러 번 지나므로 자리마다 푼 것을 시퀀스별로 둔다
+    decoded = {id(top): {}, id(chain): {}}
     for start in header(top)[1]:
-        seq = top
+        seq, memo = top, decoded[id(top)]
         pc, tick, duration, stack, events = start, 0, 0, [], []
         counter = 0
         guard = 0
@@ -319,16 +321,25 @@ def execution_trace(seq, ticks, peek=False, chain=None):
             guard += 1
             if guard > max(10000, ticks * 100):
                 raise ValueError('sequence does not advance')
-            op = seq[pc]
-            if op == 0xF7:
-                # dq5song.step 은 F7 을 1바이트(원래 드라이버에서 아무것도 안 함)로 읽지만, 고친 드라이버는 F7 m t 를 읽는다.
-                # m < 80 은 나눈 곡의 본체로 넘어감, FE·FF 는 곡 붙들기(시각에 영향 없음)
-                if chain is not None and seq[pc + 1] < 0x80:
-                    pc, seq = header(chain)[1][seq[pc + 2]], chain
-                else:
-                    pc += 3
-                continue
-            nxt, _, target, _ = step(seq, pc)
+            got = memo.get(pc)
+            if got is None:
+                op = seq[pc]
+                if op == 0xF7:
+                    # dq5song.step 은 F7 을 1바이트(원래 드라이버에서 아무것도 안 함)로 읽지만, 고친 드라이버는 F7 m t 를 읽는다.
+                    # m < 80 은 나눈 곡의 본체로 넘어감, FE·FF 는 곡 붙들기(시각에 영향 없음)
+                    if chain is not None and seq[pc + 1] < 0x80:
+                        pc, seq = header(chain)[1][seq[pc + 2]], chain
+                        memo = decoded[id(chain)]
+                    else:
+                        pc += 3
+                    continue
+                nxt, _, target, _ = step(seq, pc)
+                if op in (0xDB, 0xDC, 0xF4, 0xE0):
+                    raise ValueError(f'unsupported flow command {op:02X}')
+                got = memo[pc] = (op, nxt, target, bytes(seq[pc:nxt]),
+                                  _peeks_rest(seq, nxt) if peek and op < 0xA0 else None,
+                                  (seq[pc + 1] or 256) if 0x50 <= op < 0xA0 else None)
+            op, nxt, target, chunk, rest, length = got
             if op == 0xEA:
                 pc = target
                 continue
@@ -348,17 +359,12 @@ def execution_trace(seq, ticks, peek=False, chain=None):
                 counter = (counter or seq[pc + 1]) - 1
                 pc = target if counter else nxt
                 continue
-            if op in (0xDB, 0xDC, 0xF4, 0xE0):
-                raise ValueError(f'unsupported flow command {op:02X}')
-            if peek and op < 0xA0:
-                events.append((tick, bytes(seq[pc:nxt]), _peeks_rest(seq, nxt)))
-            else:
-                events.append((tick, bytes(seq[pc:nxt])))
+            events.append((tick, chunk, rest) if rest is not None else (tick, chunk))
             if op == 0xFF:
                 break
             if op < 0xA0:
-                if op >= 0x50:
-                    duration = seq[pc + 1] or 256
+                if length is not None:
+                    duration = length
                 if not duration:
                     raise ValueError('uninitialized note duration')
                 tick += duration
@@ -367,6 +373,7 @@ def execution_trace(seq, ticks, peek=False, chain=None):
     return tracks
 
 
+_SAME_TRACES = set()
 # 검산 결과 캐시 키에 넣는 코드: execution_trace 와 그것이 부르는 dq5song(step·header)
 TRACE_HASH = hashlib.sha256(Path(__file__).read_bytes() + (ROOT / 'sfc/dq5/tools/dq5song.py').read_bytes()).hexdigest()
 
@@ -374,12 +381,18 @@ TRACE_HASH = hashlib.sha256(Path(__file__).read_bytes() + (ROOT / 'sfc/dq5/tools
 def same_trace(raw, out, ticks, cache_dir=None):
     """raw 와 out 의 execution_trace(peek=True) 가 같은가. cache_dir 를 주면 같았던 짝을 (코드·바이트·틱) 키의 빈
     파일로 남겨 다음에는 다시 돌리지 않는다. 달랐던 짝은 남기지 않는다(곧 빌드가 멈추므로)."""
-    if cache_dir is None:
-        return execution_trace(raw, ticks, peek=True) == execution_trace(out, ticks, peek=True)
     h = hashlib.sha256(TRACE_HASH.encode())
     for part in (bytes(raw), bytes(out), str(ticks).encode()):
         h.update(hashlib.sha256(part).digest())
     key = h.hexdigest()
+    if cache_dir is None:
+        # 같은 빌드가 같은 짝을 여러 번 검산한다. 캐시를 끈 빌드도 프로세스 안에서는 같았던 짝을 다시 돌리지 않는다
+        if key in _SAME_TRACES:
+            return True
+        if execution_trace(raw, ticks, peek=True) != execution_trace(out, ticks, peek=True):
+            return False
+        _SAME_TRACES.add(key)
+        return True
     path = Path(cache_dir) / 'trace' / key[:2] / key
     if path.is_file():
         return True
