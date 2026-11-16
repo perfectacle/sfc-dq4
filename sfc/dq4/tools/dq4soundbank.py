@@ -21,6 +21,7 @@ import dq5brr  # noqa: E402
 import dq5brrenc as brr  # noqa: E402
 
 PITCH_C = 8372  # DQ5 SPC 07E5 표의 C. 음 n=1일 때 표의 두 번째 원소를 쓴다.
+_ENCODED = {}
 ENCODER_HASH = hashlib.sha256(Path(__file__).read_bytes() + Path(dq5brr.__file__).read_bytes()).hexdigest()
 
 
@@ -43,23 +44,38 @@ def hw_sample(nib, shift, filt, p1, p2):
     return s - 0x10000 if s & 0x8000 else s
 
 
+_SHIFTS = np.arange(13)
+_NIBS = np.arange(16)
+# hw_sample 의 니블 몫 (s << shift) >> 1 을 시프트·니블마다
+_NIB_TERM = ((np.where(_NIBS >= 8, _NIBS - 16, _NIBS)[None, :] << _SHIFTS[:, None]) >> 1).astype(np.int64)
+
+
 def _hw_block(target, p1, p2, filters):
-    best = None
-    for filt in filters:
-        for shift in range(13):
-            q1, q2, nibs, err = p1, p2, [], 0
-            for x in target:
-                e, nib, out = min(((hw_sample(n, shift, filt, q1, q2) - x) ** 2, n, hw_sample(n, shift, filt, q1, q2))
-                                  for n in range(16))
-                err += e
-                nibs.append(nib)
-                q2, q1 = q1, out
-                if best is not None and err >= best[0]:
-                    break
-            else:
-                if best is None or err < best[0]:
-                    best = (err, filt, shift, nibs, q1, q2)
-    return best
+    """필터·시프트 후보 모두를 한꺼번에(numpy) 굴려, 오차가 가장 작은 첫 후보와 표본마다 오차가 가장 작은 첫 니블을 고른다
+    (hw_sample 로 하나씩 고르는 것과 같은 결과, test_dq4soundbank 가 견줌)."""
+    rows = len(filters) * 13
+    filt = np.repeat(np.asarray(filters), 13)
+    terms = np.tile(_NIB_TERM, (len(filters), 1))
+    q1 = np.full(rows, p1, dtype=np.int64)
+    q2 = np.full(rows, p2, dtype=np.int64)
+    err = np.zeros(rows, dtype=np.int64)
+    nibs = np.empty((rows, len(target)), dtype=np.int64)
+    pick = np.arange(rows)
+    f1, f2, f3 = filt == 1, filt == 2, filt == 3
+    for k, x in enumerate(target):
+        half = q2 >> 1
+        base = np.where(f1, (q1 >> 1) + ((-q1) >> 5), 0)
+        base = np.where(f2, q1 - half + (half >> 4) + ((q1 * -3) >> 6), base)
+        base = np.where(f3, q1 - half + ((q1 * -13) >> 7) + ((half * 3) >> 4), base)
+        out = (np.clip(terms + base[:, None], -0x8000, 0x7FFF) << 1) & 0xFFFF
+        out -= (out & 0x8000) << 1
+        e = (out - x) ** 2
+        n = e.argmin(axis=1)
+        err += e[pick, n]
+        nibs[:, k] = n
+        q2, q1 = q1, out[pick, n]
+    r = int(err.argmin())
+    return int(err[r]), int(filt[r]), r % 13, nibs[r].tolist(), int(q1[r]), int(q2[r])
 
 
 def encode_hw(pcm, loop=None):
@@ -268,7 +284,13 @@ def convert_sample(path, region, *, max_rate=12000, cache_dir=None, seconds=None
     key = hashlib.sha256(converted.tobytes() + str(loop_start).encode() + ENCODER_HASH.encode()).hexdigest()
     cache = Path(cache_dir) / (key + '.brr') if cache_dir else None
     hit = cache is not None and cache.is_file()
-    encoded = cache.read_bytes() if hit else encode_hw(converted.tolist(), loop_start)
+    if cache is None:
+        # 같은 빌드가 같은 PCM 을 여러 번 줄인다(예산 맞추기). 캐시를 끈 빌드도 프로세스 안에서는 한 번만 인코드한다
+        if key not in _ENCODED:
+            _ENCODED[key] = encode_hw(converted.tolist(), loop_start)
+        encoded = _ENCODED[key]
+    else:
+        encoded = cache.read_bytes() if hit else encode_hw(converted.tolist(), loop_start)
     if cache is not None and not hit:
         cache.parent.mkdir(parents=True, exist_ok=True)
         partial = cache.with_suffix('.tmp')

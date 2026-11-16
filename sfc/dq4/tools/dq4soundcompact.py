@@ -9,12 +9,15 @@ from array import array
 import functools
 import gzip
 import hashlib
+import itertools
 import json
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import threading
+
+import numpy as np
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -23,6 +26,7 @@ sys.path.insert(0, str(ROOT / 'sfc/dq5/tools'))
 from dq5song import _encode_line  # noqa: E402
 import dq4native  # noqa: E402
 
+_COMPACTED = {}
 COMPACT_HASH = hashlib.sha256(Path(__file__).read_bytes() + (ROOT / 'sfc/dq5/tools/dq5song.py').read_bytes()).hexdigest()
 
 
@@ -32,6 +36,8 @@ PEEK_SKIP = {'gate_preset', 'gate', 'volume2', 'tempo', 'follow', 'follow_off'}
 MAX_CALL_DEPTH = 3  # SPC 0267 의 돌아올 자리 칸(192E: 0240+X 가 6 이상이면 부르기를 무시)
 LOOP_OPS = {'loop'}
 BARRIER_OPS = {'jump', 'end', 'loop', 'call', 'ret'}
+_KIND_CODE = {'label': 0, 'note': 1, 'rest': 2, 'skip': 3, 'cmd': 4}
+_NOTE, _REST, _SKIP, _CMD, _WALL = 1, 2, 3, 4, 5
 
 
 @functools.cache
@@ -104,18 +110,28 @@ class _Program:
             return False
         return True
 
-    def heights(self, extra=None):
+    def depths(self):
+        """서브루틴마다 (아래로 가장 긴 부르기 사슬의 길이, 위에서 내려와 닿는 가장 긴 사슬의 길이). 둘 다 자신을 셈."""
         calls = {sub: {x.split()[-1] for x in self.seqs[sub] if _op(x) == 'call'} for sub in self.subs}
-        if extra:
-            for key, value in extra.items():
-                calls.setdefault(key, set()).update(value)
-        memo = {}
+        callers = {}
+        for sub, inner in calls.items():
+            for c in inner:
+                callers.setdefault(c, []).append(sub)
+        down, up = {}, {}
 
-        def height(sub, seen=()):
-            if sub not in memo:
-                memo[sub] = 1 + max((height(c, seen + (sub,)) for c in calls.get(sub, ())), default=0)
-            return memo[sub]
-        return {sub: height(sub) for sub in calls}
+        def height(sub):
+            if sub not in down:
+                down[sub] = 1 + max((height(c) for c in calls.get(sub, ())), default=0)
+            return down[sub]
+
+        def depth(sub):
+            if sub not in up:
+                up[sub] = 1 + max((depth(c) for c in callers.get(sub, ())), default=0)
+            return up[sub]
+        for sub in calls:
+            height(sub)
+            depth(sub)
+        return down, up
 
     def loops(self):
         """목소리 본문에서 바로 이어 되풀이되는 묶음을 F5 로. 되풀이 셈은 트랙마다 하나라 겹치지 않게 맨 위에서만."""
@@ -175,24 +191,33 @@ class _Program:
 
     def calls(self, max_tokens=256):
         """여러 곳에 나오는 묶음을 깊이 3 안의 서브루틴으로. 한 번에 아끼는 바이트가 가장 큰 것부터."""
+        cache, intern = {}, {}
         while True:
-            names = list(self.seqs)
-            ids, arr, where, sizes = {}, [], [], []
-            for name in names:
-                for index, line in enumerate(self.seqs[name]):
-                    if _kind(line) == 'label' or _op(line) in BARRIER_OPS - {'call'}:
-                        arr.append(-len(arr) - 1)
-                    else:
-                        arr.append(ids.setdefault(line, len(ids)))
-                    where.append((name, index))
-                    sizes.append(_size(line))
-                arr.append(-len(arr) - 1)
-                where.append((name, None))
-                sizes.append(0)
-            prefix = [0]
-            for size in sizes:
-                prefix.append(prefix[-1] + size)
+            parts = [cache.get(name) or cache.setdefault(name, self._layout(name, intern)) for name in self.seqs]
+            where = list(itertools.chain.from_iterable(part[0] for part in parts))
+            line_ids = np.concatenate([part[1] for part in parts])
+            kinds = np.concatenate([part[2] for part in parts])
+            sizes = np.concatenate([part[3] for part in parts])
+            positions_all = np.arange(len(line_ids))
+            # 벽(이름표·되돌아갈 수 없는 흐름·시퀀스 끝)은 자리마다 다른 음수, 나머지 줄은 처음 나온 차례의 번호
+            wall = line_ids < 0
+            body = line_ids[~wall]
+            _, first, inverse = np.unique(body, return_index=True, return_inverse=True)
+            rank = np.empty(len(first), dtype=np.int64)
+            rank[np.argsort(first, kind='stable')] = np.arange(len(first))
+            arr = np.where(wall, -positions_all - 1, 0)
+            arr[~wall] = rank[inverse]
+            arr = arr.tolist()
+            prefix = [0, *np.cumsum(sizes).tolist()]
+            # 토막마다 쓰는 것: 그 안에서 마지막으로 쉼·skip 이 아닌 자리(last_good), 쉼 바로 뒤의 skip 이 아닌 첫 자리(next_after_rest)
+            last_good = np.maximum.accumulate(np.where((kinds == _NOTE) | (kinds == _CMD), positions_all, -1)).tolist()
+            after_rest = np.zeros(len(kinds), dtype=bool)
+            after_rest[1:] = (kinds[:-1] == _REST) & (kinds[1:] != _SKIP)
+            ahead = np.where(after_rest, positions_all, len(kinds))
+            next_after_rest = np.minimum.accumulate(ahead[::-1])[::-1].tolist()
             best = None
+            down, up = self.depths()
+            top, subs = max(down.values(), default=0), set(self.subs)
 
             def consider(positions, length):
                 nonlocal best
@@ -212,29 +237,23 @@ class _Program:
                 name, index = where[chosen[0]]
                 block = self.seqs[name][index:index + length]
                 label = f'Lphrase{self.serial}'
-                extra = {label: {x.split()[-1] for x in block if _op(x) == 'call'}}
-                for p in chosen:
-                    host = where[p][0]
-                    if host in self.subs:
-                        extra.setdefault(host, set()).add(label)
-                if max(self.heights(extra).values()) > MAX_CALL_DEPTH:
+                # 새 서브루틴이 늘리는 사슬은 그것을 품는 서브루틴을 지나는 것뿐이다
+                own = 1 + max((down.get(x.split()[-1], 1) for x in block if _op(x) == 'call'), default=0)
+                hosts = {where[p][0] for p in chosen} & subs
+                if max([top, own] + [up[h] + own for h in hosts]) > MAX_CALL_DEPTH:
                     return
                 best = (saving, label, block, [where[p] for p in chosen], length)
 
             for length, positions in _repeats(arr, max_tokens):
                 if len(positions) < 2:
                     continue
-                name, index = where[positions[0]]
-                block = self.seqs[name][index:index + length]
-                kinds = [_kind(x) for x in block]
+                first = positions[0]
                 # 음표로 끝나 뒤가 쉼이거나 쉼으로 시작해 앞이 음표인 곳은 block_ok 가 거른다. 끝을 쉼이 아닌 것 앞으로 당기고
                 # 처음을 쉼 뒤로 미룬 토막도 함께 본다(같은 자리 집합에서 나오므로 따로 찾지 않아도 된다).
-                ahead, lead = [None] * (length + 1), None
-                for k in range(length - 1, -1, -1):
-                    lead = kinds[k] if kinds[k] != 'skip' else lead
-                    ahead[k] = lead
-                shrink = next((k for k in range(length - 1, 1, -1) if ahead[k] not in (None, 'rest')), None)
-                shift = next((k for k in range(1, length - 1) if kinds[k - 1] == 'rest' and kinds[k] != 'skip'), None)
+                shrink = last_good[first + length - 1] - first
+                shrink = shrink if shrink >= 2 else None
+                shift = next_after_rest[first + 1] - first
+                shift = shift if shift <= length - 2 else None
                 for head in (0, shift):
                     if head is None:
                         continue
@@ -245,10 +264,32 @@ class _Program:
                 return
             _, label, block, places, length = best
             self.serial += 1
+            call = f'  call -> {label}'
             for name, index in sorted(places, key=lambda x: -x[1]):
-                self.seqs[name][index:index + length] = [f'  call -> {label}']
+                self.seqs[name][index:index + length] = [call]
+                cache[name] = self._splice(name, cache[name], index, length, call, intern)
             self.seqs[label] = list(block)
             self.subs.append(label)
+
+    def _layout(self, name, intern):
+        """calls 가 반복마다 잇는 시퀀스 하나의 몫: 자리(where), 줄 번호(벽은 -1), 종류 부호, 바이트 크기. 끝에 벽 하나."""
+        body = self.seqs[name]
+        where = [(name, index) for index in range(len(body))] + [(name, None)]
+        ids = [-1 if _kind(line) == 'label' or _op(line) in BARRIER_OPS - {'call'} else intern.setdefault(line, len(intern))
+               for line in body] + [-1]
+        kinds = [_KIND_CODE[_kind(line)] for line in body] + [_WALL]
+        sizes = [_size(line) for line in body] + [0]
+        return where, np.array(ids, dtype=np.int64), np.array(kinds, dtype=np.int8), np.array(sizes, dtype=np.int64)
+
+    def _splice(self, name, part, index, length, line, intern):
+        """_layout(name) 의 몫에서 [index, index + length) 를 줄 하나로 바꾼 것(self.seqs[name] 은 이미 바뀜)."""
+        _, ids, kinds, sizes = part
+        where = [(name, i) for i in range(len(self.seqs[name]))] + [(name, None)]
+        tail = index + length
+        return (where,
+                np.concatenate((ids[:index], [intern.setdefault(line, len(intern))], ids[tail:])),
+                np.concatenate((kinds[:index], [_KIND_CODE[_kind(line)]], kinds[tail:])).astype(np.int8),
+                np.concatenate((sizes[:index], [_size(line)], sizes[tail:])))
 
     def lines(self):
         out = []
@@ -317,14 +358,25 @@ def _repeats(arr, max_tokens):
 
 def _repeats_py(arr, max_tokens):
     n = len(arr)
-    order = sorted(range(n), key=lambda i: arr[i:i + max_tokens])
-    lcp = [0] * n
-    for k in range(1, n):
-        a, b = order[k - 1], order[k]
-        m = 0
-        while m < max_tokens and a + m < n and b + m < n and arr[a + m] == arr[b + m] and arr[a + m] >= 0:
-            m += 1
-        lcp[k] = m
+    if not n:
+        return
+    # 토큰을 차례를 지키는 고정 폭 빅엔디언 바이트(가장 작은 값이 1, 끝 뒤는 0 으로 채움)로 바꿔, 자리마다 앞 max_tokens 토큰을
+    # 바이트 문자열 하나로 만든다. 그 문자열의 안정 정렬이 arr[i:i + max_tokens] 목록의 안정 정렬과 같은 차례다(짧은 쪽이 앞).
+    shifted = np.asarray(arr, dtype=np.int64)
+    shifted = shifted - shifted.min() + 1
+    width = 2 if shifted.max() < 1 << 16 else 4
+    span = width * max_tokens
+    flat = np.zeros(n * width + span, dtype=np.uint8)
+    flat[:n * width] = np.frombuffer(shifted.astype(f'>u{width}').tobytes(), dtype=np.uint8)
+    windows = np.lib.stride_tricks.as_strided(flat, shape=(n, span), strides=(width, 1))
+    keys = np.ascontiguousarray(windows)
+    order = np.argsort(keys.view(f'S{span}').ravel(), kind='stable')
+    ranked = keys[order]
+    # 이웃한 두 자리가 함께 갖는 앞 토큰 수. 벽(음수)은 자리마다 달라 같을 수 없고, 끝 뒤 0 은 어떤 토큰과도 다르다
+    differ = ranked[1:] != ranked[:-1]
+    first = np.where(differ.any(axis=1), differ.argmax(axis=1), span)
+    lcp = [0, *(first // width).tolist()]
+    order = order.tolist()
     stack = [(0, 0)]
     for k in range(1, n + 1):
         value = lcp[k] if k < n else 0
@@ -342,9 +394,12 @@ def compact(lines, cache_dir=None):
     15E5 미리 보기가 보는 바이트의 종류는 그대로다(dq4soundport.execution_trace(peek=True) 로 검산).
 
     cache_dir 를 주면 결과를 COMPACT_HASH 와 입력으로 만든 키의 파일에 두고 다시 쓴다."""
-    if cache_dir is None:
-        return _compact(lines)
     key = hashlib.sha256((COMPACT_HASH + '\n' + '\n'.join(lines)).encode()).hexdigest()
+    if cache_dir is None:
+        # 같은 빌드가 같은 줄을 여러 번 묶는다. 캐시를 끈 빌드도 프로세스 안에서는 한 번만 묶는다
+        if key not in _COMPACTED:
+            _COMPACTED[key] = tuple(_compact(lines))
+        return list(_COMPACTED[key])
     path = Path(cache_dir) / 'compact' / key[:2] / (key + '.json.gz')
     if path.is_file():
         return json.loads(gzip.decompress(path.read_bytes()))

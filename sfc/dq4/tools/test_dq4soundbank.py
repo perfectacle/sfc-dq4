@@ -3,11 +3,32 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+import unittest.mock
 import wave
 
 import numpy as np
 
 import dq4soundbank as bank
+
+
+def one_by_one_block(target, p1, p2, filters):
+    """hw_sample 로 후보·니블을 하나씩 고르는 옛 _hw_block. numpy 로 바꾼 것이 같은 것을 고르는지 견주는 기준."""
+    best = None
+    for filt in filters:
+        for shift in range(13):
+            q1, q2, nibs, err = p1, p2, [], 0
+            for x in target:
+                e, nib, out = min(((bank.hw_sample(n, shift, filt, q1, q2) - x) ** 2, n, bank.hw_sample(n, shift, filt, q1, q2))
+                                  for n in range(16))
+                err += e
+                nibs.append(nib)
+                q2, q1 = q1, out
+                if best is not None and err >= best[0]:
+                    break
+            else:
+                if best is None or err < best[0]:
+                    best = (err, filt, shift, nibs, q1, q2)
+    return best
 
 
 class BankTests(unittest.TestCase):
@@ -24,6 +45,28 @@ class BankTests(unittest.TestCase):
         self.assertEqual(start % 16, 0)
         self.assertEqual(len(converted) % 16, 0)
         self.assertAlmostEqual((len(converted) - start) / rate, 1000 / 22050)
+
+    def test_vectorised_block_matches_one_by_one(self):
+        rng = np.random.default_rng(5)
+        for amp in (0, 40, 3000, 16383, 60000):
+            for filters in ((0,), (0, 1, 2, 3)):
+                for _ in range(12):
+                    target = [2 * int(x) for x in np.clip(rng.normal(0, amp, 16), -16384, 16383)]
+                    p1, p2 = (2 * int(x) for x in rng.integers(-16384, 16384, 2))
+                    self.assertEqual(bank._hw_block(target, p1, p2, filters), one_by_one_block(target, p1, p2, filters))
+
+    def test_uncached_sample_is_encoded_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'test.wav'
+            with wave.open(str(source), 'wb') as wav:
+                wav.setnchannels(1)
+                wav.setsampwidth(2)
+                wav.setframerate(12000)
+                wav.writeframes(np.rint(np.sin(np.arange(64) * 2 * np.pi / 16) * 9000).astype('<i2').tobytes())
+            region = {'base': 60, 'attack': 127, 'decay': 127, 'sustain': 127}
+            first = bank.convert_sample(source, region)
+            with unittest.mock.patch.object(bank, 'encode_hw', side_effect=AssertionError('다시 인코드')):
+                self.assertEqual(first, bank.convert_sample(source, region))
 
     def test_sample_resource_cache_and_brr_end(self):
         with tempfile.TemporaryDirectory() as directory:

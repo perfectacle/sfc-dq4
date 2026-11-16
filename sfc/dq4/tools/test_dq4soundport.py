@@ -190,6 +190,9 @@ class SameTraceTests(unittest.TestCase):
             self.assertTrue(port.same_trace(plain, packed, 2001, d))             # 틱이 다르면 새로 잼
             self.assertEqual(len([f for f in (Path(d) / 'trace').rglob('*') if f.is_file()]), 2)
         self.assertTrue(port.same_trace(plain, packed, 2000))
+        with mock.patch.object(port, 'execution_trace', side_effect=AssertionError('다시 돌림')):
+            self.assertTrue(port.same_trace(plain, packed, 2000))                # 캐시 없이도 같았던 짝은 한 번만
+        self.assertFalse(port.same_trace(plain, other, 2000))
 
 
 class CompactTests(unittest.TestCase):
