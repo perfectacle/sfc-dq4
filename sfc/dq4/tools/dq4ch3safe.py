@@ -75,6 +75,10 @@ WIPE_ORIG = bytes((0xA5, 0x48, 0x4A, 0x85, 0x45, 0xA5, 0x47, 0x6A, 0x85, 0x44, 0
 # 상자 열림 비트: 25:FAB0 이 chest_maps(25:FAB5 의 즉값 뱅크, 25:FAC4 의 abs)를 (그룹, 맵, 개수) 3바이트씩 훑어 앞 맵들의
 # 개수를 더한 것이 그 맵 첫 상자 번호 n 이고, 비트는 7E:2210 + n/8 의 25:FAE9[n & 7]. 3E/09 의 상자는 금고 하나뿐이다
 CHEST_BANK, CHEST_TABLE, CHEST_MASKS, CHEST_BITS = 0x25FAB5, 0x25FAC4, 0x25FAE9, 0x7E2210
+# dq4brkscan: PHP 로 시작하지 않는 진입점. chest_bit 은 JSR 로 부르는 코드, exit 는 P 를 부른 쪽이 PLP 로 되돌리는
+# 훅, flood_* 는 이벤트 스크립트 자료
+CODE_ENTRIES = ('chest_bit', 'exit')
+DATA_ENTRIES = ('flood_right', 'flood_left')
 HERO_X, HERO_Y = 0x7E3020, 0x7E3080
 FLAG_AT = 0x7E2190
 CHAPTER3_AT = FLAG_AT + 0x78    # dq4ch3event.CHAPTER3
