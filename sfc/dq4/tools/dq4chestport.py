@@ -27,7 +27,7 @@ import dq4shop  # noqa: E402
 import dq5item  # noqa: E402
 from dq4environmentrom import TARGETS  # noqa: E402
 from dq4groupbuild import placement  # noqa: E402
-from dq4itemport import IRON_SAFE  # noqa: E402
+from dq4itemport import IRON_SAFE, STATUE  # noqa: E402
 from dq4shopport import _fold, dq5_items  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
@@ -40,9 +40,9 @@ SUBSTITUTE = {"ラックのたね": "ふしぎなきのみ", "あやかしのふ
               "ピンクのレオタード": "おどりこのふく", "せいじゃくのたま": "まふうじのつえ", "うまのふん": "やくそう"}
 # せいじゃくのたま 와 まふうじのつえ 는 둘 다 쓰면 マホトーン 이 걸린다. じょうせんけん(ハバリア 의 배를 타는 표)은 DQ5 에
 # 같은 것이 없고 쓸 곳(배 이벤트)도 아직 없어, 그 이벤트를 옮길 때까지 빈 상자로 둔다.
-# ぎんのめがみぞう(3장 은의 여신상 동굴 40/05 (06,04))도 수집가에게 파는 사건 물건이라, 사건 물건 자리를 정할 때까지
-# 빈 상자로 둔다.
-LATER = {"じょうせんけん", "ぎんのめがみぞう"}
+LATER = {"じょうせんけん"}
+# 3장 은의 여신상 동굴 40/05 (06,04)의 ぎんのめがみぞう 는 엔돌 수집가에게 파는 사건 물건(dq4ch3endor)이다
+EVENT_CHEST_ITEMS = {"ぎんのめがみぞう": STATUE}
 GOLD = 0x100
 # FC special chest contents with a DQ5 reward of the same kind: FF, the empty chest (message 0297), is DQ5 FFFF
 # 「からっぽだった」.
@@ -66,6 +66,8 @@ def _reward(names, items, content, gold=True):
     name = names[content]
     if name in LATER:
         return EMPTY
+    if name in EVENT_CHEST_ITEMS:
+        return EVENT_CHEST_ITEMS[name]
     name = SUBSTITUTE.get(name, name)
     if _fold(name) not in items:
         raise ValueError(f"no DQ5 item named {name}")
