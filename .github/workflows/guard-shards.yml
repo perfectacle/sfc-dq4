@@ -667,8 +667,11 @@ jobs:
       - name: Summarize the shards
         env:
           MODE: ${{ inputs.mode }}
+          SWEEPS: ${{ inputs.sweeps }}
         run: |
           set -o pipefail
           need=()
           if [ "$MODE" = release ]; then need=(--require-build); fi
+          # Only a run that took the sweeps must show every release.toml sweep passed (pr and cache-warm have none)
+          if [ "$MODE" = release ] && [ "$SWEEPS" = true ]; then need+=(--require-sweeps); fi
           uv run --frozen python tools/release_check.py --ci-summary work/ci-report "${need[@]}" | tee -a "$GITHUB_STEP_SUMMARY"

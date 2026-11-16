@@ -347,6 +347,16 @@ class ReleaseCheckTest(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn('연습 통과', text)
 
+    def test_ci_summary_cli_requires_sweeps_only_when_asked(self):
+        """PR 조각 결과에는 스윕이 없다. --require-sweeps 없이는 검사만으로 판정한다."""
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / 's.json').write_text(json.dumps({'commit': 'c', 'shard': [1, 1], 'local': [], 'rows': [
+                {'name': 'g', 'file': 'f', 'status': 'passed', 'detail': '1초'}]}))
+            with mock.patch('builtins.print'):
+                for extra, code in (([], 0), (['--require-sweeps'], 1)):
+                    with mock.patch.object(sys, 'argv', ['release_check.py', '--ci-summary', d, *extra]):
+                        self.assertEqual(rc.main(), code, extra)
+
     def test_ci_summary_fails_on_skipped(self):
         ci = {'commit': 'c', 'shards': 1, 'local': ['m'],
               'rows': [{'name': 'a', 'status': 'passed', 'detail': '1초'}]}

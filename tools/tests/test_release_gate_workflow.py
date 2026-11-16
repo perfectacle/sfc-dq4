@@ -420,6 +420,10 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.assertRegex(self.text, r'\n  report:\n    needs: \[build, shard, build-verify\]\n')
         summary = next(s for s in self.jobs['report'] if '--ci-summary' in run_texts(s))
         self.assertIn('if [ "$MODE" = release ]; then need=(--require-build); fi', run_texts(summary))
+        # 스윕 판정은 스윕을 돌린 관문에서만. PR·cache-warm 에서 걸면 늘 「CI 결과 없음」 으로 실패한다
+        self.assertIn('if [ "$MODE" = release ] && [ "$SWEEPS" = true ]; then need+=(--require-sweeps); fi',
+                      run_texts(summary))
+        self.assertIn('SWEEPS: ${{ inputs.sweeps }}', ''.join(summary))
         shard = ''.join(self.jobs['shard'])
         self.assertIn('--kind "shard-$K"', shard)
         self.assertIn('cp "$f" work/ci-upload/', shard)

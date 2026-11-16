@@ -659,6 +659,9 @@ def main():
                     help='조각 결과를 요약해 Markdown 으로 찍고 끝낸다(CI report 잡). 모두 통과가 아니면 1')
     ap.add_argument('--require-build', action='store_true',
                     help='--ci-summary: 캐시 빌드와 무캐시 빌드의 대조가 있고 같아야 통과(배포 관문)')
+    ap.add_argument('--require-sweeps', action='store_true',
+                    help='--ci-summary: release.toml 스윕이 모두 CI 에서 통과해야 통과(sweeps 를 돌린 관문). 없으면 스윕은 '
+                         'CI 에 있는 것만 본다(PR·cache-warm)')
     ap.add_argument('--ci-coverage', nargs=2, metavar=('KIND', 'OUT'),
                     help='CI cold-build 잡: unit(단위 전부) 또는 build(--build-out 으로 빌드 한 번)를 coverage 로 재 OUT 에 적는다')
     ap.add_argument('--build-out', type=Path, help='--ci-coverage build 의 빌드 출력 폴더')
@@ -670,7 +673,7 @@ def main():
         return ci_coverage(kind, out, a.build_out)
     if a.ci_summary:
         try:
-            text, ok = ci_summary(load_ci(a.ci_summary), a.require_build, sweeps())
+            text, ok = ci_summary(load_ci(a.ci_summary), a.require_build, sweeps() if a.require_sweeps else None)
         except (OSError, ValueError, KeyError, TypeError) as e:
             print(f'# 배포 관문 CI 결과\n\n- 조각 결과를 읽지 못함: {type(e).__name__}: {e}')
             return 1
