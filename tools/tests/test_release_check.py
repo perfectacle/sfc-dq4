@@ -372,7 +372,7 @@ class ReleaseCheckTest(unittest.TestCase):
         sub = Path(d) / 'build-digest'
         sub.mkdir(exist_ok=True)
         kinds = [('cached', b'r'), ('shard-1', b'r')] + ([('cold', cold_rom)] if with_cold else [])
-        for v in ('ch1', 'ch2'):
+        for v in ('ch1', 'ch2', 'ch3'):
             for kind, rom in kinds:
                 f = sub / f'{kind}-{v}.json'
                 f.write_text(json.dumps({'format': 'dq4-build-digest/1', 'variant': v, 'kind': kind, 'commit': commit,

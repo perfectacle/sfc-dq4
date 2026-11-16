@@ -382,7 +382,7 @@ def stage_hashes(files):
     return {k: hashlib.sha256('\n'.join(v).encode()).hexdigest() for k, v in groups.items()}
 
 
-def verify_build(digests, variants=('ch1', 'ch2'), need_cached=True):
+def verify_build(digests, variants=('ch1', 'ch2', 'ch3'), need_cached=True):
     """(Markdown, 같은가). 변형마다 무캐시 빌드가 하나 있어야 하고, 캐시 빌드(need_cached 면 꼭)와 조각이 받은 것은 모두
     그것과 파일 목록·바이트가 같아야 한다. 커밋도 모두 같아야 한다."""
     lines, ok = ['## 캐시 빌드와 무캐시 빌드 대조', ''], True

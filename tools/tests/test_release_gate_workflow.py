@@ -402,12 +402,22 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.assertIn('if [ -n "$NATIVE" ]; then export DQ4_NATIVE="$NATIVE"; fi', run_texts(build))
         keys = next(s for s in cold if 'dq4buildkeys.py' in run_texts(s))
         self.assertIn('dq4buildkeys.py --chapter2', run_texts(keys))
+        self.assertIn('dq4buildkeys.py --chapter3', run_texts(keys))
         self.assertIn('--kind cold', text)
         # 무캐시 빌드의 변형 = rom 행렬의 변형(같은 인자), 그 가운데 하나는 파이썬 경로
         rom = '\n'.join(top_block(self.text, 'jobs'))
         matrices = re.findall(r'- variant: (\S+)\n\s+args: (\S*)\n(?:\s+native: (\S*)\n)?', rom)
-        self.assertEqual(matrices, [('ch1', "''", ''), ('ch2', '--chapter2', ''),
+        self.assertEqual(matrices, [('ch1', "''", ''), ('ch2', '--chapter2', ''), ('ch3', '--chapter3', ''),
                                     ('ch1', "''", "''"), ('ch2', '--chapter2', "'off'")])
+        # ch3 의 무캐시 빌드는 조각 옆 러너를 늘리지 않게 ch1 잡에서 ch1 뒤에 만들어 같은 digest 폴더에 둔다
+        ch3 = next(s for s in cold if 'work/cold/ch3' in run_texts(s))
+        self.assertIn("if: matrix.variant == 'ch1'", ''.join(ch3))
+        self.assertIn("DQ4_BUILD_CACHE: 'off'", ''.join(ch3))
+        self.assertIn('dq4build.py --out work/cold/ch3 --chapter3', run_texts(ch3))
+        self.assertIn('--variant ch3 --kind cold', run_texts(ch3))
+        self.assertIn('--out work/ci-digest/cold-ch3.json', run_texts(ch3))
+        upload = next(i for i, s in enumerate(cold) if 'actions/upload-artifact' in ''.join(s))
+        self.assertLess(cold.index(ch3), upload)
 
     def test_cold_build_records_coverage_into_the_checked_digest_upload(self):
         """롬 없는 단위 커버리지는 에셋·도구·롬이 오기 전에(CI 단위 시험 환경과 같게) 잰다. 두 기록은 롬 검사를 거쳐
@@ -501,7 +511,7 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.assertEqual(beside_shards(self.text), {'cold-build', 'build-verify'})
         self.assertEqual(beside_peak(self.text), 2, 'build-verify 는 cold-build 뒤에 떠 함께 돌지 않는다')
         self.assertEqual((runners(self.text, 'cold-build'), runners(self.text, 'rom'), runners(self.text, 'report')),
-                         (2, 2, 1))
+                         (2, 3, 1))
         self.assertEqual(needs_of(self.text)['shard'], {'build', 'rom'})
 
     def test_mesence_unpacks_its_libraries_before_guards(self):
