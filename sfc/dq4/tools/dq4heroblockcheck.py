@@ -308,6 +308,7 @@ def chapter3_cases():
                               'free': '24,9', 'want': [], 'not': [('RAFT_RIDING', safe.RIDING)], 'map': endor.CAVE_ENTRY,
                               'maxf': 3000, 'ride': (RAFT_SLOT,)}
     out.update(shop_cases(lakanaba))
+    out.update(bonmalmo_cases())
     return out
 
 
@@ -323,6 +324,21 @@ def shop_cases(lakanaba):
                      'free': f'{lakanaba.COUNTER_IN[0]},{lakanaba.COUNTER_IN[1] - 4}', 'hero_at': lakanaba.COUNTER_IN,
                      'want': [('SEEN', lakanaba.SEEN), ('SHIFT', lakanaba.SHIFT)], 'maxf': 2600}
     return out
+
+
+def bonmalmo_cases():
+    """본몰·여우 마을(dq4ch3bonmalmo): 말을 건 쪽과 상관없이 장면 뒤 조작이 돌아오고 인물이 주인공을 지나가지 않는지.
+    여우 장면은 촌장 오른쪽에서(걷기 검사는 왼쪽), 왕자는 아래에서(걷기 검사는 오른쪽) 말을 건다."""
+    import dq4ch3bonmalmo as bm
+    cx, cy = bm.CHIEF
+    px, py = bm.PRINCE['day']
+    wx, wy = bm.FOREST_WAKE
+    return {'bm-fox-right': {'warp': f'{bm.FOX_TOWN},{cx + 2},{cy - 1}', 'set': '21FF|02',
+                             'walk': f'{wc.talk("left", 4)};wait:400;{wc.taps(16, 80)};wait:600;{pc.CLOSE}',
+                             'free': f'{wx},{wy - 4}', 'want': [('BM_FOXED', bm.FOXED)], 'map': bm.FOREST, 'maxf': 7000},
+            'bm-prince-below': {'warp': f'{bm.CASTLE},{px},{py + 1}', 'set': '',
+                                'walk': f'{wc.talk("up", 10)};wait:300', 'free': f'{px + 4},{py + 2}',
+                                'want': [('BM_PRINCE_MET', bm.PRINCE_MET)], 'map': bm.CASTLE, 'maxf': 3000}}
 
 
 def overlaps(text, ride=()):

@@ -16,6 +16,7 @@ HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4ch1event as ev  # noqa: E402
+import dq4ch3bonmalmo as bm  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 import dq4ch2frenol as fr  # noqa: E402
 import dq4ch2king as king  # noqa: E402
@@ -186,6 +187,8 @@ PASS_NO_DEVICE = {
     '(12,53)~(8,53) 만 걷고, 맵 구석으로 사라진 뒤 조작을 푼다(dq4ch3lakanabacheck 손님 사례)',
     lakanaba.SCRIPTS['first_master'][2]: '레이크나바 첫 출근 주인: 주인공이 문 칸·문 밖(X 14 이상)에 서면 조작을 막고 X 12 '
     '이하((12,53)→(10,53)→(10,49))로만 비킴(heroblock shop-right·shop-above·shop-below)',
+    bm.SCRIPTS['fox'][2]: '숲의 여우: 장면 동안 주인공은 (04,0C)에 묶이고 여우는 (05,0D)→(05,04) 열로만 걸음(bm-fox-right 사례 겹침 0)',
+    bm.SCRIPTS['gaade'][2]: '돈 가아데: 주인공 아래 줄(FC Y 0D)로만 걸음(bm-fox-right 사례 겹침 0)',
 }
 
 
