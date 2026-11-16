@@ -46,6 +46,8 @@ FLAGS = {
     'SAFE_SLOT': (0x7E2056 + 2, 0xFF),
     'BENTO': wc.flag(lakanaba.BENTO_TODAY), 'SEEN': wc.flag(lakanaba.SEEN), 'SHIFT': wc.flag(lakanaba.SHIFT),
     'TOM_PUSH': wc.flag(lakanaba.TOM_PUSH), 'SCOTT_DAYS': (ch3.SCOTT_DAYS, 0xFF),
+    # 구르는 바위(dq4boulder)의 메움 비트(bit0 왼쪽 구덩이, bit1 가운데)
+    'SAFE_FILL': (safe.BOULDER_VARS(safe.boulder.FILL), 0xFF),
 }
 
 TOWN = '3E/00'                 # FC 16/00 레이크나바
@@ -133,6 +135,29 @@ SEGMENTS = [
     # 꾸지람 뒤 주인이 비키고 주인공이 걷는 동안 누른 A 는 버려지므로 넉넉히 누른다
     ('shop_first', 'walk', f'16,53;{taps(12)};{CLOSE}',
      {'map': TOWN, 'cell': lakanaba.COUNTER_IN, 'want': ['SEEN', 'SHIFT'], 'maxf': 2400}),
+    # 입구에서 금고까지 순간이동 없이: 입구 층 → 3E/04 위 → 오른쪽 통로 계단으로 입구 층 아래 → 3E/04 왼쪽 방 →
+    # 왼쪽 수문 「예」 → 3E/06 → 3E/07 → 바위를 줄 13 오른쪽·열 0B 아래·줄 1E 왼쪽으로 이끌어 왼쪽 구덩이를 메움 →
+    # 메운 구덩이를 건너 3E/09 → 금고 상자. 기다림은 바위가 멈출 자리에 닿을 때까지(헤드리스 실측 + 여유). 끝에 금고 방
+    # 계단으로 돌아와 위로 걸으면 바위가 처음 자리로 돌아가 있어 3E/08 로 떨어짐
+    ('safe_cave', 'warp', f'{safe.ENTRY},22,8', {'map': safe.ENTRY, 'set': f'{0x2190 + safe.DRAINED[0]:04X}=00'}),
+    # 입구 층 FC (07~08,04)가 물이라 한 줄 위(03)로 돌아 (03,04) 계단에. (0B,03)은 필드로 나가는 계단이라 밟지 않음
+    ('safe_cave_top', 'walk', '20,9;20,7;6,7;6,9;wait:200', {'map': safe.GATES, 'changes': 1, 'after': 60}),
+    ('safe_cave_round', 'walk', '14,9;28,9;28,23;40,23;40,55;wait:200', {'map': safe.ENTRY, 'changes': 1, 'after': 60}),
+    ('safe_cave_left', 'walk', '12,51;12,33;4,33;4,35;wait:200', {'map': safe.GATES, 'changes': 1, 'after': 60}),
+    ('safe_cave_button', 'walk', f'16,31;16,29;wait:200;{SAFE_ASK};a:8;wait:60;a:8;wait:1300',
+     {'map': safe.PIT, 'want': ['SAFE_DRAINED'], 'changes': 1, 'after': 60}),
+    ('safe_cave_down', 'walk', '16,13;8,13;8,7;4,7;wait:200', {'map': safe.ROLL, 'changes': 1, 'after': 60}),
+    ('safe_boulder', 'walk', '38,29;34,29;34,21;6,21;6,29;6,39;22,39;22,43;wait:800;22,61;16,61;wait:330;8,61;8,53;wait:260;'
+     '8,39;12,39;wait:600', {'map': safe.ROLL, 'bytes': {'SAFE_FILL': 0x01}}),
+    ('safe_cross', 'walk', '8,39;8,89;6,89;6,91;wait:200', {'map': safe.VAULT, 'changes': 1, 'after': 60}),
+    ('safe_take', 'walk', f'20,39;8,39;8,9;wait:30;{SAFE_SEARCH}', {'map': safe.VAULT, 'items': [safe.IRON_SAFE]}),
+    ('safe_fall_back', 'walk', '8,39;24,39;down:20;wait:300;8,73;wait:300',
+     {'map': safe.PIT_BELOW, 'changes': 2, 'after': 60, 'bytes': {'SAFE_FILL': 0x00}}),
+    # 바위를 가운데 구덩이로: 줄 1E 에서 주인공이 X ≥ 05 면 바위가 오른쪽으로, 열 0B 에서 아래로 굴러 가운데 구덩이를
+    # 메움(그 길은 3E/08 아래 계단으로 이어짐)
+    ('safe_boulder_mid_side', 'warp', f'{safe.ROLL},6,22', {'map': safe.ROLL}),
+    ('safe_boulder_mid', 'walk', '6,29;8,29;8,61;16,61;wait:810;22,61;22,53;wait:270;22,39;8,39;8,43;wait:520;'
+     '8,39;22,39;22,89;22,91;wait:200', {'map': safe.PIT_BELOW, 'changes': 1, 'after': 60, 'bytes': {'SAFE_FILL': 0x02}}),
 ]
 
 

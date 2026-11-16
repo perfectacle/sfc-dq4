@@ -279,6 +279,15 @@ def chapter3_cases():
         for x in (x0, x0 + 1):
             out[f'safe-{side}-{x}'] = {'warp': f'{safe.GATES},{x},{y1 + 2}', 'set': '', 'walk': yes, 'free': free,
                                        'want': want, 'map': spec['to'][0], 'maxf': 4000}
+    # 구르는 바위(3E/07): 풀리는 칸 (03~04,0E)를 주인공 두 열(셀 X 6·7·8)로 지나 왼쪽 통로를 내려가 기다리면 바위가 바로
+    # 위에서 멈춘다. 위로 밀어도 지나가지 못하고, 줄 1E 로 비켜 가운데 통로로 걸어 갈 수 있어야 한다(바위가 일행과 겹치거나
+    # 길을 영영 막지 않음). 구덩이 바로 위에서 기다리면 갇히지 않고 구덩이로 떨어져 3E/08 로
+    for x in (6, 7, 8):
+        out[f'safe-boulder-{x}'] = {'warp': f'{safe.ROLL},{x},22', 'set': '',
+                                    'walk': f'{x},49;wait:500;up:30;wait:60;{x},61', 'free': '20,61',
+                                    'want': [], 'map': safe.ROLL, 'maxf': 4000}
+    out['safe-boulder-pit'] = {'warp': f'{safe.ROLL},6,22', 'set': '', 'walk': '6,73;wait:900;down:40;wait:300',
+                               'free': '6,29', 'want': [], 'map': safe.PIT_BELOW, 'maxf': 4000}
     out.update(shop_cases(lakanaba))
     return out
 
