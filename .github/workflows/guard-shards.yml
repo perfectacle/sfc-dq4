@@ -306,14 +306,6 @@ jobs:
           if [ "$ok" != 0 ]; then tail -n 60 "$RUNNER_TEMP/cold-ch1.log" "$RUNNER_TEMP/cold-ch2.log"; fi
           exit "$ok"
 
-      - name: Check that every build stage cache key holds what the stage reads
-        env:
-          DQ4_ASSETS: ${{ github.workspace }}/assets
-          DQ4_READSET: 'off'
-        run: |
-          uv run --frozen python sfc/dq4/tools/dq4buildkeys.py
-          uv run --frozen python sfc/dq4/tools/dq4buildkeys.py --chapter2
-
       - name: Hash the cold builds for build-verify
         run: |
           mkdir -p work/ci-digest
@@ -333,6 +325,17 @@ jobs:
           path: work/ci-digest
           if-no-files-found: error
           retention-days: 14
+
+      # After the upload, so build-verify still compares the bytes when this finds a missing key input
+      - name: Check that every build stage cache key holds what the stage reads
+        env:
+          DQ4_ASSETS: ${{ github.workspace }}/assets
+          DQ4_READSET: 'off'
+        run: |
+          ok=0
+          uv run --frozen python sfc/dq4/tools/dq4buildkeys.py || ok=1
+          uv run --frozen python sfc/dq4/tools/dq4buildkeys.py --chapter2 || ok=1
+          exit "$ok"
 
   # Fails the run as soon as both builds are in when the caches gave other bytes than the cold build.
   build-verify:

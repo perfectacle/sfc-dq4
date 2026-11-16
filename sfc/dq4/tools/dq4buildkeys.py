@@ -274,7 +274,8 @@ def check(tool, args, got, temp_roots=()):
     for name in sorted(set(got['e']) - set(key_env) - set(IGNORED_ENV)):
         problems.append(f'키에 없는 환경 변수: {name}')
     for p in sorted(written):
-        if _under(p, outs) or p in sides or _under(p, temps) or str(p).startswith(SYSTEM) or _pyc_source(p):
+        # 파이썬이 바이트코드를 __pycache__ 에 쓰는 것(임시 이름 .pyc.NNN 포함)은 결과가 아니다
+        if _under(p, outs) or p in sides or _under(p, temps) or str(p).startswith(SYSTEM) or '__pycache__' in p.parts:
             continue
         problems.append(f'출력 자리 밖에 씀(캐시에서 되살아나지 않음): {p}')
     for argv in got['x']:
