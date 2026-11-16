@@ -214,7 +214,7 @@ FC 는 그날 일했으면(일삯을 받은 뒤) 도시락이 있어도 재우�
 | 검사 | 보는 것 | 가드 |
 | --- | --- | --- |
 | `dq4ch3walkcheck.py` | 사건 구간을 3장 출발 상태에서 묶음마다 따로 걸어 flag·끝 맵·필드인지·끝 셀·바이트. `--repeat 2` 로 머리와 묶음을 두 번 걸어 기록 SHA-1 이 같은지 | `dq4-ch3-walk` |
-| `dq4npccheck.py --chapter3` | 3장 그룹(`3E`·`3F`·`40`) 인물을 3장 flag 를 켜고 말 걸어 첫 메시지·가게 품목·인물 표 | `dq4-ch3-npc` |
+| `dq4npccheck.py --chapter3` | 3장 그룹(LINKS 의 `"chapter": 3`, 지금 `3E`·`3F`·`40`·`47`·`48`) 인물을 3장 flag 를 켜고 말 걸어 첫 메시지·가게 품목·인물 표 | `dq4-ch3-npc` |
 | `dq4heroblockcheck.py --chapter3` | 주인공이 선 칸에 따라 사건이 멈추거나 엇나가지 않는지(`chapter3_cases`) | `dq4-ch3-heroblock` |
 | `dq4compatcheck.py walk --chapter3` | 같은 머리·구간을 libretro bsnes·snes9x 에서 | `dq4-ch3-compat-walk` |
 | `dq4peopleeventcheck.py --chapter 3` | 걷기 구간 동안 인물 공용 OBJ 팔레트 줄 | `dq4-people-event-lines` |
@@ -245,7 +245,7 @@ MESENCE=… LIBDIR=… uv run --locked python sfc/dq4/tools/dq4ch3walkcheck.py -
 | --- | --- | --- |
 | `house` | 침대 (54,11) → 아래 (54,13) → (58,13) → (58,15) → 문 → 계단 (66,15) | 맵 `3E/00`·셀 (56,55), 3장 flag, 첫머리 대기 꺼짐 |
 | `town_side` → `town_out` → `town_in` | 마을 왼쪽 도착 칸 옆 (4,27)에서 왼쪽으로 나가 필드, 위로 걸어 입구 블록으로 | 필드·셀 (208,75) / 실내·셀 (0,27) |
-| npccheck | `3E`·`3F`·`40` 인물 222장면(표 54, 말 걸기 140, 가게 11, 건너뜀 17) | 첫 메시지·가게 품목·인물 표 |
+| npccheck | `3E`·`3F`·`40`·`47`·`48` 인물 278장면(맵 밖·벽 인물은 건너뜀). 인물 표 장면은 `--layout` 으로 이 롬의 목록 자리를 준다 | 첫 메시지·가게 품목·인물 표 |
 | heroblock `nene-above` | 네네 위 칸 (54,7)에서 아래로 말 걸고 위 줄로 돌아 (58,5) | 129 밖의 메시지 하나(도시락 견본의 「뭐 두고 간 거라도」), 다시 걸음 |
 
 - 침대 칸은 FC 에서 막힌 블록(속성 `80`)이라, 맵을 다시 불러온 뒤 순간이동으로 침대에 세우면 위의 네네에게 말을 걸어도 「その方向には誰もいない」(`129`)만 떴습니다. 첫머리 직후(맵을 다시 부르기 전) 침대에서 말 거는 것은 첫머리 검사가 봅니다.

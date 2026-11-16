@@ -413,7 +413,7 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-ch3-npc"
-why = "3장 그룹(3E·3F·40: 레이크나바·북쪽 동굴·본모르·엔돌) 인물을 3장 flag 를 켠 채 말 걸어 첫 메시지(일본어 임시 대사·3장 사건 모듈의 시작 표)·가게 품목·인물 표를 본다. 순간이동은 2장 롬처럼 TO 한 셀 아래에 내린다"
+why = "3장 그룹(LINKS 의 chapter 3: 3E·3F·40 레이크나바·북쪽 동굴·본모르·엔돌, 47 굴, 48 여우 마을·여신상 동굴) 인물을 3장 flag 를 켠 채 말 걸어 첫 메시지(일본어 임시 대사·3장 사건 모듈의 시작 표)·가게 품목·인물 표를 본다. 순간이동은 2장 롬처럼 TO 한 셀 아래에 내린다. 인물 표 장면은 이 롬의 목록 자리(--layout keep/npc-layout.json)를 읽어야 한다: 빼면 그룹 빌드의 자리를 읽어 3장 그룹 표가 모두 어긋났다"
 paths = [
   "sfc/dq4/tools/dq4npccheck.py",
   "sfc/dq4/tools/dq4shards.py",
@@ -432,7 +432,7 @@ paths = [
   "sfc/dq5/tools/dq5npcrecordcheck.py",
   "tools/mesence_settings.py",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4chapter1.py build --rom work/ch3/menu.sfc --keep work/ch3/keep --chapter3 --out work/ch3/npc.sfc && rm -rf work/ch3npc && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter3 --rom work/ch3/npc.sfc --build work/ch3/keep/groups --texts work/ch3/messages.json --out work/ch3npc --jobs 4"
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4chapter1.py build --rom work/ch3/menu.sfc --keep work/ch3/keep --chapter3 --out work/ch3/npc.sfc && rm -rf work/ch3npc && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter3 --rom work/ch3/npc.sfc --build work/ch3/keep/groups --layout work/ch3/keep/npc-layout.json --texts work/ch3/messages.json --out work/ch3npc --jobs 4"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태·3장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-build", "ch1-walk"]
 

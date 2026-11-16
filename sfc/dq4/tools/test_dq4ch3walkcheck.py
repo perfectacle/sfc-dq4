@@ -70,7 +70,10 @@ class SegmentTableTests(unittest.TestCase):
 
 class ChapterThreeCaseTests(unittest.TestCase):
     def test_npc_chapter3_groups(self):
-        self.assertEqual(set(npc.CHAPTER3_GROUPS), {'3E', '3F', '40'})
+        # 3장 맵 그룹은 늘어나므로(굴 47·여우 마을 48 등) 처음 셋을 포함하고, 모두 LINKS 의 "chapter": 3 인지만 본다
+        self.assertLessEqual({'3E', '3F', '40'}, set(npc.CHAPTER3_GROUPS))
+        for g in npc.CHAPTER3_GROUPS:
+            self.assertTrue(any(p.get('chapter') == 3 for p in npc.LINKS[int(g, 16)]), g)
         self.assertEqual(npc.CHAPTER2_GROUPS, npc.chapter_groups(2))
 
     def test_heroblock_chapter3_cases_are_well_formed(self):
