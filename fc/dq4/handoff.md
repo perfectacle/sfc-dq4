@@ -26,6 +26,7 @@ SFC 로 옮길 데이터는 거의 모두 롬만으로 뽑을 수 있게 됐습�
 | 표 | [dq4-data-format.md](docs/dq4-data-format.md) · `dq4data.py` | 레벨업 626건, 주문·행동 256개, 몬스터 레코드 전 바이트, 몬스터·동료 AI |
 | 상점·얻는 것 | [dq4-shop-format.md](docs/dq4-shop-format.md) · `dq4shop.py`·`dq4chest.py`(`loot`) | 가게 창, 여관·교회 요금, 상자 160개, 얻는 물건 238줄, 숨는 인물 |
 | 조우 | [dq4-encounter-format.md](docs/dq4-encounter-format.md) · `dq4encounter.py` | 필드·던전 21층 전투 158번, 특수 전투 34개, 기습·선제 비율 |
+| 3장 | [dq4-chapter3-format.md](docs/dq4-chapter3-format.md) · `dq4encounter.py chapter3`·`dq4flags.STORY[3]` | 사건 25장면(flag·메시지·돈), 무기점 손님 갈래·일삯, 톨네코 3장 전용 줍기 표·전멸 골드, 구역 14~17 조우 160번 0 다름, 떠돌이 상인 → 그룹 `FE` 여관·도구점, 장 끝 연출 프레임 |
 | 원작 그림 | [dq4-fcgfx.md](docs/dq4-fcgfx.md)·[dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md) · `dq4fcgfx.py`·`dq4fcsprite.py` | 맵·필드·장면 화면 픽셀 0 다름, 스프라이트·몬스터 픽셀 대조, 롬에 이름 없는 21그룹은 NDS 지명으로(`name_src` 로 출처 표시) |
 | 소리 | [dq4-sound-format.md](docs/dq4-sound-format.md) · `dq4sound.py`(`export --flac` 이 곡·효과음마다 MIDI·MusicXML·SVG 오선 악보·FLAC·채널별 JSON, 전체 NSF) | 곡 50·효과음 55 를 롬 드라이버 실행과 APU 기록으로 프레임마다 0 다름, 맵·필드·전투 곡 표 |
 | 디버그 | [dq4-debug.md](docs/dq4-debug.md) | `$C000` 스위치(장 고르기·벽 통과·인카운트 끄기·전투 테스트) |

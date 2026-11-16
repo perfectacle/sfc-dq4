@@ -10,6 +10,7 @@
   python fc/dq4/tools/dq4encounter.py rom/dq4.nes henge                   へんげのつえ 모습 표 1E:$B079(사람 37칸·몬스터 15칸)와 그 그림을 쓰는 인물 수
   python fc/dq4/tools/dq4encounter.py rom/dq4.nes scripts                 인물 블록(맵·이벤트 목록)에서 명령 21(1F:$DA8A, 특수 전투)을 찾음
   python fc/dq4/tools/dq4encounter.py rom/dq4.nes check [enc.txt ...]     표 경계 검사, fc/dq4/tools/lua/enc.lua 기록 대조
+  python fc/dq4/tools/dq4encounter.py rom/dq4.nes chapter3                3장: 걸어서 닿는 필드(다리 전·뒤)·입구·구역, 던전 층, たびのしょうにん, 나오는 몬스터
 
 근거 루틴(뱅크 18): $9BE6(걸음마다 조우 판정), $9C19(필드 구역), $9F79·$A069(던전 구역),
 $9C88(구역 레코드), $9CB2·$9CCC·$9CF6(조우율), $9D0E~$9F5D(무리 고르기), $A1AD(특수 전투).
@@ -40,6 +41,11 @@ FIELD_FIXED = {(1, 'y<0C'): 0x35, (1, 'y>=0C'): 0x34, (3, ''): 0x36}
 # 무리 고르기 칸 마스크(18:$9D6B, $9F34). 낮/밤은 걸음 시계 $62ED < 78 / ≥ 78
 MASK_FIRST = {'day': 0x1BEF, 'night': 0x3FBE, 'dungeon': 0x3FFF}
 MASK_SECOND = {'day': 0x000F, 'night': 0x001E, 'dungeon': 0x001F}
+# 3장 필드에서 무리를 고르기 전에 rand(10) = 0 이면 이 몬스터 한 마리(18:$9D12). 전투 시작 12:$84B3 이 첫 무리가 이것이면
+# 싸우지 않고 15:$BEF4 로: $63/$64 = FE 로 두고 rand < 10(/256)이면 여관(1인 10G), 아니면 도구점(가게 목록 FE/FE)
+MERCHANT, MERCHANT_INN = 0xAD, 0x10
+CH3_START = (0x68, 0x25)    # 3장 시작 레イクナバ(그룹 16) 입구 (68,24) 바로 아래
+CH3_BRIDGE = 0x10           # $6286 bit4: 다리(블록 정의 00 17 → 00 12, dq4block.swap)
 
 
 def rd(prg, a):
@@ -141,6 +147,94 @@ def formation(prg, i):
         c = r[g >> 1] >> (3 if g & 1 else 0) & 7
         out.append((r[2 + g], *count_range(rd(prg, FORM_ADD + c), rd(prg, FORM_CNT + c))))
     return out
+
+
+def zone_monsters(prg, z, mode='day'):
+    """그 구역에서 mode 의 첫 무리 마스크로 고를 수 있는 칸이 낼 수 있는 몬스터 ID 집합(outcomes 의 모든 무리)."""
+    rec = zone(prg, z)
+    firsts = pick(prg, rec['slots'], rec['row'], MASK_FIRST[mode])
+    out = set()
+    for y, (_, groups) in outcomes(prg, z, mode).items():
+        if y in firsts:
+            for ids, _, hi in groups:
+                if hi:
+                    out |= ids
+    return out - {0xFF}
+
+
+def reach(passable, entrances, start):
+    """start 에서 네 방향으로 걸어 닿는 칸 집합과 부딪힌 입구 {(그룹, (x, y))}. 입구 칸은 들어가므로 지나가지 않는다."""
+    seen, todo, hits = {start}, [start], set()
+    while todo:
+        x, y = todo.pop()
+        for n in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if n in entrances:
+                hits.add((entrances[n], n))
+            elif n not in seen and passable(*n):
+                seen.add(n)
+                todo.append(n)
+    return seen, hits
+
+
+def ch3_reach(prg, bridge):
+    """3장 일행이 시작 마을 앞에서 필드 0 을 걸어 닿는 칸과 입구. 속성 bit7 = 0 인 블록만 걷는다(dq4-block-format.md).
+    bridge 는 $6286 bit4."""
+    import dq4block
+    import dq4field
+    grid = dq4field.decode(prg, 0)
+    blocks = dq4block.defs(prg, 0, 2, CH3_BRIDGE if bridge else 0)
+    h, w = len(grid), len(grid[0])
+
+    def passable(x, y):
+        e = blocks.get(grid[y][x] & 0x1F) if 0 <= y < h and 0 <= x < w else None
+        return e is not None and not e['prop'] & 0x80
+    ents = {(e[1], e[2]): e[0] for e in dq4field.entrances(prg) if e[7] == 0}
+    return reach(passable, ents, CH3_START)
+
+
+def show_chapter3(prg):
+    import dq4shop
+    nm = names(prg)
+    items, _ = dq4shop.item_names(prg)
+    _, _, recs = dungeon_lists(prg)[0]
+    dl = dict(recs)
+    seen_all, groups = set(), set()
+    print('# 3장 필드 0(구역 지도 18:A6BD). 시작 칸', '(%02X,%02X)' % CH3_START)
+    for bridge in (False, True):
+        cells, hits = ch3_reach(prg, bridge)
+        seen_all |= cells
+        groups |= {g for g, _ in hits}
+        zc = {}
+        for x, y in cells:
+            zc[zone_at(prg, 2, x, y)] = zc.get(zone_at(prg, 2, x, y), 0) + 1
+        xs, ys = [x for x, _ in cells], [y for _, y in cells]
+        print(f'다리 {"뒤" if bridge else "전"}($6286 bit4 {int(bridge)}): 칸 {len(cells)}, X {min(xs):02X}~{max(xs):02X} Y {min(ys):02X}~{max(ys):02X}, '
+              + '구역 ' + ' '.join(f'{z:02X}({n})' for z, n in sorted(zc.items())) + ', 입구 '
+              + ' '.join(f'{g:02X}({x:02X},{y:02X})' for g, (x, y) in sorted(hits)))
+    zones_f = sorted({zone_at(prg, 2, x, y) for x, y in seen_all})
+    monsters = set()
+    print('# 필드 구역(낮 / 밤)')
+    for z in zones_f:
+        day, night = zone_monsters(prg, z, 'day'), zone_monsters(prg, z, 'night')
+        monsters |= day | night
+        print(f'구역 {z:02X} 레벨 {zone(prg, z)["b1"]:02X}: ' + ', '.join(mname(nm, m) for m in sorted(day))
+              + ' / ' + ', '.join(mname(nm, m) for m in sorted(night)))
+    print('# 던전 층(1~4장 목록)')
+    for g in sorted(groups):
+        if g not in dl:
+            print(f'그룹 {g:02X}: 목록에 없음(조우 없음)')
+            continue
+        floors = [(k, z) for k, z in enumerate(dl[g])]
+        print(f'그룹 {g:02X}: ' + ' '.join(f'{g:02X}/{k:02X}→' + ('--' if z == 0xFF else f'{z:02X}') for k, z in floors))
+        for z in sorted({z for _, z in floors if z != 0xFF}):
+            ms = zone_monsters(prg, z, 'dungeon')
+            monsters |= ms
+            print(f'  구역 {z:02X} 레벨 {zone(prg, z)["b1"]:02X}: ' + ', '.join(mname(nm, m) for m in sorted(ms)))
+    shop = dq4shop.lookup(prg, 2, 0xFE, 0xFE) or []
+    print(f'# {mname(nm, MERCHANT)}({MERCHANT:02X}): 3장 필드 조우의 1/10(18:$9D12). 싸우지 않고 12:$84AA → 15:$BEF4, '
+          f'rand < {MERCHANT_INN}/256 이면 여관 1인 10G, 아니면 도구점 '
+          + ' '.join(f'{i:02X} {items.get(i, "?")}' for i in shop))
+    print(f'# 3장에 나오는 몬스터 {len(monsters) + 1}종: ' + ', '.join(f'{m:02X} {mname(nm, m)}' for m in sorted(monsters | {MERCHANT})))
 
 
 def dungeon_lists(prg):
@@ -589,6 +683,8 @@ def main():
         print(f'블록 {n_blocks}개(본문 주소가 다른 것), 명령 {n_cmds}개, 못 읽은·넘친 명령 {bad}, 명령 21 {len(hits)}번')
         for bank, a, i, name in hits:
             print(f'{bank:02X}:{a:04X} 21 {i:02X}  {name}')
+    elif cmd == 'chapter3':
+        show_chapter3(prg)
     elif cmd == 'check':
         ok = check_tables(prg)
         for path in args:

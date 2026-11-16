@@ -24,6 +24,7 @@ FC 「드래곤 퀘스트 IV」(일본판 Rev A) 원작 데이터를 분석하�
 - [docs/dq4-fcsprite-format.md](docs/dq4-fcsprite-format.md): DQ4(FC) 필드 인물·일행·탈것 그림 표(4방향 × 걸음 2, 돌려 그리기)와 전투 몬스터 그림(압축·배치·팔레트)·デスピサロ 형태 8가지·이벤트가 바꾸는 그림, 롬에서 뽑아 열람하기
 - [docs/dq4-npcblock-format.md](docs/dq4-npcblock-format.md): DQ4(FC) 인물 블록(움직임·자동 이벤트 스크립트) 명령 60가지, 일행 움직임 패턴
 - [docs/dq4-story-format.md](docs/dq4-story-format.md): DQ4(FC) 이야기 진행: 플래그를 켜는 장면(실측 104), 장마다 진행 순서 → 플래그, 블록 이벤트 루틴 표
+- [docs/dq4-chapter3-format.md](docs/dq4-chapter3-format.md): DQ4(FC) 3장: 사건 차례(맵·대화·메시지·flag·돈), 납품·용병, 무기점 일(손님 갈래·일삯), 톨네코(성장·장비·특수 행동·3장 전용 줍기 표·감정·전멸 골드), 걸어서 닿는 필드·조우·떠돌이 상인, 굴과 장 끝 연출
 - [todo.md](todo.md): 남은 일
 - [references.md](references.md): 참고 자료
 - [tools/README.md](tools/README.md): 도구 사용법
