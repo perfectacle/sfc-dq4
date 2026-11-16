@@ -30,11 +30,10 @@ pages = ch2._speaker_pages
 # flag 는 그 모듈의 예약 바이트(dq4ch3slots)·비트를 여기 적고, test_dq4ch3towns 가 그 모듈이 있으면 같은지 본다
 FLAGS = ()
 FOXED = (0x73, 0x01)           # 본몰 B: 여우를 쫓음(FC $6280&02)
-PRINCE_MET = (0x73, 0x02)      # 본몰 B: 낮에 왕자를 만나 유모에게 쫓겨남(FC $6280&08·$6289&40)
 SON_FREED = (0x73, 0x04)       # 본몰 B: 톰 아들에게 키메라의 날개를 줌(FC $6280&04)
 LETTER1 = (0x73, 0x10)         # 본몰 B: 왕자의 편지를 모니카에게 전함(FC $6280&01)
 SHOP = (0x75, 0x02)            # 엔돌 E: 가게를 삼(FC $6286&20)
-OWNERS = {'dq4ch3bonmalmo': ('FOXED', 'PRINCE_MET', 'SON_FREED', 'LETTER1'), 'dq4ch3endor': ('SHOP',)}
+OWNERS = {'dq4ch3bonmalmo': ('FOXED', 'SON_FREED', 'LETTER1'), 'dq4ch3endor': ('SHOP',)}
 
 YES = {"code": "05"}
 DAY = {"code": "14"}
@@ -67,6 +66,9 @@ PORTED = {
     (0x828,): say('여기는 방어구 가게인데요, 괴물이 돌아다니고부터 방어구가 팔리고 또 팔려서……',
                   '그래서 물건이 다 떨어졌어요. 죄송해요.'),
     (0x66C,): say('본몰 성에 어서 오세요.'),
+    # 유모(대화 05F). FC 는 왕자를 만나 쫓겨난 그 방문 동안($6289&40, 필드로 나가면 지워짐)만 03B1 을 말한다.
+    # 쫓겨나는 말(03B0·03B1)은 본몰 모듈의 왕자 대화가 띄우므로, 유모는 늘 0836 으로 둔다
+    (0x836,): say('여기는 왕자님 방이에요. 너 같은 천한 것이 올 곳이 아닙니다.'),
     (0x558,): say('왕자님! 왕자님이 안 계세요. 어쩌면 좋아……'),
     (0x556,): say('이런 한밤중에 성에 들어오는 것은 허락할 수 없다!'),
     (0x557,): say('내일 다시 오는 것이 좋을 것이오.'),
@@ -180,9 +182,6 @@ MESSAGES = {
     # 본몰 감옥 3F/00 (08,04) 대화 064
     'thief_rumor': say('저쪽에 갇혀 있는 건 좀도둑 녀석이야.', '레이크나바에서 왔다나 봐.'),      # 083D
     'thief_gone': say('저쪽에 갇혀 있던 남자가 안 보이네.'),                                  # 083E
-    # 본몰 성 3F/01 유모 (06,06)·(06,07) 대화 05F
-    'nanny_room': say('여기는 왕자님 방이에요. 너 같은 천한 것이 올 곳이 아닙니다.'),        # 0836
-    'nanny_out': say('자! 나가세요!'),                                                      # 03B1
     # (06,1C) 대화 062
     'fox_rumor': say('요즘 사람을 홀리는 여우가 있다더군.', '하지만 여우쯤이야 개를 데려가면 쫓을 수 있을 거야.'),  # 066D
     'arms_demand': say('요즘 괴물들도 강해져서 많은 성에서 무기와 방어구를 사 모으는 모양입니다.'),  # 0890
@@ -245,7 +244,7 @@ def _not(cond):
 SIMPLE = ('profit', 'clouds', 'monsters_back', 'tournament_over', 'shop_permit', 'emperor_rumor', 'ryan', 'keep_out',
           'arena_closed', 'pizarro_gone', 'emperor_rumor2', 'hero_rumor', 'kitchen', 'gaade_bridges', 'pizarro_fan',
           'sky_sword', 'king_meets_all')
-TALKS = ('safe_man', 'nun', 'warrior', 'neighbor', 'prisoner', 'nanny', 'castle_man', 'bridge', 'jail',
+TALKS = ('safe_man', 'nun', 'warrior', 'neighbor', 'prisoner', 'castle_man', 'bridge', 'jail',
          'armor_buyer', 'gate', 'drunk', 'statue_merchant') + SIMPLE
 
 
@@ -260,7 +259,6 @@ def talk_scripts(ctx):
         'warrior': [when(flag(SON_FREED), [s('warrior_fox')], [s('warrior')])],
         'neighbor': [when(flag(SHOP), [s('neighbor_proud')], [s('neighbor_dream')])],
         'prisoner': [when(flag(SON_FREED), [s('thief_gone')], [s('thief_rumor')])],
-        'nanny': [when(flag(PRINCE_MET), [s('nanny_out')], [s('nanny_room')])],
         'castle_man': [when(flag(LETTER1), [s('arms_demand'), s('arms_envy')], [s('fox_rumor')])],
         'bridge': [when(flag(FOXED), [s('bridge_soon')], [s('bridge_wait')])],
         'jail': [when(flag(FOXED), [s('jail_broke')], [s('jail_hint')])],
@@ -284,13 +282,15 @@ RETALK = {
     (LAKANABA, 'night', (0x04, 0x13)): 'warrior',
     (HOUSE, 'night', (0x02, 0x04)): 'neighbor',
     (PRISON, 'day', (0x08, 0x04)): 'prisoner',
-    (BONMALMO, 'day', (0x06, 0x06)): 'nanny',
-    (BONMALMO, 'day', (0x06, 0x07)): 'nanny',
     (BONMALMO, None, (0x06, 0x1C)): 'castle_man',
     (BONMALMO, 'day', (0x0B, 0x10)): 'bridge',
     (BONMALMO, 'day', (0x1F, 0x1A)): 'jail',
     (BONMALMO, 'day', (0x04, 0x15)): 'armor_buyer',
 }
+
+# FC 16/01 맨 윗줄 (10,00)의 서비스 3 인물(대화 003). 16/01 에는 가게 목록이 없어 옮기면 「＜なにもない＞」 만 낸다.
+# 사건과 상관없는 사람이라 목록에서 뺀다
+EMPTY_SHOP = (HOUSE, 'day', (0x10, 0x00))
 
 ENDOR_TOWN, CASINO, ENDOR_HALL, KITCHEN, THRONE, ARENA, INN = '40/00', '40/01', '40/02', '40/05', '40/06', '40/07', '40/0B'
 # FC 3장 엔돌 목록에서 기본 목록과 대화가 다른 칸(엔돌·본몰 모듈이 맡은 칸과 용병 스콧 (05,13)은 빼고): (맵, 낮·밤,
@@ -387,6 +387,15 @@ def npc_lists(lists, ctx):
     t = ctx.talk
     for (m, time, fc), name in RETALK.items():
         ctx.retalk(lists, m, cell(*fc), t[name], time=time)
+    # 첫머리 목록(dq4ch3event 가 기본 목록을 베낀 ch3_opening)에서도 뺀다. 제자리에서 고친다: dq4ch3event 가 이 뒤에
+    # 그 목록 객체의 첫머리 네네 대화를 바꾼다
+    m, time, fc = EMPTY_SHOP
+    for lst in (lists[m], *_ch3_lists(m, ctx)):
+        entries = lst["entries"]
+        kept = [e for e in entries if (e["time"], _at(e)) != (time, cell(*fc))]
+        if len(kept) != len(entries) - 1:
+            raise SystemExit(f'마을 사람: {m} {fc} 의 빈 가게 사람이 {len(entries) - len(kept)}명')
+        entries[:] = kept
     new, over = [], []
 
     def on(m, name):
@@ -406,8 +415,9 @@ def npc_lists(lists, ctx):
 
 
 def absent(ctx=None):
-    """{(맵, DQ5 셀 x, y, 밤)}: 3장 동안 목록에 없는 기본 목록의 사람(닫힌 카지노, 성 1층의 셋)."""
+    """{(맵, DQ5 셀 x, y, 밤)}: 3장 동안 목록에 없는 기본 목록의 사람(닫힌 카지노, 성 1층의 셋, 레이크나바 집의 빈 가게)."""
     out = {(CASINO, *cell(*fc), night) for fc in CASINO_PEOPLE for night in (False, True)}
+    out.add((EMPTY_SHOP[0], *cell(*EMPTY_SHOP[2]), False))
     out |= {(m, *cell(*fc), t == 'night') for m, gone in ENDOR_GONE.items() for t, fc in gone}
     return out
 
@@ -416,7 +426,7 @@ def start_messages(ctx):
     """{(맵, DQ5 셀, 밤 또는 None): 첫 메시지}: 3장 처음 상태(사건 flag 모두 꺼짐)에서 이 모듈이 대화를 바꾼 사람."""
     m = ctx.msg
     first = {'safe_man': None, 'nun': 'nun_pray', 'warrior': 'warrior', 'neighbor': 'neighbor_dream',
-             'prisoner': 'thief_rumor', 'nanny': 'nanny_room', 'castle_man': 'fox_rumor', 'bridge': 'bridge_wait',
+             'prisoner': 'thief_rumor', 'castle_man': 'fox_rumor', 'bridge': 'bridge_wait',
              'jail': 'jail_hint', 'armor_buyer': 'armor_ask', 'gate': 'gate_ask', 'drunk': 'drunk_ask',
              'statue_merchant': 'statue_ask', **{n: n for n in SIMPLE}}
     out = {}
@@ -446,7 +456,5 @@ def state_messages(ctx):
                                       (BONMALMO, (0x1F, 0x1A), False): m['jail_broke']}),
         'towns_letter': (_set(LETTER1), {(BONMALMO, (0x06, 0x1C), False): m['arms_demand'],
                                          (BONMALMO, (0x06, 0x1C), True): m['arms_demand']}),
-        'towns_prince': (_set(PRINCE_MET), {(BONMALMO, (0x06, 0x06), False): m['nanny_out'],
-                                            (BONMALMO, (0x06, 0x07), False): m['nanny_out']}),
         'towns_shop': (_set(SHOP), {(HOUSE, (0x02, 0x04), True): m['neighbor_proud']}),
     }
