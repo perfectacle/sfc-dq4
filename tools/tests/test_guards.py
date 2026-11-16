@@ -245,7 +245,6 @@ class RunTest(unittest.TestCase):
     def test_key_leaves_out_files_that_cannot_change_the_result(self):
         """추적 파일 가운데 문서·검사 목록·에이전트·CI 설정·일지·단위 테스트는 검사 명령의 결과에 닿지 않아 키에서 뺀다.
         도구 코드는 넣는다. 명령이 단위 테스트를 부르면 테스트가 무엇을 읽을지 몰라 .md 만 뺀다."""
-        from unittest import mock
         base = {'sfc/dq4/tools/dq4x.py': 'a1', 'sfc/dq4/guards.toml': 'b1', 'sfc/dq4/journal/x.png': 'c1',
                 '.github/workflows/ci.yml': 'd1', '.agents/skills/x/y.txt': 'e1', 'sfc/dq4/tools/test_dq4x.py': 'f1',
                 'tools/tests/test_x.py': 'g1', 'README.md': 'h1', 'sfc/dq4/images/x.png': 'i1'}
@@ -269,7 +268,6 @@ class RunTest(unittest.TestCase):
     def test_paths_key_sees_only_the_checks_paths_and_unclaimed_data(self):
         """[cache] key = "paths": paths 밖 코드나 다른 검사가 낱낱이 적은 자료 파일만 바뀌면 같은 키, 자기 paths·묶음
         안 파일, 아무도 적지 않은 자료 파일, 의존성 파일이 바뀌면 다른 키. [cache] 가 없는 트랙은 무엇이 바뀌어도 다른 키."""
-        from unittest import mock
         text = ('[cache]\nkey = "paths"\n' + GOOD.replace('"sfc/dq4/tools/dq4ch*event.py"',
                                                             '"sfc/dq4/tools/dq4ch*event.py", "sfc/dq4/tools/**/*.json"')
                 + '\ngroups = ["walk"]\n'
@@ -317,7 +315,6 @@ class RunTest(unittest.TestCase):
         """MESENCE 를 쓰는 검사는 MesenCE 사용자 설정 파일이 바뀌면(콜백 시간 제한 등) 옛 통과를 쓰지 않는다. 설정 파일을
         못 찾으면 키가 없다(None): 캐시를 읽지도 쓰지도 않는다."""
         import tempfile
-        from unittest import mock
         import mesence_settings
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -342,7 +339,6 @@ class RunTest(unittest.TestCase):
     def test_no_key_means_no_cache(self):
         """키를 만들 수 없는 검사(MESENCE 설정 파일 없음)는 통과해도 캐시에 적지 않고, 다음에도 다시 돈다."""
         import tempfile
-        from unittest import mock
         with tempfile.TemporaryDirectory() as tmp:
             cache, logs = Path(tmp) / 'cache', Path(tmp) / 'logs'
             logs.mkdir()
@@ -503,6 +499,12 @@ class BuiltCacheTest(unittest.TestCase):
         run('git', 'add', '.')
         run('git', '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x')
         self.old = guards.ROOT, guards.cache_dir, guards.CHECK_STAGE
+        # coverage 로 돌면 자식 Python 도 coverage 를 싣고, 끝날 때 sqlite 로 기록을 써 추적기가 `?` 를 적는다
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        for k in ('COVERAGE_PROCESS_CONFIG', 'COVERAGE_PROCESS_START'):
+            os.environ.pop(k, None)
         guards.ROOT = self.root
         guards.cache_dir = lambda: Path(self.tmp.name) / 'cache'
         # 시험은 uv 없이 지금 Python 으로 검사 단계를 돌린다
@@ -698,7 +700,6 @@ class BuiltCacheTest(unittest.TestCase):
         self.assertEqual(guards.run_check(self.check, 60, self.logs)[0], 'failed')
 
     def test_mesence_children_record_their_file_and_env_args(self):
-        from unittest import mock
         cat = os.path.realpath('/bin/cat')
         (self.root / 'sub').mkdir()
         self.edit('data file.txt', 'a')

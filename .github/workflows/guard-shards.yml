@@ -288,6 +288,12 @@ jobs:
 
       - run: uv sync --locked
 
+      # Before the assets, tools and ROMs arrive, so this is the ROM-less CI test environment (CI_MIN).
+      # Records only executed line numbers of build path files; the upload below carries them.
+      - name: Measure build path coverage of the unit tests without ROMs
+        if: matrix.variant == 'ch1'
+        run: uv run --frozen python tools/release_check.py --ci-coverage unit work/ci-digest/coverage-unit.json
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: perfectacle/sfc-dq4-assets
@@ -321,7 +327,13 @@ jobs:
           args=()
           if [ -n "$ARGS" ]; then args=("$ARGS"); fi
           if [ -n "$NATIVE" ]; then export DQ4_NATIVE="$NATIVE"; fi
-          uv run --frozen python sfc/dq4/tools/dq4build.py --out "work/cold/$VARIANT" "${args[@]}"
+          if [ "$VARIANT" = ch1 ]; then
+            # Under coverage (stage scripts too) for the release gate's local coverage (LOCAL_MIN)
+            uv run --frozen python tools/release_check.py --ci-coverage build work/ci-digest/coverage-build.json \
+              --build-out work/cold/ch1
+          else
+            uv run --frozen python sfc/dq4/tools/dq4build.py --out "work/cold/$VARIANT" "${args[@]}"
+          fi
 
       - name: Hash the cold build for build-verify
         env:
