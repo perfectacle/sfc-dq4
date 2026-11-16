@@ -3,8 +3,8 @@
 FC 를 헤드리스로 잰 흐름(fc/dq4/docs/dq4-chapter3-format.md 「무기점 일」·「손님 갈래」·「일삯」)을 SFC 인물 스크립트와
 대화 스크립트로 옮긴다. 형식은 sfc/dq4/docs/dq4-chapter3-format.md 「레이크나바」.
 
-  네네   낮에 오늘 일했거나(WORKED) 오늘 도시락을 받지 않았으면(BENTO_TODAY 꺼짐) 080B·080C 뒤 잠, 아니면 이번 방문에
-         잤으면 080F, 아니면 0810. 밤에는 0811·080C 뒤 잠. 잠은 이벤트로 HP·MP 를 채우고 아침으로 집을 다시 불러온 뒤
+  네네   첫머리 직후(집을 다시 불러오기 전, dq4ch3event.FRESH)에는 080A. 낮에 오늘 일했거나(WORKED) 오늘 도시락을
+         받지 않았으면(BENTO_TODAY 꺼짐) 080B·080C 뒤 잠, 아니면 이번 방문에 잤으면 080F, 아니면 0810. 밤에는 0811·080C 뒤 잠. 잠은 이벤트로 HP·MP 를 채우고 아침으로 집을 다시 불러온 뒤
          080D·080E, 도시락이 없고 물건 칸이 비었으면 도시락을 준다.
   무기점 첫 출근은 문 앞에서 꾸지람(02F3) 뒤 카운터 안으로 걸려 들어가 031D. 다음부터는 카운터 안의 주인에게 말을 걸어
          「예」(0326). 일하는 동안 손님이 문으로 들어와 카운터 앞에 서고, 주인공이 카운터 안 (02,1A) 에 서면 말을 건다.
@@ -561,7 +561,8 @@ def native(ctx):
     put('tom_pay', _tom_pay(talk['tom']))
     put('at_counter', dq4prologue._all_at([(0, *COUNTER_IN, None)]))
     put('face_right', dq4prologue._hero_face(0x11))
-    put('first_walk', dq4prologue.hero_goto([('x', COUNTER_IN[0])], None))
+    # 주인공 셀이 반 칸 어긋나 있어도(순간이동한 검사에서 Y 54) 카운터 안 칸에 맞춰 서게 Y 도 걷는다
+    put('first_walk', dq4prologue.hero_goto([('x', COUNTER_IN[0]), ('y', COUNTER_IN[1])], None))
     put('counter_walk', dq4prologue.hero_goto([('x', COUNTER_IN[0]), ('y', COUNTER_IN[1])], None))
     put('close_event', _event_bytes(_close_tokens(ctx, at)))
     put('close', dq4prologue._event_start(at['close_event']))

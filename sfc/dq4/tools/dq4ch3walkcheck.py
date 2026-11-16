@@ -130,8 +130,9 @@ SEGMENTS = [
     ('tom_push', 'walk', '50,25;50,21;48,21;48,25', {'map': TOWN, 'cell': (48, 25)}),
     # 무기점 첫 출근: 문 밖에 서면 꾸지람 뒤 카운터 안으로 걸려 들어간다
     ('shop_door', 'warp', f'{TOWN},20,52', {'map': TOWN}),
-    ('shop_first', 'walk', f'16,53;{taps(6)};{CLOSE}',
-     {'map': TOWN, 'cell': lakanaba.COUNTER_IN, 'want': ['SEEN', 'SHIFT']}),
+    # 꾸지람 뒤 주인이 비키고 주인공이 걷는 동안 누른 A 는 버려지므로 넉넉히 누른다
+    ('shop_first', 'walk', f'16,53;{taps(12)};{CLOSE}',
+     {'map': TOWN, 'cell': lakanaba.COUNTER_IN, 'want': ['SEEN', 'SHIFT'], 'maxf': 2400}),
 ]
 
 

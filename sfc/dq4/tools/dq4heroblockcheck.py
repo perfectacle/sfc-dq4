@@ -291,9 +291,9 @@ SHOP_APPROACH = [('shop-right', '20,52'), ('shop-above', '16,48'), ('shop-below'
 def shop_cases(lakanaba):
     out = {}
     for name, warp in SHOP_APPROACH:
-        out[name] = {'warp': f'{lakanaba.TOWN},{warp}', 'set': '', 'walk': f'16,53;{wc.taps(6)};{pc.CLOSE}',
+        out[name] = {'warp': f'{lakanaba.TOWN},{warp}', 'set': '', 'walk': f'16,53;{wc.taps(12)};{pc.CLOSE}',
                      'free': f'{lakanaba.COUNTER_IN[0]},{lakanaba.COUNTER_IN[1] - 4}', 'hero_at': lakanaba.COUNTER_IN,
-                     'want': [('SEEN', lakanaba.SEEN), ('SHIFT', lakanaba.SHIFT)], 'maxf': 2000}
+                     'want': [('SEEN', lakanaba.SEEN), ('SHIFT', lakanaba.SHIFT)], 'maxf': 2600}
     return out
 
 
