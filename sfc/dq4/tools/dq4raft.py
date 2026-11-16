@@ -168,11 +168,11 @@ def _in_map(a, label):
         a.label(f'{label}_ok{k}')
 
 
-def natives(code, base, prg):
-    """[(이름, 바이트)]·{이름: 주소}. code: Code(at 은 여기서 채움), base: 둘 자리, prg: FC PRG(물 표)."""
+def natives(code, base, tbls):
+    """[(이름, 바이트)]·{이름: 주소}. code: Code(at 은 여기서 채움), base: 둘 자리, tbls: tables(prg).
+    물 표는 맨 끝에 두어 코드 주소가 표 길이에 매이지 않는다(롬 없이 주소만 쓰는 단위 테스트)."""
     import dq4prologue
     from dq4ch2endor import BCC, BEQ, BNE, BRA, lda, sta
-    tbls = tables(prg)
 
     def build(at):
         code.at = at
@@ -185,14 +185,6 @@ def natives(code, base, prg):
             at2[name] = pos
             pos += len(b)
         at2 = {}
-        # 물 표 머리 [맵, 주소 lo, hi] … FF 와 줄 표
-        head_len = 3 * len(tbls) + 1
-        heads, body, p = b'', b'', base + head_len
-        for k, t in tbls.items():
-            heads += bytes((k, p & 0xFF, p >> 8 & 0xFF))
-            body += t
-            p += len(t)
-        put('tables', heads + b'\xFF' + body)
         put('cellbits', code.cellbits().bytes())
         a = code.mark_all(at.get('cellbits', base), 'ma')
         put('mark_all', a.bytes() + b'\x60')
@@ -279,6 +271,13 @@ def natives(code, base, prg):
         a.label('c_out2')
         a.label('c_out')(DP_RESTORE)
         put('ctl', a.bytes() + LEAVE_ONE)
+        # 물 표 머리 [맵, 주소 lo, hi] … FF 와 줄 표
+        heads, body, p = b'', b'', pos + 3 * len(tbls) + 1
+        for k, t in tbls.items():
+            heads += bytes((k, p & 0xFF, p >> 8 & 0xFF))
+            body += t
+            p += len(t)
+        put('tables', heads + b'\xFF' + body)
         return out, at2
 
     out, at = build({})

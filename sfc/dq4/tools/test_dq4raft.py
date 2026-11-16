@@ -55,7 +55,7 @@ class TableTest(unittest.TestCase):
     def test_code_fits_its_place(self):
         out, at = safe.raft_natives()
         self.assertLessEqual(safe.RAFT_CODE[0] + sum(len(b) for _, b in out), safe.RAFT_CODE[1])
-        self.assertEqual(at['tables'], safe.RAFT_CODE[0])
+        self.assertEqual(min(at.values()), safe.RAFT_CODE[0])
 
 
 @unittest.skipUnless(DQ4.exists(), 'FC 롬 없음')

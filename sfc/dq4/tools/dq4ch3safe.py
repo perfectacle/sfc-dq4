@@ -13,6 +13,7 @@ FC 그룹 3D(きたのどうくつ)는 SFC 그룹 3E 의 3E/03~09(FC 3D/00~06)�
 DQ5 의 しらべる 는 인물 대화를 부르지 않아, 금고 되돌리기는 연 상자 칸을 밟으면 묻는다(보이지 않는 인물). 물살은
 그림 없이 주인공을 아래로 걷게 한 뒤 순간이동으로 옮긴다. 형식은 sfc/dq4/docs/dq4-chapter3-format.md 「북쪽 동굴과 금고」.
 """
+import functools
 from pathlib import Path
 import sys
 
@@ -214,14 +215,18 @@ def hooks(ctx):
             (boulder.AREA_SITE, boulder.AREA_ORIG, boulder.area_hook(at)), (RAFT_CODE[0], bytes(len(raft)), raft)]
 
 
+@functools.cache
 def raft_natives():
-    """여신상 동굴 배 네이티브([(이름, 바이트)], {이름: 주소}). RAFT_CODE 에 hooks 로 둔다(빈 자리 확인)."""
+    """여신상 동굴 배 네이티브([(이름, 바이트)], {이름: 주소}). RAFT_CODE 에 hooks 로 둔다(빈 자리 확인). 물 표는 FC 롬에서
+    만들고, 롬이 없으면(단위 테스트) 빈 표로 둔다. 표가 맨 끝이라 코드 주소는 같다."""
     import dq4ch3endor
     import dq4growth
     from kr_patch.fc import ines
-    prg = ines.prg(Path(dq4growth.DQ4).read_bytes())
+    rom = Path(dq4growth.DQ4)
+    tbls = (raft.tables(ines.prg(rom.read_bytes())) if rom.exists()
+            else {k: b'\xFF' for k in raft.MAPS})
     code = raft.Code(RAFT_VARS, RIDING, dq4ch3endor.BUTTON)
-    out, at = raft.natives(code, RAFT_CODE[0], prg)
+    out, at = raft.natives(code, RAFT_CODE[0], tbls)
     if RAFT_CODE[0] + sum(len(b) for _, b in out) > RAFT_CODE[1]:
         raise SystemExit(f'배 코드가 {RAFT_CODE[1]:06X} 를 넘음')
     return out, at
