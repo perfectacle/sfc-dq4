@@ -45,6 +45,10 @@ permissions:
 env:
   # Guards whose needs name this stay on the local machine (results that differ on Linux).
   LOCAL_NEEDS: macos
+  # Free plan: at most 20 jobs run at once for the account. A run is build, two rom jobs, the shards and report,
+  # so the shard count is capped at JOB_LIMIT - FIXED_JOBS and the run never queues behind itself.
+  JOB_LIMIT: 20
+  FIXED_JOBS: 4
 
 jobs:
   build:
@@ -53,6 +57,7 @@ jobs:
     outputs:
       sha: ${{ steps.plan.outputs.sha }}
       shards: ${{ steps.plan.outputs.shards }}
+      count: ${{ steps.plan.outputs.count }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -68,6 +73,12 @@ jobs:
         run: |
           case "$SHARDS" in ''|*[!0-9]*) echo "::error::shards must be a number"; exit 1 ;; esac
           if [ "$SHARDS" -lt 1 ] || [ "$SHARDS" -gt 64 ]; then echo "::error::shards must be 1-64"; exit 1; fi
+          most=$((JOB_LIMIT - FIXED_JOBS))
+          if [ "$SHARDS" -gt "$most" ]; then
+            echo "::notice::shards $SHARDS → $most (account job limit $JOB_LIMIT, $FIXED_JOBS other jobs in this run)"
+            SHARDS=$most
+          fi
+          echo "count=$SHARDS" >> "$GITHUB_OUTPUT"
           case "$MODE" in
             release) [ -z "$GUARDS" ] || { echo "::error::mode release runs every guard; guards must be empty"; exit 1; } ;;
             pr) [ -n "$GUARDS" ] || { echo "::error::mode pr needs a guard list"; exit 1; } ;;
@@ -85,7 +96,7 @@ jobs:
 
       - name: List the shards
         env:
-          SHARDS: ${{ inputs.shards }}
+          SHARDS: ${{ steps.plan.outputs.count }}
           GUARDS: ${{ inputs.guards }}
         run: |
           only=()
@@ -301,7 +312,7 @@ jobs:
         with:
           op: restore
           name: guard-state
-          prefix: guard-state-${{ inputs.mode }}-${{ matrix.k }}of${{ inputs.shards }}
+          prefix: guard-state-${{ inputs.mode }}-${{ matrix.k }}of${{ needs.build.outputs.count }}
           dir: work/cache
           age_key: ${{ secrets.CI_ROM_AGE_KEY }}
 
@@ -321,7 +332,7 @@ jobs:
           HEADLESS_SLOTS: '4'
           DQ4_READSET_MAX_GB: '2'
           K: ${{ matrix.k }}
-          N: ${{ inputs.shards }}
+          N: ${{ needs.build.outputs.count }}
           GUARDS: ${{ inputs.guards }}
         run: |
           mkdir -p work/ci-gate
@@ -336,7 +347,7 @@ jobs:
           DQ4_ASSETS: ${{ github.workspace }}/assets
           HEADLESS_SLOTS: '4'
           K: ${{ matrix.k }}
-          N: ${{ inputs.shards }}
+          N: ${{ needs.build.outputs.count }}
           GUARDS: ${{ inputs.guards }}
         run: |
           mkdir -p work/ci-gate
@@ -357,7 +368,7 @@ jobs:
         with:
           op: save
           name: guard-state
-          prefix: guard-state-${{ inputs.mode }}-${{ matrix.k }}of${{ inputs.shards }}
+          prefix: guard-state-${{ inputs.mode }}-${{ matrix.k }}of${{ needs.build.outputs.count }}
           dir: work/cache
           exclude: guards
           max_mb: '1500'

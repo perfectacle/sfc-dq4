@@ -101,9 +101,10 @@ CACHE_KEYS = ('all', 'paths')
 RESULT_FIELDS = ('run', 'needs')
 # CI 조각이 로컬 몫으로 빼는 needs 이름의 정본(env LOCAL_NEEDS). PR 계획·본문 검사·ship.py 가 이것을 읽는다
 SHARDS_WORKFLOW = ROOT / '.github' / 'workflows' / 'guard-shards.yml'
-# PR 가드 잡의 조각 수: 조각 하나에 이만큼(초)씩, 많아야 이만큼 조각
+# PR 가드 잡의 조각 수: 조각 하나에 이만큼(초)씩, 많아야 이만큼 조각. 계정 동시 잡 20 을 배포 관문·cache-warm(조각 16)과
+# 나눠 쓰므로 그보다 작게 둔다(test_release_gate_workflow 가 지킴)
 PR_SHARD_SECONDS = 480
-PR_SHARDS_MAX = 16
+PR_SHARDS_MAX = 8
 
 
 def git(*args):
