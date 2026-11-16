@@ -1,0 +1,163 @@
+name: Guard unit cache
+description: >-
+  One encrypted cache (enc-cache) per guard unit (a guard, or one part k/n of a guard with
+  parts), holding the scene, start state and build stage caches the unit wrote under
+  DQ4_UNIT_CACHE/<unit>. Keys are unit names, not shard numbers or modes, so a pull request
+  run finds what the daily warm run (or any other shard count) left; entries inside are
+  found by ROM bytes and code fingerprints, so a stale bundle only misses. The slot list is
+  tools/guards.py --unit-slots; the slot count is guards.UNIT_SLOTS (test_release_gate_workflow
+  checks both).
+  Format: sfc/dq4/docs/dq4-release-check-format.md
+
+inputs:
+  op:
+    description: restore or save
+    required: true
+  slots:
+    description: JSON file from tools/guards.py --unit-slots ([{prefix, dir}])
+    required: true
+  age_key:
+    description: age private key (secret CI_ROM_AGE_KEY)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Read the slots
+      id: slots
+      shell: bash
+      env:
+        SLOTS: ${{ inputs.slots }}
+      run: uv run --frozen python tools/ci_cache.py slots --file "$SLOTS" --count 12 >> "$GITHUB_OUTPUT"
+
+    - name: Unit slot 0
+      if: steps.slots.outputs.p0 != ''
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: ${{ inputs.op }}
+        name: unit-0
+        prefix: ${{ steps.slots.outputs.p0 }}
+        dir: ${{ steps.slots.outputs.d0 }}
+        max_mb: '1500'
+        age_key: ${{ inputs.age_key }}
+
+    - name: Unit slot 1
+      if: steps.slots.outputs.p1 != ''
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: ${{ inputs.op }}
+        name: unit-1
+        prefix: ${{ steps.slots.outputs.p1 }}
+        dir: ${{ steps.slots.outputs.d1 }}
+        max_mb: '1500'
+        age_key: ${{ inputs.age_key }}
+
+    - name: Unit slot 2
+      if: steps.slots.outputs.p2 != ''
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: ${{ inputs.op }}
+        name: unit-2
+        prefix: ${{ steps.slots.outputs.p2 }}
+        dir: ${{ steps.slots.outputs.d2 }}
+        max_mb: '1500'
+        age_key: ${{ inputs.age_key }}
+
+    - name: Unit slot 3
+      if: steps.slots.outputs.p3 != ''
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: ${{ inputs.op }}
+        name: unit-3
+        prefix: ${{ steps.slots.outputs.p3 }}
+        dir: ${{ steps.slots.outputs.d3 }}
+        max_mb: '1500'
+        age_key: ${{ inputs.age_key }}
+
+    - name: Unit slot 4
+      if: steps.slots.outputs.p4 != ''
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: ${{ inputs.op }}
+        name: unit-4
+        prefix: ${{ steps.slots.outputs.p4 }}
+        dir: ${{ steps.slots.outputs.d4 }}
+        max_mb: '1500'
+        age_key: ${{ inputs.age_key }}
+
+    - name: Unit slot 5
+      if: steps.slots.outputs.p5 != ''
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: ${{ inputs.op }}
+        name: unit-5
+        prefix: ${{ steps.slots.outputs.p5 }}
+        dir: ${{ steps.slots.outputs.d5 }}
+        max_mb: '1500'
+        age_key: ${{ inputs.age_key }}
+
+    - name: Unit slot 6
+      if: steps.slots.outputs.p6 != ''
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: ${{ inputs.op }}
+        name: unit-6
+        prefix: ${{ steps.slots.outputs.p6 }}
+        dir: ${{ steps.slots.outputs.d6 }}
+        max_mb: '1500'
+        age_key: ${{ inputs.age_key }}
+
+    - name: Unit slot 7
+      if: steps.slots.outputs.p7 != ''
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: ${{ inputs.op }}
+        name: unit-7
+        prefix: ${{ steps.slots.outputs.p7 }}
+        dir: ${{ steps.slots.outputs.d7 }}
+        max_mb: '1500'
+        age_key: ${{ inputs.age_key }}
+
+    - name: Unit slot 8
+      if: steps.slots.outputs.p8 != ''
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: ${{ inputs.op }}
+        name: unit-8
+        prefix: ${{ steps.slots.outputs.p8 }}
+        dir: ${{ steps.slots.outputs.d8 }}
+        max_mb: '1500'
+        age_key: ${{ inputs.age_key }}
+
+    - name: Unit slot 9
+      if: steps.slots.outputs.p9 != ''
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: ${{ inputs.op }}
+        name: unit-9
+        prefix: ${{ steps.slots.outputs.p9 }}
+        dir: ${{ steps.slots.outputs.d9 }}
+        max_mb: '1500'
+        age_key: ${{ inputs.age_key }}
+
+    - name: Unit slot 10
+      if: steps.slots.outputs.p10 != ''
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: ${{ inputs.op }}
+        name: unit-10
+        prefix: ${{ steps.slots.outputs.p10 }}
+        dir: ${{ steps.slots.outputs.d10 }}
+        max_mb: '1500'
+        age_key: ${{ inputs.age_key }}
+
+    - name: Unit slot 11
+      if: steps.slots.outputs.p11 != ''
+      uses: ./.github/actions/enc-cache # zizmor: ignore[self-repository] actionlint 1.7.12 rejects $/
+      with:
+        op: ${{ inputs.op }}
+        name: unit-11
+        prefix: ${{ steps.slots.outputs.p11 }}
+        dir: ${{ steps.slots.outputs.d11 }}
+        max_mb: '1500'
+        age_key: ${{ inputs.age_key }}

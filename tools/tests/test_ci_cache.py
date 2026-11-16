@@ -139,6 +139,22 @@ class CiCacheTest(unittest.TestCase):
         self.quiet(ci_cache.unpack, 'none', self.tmp / 'd', '')
         self.assertFalse((self.tmp / 'd').exists())
 
+    def test_unit_slots_become_output_lines(self):
+        import json
+        f = self.tmp / 'slots.json'
+        f.write_text(json.dumps([{'prefix': 'guard-unit-a~1of4', 'dir': '/w/u/a~1,3of4'},
+                                 {'prefix': 'guard-unit-b', 'dir': '/w/u/b'}]))
+        got = ci_cache.slots(f, 3)
+        self.assertEqual(got, ['p0=guard-unit-a~1of4', 'd0=/w/u/a~1,3of4', 'p1=guard-unit-b', 'd1=/w/u/b', 'p2=', 'd2='])
+        self.assertEqual(ci_cache.slots(self.tmp / 'none.json', 1), ['p0=', 'd0='])
+        with self.assertRaises(SystemExit):
+            ci_cache.slots(f, 1)
+        for bad in ({'prefix': 'guard-unit-a,b', 'dir': '/d'}, {'prefix': 'x', 'dir': '/d'},
+                    {'prefix': 'guard-unit-a', 'dir': '/d\nq=1'}):
+            f.write_text(json.dumps([bad]))
+            with self.assertRaises(SystemExit):
+                ci_cache.slots(f, 1)
+
 
 if __name__ == '__main__':
     unittest.main()
