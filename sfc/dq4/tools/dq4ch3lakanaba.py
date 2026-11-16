@@ -134,6 +134,9 @@ TOM = {'day': cell(0x18, 0x0B), 'night': cell(0x16, 0x0B)}   # FC 16/00 대화 0
 SON = cell(0x17, 0x03)                                  # FC 16/00 슬롯 2, 대화 055
 DOG = cell(0x1B, 0x04)                                  # FC 16/00 우리 안의 개(대화 0663)
 NENE = {'day': ch3.NENE_CELL, 'night': cell(0x1D, 0x03)}     # FC 16/01 대화 057
+# FC 16/01 낮 목록의 둘째 네네(슬롯 07, 돌아다님). FC 는 첫머리 뒤 이쪽만 두지만, 첫머리 자리 (1B,04) 의 네네를 남기고 이쪽을
+# 뺀다(한 사람만 서게, 말 거는 자리가 검사·첫머리 인물과 같게)
+NENE_WALKER = (HOUSE, 'day', cell(0x21, 0x02))
 POPOLO = {'day': (cell(0x1B, 0x07),), 'night': (cell(0x1B, 0x07), cell(0x10, 0x02))}
 QUIT_MASTER = (CELLAR, 'day', cell(0x07, 0x04))        # FC 16/02 대화 052
 MASTER_PIC = 0x07
@@ -798,6 +801,11 @@ def npc_lists(lists, ctx):
                 _person('helper', 'day', HELPER_CELL, 'down', t['late'], 0),
                 _person('helper_night', 'night', HELPER_CELL, 'down', t['late'], 0)]
     if HOUSE in lists:
+        house = lists[HOUSE]["entries"]
+        before = len(house)
+        house[:] = [e for e in house if (e["time"], _at(e)) != NENE_WALKER[1:]]
+        if before - len(house) != 1:
+            raise SystemExit(f'{HOUSE}: 둘째 네네 {NENE_WALKER[2]} 이 {before - len(house)}명')
         for time, c in NENE.items():
             ctx.retalk(lists, HOUSE, c, t['nene'], time=time)
         for time, cells in POPOLO.items():
@@ -820,8 +828,8 @@ def start_messages(ctx):
 
 def absent(ctx):
     """{(맵, DQ5 셀 x, y, 밤)}: 처음 상태에서 없는 FC 인물. 카운터 주인은 첫 출근(꾸지람) 전에는 숨고, 문·밖에 세운 FC 슬롯
-    11·14·15 는 목록에서 뺐다(첫 출근 주인·손님·가게를 닫는 이벤트가 맡음)."""
-    return {(m, *c, time == 'night') for m, time, c in (MASTER, *STRAYS)}
+    11·14·15 와 집의 둘째 네네는 목록에서 뺐다(첫 출근 주인·손님·가게를 닫는 이벤트, 첫머리 자리 네네가 맡음)."""
+    return {(m, *c, time == 'night') for m, time, c in (MASTER, *STRAYS, NENE_WALKER)}
 
 
 FC_NENE, FC_TOM, FC_SON, FC_MASTER, FC_QUIT = 0x057, 0x058, 0x055, 0x054, 0x052
