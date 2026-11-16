@@ -635,17 +635,20 @@ class HookEntryTests(unittest.TestCase):
         fake = lambda person, rom: (0x40 + P.PEOPLE.index(person), 'simple', 10)  # noqa: E731
         with unittest.mock.patch.object(P, 'target', fake):
             entries = P.hook_entries(None)
-        leader = P.PEOPLE.index(next(p for p in P.PEOPLE if p.flag is not None and p.leader))
-        self.assertEqual(entries[0], (P.LEADER_PICTURES[0], None, P.CHAPTER2, 0x40 + leader))
-        self.assertEqual(entries[1], (P.LEADER_PICTURES[1], None, P.CHAPTER2, 0x40 + leader))
+        leaders = [p for p in P.PEOPLE if p.flag is not None and p.leader]
+        self.assertEqual([p.flag for p in leaders], [P.CHAPTER2, P.CHAPTER3])
+        n = 2 * len(leaders)
+        for k, p in enumerate(leaders):
+            for j in range(2):
+                self.assertEqual(entries[2 * k + j], (P.LEADER_PICTURES[j], None, p.flag, 0x40 + P.PEOPLE.index(p)))
         frog = P.PEOPLE.index(next(p for p in P.PEOPLE if p.role == '개구리'))
-        grouped = [e for e in entries[2:] if e[1] is not None]
-        loose = [e for e in entries[2:] if e[1] is None]
+        grouped = [e for e in entries[n:] if e[1] is not None]
+        loose = [e for e in entries[n:] if e[1] is None]
         self.assertIn((0x50, P.PROLOGUE, None, 0x40 + frog), grouped)
-        self.assertEqual(entries[2:], grouped + loose)
+        self.assertEqual(entries[n:], grouped + loose)
         wanted = sum(len(p.pictures) for p in P.PEOPLE
                      if (p.new_set is not None or p.spare is not None) and p.pictures != (p.spare,))
-        self.assertEqual(len(entries), 2 + wanted)
+        self.assertEqual(len(entries), n + wanted)
 
     def test_hook_patch_refuses_a_site_that_is_not_the_table_read(self):
         with unittest.mock.patch.object(P, 'hook_entries', return_value=[]):

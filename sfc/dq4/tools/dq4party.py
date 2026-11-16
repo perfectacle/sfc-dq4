@@ -55,14 +55,16 @@ FC_SPELLS_MEASURED = {
     dq4growth.FC_BREY: {1: 0x000001, 5: 0x000003, 10: 0x03002B, 15: 0x03022F, 20: 0x070A2F},
 }
 
-EQUIP_AT = 0x57CE00              # 57:8703~ 빈 자리, 성장 표(dq4growth.GROWTH_AT) 앞
+EQUIP_AT = 0x57CE00              # 성장 표(dq4growth.SPACE_END) 뒤 빈 자리
+PARTY_END = 0x57D000             # 장비 표·주문 코드가 넘지 않을 끝
 EQUIP_HOOK = 0x21A557            # LDA $23B591,X / LDX $4B / AND $21A632,X(M·X 8, X = 물건, $4B = 사람 & 3F)
 EQUIP_ORIG = bytes.fromhex('bf 91 b5 23 a6 4b 3f 32 a6 21')
 DQ5_EQUIP, DQ5_PERSON_BIT = 0x23B591, 0x21A632
 ITEM_COUNT = 0xD8
-# DQ5 사람 → (FC 표를 쓰는 조건 flag, FC 인물). 사람 0 은 2장일 때만(1장 라이안은 DQ5 주인공 비트 그대로)
-EQUIP_PEOPLE = {0x00: (dq4growth.CHAPTER2, dq4growth.FC_ALENA), 0x09: (None, dq4growth.FC_KIRYL),
-                0x05: (None, dq4growth.FC_BREY)}
+# DQ5 사람 → ((FC 표를 쓰는 조건 flag, FC 인물), …). 앞 줄부터 맞는 것을 쓴다. 사람 0 은 2장·3장일 때만(1장 라이안은 DQ5
+# 주인공 비트 그대로)
+EQUIP_PEOPLE = {0x00: ((dq4growth.CHAPTER2, dq4growth.FC_ALENA), (dq4growth.CHAPTER3, dq4growth.FC_TORNEKO)),
+                0x09: ((None, dq4growth.FC_KIRYL),), 0x05: ((None, dq4growth.FC_BREY),)}
 
 
 def _kata(text):
@@ -247,15 +249,18 @@ def equip_code(table, at=EQUIP_AT):
     """21:A557 에서 JSL 로 부르는 훅(M·X 8). Z 가 그대로 남아 부른 곳의 BEQ 가 장비 못 함을 가른다."""
     a = _Asm(at)
     a.label('equip').b(0xA5, 0x4B).rel(0xD0, 'other')
-    flag, who = EQUIP_PEOPLE[0]
-    a.b(0xAF, *flag[0].to_bytes(3, 'little'), 0x29, flag[1]).rel(0xF0, 'dq5')
-    a.b(0xA9, 1 << who).rel(0x80, 'fc')
+    for k, (flag, who) in enumerate(EQUIP_PEOPLE[0]):
+        a.b(0xAF, *flag[0].to_bytes(3, 'little'), 0x29, flag[1]).rel(0xF0, f'hero{k}')
+        a.b(0xA9, 1 << who).rel(0x80, 'fc')
+        a.label(f'hero{k}')
+    a.rel(0x80, 'dq5')
     a.label('other')
-    for person, (flag, who) in EQUIP_PEOPLE.items():
+    for person, rows in EQUIP_PEOPLE.items():
         if person == 0:
             continue
-        if flag is not None:
+        if len(rows) != 1 or rows[0][0] is not None:
             raise ValueError('사람 0 밖에는 flag 조건을 두지 않는다')
+        who = rows[0][1]
         a.b(0xA5, 0x4B, 0xC9, person).rel(0xD0, f'not{person}')
         a.b(0xA9, 1 << who).rel(0x80, 'fc')
         a.label(f'not{person}')
@@ -270,17 +275,17 @@ def equip_writes(dq5=DQ5, dq4=DQ4, at=EQUIP_AT):
     """dq5patch/1 쓰기: 장비 훅·표와 21:A557 의 호출."""
     rom = _dq5(dq5)
     data, labels = equip_code(equip_table(_fc(dq4), rom), at)
-    if at + len(data) > dq4growth.GROWTH_AT:
-        raise ValueError(f'장비 표가 {dq4growth.GROWTH_AT:06X} 를 넘음')
+    if at + len(data) > PARTY_END:
+        raise ValueError(f'장비 표가 {PARTY_END:06X} 를 넘음')
     call = bytes((0x22, *labels['equip'].to_bytes(3, 'little'))) + b'\xea' * (len(EQUIP_ORIG) - 4)
     hexs = lambda b: bytes(b).hex(' ').upper()  # noqa: E731
     cpu = lambda x: f'{x >> 16:02X}:{x & 0xFFFF:04X}'  # noqa: E731
-    return [{'at': cpu(at), 'hex': hexs(data), 'orig': hexs(bytes(len(data))), 'note': '2장 일행 장비: FC 장비 비트 표와 훅'},
+    return [{'at': cpu(at), 'hex': hexs(data), 'orig': hexs(bytes(len(data))), 'note': '2장 일행·톨네코 장비: FC 장비 비트 표와 훅'},
             {'at': cpu(EQUIP_HOOK), 'hex': hexs(call), 'orig': hexs(EQUIP_ORIG), 'note': '장비 판정(21:A557)을 2장 일행 훅으로'}]
 
 
 
-SPELL_AT = 0x57CF40              # 장비 표 뒤 빈 자리, 성장 표(dq4growth.GROWTH_AT) 앞
+SPELL_AT = 0x57CF40              # 장비 표 뒤 빈 자리, PARTY_END 앞
 BANK20_AT = 0x20FFD9             # 뱅크 20 끝 빈 자리(39바이트). 처리·적용 루틴은 뱅크 20 의 JSR 표라 여기서 넘긴다
 FIELD_AT = 0x11FFA0              # 뱅크 11 끝 빈 자리(96바이트). 필드 주문 표(11:8024)도 뱅크 안 JSR
 # 행동 번호로 색인하는 표(dq5spellgrow.WIDE·MENU_MP·FX 와 같은 자리)
@@ -393,7 +398,7 @@ def spell_writes(dq5=DQ5, dq4=DQ4):
     far, far_labels2 = spell_code(bank20=stub_labels)
     if far_labels2 != far_labels:
         raise ValueError('주문 코드 자리가 두 번 셈에서 다름')
-    if SPELL_AT < EQUIP_AT + len(equip_code(equip_table(prg, rom))[0]) or SPELL_AT + len(far) > dq4growth.GROWTH_AT:
+    if SPELL_AT < EQUIP_AT + len(equip_code(equip_table(prg, rom))[0]) or SPELL_AT + len(far) > PARTY_END:
         raise ValueError('주문 코드 자리가 장비 표나 성장 표와 겹침')
     out = []
 

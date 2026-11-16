@@ -288,10 +288,12 @@ def throne_script(native):
         {"op": "16", "args": []}]}
 
 
-def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=(), chapter2=False):
+def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=(), chapter2=False, chapter3=False):
     """ported·report·ported_messages: dq4npcport.port 의 인물 목록·보고·메시지. 왕좌의 방은 이 연출 배치로 바꾸고,
     report 가 있으면 1장 진행 사건(dq4ch1event)의 인물을 고친다. prologue 면 서장 맵의 인물을 더한다. chapter2 면
-    1장 끝 서술 뒤 2장으로 옮기고, 아니면 끝맺음 서술과 끝 상자 뒤 타이틀로 돌아간다(1장까지의 배포판)."""
+    1장 끝 서술 뒤 2장으로 옮기고, 아니면 끝맺음 서술과 끝 상자 뒤 타이틀로 돌아간다(1장까지의 배포판). chapter3 이면
+    2장 끝 서술 뒤 3장으로 옮긴다(chapter2 를 함께 켬)."""
+    chapter2 = chapter2 or chapter3
     native = {k: [v & 0xFF, v >> 8 & 0xFF, v >> 16] for k, v in dq4chapterbox.entry_points(scenes(prologue)).items()}
     flag, mask = EVENT_FLAG
     staff = [entry(STATIC, x, y, g, f, t) for x, y, g, f, t in STAFF]
@@ -345,7 +347,13 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=(),
         ported, ch2_new, ch2_overrides = dq4ch2event.npc_lists(ported, chapter2_talk())
         new_lists += ch2_new
         overrides = ch2_overrides + overrides
-        scripts += dq4ch2event.scripts(chapter2_message(first), dq4chapterbox.entry_points(scenes(prologue)))
+        points = dq4chapterbox.entry_points(scenes(prologue))
+        scripts += dq4ch2event.scripts(chapter2_message(first), points, chapter3)
+        import dq4ch3event
+        ch3_new, ch3_overrides = dq4ch3event.npc_lists(ported)
+        new_lists += ch3_new
+        overrides = ch3_overrides + overrides
+        scripts += dq4ch3event.scripts(chapter3_message(first), points)
     mine = {lst["map"] for lst in lists}
     return {"format": "dq5npcrelocate/1", "scripts": scripts,
             "lists": lists + [lst for lst in ported if "map" in lst and lst["map"] not in mine],
@@ -405,10 +413,12 @@ def messages(ported_messages, report):
     first = dq4npcport.FIRST_MESSAGE + len(ported_messages)
     events = dq4ch1event.texts(first)
     import dq4ch2event
+    import dq4ch3event
     import dq4signs
     for name, texts in (('1장', TEXTS), ('서장', dq4prologue.TEXTS), ('시스템', dq4sysmsg.TEXTS),
                         ('팻말', dq4signs.texts()),
-                        ('1장 사건', events), ('2장', dq4ch2event.texts(chapter2_message(first)))):
+                        ('1장 사건', events), ('2장', dq4ch2event.texts(chapter2_message(first))),
+                        ('3장', dq4ch3event.texts(chapter3_message(first)))):
         clash = set(out) & set(texts)
         if clash:
             raise ValueError(f'{name} 메시지와 겹치는 번호: {sorted(f"{m:03X}" for m in clash)}')
@@ -419,18 +429,24 @@ def messages(ported_messages, report):
 
 
 def npc_scripts(first_message):
-    """빌드가 넣을 수 있는 인물 스크립트 전부({"address", "commands"}): 왕좌의 방 연출, 서장, 1장 사건, 2장. 1장 끝
-    스크립트는 빌드 옵션(chapter2)으로 갈리므로 두 판을 모두 넣는다."""
+    """빌드가 넣을 수 있는 인물 스크립트 전부({"address", "commands"}): 왕좌의 방 연출, 서장, 1장 사건, 2장, 3장. 1장
+    끝·2장 끝 스크립트는 빌드 옵션(chapter2·chapter3)으로 갈리므로 두 판을 모두 넣는다."""
     import dq4ch1event
     import dq4ch2event
+    import dq4ch3event
     import dq4prologue
     points = dq4chapterbox.entry_points(scenes(True))
     native = {k: [v & 0xFF, v >> 8 & 0xFF, v >> 16] for k, v in points.items()}
     ending = [s for s in dq4ch1event.scripts(first_message, ending_at=points['end'])
               if s['address'] == dq4ch1event.ENDER_SCRIPT]
+    import dq4ch2ending
+    ender = dq4ch2ending.SCRIPTS['ender'][1]
+    ch2_to_ch3 = [s for s in dq4ch2event.scripts(chapter2_message(first_message), points, chapter3=True)
+                  if s['address'] == ender]
     return ([throne_script(native), walk_out(WALK_OUT_LEFT, EXIT_LEFT), walk_out(WALK_OUT_RIGHT, EXIT_RIGHT)] +
             dq4prologue.npc_lists()[3] + dq4ch1event.scripts(first_message, dq4ch2event.native()[1]['transfer']) +
-            ending + dq4ch2event.scripts(chapter2_message(first_message), points))
+            ending + dq4ch2event.scripts(chapter2_message(first_message), points) + ch2_to_ch3 +
+            dq4ch3event.scripts(chapter3_message(first_message), points))
 
 
 def message_flow(first_message):
@@ -454,6 +470,12 @@ def chapter2_message(first_message):
     """2장 메시지의 첫 번호: 1장 사건 메시지 바로 뒤."""
     import dq4ch1event
     return first_message + len(dq4ch1event.MESSAGES)
+
+
+def chapter3_message(first_message):
+    """3장 메시지의 첫 번호: 2장 메시지(사건 모듈 것까지) 바로 뒤."""
+    import dq4ch2event
+    return chapter2_message(first_message) + dq4ch2event.message_count()
 
 
 def chapter2_talk():
@@ -667,9 +689,9 @@ def return_places(out, original, dq4):
     return out
 
 
-def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
+def build(rom, dq5, dq4, work, prologue=True, chapter2=False, chapter3=False):
     """메뉴 빌드 롬(dq4menupatch.py build --messages) → 1장 첫머리 롬. prologue 면 새 게임이 서장으로 시작해
-    서장 끝에서 1장 첫머리로 넘어간다."""
+    서장 끝에서 1장 첫머리로 넘어간다. chapter2·chapter3 은 npc_doc 과 같다."""
     original = dq5.read_bytes()
     import dq4ch1event
     from kr_patch.fc import ines
@@ -708,7 +730,8 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
     ported, ported_messages, report = port(dq5, dq4)
     new_maps = [a for g, n in sorted(GROUPS.values()) for a in ('--new-map', f'{g:02X}/{n:02X}')]
     records = json.loads((work / 'npc-records.json').read_text())
-    (work / 'npc.json').write_text(json.dumps(npc_doc(records, ported, prologue, report, ported_messages, chapter2), ensure_ascii=False, indent=1))
+    doc = npc_doc(records, ported, prologue, report, ported_messages, chapter2, chapter3)
+    (work / 'npc.json').write_text(json.dumps(doc, ensure_ascii=False, indent=1))
     base = npc_base(work / 'groups' / GROUP_PATCHES[0])
     run_tool(DQ5_TOOLS / 'dq5npcrelocate.py', dq5, 'patch', work / 'npc.json', '--base', base, '--alt', NPC_ALT,
              '--allow-growth', *new_maps, '-o', work / 'npc.dq5patch.json')
@@ -730,6 +753,8 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False):
     import dq4npcport
     out = bytearray(dq4ch2event.apply(out, original,
                                       chapter2_message(dq4npcport.FIRST_MESSAGE + len(ported_messages))))
+    import dq4ch3event
+    out = bytearray(dq4ch3event.apply(out, original, dq4))
     out = bytearray(dq4party.apply_recruits(out, dq5, dq4))
     import dq4josa
     out = bytearray(dq4josa.apply(out))
@@ -778,6 +803,8 @@ def main():
     b.add_argument('--no-prologue', action='store_true', help='NDS 서장(dq4prologue.py) 없이 새 게임을 1장으로 시작')
     b.add_argument('--chapter2', action='store_true',
                    help='1장 끝에서 2장으로 넘어감(기본은 끝맺음 서술·끝 상자 뒤 타이틀로, 1장까지의 배포판)')
+    b.add_argument('--chapter3', action='store_true',
+                   help='2장 끝에서 3장으로 넘어감(--chapter2 를 함께 켬. 기본은 2장 끝 상자 뒤 타이틀로)')
     args = ap.parse_args()
     if args.cmd == 'messages':
         args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -788,10 +815,10 @@ def main():
     rom = args.rom.read_bytes()
     if args.keep:
         args.keep.mkdir(parents=True, exist_ok=True)
-        out = build(rom, args.dq5, args.dq4, args.keep, not args.no_prologue, args.chapter2)
+        out = build(rom, args.dq5, args.dq4, args.keep, not args.no_prologue, args.chapter2, args.chapter3)
     else:
         with tempfile.TemporaryDirectory() as t:
-            out = build(rom, args.dq5, args.dq4, Path(t), not args.no_prologue, args.chapter2)
+            out = build(rom, args.dq5, args.dq4, Path(t), not args.no_prologue, args.chapter2, args.chapter3)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_bytes(out)
     args.out.with_suffix('.ips').write_bytes(ips_patch(rom, out))

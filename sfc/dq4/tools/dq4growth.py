@@ -1,10 +1,10 @@
-"""1장 라이안·2장 아리나·크리프트·브라이의 성장을 FC 곡선으로. 형식은 sfc/dq4/docs/dq4-growth-format.md.
+"""1장 라이안·2장 아리나·크리프트·브라이·3장 톨네코의 성장을 FC 곡선으로. 형식은 sfc/dq4/docs/dq4-growth-format.md.
 
 DQ5 는 일행 기록 +0(종류)으로 성장 레코드를 고르고(23:EDCD, 사람 n = 23:9E41 + n × 50), 능력치 값은 23:F12D, 경험치는
 23:EDF6 이 그 레코드에서 셈한다. FC 곡선(fc/dq4/docs/dq4-data-format.md 「성장 곡선」)은 능력치마다 꺾이는 레벨이
 따로이고 경험치를 레벨마다 정수로 버리며 곱해, 꺾이는 레벨을 모두가 나눠 쓰는 DQ5 레코드로는 같은 값을 낼 수 없다.
 그래서 사람마다 레벨 0~100 의 값 표를 두고 세 곳에 훅을 건다(TABLES 의 레코드일 때만 표, 아니면 원래 길).
-라이안과 아리나는 둘 다 사람 0 기록이라 2장 flag 로 가르고, 크리프트·브라이는 빌린 사람 칸(09 ヘンリー·05 サンチョ)의
+라이안·아리나·톨네코는 모두 사람 0 기록이라 2장·3장 flag 로 가르고, 크리프트·브라이는 빌린 사람 칸(09 ヘンリー·05 サンチョ)의
 레코드로 가른다.
 
   23:F12D  능력치 값(A 레벨, X 능력치 0~6, Y 레코드) → $00. 표 STATS 에서 읽고 23:F1B9(PLX PLY RTS)로
@@ -28,18 +28,21 @@ if str(TOOLS) not in sys.path:
 
 from dq4environmentrom import _Asm  # noqa: E402
 
-FC_KIRYL, FC_BREY, FC_RYAN, FC_ALENA = 1, 4, 6, 7   # FC 인물 번호 クリフト·ブライ·ライアン·アリーナ(dq4data.PARTY)
+FC_KIRYL, FC_BREY, FC_TORNEKO, FC_RYAN, FC_ALENA = 1, 4, 5, 6, 7   # FC 인물 번호(dq4data.PARTY)
 PEOPLE, RECORD = 0x9E41, 0x50   # 사람 n 의 성장 레코드 = PEOPLE + n × RECORD(23:EDCD 가 Y 에 둠)
 HERO_GROWTH = PEOPLE            # 사람 0
 CHAPTER2 = (0x7E2208, 0x10)     # dq4ch2event.CHAPTER2(7E:2208 bit4)
+CHAPTER3 = (0x7E2208, 0x08)     # dq4ch3event.CHAPTER3(7E:2208 bit3)
 # 표 차례: (DQ5 사람 번호, 그 표를 고르는 flag, FC 인물). 첫째(라이안)는 사람 0 의 기본 표라 flag 를 보지 않는다.
 # 크리프트·브라이는 dq4ch2event.RECRUITS 가 빌린 사람 칸(09 ヘンリー·05 サンチョ)이다. 이 해킹에는 그 두 사람이 없다
-TABLES = ((0, None, FC_RYAN), (0, CHAPTER2, FC_ALENA), (9, None, FC_KIRYL), (5, None, FC_BREY))
+TABLES = ((0, None, FC_RYAN), (0, CHAPTER2, FC_ALENA), (9, None, FC_KIRYL), (5, None, FC_BREY),
+          (0, CHAPTER3, FC_TORNEKO))
 LEVELS = 101                    # 표 줄: 레벨 0~100. 23:EB50 이 레벨 99 에서 100 의 값도 셈한다
 STAT_COUNT = 7
 STAT_CAP, HP_CAP, EXP_CAP = 255, 999, 9999999
-# 57:8000 던전 걸음(dq4dungeonrate)과 57:F000 보상(dq4balance) 사이의 빈 자리. 표 넷(7,272바이트)과 코드가 들어간다
-GROWTH_AT, SPACE_END = 0x57D000, 0x57F000
+# 57:8000 던전 걸음(dq4dungeonrate, 57:8702 까지)과 57:CE00 장비 표(dq4party.EQUIP_AT) 사이의 빈 자리. 표 다섯(9,090바이트)과
+# 코드가 들어간다. 57:D000~EFFF 에는 넷까지만 들어갔다
+GROWTH_AT, SPACE_END = 0x579000, 0x57CE00
 
 STAT_AT, STAT_ORIG, STAT_GO, STAT_DONE = 0x23F12D, bytes.fromhex('5a da 85 0f'), 0x23F131, 0x23F1B9
 EXP_AT, EXP_ORIG, EXP_GO = 0x23EDF6, bytes.fromhex('85 09 8e bb 09'), 0x23EDFB
@@ -66,7 +69,13 @@ KIRYL_MEASURED = {1: ([18, 7, 3, 5, 7, 2, 9], 18), 5: ([32, 23, 11, 10, 15, 11, 
 BREY_MEASURED = {1: ([16, 10, 3, 5, 8, 2, 7], 19), 5: ([26, 30, 3, 13, 16, 12, 12], 361),
                  10: ([46, 65, 8, 23, 30, 27, 22], 3215), 15: ([76, 90, 13, 38, 50, 48, 37], 16687),
                  20: ([106, 115, 18, 53, 70, 73, 52], 48818)}
-MEASURED = {FC_RYAN: RYAN_MEASURED, FC_ALENA: ALENA_MEASURED, FC_KIRYL: KIRYL_MEASURED, FC_BREY: BREY_MEASURED}
+# 톨네코는 2장 시작 세이브스테이트의 인물 레코드 5 에 FC 3장 시작 기록(dq4event.init_record)을 써서 같은 방법으로 쟀다
+# (3장 시작 세이브스테이트는 첫머리 이벤트 2F 가 방향 키를 기다려 필드로 순간이동하지 못한다). 다음 레벨 경험치는 FC 곡선
+TORNEKO_MEASURED = {1: ([20, 0, 4, 5, 5, 3, 10], 10), 5: ([44, 0, 12, 13, 9, 7, 22], 220),
+                    10: ([74, 0, 25, 23, 14, 12, 37], 1995), 15: ([104, 0, 40, 33, 20, 17, 52], 10371),
+                    20: ([134, 0, 55, 43, 30, 22, 67], 33861)}
+MEASURED = {FC_RYAN: RYAN_MEASURED, FC_ALENA: ALENA_MEASURED, FC_KIRYL: KIRYL_MEASURED, FC_BREY: BREY_MEASURED,
+            FC_TORNEKO: TORNEKO_MEASURED}
 
 PERSON_TABLE = 0x23C014         # 새 게임의 일행 기록 틀(42바이트, 칸 0 이 주인공)
 FIRST_FIELDS = ((0x02, 2, 'hp'), (0x0E, 2, 'hp'), (0x04, 2, 'mp'), (0x10, 2, 'mp'), (0x06, 1, 'agi'),
@@ -120,10 +129,12 @@ def record_of(person):
 
 
 def table_index(kind, chapter=0):
-    """일행 기록 +0(종류)과 장(0 = 1장)으로 TABLES 의 번호. 표를 쓰지 않는 종류면 None."""
-    flagged = [k for k, (p, f, _) in enumerate(TABLES) if p == kind and f is not None]
+    """일행 기록 +0(종류)과 장으로 TABLES 의 번호. 표를 쓰지 않는 종류면 None. chapter 0 은 flag 없음(1장), 3 은 3장
+    flag, 그 밖의 참 값(1·2)은 2장 flag 가 켜진 것으로 본다."""
+    flag = None if not chapter else CHAPTER3 if chapter == 3 else CHAPTER2
+    flagged = [k for k, (p, f, _) in enumerate(TABLES) if p == kind and f == flag and f is not None]
     plain = [k for k, (p, f, _) in enumerate(TABLES) if p == kind and f is None]
-    if chapter and flagged:
+    if flagged:
         return flagged[0]
     return plain[0] if plain else None
 
@@ -157,7 +168,7 @@ def code(sets, at=GROWTH_AT):
 
     def pick(name):
         # M·X 16, X = 표 안 자리, Y = 레코드. 첫째 표가 아니면 X 에 그 표까지의 거리를 더한다. A 는 덮는다.
-        # 같은 사람에 flag 로 고르는 표를 먼저 본다(사람 0 은 2장 flag 면 아리나, 아니면 라이안)
+        # 같은 사람에 flag 로 고르는 표를 먼저 본다(사람 0 은 2장 flag 면 아리나, 3장 flag 면 톨네코, 아니면 라이안)
         order = sorted(range(1, len(TABLES)), key=lambda k: TABLES[k][1] is None)
         a.label(f'{name}_start')
         for k in order:
@@ -254,7 +265,7 @@ def writes(dq5, dq4=DQ4, at=GROWTH_AT):
         rec[off:off + n] = first[k].to_bytes(n, 'little')
     # 빈 자리여야 한다: 0 을 orig 로 주어 다른 쓰기와 겹치면 빌드가 멈추게
     return [{'at': _cpu(at), 'hex': _hex(data), 'orig': _hex(bytes(len(data))),
-             'note': '라이안·아리나·크리프트·브라이 성장: FC 곡선 표와 훅'}, *calls(labels),
+             'note': '라이안·아리나·크리프트·브라이·톨네코 성장: FC 곡선 표와 훅'}, *calls(labels),
             {'at': _cpu(PERSON_TABLE), 'hex': _hex(rec), 'orig': _hex(orig), 'note': '라이안 1레벨 기록을 FC 장 시작 값으로'}]
 
 

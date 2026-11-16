@@ -302,7 +302,13 @@ class LayoutTests(unittest.TestCase):
     def test_data_follows_the_code_in_the_blob(self):
         lay, tiles, maps = self.layout(box.GAME_SCENES)
         self.assertTrue(lay.blob.endswith(tiles))
-        data_at = lay.boot_at - lay.base + len(box.soft_boot())
+        data_at = lay.data_at - lay.base
+        load = lay.blob[lay.load_at - lay.base:data_at]
+        self.assertEqual(lay.boot_at + len(box.soft_boot()), lay.load_at)
+        self.assertEqual(load[-1:], b'\x60')                      # RTS
+        for name in lay.box_at:
+            code = lay.blob[lay.box_at[name] - lay.base:]
+            self.assertIn(bytes((0x20, *(lay.load_at & 0xFFFF).to_bytes(2, 'little'))), code[:64], name)
         self.assertEqual(lay.blob[data_at:data_at + 2], b'\x00\xff')
         self.assertEqual(lay.blob[data_at + 2:data_at + 2 + len(lay.pal)], lay.pal)
         self.assertEqual(lay.blob[data_at + 2 + len(lay.pal):][:len(maps[0])], maps[0])
@@ -311,12 +317,23 @@ class LayoutTests(unittest.TestCase):
 
     def test_ending_scene_waits_for_a_button_and_resets(self):
         lay, _, _ = self.layout(box.GAME_SCENES)
-        ending = lay.blob[lay.box_at['end'] - lay.base:lay.reveal_at - lay.base]
+        ending = lay.blob[lay.box_at['end'] - lay.base:lay.box_at['end2'] - lay.base]
         self.assertIn(box.wait_button(), ending)
         self.assertTrue(ending.endswith(box.soft_reset()))
         title = lay.blob[lay.box_at['box'] - lay.base:lay.box_at['box2'] - lay.base]
         self.assertNotIn(box.wait_button(), title)
         self.assertTrue(title.endswith(box.LEAVE))
+        chapter3 = lay.blob[lay.box_at['box3'] - lay.base:lay.reveal_at - lay.base]
+        self.assertNotIn(box.wait_button(), chapter3)
+        self.assertTrue(chapter3.endswith(box.LEAVE))
+
+    def test_a_box_map_that_begins_another_is_shared(self):
+        lay, _, maps = self.layout(box.GAME_SCENES)
+        names = [s.name for s in box.GAME_SCENES]
+        end2, box3 = maps[names.index('end2')], maps[names.index('box3')]
+        self.assertTrue(end2.startswith(box3))
+        self.assertEqual(lay.blob.count(end2), 1)
+        self.assertEqual(lay.blob.count(box3), 1)
 
     def test_bank_overflow_is_rejected(self):
         with self.assertRaisesRegex(ValueError, '뱅크를 넘음'):

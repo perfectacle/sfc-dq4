@@ -810,6 +810,8 @@
 06=31@night
 --song-pick
 02=05@7E2208&10
+--song-pick
+02=0E@7E2208&08
 --gain-db
 1E=-2.4
 --stream-ticks

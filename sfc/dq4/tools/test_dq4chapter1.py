@@ -425,8 +425,8 @@ class MainTests(unittest.TestCase):
     def test_build_writes_rom_and_ips_with_the_chosen_options(self):
         calls = []
 
-        def fake_build(rom, dq5, dq4, work, prologue, chapter2):
-            calls.append((rom, Path(dq5).name, Path(dq4).name, work.is_dir(), prologue, chapter2))
+        def fake_build(rom, dq5, dq4, work, prologue, chapter2, chapter3):
+            calls.append((rom, Path(dq5).name, Path(dq4).name, work.is_dir(), prologue, chapter2, chapter3))
             return bytes(range(16))
         with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.object(ch, 'build', fake_build):
             tmp = Path(tmp)
@@ -438,8 +438,10 @@ class MainTests(unittest.TestCase):
             ips = out.with_suffix('.ips').read_bytes()
             self.assertTrue((tmp / 'keep').is_dir())
             self.run_main('build', '--rom', str(tmp / 'menu.sfc'), '--out', str(out))
-        self.assertEqual(calls[0], (bytes(16), 'dq5.sfc', 'dq4.nes', True, False, True))
-        self.assertEqual(calls[1][4:], (True, False))
+            self.run_main('build', '--rom', str(tmp / 'menu.sfc'), '--out', str(out), '--chapter3')
+        self.assertEqual(calls[0], (bytes(16), 'dq5.sfc', 'dq4.nes', True, False, True, False))
+        self.assertEqual(calls[1][4:], (True, False, False))
+        self.assertEqual(calls[2][4:], (True, False, True))
         self.assertTrue(ips.startswith(b'PATCH') and ips.endswith(b'EOF'))
         self.assertEqual(text.strip(), f'{out} sha1={hashlib.sha1(bytes(range(16))).hexdigest()}')
 
@@ -484,6 +486,7 @@ class BuildFlowTests(unittest.TestCase):
         from unittest import mock
         import dq4ch1event
         import dq4ch2event
+        import dq4ch3event
         import dq4growth
         import dq4josa
         import dq4menupatch
@@ -547,6 +550,7 @@ class BuildFlowTests(unittest.TestCase):
                     mock.patch.multiple(dq4ch1event, apply=step('ch1event'),
                                         monster_doc=lambda prg: {'format': 'test-monsters', 'prg': len(prg)}), \
                     mock.patch.multiple(dq4ch2event, apply=step('ch2event'), monster_entries=lambda prg: []), \
+                    mock.patch.object(dq4ch3event, 'apply', step('ch3event')), \
                     mock.patch.object(dq4growth, 'writes', lambda dq5, dq4: []), \
                     mock.patch.multiple(dq4party, learn_doc=lambda dq5, dq4: {'format': 'dq5learn/1', 'characters': []},
                                         writes=lambda dq5, dq4: [], apply_recruits=step('party')), \
@@ -600,7 +604,7 @@ class BuildFlowTests(unittest.TestCase):
         self.assertEqual(monsters, {'format': 'test-monsters', 'prg': 0x4000, 'spells': [{'id': '42', 'MP': 2}]})
         self.assertEqual(npc, {'format': 'dq5npcrelocate/1'})
         self.assertEqual(self.npc_doc.call_args.args, ({'records': 1}, ['ported'], False, {'report': 1}, ['m1', 'm2'],
-                                                      False))
+                                                      False, False))
         # 각 문서를 읽는 도구의 출력이 곧 덮어 쓰는 패치다
         outs = {c[0]: (Path(c[c.index('patch') + 1]).name, Path(c[c.index('-o') + 1]).name)
                 for c in calls if 'patch' in c}
@@ -639,7 +643,8 @@ class BuildFlowTests(unittest.TestCase):
         checksum = int.from_bytes(out[0x7FDE:0x7FE0], 'little')
         self.assertEqual(checksum ^ int.from_bytes(out[0x7FDC:0x7FDE], 'little'), 0xFFFF)
         self.assertEqual(checksum, sum(out) & 0xFFFF)
-        self.assertEqual(order[:7], ['chapterbox', 'ch1event', 'ch2event', 'party', 'josa', 'msgnames', 'signs'])
+        self.assertEqual(order[:8], ['chapterbox', 'ch1event', 'ch2event', 'ch3event', 'party', 'josa', 'msgnames',
+                                     'signs'])
         # 그룹 빌드 롬과 견주는 것은 체크섬까지 끝낸 롬이다
         self.assertEqual(self.verify.call_args.args[:2], (bytes(out), b'groups'))
 

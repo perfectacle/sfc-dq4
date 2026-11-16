@@ -180,15 +180,15 @@ def slot_of_fc(fc):
     return order.index(fc)
 
 
-def chapter_slot_code():
-    """M8 code that puts chapter 2's FC return place (CHAPTER2_CHURCH_FC) in 7E:2033 by day: where a wipe-out goes back
-    to, and continuing, until the party saves. Then the visited bits 7E:2030~2032 become FC chapter 2's
-    (CHAPTER2_VISITED_FC) as FC's chapter start overwrites them, and 7E:2193 its first town's slot."""
-    out = bytes((0xA9, slot_of_fc(CHAPTER2_CHURCH_FC), 0x8F, *PLACE_SAVED.to_bytes(3, "little")))
-    bits = sum(1 << slot_of_fc(fc) for fc in CHAPTER2_VISITED_FC)
+def chapter_slot_code(church=CHAPTER2_CHURCH_FC, visited=CHAPTER2_VISITED_FC):
+    """M8 code that puts a chapter's FC return place (church, chapter 2's by default) in 7E:2033 by day: where a
+    wipe-out goes back to, and continuing, until the party saves. Then the visited bits 7E:2030~2032 become the FC
+    chapter's (visited) as FC's chapter start overwrites them, and 7E:2193 its first town's slot."""
+    out = bytes((0xA9, slot_of_fc(church), 0x8F, *PLACE_SAVED.to_bytes(3, "little")))
+    bits = sum(1 << slot_of_fc(fc) for fc in visited)
     for k in range(3):
         out += bytes((0xA9, bits >> 8 * k & 0xFF, 0x8F, *(VISITED + k).to_bytes(3, "little")))
-    return out + bytes((0xA9, SLOT_MARK | slot_of_fc(CHAPTER2_VISITED_FC[0]), 0x8F, *LAST_TOWN.to_bytes(3, "little")))
+    return out + bytes((0xA9, SLOT_MARK | slot_of_fc(visited[0]), 0x8F, *LAST_TOWN.to_bytes(3, "little")))
 
 
 def order_slots():

@@ -205,14 +205,21 @@ def _skip_song():
     return ENTER + bytes((0xAF,)) + _al(addr) + bytes((0x09, bit, 0x8F)) + _al(addr) + LEAVE
 
 
+def chapter_pictures():
+    """((flag, 그림), …): 장마다 주인공 그림을 대역으로 바꾸는 flag. 앞 줄부터 본다."""
+    import dq4ch3event
+    return ((CHAPTER2, ALENA_PICTURE), (dq4ch3event.CHAPTER3, dq4ch3event.TORNEKO_PICTURE))
+
+
 def _hero_picture():
-    """05:D9A1 대신: 2장 동안이면 아리나 대역 그림, 아니면 원래처럼 2190 bit6 꺼짐 2E, 21BE bit5 켜짐 2D, 아니면 3A.
-    M 8 에서 부르고 A 에 그림 번호를 둔 채 돌아간다(부른 곳의 RTS 가 05:D98F 를 끝냄)."""
-    flag = 0x7E2190 + CHAPTER2[0]
-    return bytes((0xAF,)) + _al(flag) + bytes((0x29, CHAPTER2[1], 0xF0, 0x03, 0xA9, ALENA_PICTURE, 0x6B,
-                                              0xAF)) + _al(0x7E2190) + bytes((0x29, 0x40, 0xD0, 0x03,
-                                              0xA9, 0x2E, 0x6B, 0xAF)) + _al(0x7E21BE) + bytes((
-                                              0x29, 0x20, 0xF0, 0x03, 0xA9, 0x2D, 0x6B, 0xA9, 0x3A, 0x6B))
+    """05:D9A1 대신: 2장 동안이면 아리나, 3장 동안이면 톨네코 대역 그림, 아니면 원래처럼 2190 bit6 꺼짐 2E, 21BE bit5
+    켜짐 2D, 아니면 3A. M 8 에서 부르고 A 에 그림 번호를 둔 채 돌아간다(부른 곳의 RTS 가 05:D98F 를 끝냄)."""
+    out = b''
+    for flag, picture in chapter_pictures():
+        out += bytes((0xAF,)) + _al(0x7E2190 + flag[0]) + bytes((0x29, flag[1], 0xF0, 0x03, 0xA9, picture, 0x6B))
+    return out + bytes((0xAF,)) + _al(0x7E2190) + bytes((0x29, 0x40, 0xD0, 0x03,
+                                                         0xA9, 0x2E, 0x6B, 0xAF)) + _al(0x7E21BE) + bytes((
+                                                         0x29, 0x20, 0xF0, 0x03, 0xA9, 0x2D, 0x6B, 0xA9, 0x3A, 0x6B))
 
 
 def _hero_at_wall(away=False):
@@ -478,9 +485,10 @@ class Context:
     """사건 모듈이 받는 것. msg·talk 는 {이름: 번호}(모르는 자리에서는 None), at 은 그 모듈 네이티브의 {이름: 주소},
     base 는 이 모듈 네이티브의 {이름: 주소}, original 은 원래 롬(없으면 None: 주소만 셀 때)."""
 
-    def __init__(self, key, module, message=None, talk=None, original=None, points=None):
+    def __init__(self, key, module, message=None, talk=None, original=None, points=None, chapter3=False):
         self.key, self.module, self.slot, self.original = key, module, SLOTS[key], original
         self.points = points       # dq4chapterbox.entry_points(장 상자·밝히기 주소). 인물 스크립트를 짤 때만 있음
+        self.chapter3 = chapter3   # 2장 끝에서 3장으로 넘어가는 빌드(--chapter3)인지. 인물 스크립트를 짤 때만 봄
         self.code_at = self.slot.code[0]
         self.msg = None if message is None else {n: message + k for k, n in enumerate(getattr(module, 'MESSAGES', {}))}
         self.talk = None if talk is None else {n: talk + k for k, n in enumerate(getattr(module, 'TALKS', ()))}
@@ -507,7 +515,7 @@ def _first_talk():
     return dq4npcport.SCRIPT_TALK + len(dq4prologue.talk_doc()["scripts"]) + len(dq4ch1event.TALKS)
 
 
-def contexts(first_message=None, first_talk=None, original=None, points=None):
+def contexts(first_message=None, first_talk=None, original=None, points=None, chapter3=False):
     """[Context] EVENTS 차례. 메시지는 이 모듈 MESSAGES 뒤, 대화는 TALKS 뒤에 모듈마다 이어 붙인다."""
     mods = modules()
     if not mods:
@@ -516,7 +524,7 @@ def contexts(first_message=None, first_talk=None, original=None, points=None):
     talk = (_first_talk() if first_talk is None else first_talk) + len(TALKS)
     out = []
     for key, mod in mods:
-        out.append(Context(key, mod, message, talk, original, points))
+        out.append(Context(key, mod, message, talk, original, points, chapter3))
         message = None if message is None else message + len(getattr(mod, 'MESSAGES', {}))
         talk += len(getattr(mod, 'TALKS', ()))
     return out
@@ -669,8 +677,9 @@ def _cmd(op, *args):
     return {"op": op, "args": list(args)}
 
 
-def scripts(first_message, native_points):
-    """인물 스크립트. native_points: dq4chapterbox.entry_points 의 {이름: 주소}(box2·reveal)."""
+def scripts(first_message, native_points, chapter3=False):
+    """인물 스크립트. native_points: dq4chapterbox.entry_points 의 {이름: 주소}(box2·reveal). chapter3 이면 2장 끝
+    인물이 3장으로 넘긴다(dq4ch2ending)."""
     m = message_ids(first_message)
     _, at = native()
     lo, hi = lambda v: v & 0xFF, lambda v: v >> 8
@@ -695,8 +704,13 @@ def scripts(first_message, native_points):
         {"address": PRIEST_SCRIPT, "commands": [
             _cmd('09', 0x80 | TEMPE_GONE[0], TEMPE_GONE[1]), _cmd('10', *TEMPE_ALTAR),
             _cmd('37', *_al(tail_native(first_message)[1]['altar_go'])), _cmd('16')]},
-    ] + [s for ctx in contexts(first_message, points=native_points) if hasattr(ctx.module, 'scripts')
+    ] + [s for ctx in contexts(first_message, points=native_points, chapter3=chapter3) if hasattr(ctx.module, 'scripts')
          for s in ctx.module.scripts(ctx)]
+
+
+def message_count():
+    """이 모듈과 사건 모듈의 메시지 수(3장 메시지는 그 뒤부터)."""
+    return len(MESSAGES) + sum(len(getattr(mod, 'MESSAGES', {})) for _, mod in modules())
 
 
 def _invisible(src, talk):

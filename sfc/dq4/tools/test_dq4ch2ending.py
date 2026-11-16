@@ -48,8 +48,11 @@ class SlotTest(unittest.TestCase):
     def test_end_box_is_a_game_scene_and_stays_before_the_event_code(self):
         self.assertIn(box.ENDING2, box.GAME_SCENES)
         self.assertEqual(box.ENDING2.subtitle, box.ENDING.subtitle)
-        lay = box.Layout(box.CODE_AT, box.GAME_SCENES, bytes(32 * 80),
-                         [bytes(box.BOX_W * box.rows(s.subtitle) * 2) for s in box.GAME_SCENES], box.palettes())
+        # 타일맵은 제목마다 다르고, 같은 제목이면 상자 줄이 같다(부제 줄만 더함). 그 앞머리만 함께 쓸 수 있다
+        titles = list(dict.fromkeys(s.title for s in box.GAME_SCENES))
+        maps = [bytes((titles.index(s.title) + 1,)) * (box.BOX_W * box.BOX_H * 2) +
+                b'\x80' * (box.BOX_W * (box.rows(s.subtitle) - box.BOX_H) * 2) for s in box.GAME_SCENES]
+        lay = box.Layout(box.CODE_AT, box.GAME_SCENES, bytes(32 * 80), maps, box.palettes())
         first = min(s.code[0] for s in slots.SLOTS.values() if s.code[0] >> 16 == box.CODE_AT >> 16)
         self.assertLess(box.CODE_AT + len(lay.blob), first)
 
