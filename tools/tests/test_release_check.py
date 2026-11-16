@@ -79,6 +79,8 @@ class ReleaseCheckTest(unittest.TestCase):
             with mock.patch.object(rc, 'build_path_files', return_value=[str(mod)]):
                 percent, lines = rc.coverage_result(root, logs, 't', extra={'pkg/m.py': [2, 3], 'gone.py': [1]})
                 self.assertEqual((percent, lines), (75.0, {'pkg/m.py': [1, 2, 3]}))
+                # 다시 모아도 앞서 모은 줄이 남는다
+                self.assertEqual(rc.coverage_result(root, logs, 't', extra={'pkg/m.py': [4]})[0], 100.0)
                 self.assertEqual(rc.coverage_result(root, logs, 'none')[0], 0.0)
 
     def test_ci_coverage_records_lines_and_fails_only_on_build(self):

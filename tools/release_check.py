@@ -435,6 +435,9 @@ def coverage_result(root, logs, tag, extra=None):
     (퍼센트, 빌드 경로 파일마다 실행한 줄 {저장소 상대 경로: [줄]})."""
     import coverage
     data, rc = coverage_paths(logs, tag)
+    # combine 은 이미 모은 기록을 지우고 조각들로 새로 쓴다. 다시 불러도 앞서 모은 것이 남게 조각으로 돌린다
+    if data.is_file():
+        data.rename(data.with_name(f'{data.name}.combined'))
     cov = coverage.Coverage(data_file=str(data), config_file=str(rc))
     cov.combine(strict=False)
     files = build_path_files(root)

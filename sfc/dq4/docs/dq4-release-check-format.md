@@ -10,7 +10,7 @@
 | `unit` | CI test 잡과 같은 폴더(`sfc/dq4/tools`, `sfc/dq5/tools/tests`, `tools/tests`, `fc/dq4/tools`, `nds/dq4/tools`)마다 `unittest discover` | 모두 0 으로 끝남. 롬이 있으므로 롬 게이트 시험도 돈다 |
 | `guards` | 모든 트랙 `guards.toml` 의 실행 검사 전부(`guards.run_many`). PR 에서 빠지는 `tier = "release"` 검사와 묶음으로만 걸리는 검사도 여기서 돈다 | 모두 통과 |
 | `sweep` | 트랙마다 `release.toml` 의 시드 스윕. `--ci-report` 면 CI 결과만 받는다 | 모두 0 으로 끝남(CI 는 시드 단위가 모두 통과) |
-| `coverage` | 빌드 경로(`dq4publish.inputs()` 의 시험 아닌 `.py`) 커버리지를 둘로 잰다. 로컬: 단위 전부와 빌드 캐시 끈 빌드 한 번(`patch = subprocess` 로 단계 스크립트까지). CI 와 같게: 롬 링크 없는 임시 워크트리에서 롬·도구 환경 변수(`CI_UNSET`) 없이 단위만 | 로컬 ≥ 90%, CI 와 같게 ≥ 80% |
+| `coverage` | 빌드 경로(`dq4publish.inputs()` 의 시험 아닌 `.py`) 커버리지를 둘로 잰다. 로컬: 단위 전부와 빌드 캐시 끈 빌드 한 번(`patch = subprocess` 로 단계 스크립트까지). CI 와 같게: 롬 링크 없는 임시 워크트리에서 롬·도구 환경 변수(`CI_UNSET`) 없이 단위만. `unit` 단계와 함께 돌면 `unit` 단계가 coverage 로 돌아 단위를 다시 돌지 않는다. `--ci-report` 면 빌드와 CI 와 같게는 CI 기록(아래 「CI 커버리지 기록」)을 쓰고 로컬은 단위만 잰다 | 로컬 ≥ 90%, CI 와 같게 ≥ 80% |
 
 - 앞 단계가 실패해도 나머지를 돌려 보고서에 모두 남긴다. 실패한 검사·스윕은 다시 돌려 통과로 덮지 않는다. 실패 까닭(장면 검사가 남기는 「MesenCE 실행: …」)이 로그에 그대로 남고, 바쁜 머신에서 실패하는 검사의 목록이 된다.
 - 단계마다 같은 머신에서 돈 MesenCE 를 30초마다 세어 적는다. 이 실행과 다른 워크트리의 수(최대·평균)와 워크트리마다의 최대 수다. libretro 코어는 파이썬 프로세스 안에서 돌아 세지 않는다.
@@ -118,6 +118,15 @@ uv run --locked python sfc/dq4/tools/dq4publish.py release --report work/release
 - 다시 빌드한 롬의 SHA-1 이 보고서의 롬 SHA-1 과 같아야 한다.
 - 에셋 저장소 `sfc/dq4/release/dq4-ch1.ips` 와 `RELEASE.txt`(커밋, 원본·결과 롬 SHA-1, 보고서 시각과 SHA-256)에 쓴다.
 
+## CI 커버리지 기록
+
+배포 관문 cold-build 잡이 `release_check.py --ci-coverage KIND OUT` 으로 두 기록을 `work/ci-digest/` 에 쓰고, 롬 검사를 거쳐 artifact `build-digest-release-cold` 로 올린다.
+
+- `coverage-unit.json`(`unit`): `uv sync` 바로 뒤, 에셋·도구·롬이 오기 전에 단위 전부를 coverage 로. CI 와 같게(`CI_MIN`)의 근거다.
+- `coverage-build.json`(`build`, `--build-out work/cold/ch1`): ch1 무캐시 빌드를 coverage 로(단계 스크립트까지). 로컬 수(`LOCAL_MIN`)에 로컬 단위와 합친다.
+- 꼴: `{"format": "release-coverage-1", "commit", "kind", "percent", "failed": [실패한 폴더 또는 "build"], "lines": {저장소 상대 경로: [실행한 줄]}}`. 빌드 경로 파일의 줄 번호만 들고 롬 바이트는 없다. 단위 실패는 기록만 하고(0 으로 끝남) 빌드 실패는 1 로 끝나 빌드 단계를 실패시킨다.
+- `load_ci` 가 `coverage` 로 받는다(커밋이 조각 결과와 다르면 거부). 둘 중 하나라도 없으면 coverage 단계는 「CI 커버리지 기록 없음」 으로 실패한다.
+
 ## 커버리지가 단계 스크립트까지 재는가
 
 로컬 커버리지는 `dq4build.py` 가 하위 프로세스로 부르는 단계 스크립트까지 잰다(coverage 설정 `patch = subprocess`). 실측 보고서(`coverage-local-report.txt`)에서 단계 스크립트가 모두 잡혔다. `dq4titlelayers` 92%, `dq4titlelayerpatch` 95%, `dq4overture` 96%, `dq4chapter1` 97%, `dq4menupatch` 91%, `dq4soundset` 94%, `dq4sparfx` 83%, `dq4people` 97% 다. 롬 없이(CI 와 같게) 재면 `dq4chapter1` 61%, `dq4people` 64% 다.
@@ -169,10 +178,9 @@ uv run --locked python sfc/dq4/tools/dq4publish.py release --report work/release
 - 조각은 `tools/guardshard-times.json`(검사마다 지난 시간)으로 고르게 나눈다. `guards.py --record-times 보고서…` 로 고쳐 쓴다.
 - 긴 검사는 `guards.toml` 에 `parts = n` 을 달아 하위 조각으로 나눈다. `--shard` 때 조각 수와 상관없이 하위 조각 n 개로 펼치고(`expand_parts`, 무게 = 검사 시간/n), 같은 검사의 하위 조각은 되도록 서로 다른 조각에 넣는다. 하위 조각 k 는 `DQ4_GUARD_PART=k/n` 으로 돈다. 조각이 n 보다 적어 한 조각에 여럿 들면 한 프로세스로 함께 돈다(`DQ4_GUARD_PART=1,3/4`, `guards.group_parts`). 통과 기록이 이미 있는 몫은 빼고 돈다. 결과 행은 하위 조각마다 `"part": [k, n]` 이 붙는다. `release_check.load_ci`·`ship.py` 가 `guards.merge_parts` 로 검사 하나로 합친다(하위 조각이 모두 있고 모두 통과해야 통과). 통과 기록 이름은 하위 조각마다 `<이름>~<k>of<n>` 이라 조각 수가 다른 실행끼리 맞는다. 로그 이름은 함께 돈 몫을 모두 적는다(`<이름>~1,3of4`).
 - 검사 도구 쪽 인터페이스는 `sfc/dq4/tools/dq4shards.py` 의 `add_part_arg(ap)`(`--part k/n` 또는 `k1,k2/n`, 기본 `DQ4_GUARD_PART`, 읽은 뒤 환경에서 지움. 몫 여럿은 `dq4shards.Parts` 라 `f'{k}/{n}'` 이 `1,3/4`)와 `part_of(단위, part, key, weight)`(결정적 몫, 모으면 전체). 단위는 서로 상태를 주고받지 않는 장면이고, 몫에서는 판정도 그 몫 단위로 좁힌다. `parts` 가 달린 가드의 마지막 단계 도구는 `add_part_arg` 를 불러야 한다(`test_guards.test_parted_guards_run_tools_that_split`).
-- 로컬에서 마무리: 조각 artifact 를 받은 폴더로 `release_check.py --ci-report DIR` 를 돌린다. guards·sweep 단계는 CI 결과(같은 커밋, 조각이 모두 있어야 함)만 받고 로컬 몫(`LOCAL_NEEDS`)만 돈다. CI 에서 돌리지 않음·결과 없음인 검사·스윕은 로컬 에뮬레이터로 메우지 않고 통과가 아닌 것으로 남는다. 로컬에서 도는 것은 build·unit·coverage(에뮬레이터 없음)다.
+- 로컬에서 마무리: 조각 artifact 를 받은 폴더로 `release_check.py --ci-report DIR` 를 돌린다. guards·sweep 단계는 CI 결과(같은 커밋, 조각이 모두 있어야 함)만 받고 로컬 몫(`LOCAL_NEEDS`)만 돈다. CI 에서 돌리지 않음·결과 없음인 검사·스윕은 로컬 에뮬레이터로 메우지 않고 통과가 아닌 것으로 남는다. 로컬에서 도는 것은 build·unit(coverage 로)·coverage(CI 기록을 합쳐 판정만)다.
 - `tools/tests/test_release_gate_workflow.py` 가 지킨다: 관문은 `workflow_dispatch` 만(`pull_request`·`pull_request_target`·`schedule` 금지), 조각 워크플로는 `workflow_call` 만이고 부르는 곳은 관문·`cache-warm.yml`·`ci.yml` 뿐, `cache-warm.yml` 은 `schedule`·`workflow_dispatch` 만이고 정각이 아니며 main 에서만·`mode: release`·`cache: true`·조각 16 이하·시크릿은 이름으로·올리기 없음·평문 캐시는 데운 커밋 표시만·묶음 `release-gate-main`, 올리기 앞 검사 단계, 평문 캐시 경로(도구·통과 기록만), 롬 파생 폴더는 enc-cache·ship-cache 로만, ship-cache 단계 목록 = `SHIP_LABELS`, 단위 캐시 열쇠에 모드·조각 번호 없음·unit-cache 자리 수 = `guards.UNIT_SLOTS`·통과 기록 → 자리 목록 → 되살리기 차례, 관문은 `rehearse` 일 때만 장면·상태·통과 기록 캐시(빌드 단계 캐시는 늘 쓰고 cold-build 는 모든 캐시를 끔, build-verify·report 가 대조), 시크릿을 찍는 줄 없음. `tools/tests/test_pr_guards_workflow.py` 는 `ci.yml` 쪽을 지킨다: `pull_request_target`·`workflow_run`·`issue_comment`·`secrets: inherit` 없음, 시크릿을 쓰는 잡은 `pr-guards` 하나이고 조건은 「CI 몫 있음 그리고 (같은 저장소 브랜치 PR 또는 main push)」 글자 그대로, `mode: pr`·`cache: true`, `guard-plan` 이 보호 테스트를 계획보다 먼저, `ci-ok` 가 `pr-guards-result`·`required-checks` 를 기다림, `LOCAL_NEEDS` 정본은 `guard-shards.yml` 하나.
 
 ## 남은 것
 
-- 커버리지가 기준에 못 미친다(로컬 77.1%, CI 와 같게 69.7%). 기준은 그대로 두고 빌드 경로 시험을 늘려 맞춘다. 그때까지 관문은 「커버리지 미달」 로 실패한다.
 - 기능 표: 자동 검증 계획의 「배포 차단 위험」 목록(가게 거래, 전투 갈래, 여관·교회, 레벨업, 효과음, 저장 칸, 낮밤, 다른 에뮬)을 행으로, 층(L1 롬 바이트, L2 장면, L3 걷기, L4 시드)을 칸으로 하는 표다. 칸에 그 층의 검사 이름을 이어, 이번 실행에서 통과하면 ○ 로 채운다. 행 목록은 아직 정하지 않았다.
