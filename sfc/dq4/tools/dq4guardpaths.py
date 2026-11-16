@@ -21,6 +21,11 @@ docstring 과 빈칸이 든 글(도움말)은 보지 않는다.
 sfc/dq4/guards.toml 은 [cache] key = "paths" 라 검사 결과 캐시 키가 그 검사의 paths·묶음에 맞는 코드만 본다(자료
 파일은 어느 검사의 paths 에도 낱낱이 적히지 않았으면 모든 키에 든다. tools/guards.py key_scope). 이 시험이 그 근거다.
 
+3장 사건 모듈은 dq4ch3event 가 dq4ch3slots.SLOTS 의 이름으로 들이므로(importlib) 위 길로 닿지 않고, 빌드 묶음이 덮어도
+묶음은 PR 에서 검사를 걸지 않는다. 그래서 모듈이 바꾸는 롬 내용(인물 목록·그림·메시지·훅)을 보는 검사(dq4-ch3-* 와
+CH3_CONTENT_CHECKS)는 모듈 파일(ch3_module_files)을 paths 에 직접 덮어야 하고, dq4-ch3-* 는 3장 맵·인물 목록을
+만드는 CH3_SCENE_FILES 도 덮어야 한다(ch3_missing).
+
 많은 검사가 함께 닿는 묶음은 guards.toml 의 [groups] 에 둔다. 묶음마다 뿌리를 GROUP_ROOTS 에 적고(이름이 같아야
 함), 묶음은 그 뿌리에서 위 길로 닿는 파일을 덮어야 한다.
 
@@ -45,6 +50,10 @@ GROUP_ROOTS = {
     'ch1-build': ('sfc/dq4/tools/dq4build.py',),
     'ch1-walk': ('sfc/dq4/tools/dq4ch1walkcheck.py',),
 }
+# dq4-ch3-* 밖에서 3장 모듈이 롬에 싣는 것을 보는 검사
+CH3_CONTENT_CHECKS = ('dq4-people-match', 'dq4-people-event-lines', 'dq4-wrap-routine', 'dq4-msg-banks', 'dq4-rom-ledger')
+# 3장 맵(그룹)과 옮긴 인물 목록을 만드는 파일
+CH3_SCENE_FILES = ('sfc/dq4/tools/dq4npcport.py', 'sfc/dq4/tools/dq4groupbuild.py')
 FILE_NAME = re.compile(r'[\w./-]+\.(?:py|lua|asm)')
 # 코드가 글자 상수로 이름을 적어 읽는 자료 파일
 DATA_NAME = re.compile(r'[\w./-]+\.(?:toml|json|args|patch|tsv)')
@@ -200,6 +209,30 @@ def missing(checks, groups):
     return by_check, by_group
 
 
+def ch3_module_files():
+    """3장 사건 모듈 파일과, 모듈만 닿는 파일(dq4ch3event 가 따로 닿지 않는 것), dq4ch3event·dq4ch3slots."""
+    sys.path.insert(0, str(ROOT / 'sfc/dq4/tools'))
+    import dq4ch3slots
+    event = 'sfc/dq4/tools/dq4ch3event.py'
+    mods = [f for f in (f'sfc/dq4/tools/{s.module}.py' for s in dq4ch3slots.SLOTS.values()) if f in tracked()]
+    return sorted(set(mods) | (closure(mods) - closure([event])) | {event, 'sfc/dq4/tools/dq4ch3slots.py'})
+
+
+def ch3_missing(checks):
+    """{검사 이름: paths 가 덮지 않는 3장 모듈·맵 파일}. 묶음은 PR 에서 걸리지 않으므로 paths 만 본다."""
+    mods = ch3_module_files()
+    out = {}
+    for c in checks:
+        scene = c['name'].startswith('dq4-ch3-')
+        if not scene and c['name'] not in CH3_CONTENT_CHECKS:
+            continue
+        need = mods + (list(CH3_SCENE_FILES) if scene else [])
+        miss = [f for f in need if not covered(f, c.get('paths', []))]
+        if miss:
+            out[c['name']] = miss
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--group', choices=sorted(GROUP_ROOTS), help='그 묶음이 덮어야 할 파일을 찍는다')
@@ -210,6 +243,10 @@ def main():
         return 0
     checks, groups = load()
     by_check, by_group = missing(checks, groups)
+    for name, miss in ch3_missing(checks).items():
+        print(f'{name}: 3장 모듈·맵 파일 paths 에 빠짐 {len(miss)}개')
+        for f in miss:
+            print(f'  {f}')
     for g, miss in by_group.items():
         print(f'묶음 {g}: 빠짐 {len(miss)}개')
         for f in miss:

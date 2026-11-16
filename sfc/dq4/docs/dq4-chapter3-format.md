@@ -336,7 +336,7 @@ FC 실측(`rom/dq4.nes`, 1장 왕좌의 방 상태에서 `$615A` = 2, 금화 100
 
 ## 검사
 
-3장 사건이 늘 때마다 아래 검사에 그 사건의 구간·사례를 붙입니다. 모두 `dq4build.py --chapter3` 롬으로 돌고, 난수·시각·조우를 묶어 같은 입력이면 같은 기록을 냅니다([2장 검사](dq4-chapter2-format.md#검사에-구간-붙이기)와 같은 틀). 가드는 [`guards.toml`](../guards.toml) 의 `dq4-ch3-*` 이고 `paths` 에 `sfc/dq4/tools/dq4ch3*.py` 가 있어 3장 사건 모듈을 새로 만들어도 걸립니다.
+3장 사건이 늘 때마다 아래 검사에 그 사건의 구간·사례를 붙입니다. 모두 `dq4build.py --chapter3` 롬으로 돌고, 난수·시각·조우를 묶어 같은 입력이면 같은 기록을 냅니다([2장 검사](dq4-chapter2-format.md#검사에-구간-붙이기)와 같은 틀). 가드는 [`guards.toml`](../guards.toml) 의 `dq4-ch3-*` 이고 `paths` 에 `sfc/dq4/tools/dq4ch3*.py` 가 있어 3장 사건 모듈을 새로 만들어도 걸립니다. 빌드가 모듈을 이름으로 들여(importlib) import 길로는 닿지 않으므로, `dq4-ch3-*` 와 3장 모듈이 싣는 롬 내용을 보는 검사(`dq4guardpaths.CH3_CONTENT_CHECKS`: 인물 그림·사건 중 팔레트 줄·줄바꿈 루틴·메시지 뱅크·롬 장부)는 모듈 파일과 모듈만 닿는 파일(`dq4boulder.py` 등)을 `paths` 에 직접 적고, `dq4-ch3-*` 는 3장 맵·인물 목록 파일(`dq4npcport.py`·`dq4groupbuild.py`)도 적습니다. `test_dq4guardpaths` 가 지키고, 빠진 것은 `dq4guardpaths.py` 가 찍습니다. 롬 장부 가드 `dq4-rom-ledger` 는 3장 롬 장부도 봅니다.
 
 | 검사 | 보는 것 | 가드 |
 | --- | --- | --- |
