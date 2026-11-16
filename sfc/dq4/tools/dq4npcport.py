@@ -429,8 +429,10 @@ def first_talk():
     come first."""
     import dq4ch1event
     import dq4ch2event
+    import dq4ch3event
     import dq4prologue
-    return SCRIPT_TALK + len(dq4prologue.talk_doc()["scripts"]) + len(dq4ch1event.TALKS) + len(dq4ch2event.talk_names())
+    return (SCRIPT_TALK + len(dq4prologue.talk_doc()["scripts"]) + len(dq4ch1event.TALKS) +
+            len(dq4ch2event.talk_names()) + len(dq4ch3event.talk_names()))
 
 
 def allocate(texts, key, codes):
@@ -459,6 +461,11 @@ def talk_doc(messages):
     ch2_first = FIRST_MESSAGE + len(ids) + len(dq4ch1event.MESSAGES)
     doc["scripts"] += [{"talk": f"{ch2 + k:03X}", "body": body}
                        for k, body in enumerate(dq4ch2event.talk_scripts(ch2_first))]
+    import dq4ch3event
+    ch3 = SCRIPT_TALK + len(doc["scripts"])
+    ch3_first = ch2_first + dq4ch2event.message_count()
+    doc["scripts"] += [{"talk": f"{ch3 + k:03X}", "body": body}
+                       for k, body in enumerate(dq4ch3event.talk_scripts(ch3_first))]
     doc["scripts"] += [{"talk": f"{first + k:03X}", "body": [{"op": "msg", "id": f"{m:03X}"}]}
                        for k, m in enumerate(ids)]
     return doc

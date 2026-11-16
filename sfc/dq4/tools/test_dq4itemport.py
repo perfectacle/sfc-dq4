@@ -28,7 +28,9 @@ class PriceTest(unittest.TestCase):
     def test_korean_name(self):
         self.assertEqual(dq4itemport.korean_names(), {0x01: "철 창", 0x34: "정의의 주판", 0x4E: "철의 앞치마",
                                                       0x61: "외톨이 메탈 갑옷", 0x89: "금 머리장식", 0x8C: "깃털 모자",
-                                                      0xC6: "황금의 팔찌", 0xBE: "지저귐의 꿀"})
+                                                      0xC6: "황금의 팔찌", 0xBE: "지저귐의 꿀",
+                                                      0xBB: "도시락", 0xBC: "철 금고", 0xBD: "은의 여신상",
+                                                      0xC3: "왕자의 편지", 0xCA: "왕의 편지"})
 
 
 @unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
@@ -75,6 +77,22 @@ class RomTest(unittest.TestCase):
         for item in (0xC6, 0xBE):
             self.assertEqual([rom.u8(t + item) for t in dq4itemport.RECORD], [0x1C, 0x04, 0x53, 0x07])
             self.assertEqual(rom.u16(dq4itemport.USE_HANDLERS + (item - 0xA1) * 2), 0x8BE4)
+
+    def test_chapter_three_story_items(self):
+        """3장 사건 물건: BB~BD 는 이름을 한 줄로 다시 써(합 26바이트 그대로) 뒤 물건 이름이 그대로이고, 다섯 모두 물건
+        표·필드에서 쓰기가 ゴールドオーブ 것."""
+        import dq5chest
+        import dq5item
+        rom = self._patched()
+        names = {0xBB: "おべんとう", 0xBC: "てつのきんこ", 0xBD: "ぎんのめがみぞう", 0xC3: "おうじのてがみ", 0xCA: "おうのてがみ"}
+        for item, name in names.items():
+            self.assertEqual(dq5chest.item_name(rom, item), name)
+            self.assertEqual([rom.u8(t + item) for t in dq4itemport.RECORD], [0x1C, 0x04, 0x53, 0x07])
+            self.assertEqual(rom.u16(dq4itemport.USE_HANDLERS + (item - 0xA1) * 2), 0x8BE4)
+        original = dq5item.Rom(DQ5.read_bytes())
+        for item in (0xBA, 0xBF, 0xC2, 0xC4, 0xC9, 0xCB):
+            self.assertEqual(dq5chest.item_name(rom, item), dq5chest.item_name(original, item))
+        self.assertEqual(dq4itemport.name_at(rom, 0xBE), dq4itemport.name_at(original, 0xBE))
 
     def test_thief_key(self):
         """とうぞくのカギ 는 DQ5 의 B7 그대로, 비어 있던 물건 표를 まほうのカギ 것으로(도구 칸, 팔 수 없음)."""

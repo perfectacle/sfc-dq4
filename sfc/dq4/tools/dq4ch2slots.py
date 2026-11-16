@@ -58,14 +58,15 @@ SLOTS = {
 
 # 모든 사건이 함께 쓰는 것(dq4ch2battle): 마지막으로 건 사건 전투를 이겼는지. 전투마다 다시 쓴다
 BATTLE_WON = (0x78, 0x80)      # 7E:2208 bit7
-# 아직 아무에게도 주지 않은 몫. 쓰려면 이 표를 고치는 PR 을 먼저 올린다
+# 아직 아무에게도 주지 않은 몫. 쓰려면 이 표를 고치는 PR 을 먼저 올린다. 남았던 flag 바이트와 코드 자리는 3장 사건
+# 예약표(dq4ch3slots)로 넘겼다
 SPARE = {
-    'flags': (0x6F, 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x79, 0x7A, 0x7B, 0x7C),
+    'flags': (),
     'flag_bits': (),
     'groups': (0x37, 0x38, 0x39, 0x3A),
     'monsters': (0xC5, 0xB6, 0x9D, 0xA5, 0xE3, 0x3D),
     'battles': (),
-    'code': ((0x5FF800, 0x600000), (0x5CD000, 0x5D0000)),
+    'code': (),
 }
 # 2장 첫머리·성·텐페 앞 절반(dq4ch2event)이 이미 쓰는 것. 새 모듈은 쓰지 않는다
 BASE_CODE = (0x5EF000, 0x5F0000)
