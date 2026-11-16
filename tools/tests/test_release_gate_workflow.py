@@ -117,6 +117,31 @@ def prints_secret(line):
     return not target or 'GITHUB_' in target[1]
 
 
+def needs_of(text):
+    """{잡: needs 이름 집합}."""
+    out = {}
+    for m in re.finditer(r'^  ([A-Za-z0-9_-]+):\n((?:    .*\n|\n)*)', '\n'.join(top_block(text, 'jobs')) + '\n', re.M):
+        n = re.search(r'^    needs: (\[[^\]]*\]|\S+)', m[2], re.M)
+        out[m[1]] = set(re.findall(r'[A-Za-z0-9_-]+', n[1])) if n else set()
+    return out
+
+
+def beside_shards(text):
+    """조각 행렬과 함께 돌 수 있는 잡: 조각이 (거쳐서라도) 기다리지 않고, 조각을 기다리지도 않는 잡."""
+    needs = needs_of(text)
+
+    def ancestors(job):
+        seen, todo = set(), list(needs.get(job, ()))
+        while todo:
+            j = todo.pop()
+            if j not in seen:
+                seen.add(j)
+                todo += needs.get(j, ())
+        return seen
+    before = ancestors('shard')
+    return {j for j in needs if j != 'shard' and j not in before and 'shard' not in ancestors(j)}
+
+
 class ReleaseGateWorkflowTest(unittest.TestCase):
     def setUp(self):
         self.text = WORKFLOW.read_text(encoding='utf-8')
@@ -388,10 +413,12 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
 
     def test_shard_count_fits_the_job_limit(self):
         """무료 요금제는 계정 동시 잡이 20 이다. 한 실행이 제 잡끼리 줄 서지 않게 조각 수를 JOB_LIMIT - FIXED_JOBS 로
-        자르고, 그 뒤로는 inputs.shards 대신 자른 수(needs.build.outputs.count)를 쓴다."""
+        자르고, 그 뒤로는 inputs.shards 대신 자른 수(needs.build.outputs.count)를 쓴다. FIXED_JOBS 는 조각과 함께 돌 수
+        있는 잡(조각이 기다리는 잡도, 조각을 기다리는 잡도 아닌 것) 수 이상이어야 한다."""
         self.assertIn('  JOB_LIMIT: 20\n', self.text)
         fixed = int(re.search(r'^  FIXED_JOBS: (\d+)$', self.text, re.M)[1])
-        self.assertEqual(fixed, len(set(self.jobs) - {'shard'}) + 1, '조각 밖 잡 수: build·report 에 rom 행렬 둘')
+        self.assertGreaterEqual(fixed, len(beside_shards(self.text)),
+                                f'조각과 함께 돌 수 있는 잡 {sorted(beside_shards(self.text))}')
         self.assertEqual(self.text.count('inputs.shards'), 1, '입력 조각 수는 Plan shards 만 읽는다')
         shard = ''.join(self.jobs['shard'])
         self.assertNotIn('inputs.shards', shard)
@@ -403,6 +430,10 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         sys.path.insert(0, str(ROOT / 'tools'))
         import guards
         self.assertLessEqual(guards.PR_SHARDS_MAX, 8, 'PR 은 관문·cache-warm 과 한도를 나눠 씀')
+
+    def test_jobs_beside_the_shards_are_the_release_build_check(self):
+        self.assertEqual(beside_shards(self.text), {'cold-build', 'build-verify'})
+        self.assertEqual(needs_of(self.text)['shard'], {'build', 'rom'})
 
     def test_mesence_unpacks_its_libraries_before_guards(self):
         """리눅스 MesenCE 는 처음 뜰 때 MesenCore.so 를 실행 파일 옆에 푼다. 처음 뜨는 것이 여럿 함께면 서로 덮어써
