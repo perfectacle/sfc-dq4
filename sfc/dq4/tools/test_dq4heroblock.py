@@ -19,6 +19,7 @@ import dq4ch1event as ev  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 import dq4ch2frenol as fr  # noqa: E402
 import dq4ch2king as king  # noqa: E402
+import dq4ch3lakanaba as lakanaba  # noqa: E402
 import dq4chapter1 as ch  # noqa: E402
 import dq4prologue as pro  # noqa: E402
 
@@ -181,6 +182,10 @@ PASS_NO_DEVICE = {
        for (_, script), (_, path, _) in ev._distinct(zip(ev.SOLDIER_SRCS, ev.THRONE_SOLDIERS)) if path},
     **{king.SCRIPTS[king.USE[name]]: '탑 꼭대기 엘프: 주인공이 줄 0C(셀 Y 26) 아래에서 들어설 때 걸리고, 엘프는 그보다 위 '
        '셀 Y 17·19 에서 위로만 걸음(elves-up·elves-right 사례 겹침 0)' for name in ('elf_a', 'elf_b')},
+    lakanaba.SCRIPTS['customer'][2]: '레이크나바 손님: 주인공이 카운터 안 (4,53)에 선 뒤 조작을 막고서야 카운터 바깥 '
+    '(12,53)~(8,53) 만 걷고, 맵 구석으로 사라진 뒤 조작을 푼다(dq4ch3lakanabacheck 손님 사례)',
+    lakanaba.SCRIPTS['first_master'][2]: '레이크나바 첫 출근 주인: 주인공이 문 칸·문 밖(X 14 이상)에 서면 조작을 막고 X 12 '
+    '이하((12,53)→(10,53)→(10,49))로만 비킴(heroblock shop-right·shop-above·shop-below)',
 }
 
 

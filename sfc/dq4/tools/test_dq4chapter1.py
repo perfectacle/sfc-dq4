@@ -353,8 +353,10 @@ class MessageAssemblyTests(unittest.TestCase):
         self.assertEqual(sorted(flow), ['events', 'pauses', 'scripts', 'talks'])
         self.assertEqual(len(flow['scripts']), len(ch.npc_scripts(3300)))
         import dq4ch2event
-        # 서장 끝·합류·바구니 셋 뒤에 등록한 2장 사건 모듈(EVENTS)의 이벤트
-        self.assertEqual(len(flow['events']), 3 + len(dq4ch2event.event_tokens(ch.chapter2_message(3300))))
+        import dq4ch3event
+        # 서장 끝·합류·바구니 셋 뒤에 등록한 2장·3장 사건 모듈(EVENTS)의 이벤트
+        self.assertEqual(len(flow['events']), 3 + len(dq4ch2event.event_tokens(ch.chapter2_message(3300))) +
+                         len(dq4ch3event.event_tokens(ch.chapter3_message(3300))))
         self.assertEqual(ch.npc_scripts(3300)[0]['address'], '05:A84F')
 
 

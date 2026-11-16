@@ -714,14 +714,16 @@ def scripts(ctx):
         _cmd('1E', WALK_SPEED), _cmd('1C'), _cmd('2B', *PARK),
         _wait_on(SHIFT) | {"label": "wait"}, _if_on(DONE, 'wait'), poll(at['pace']),
         _if_off(SHIFT, 'wait'), _if_on(DONE, 'wait'),
+        # 주인공이 카운터 안에 선 뒤 조작을 막고서야 들어와, 걷는 길((12,53)~(8,53))이 주인공과 겹치지 않는다
+        poll(at['at_counter']), _cmd('3F'),
         _cmd('2B', out_x, out_y), _cmd('13', *COUNTER_OUT), _cmd('14'), _cmd('2F', 0x22),
-        call(at['arrive']), call(at['set_talk']), poll(at['at_counter']), _if_on(SERVED, 'after'),
-        _and_off(ANSWERED) | {"label": "talk"}, _and_off(AGAIN), call(at['set_talk']), _cmd('3F'), call(talk_here),
-        _wait_on(ANSWERED), _cmd('40'), _if_on(AGAIN, 'talk'),
-        _if_on(CLOSE, 'close') | {"label": "after"},
-        _cmd('13', out_x, out_y), _cmd('14'), _cmd('2B', *PARK), _cmd('03', target='wait'),
-        call(at['close'], label='close'), _cmd('2B', *PARK), _cmd('16')]
-    first = [_if_on(SEEN, 'hide'), _cmd('1E', WALK_SPEED), poll(at['first_trigger']), _cmd('3F'), msg('late'),
+        call(at['arrive']),
+        _and_off(ANSWERED) | {"label": "talk"}, _and_off(AGAIN), call(at['set_talk']), call(talk_here),
+        _wait_on(ANSWERED), _if_on(AGAIN, 'talk'),
+        _if_on(CLOSE, 'close'),
+        _cmd('13', out_x, out_y), _cmd('14'), _cmd('2B', *PARK), _cmd('40'), _cmd('03', target='wait'),
+        _cmd('2B', *PARK, label='close'), _cmd('40'), call(at['close']), _cmd('16')]
+    first = [_if_on(SEEN, 'hide'), _cmd('1E', WALK_SPEED), _cmd('1C'), poll(at['first_trigger']), _cmd('3F'), msg('late'),
              *[c for x, y in FIRST_ASIDE for c in (_cmd('13', x, y), _cmd('14'))],
              call(at['first_walk']), poll(at['at_counter']), call(at['face_right']), msg('how'),
              _or(SEEN), _or(SHIFT), _and_off(DONE), _cmd('40'), _cmd('28'), _cmd('52'), _cmd('16'), *hide]
