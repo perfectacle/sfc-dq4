@@ -26,6 +26,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4ch1walkcheck as wc  # noqa: E402
 import dq4ch2walkcheck as cw  # noqa: E402
+import dq4ch3endor as endor  # noqa: E402
 import dq4ch3event as ch3  # noqa: E402
 import dq4ch3lakanaba as lakanaba  # noqa: E402
 import dq4ch3opencheck as opening  # noqa: E402
@@ -48,6 +49,10 @@ FLAGS = {
     'TOM_PUSH': wc.flag(lakanaba.TOM_PUSH), 'SCOTT_DAYS': (ch3.SCOTT_DAYS, 0xFF),
     # 구르는 바위(dq4boulder)의 메움 비트(bit0 왼쪽 구덩이, bit1 가운데)
     'SAFE_FILL': (safe.BOULDER_VARS(safe.boulder.FILL), 0xFF),
+    **{f'ENDOR_{k}': wc.flag(getattr(endor, k)) for k in ('ALLOWED', 'SHOP', 'ORDER', 'DELIVERED', 'SOLD', 'SON_CHEER',
+                                                          'NOTICE', 'OPENED', 'BUTTON', 'ASKED', 'PRESSED')},
+    'ENDOR_COUNT': (ch3.VARS_AT + ch3.SLOTS['E'].vars[0] + endor.VARS, 0xFF),
+    'GOLD0': (ch3.GOLD_AT, 0xFF), 'GOLD1': (ch3.GOLD_AT + 1, 0xFF), 'GOLD2': (ch3.GOLD_AT + 2, 0xFF),
 }
 
 TOWN = '3E/00'                 # FC 16/00 레이크나바
@@ -91,6 +96,32 @@ SAFE_FACE_UP = '7E31E0=88'
 # 명령 창 → しらべる(dq4chestcheck.SEARCH), 상자 메시지를 넘기고 창을 닫는다
 SAFE_SEARCH = ('a:8;wait:60;down:6;wait:25;down:6;wait:25;down:6;wait:25;right:6;wait:25;a:8;wait:200;'
                'a:4;wait:150;a:4;wait:150;b:4;wait:220')
+
+# 엔돌: 사람 바로 아래 셀(FC 칸 한 칸 아래). 순간이동은 TO 의 한 셀 아래에 내린다
+KING_BELOW = endor.cell(endor.KING[2][0], endor.KING[2][1] + 1)
+ENDOR_OFF = ['ENDOR_ALLOWED', 'ENDOR_SHOP', 'ENDOR_ORDER']
+BUTTON_CELL = endor.BUTTON_LAND[1]
+BENTO = 0xBB
+
+
+def _set(flag):
+    return f'{0x2190 + flag[0]:04X}|{flag[1]:02X}'
+
+
+def _gold(n):
+    return ';'.join(f'{(ch3.GOLD_AT & 0xFFFF) + k:04X}={n >> 8 * k & 0xFF:02X}' for k in range(3))
+
+
+def _items(*items):
+    """톨네코 물건 칸 2 부터(칸 0 옷, 칸 1 도시락)."""
+    return ';'.join(f'{(ch3.PARTY_ITEMS & 0xFFFF) + 2 + k:04X}={item:02X}' for k, item in enumerate(items))
+
+
+def _below(mp, fc):
+    """FC 칸 fc 의 사람 바로 아래 셀에 내리는 순간이동 인자(TO 의 한 셀 아래에 내린다)."""
+    x, y = endor.cell(fc[0], fc[1] + 1)
+    return f'{mp},{x},{y - 1}'
+LETTER2_SET = f'{0x2190 + endor.LETTER2[0]:04X}|{endor.LETTER2[1]:02X}'
 
 # (이름, 방법, 인자, 선택). 꼴은 dq4ch2walkcheck.SEGMENTS 와 같다(선택은 dq4chapterwalk 머리말)
 SEGMENTS = [
@@ -158,6 +189,55 @@ SEGMENTS = [
     ('safe_boulder_mid_side', 'warp', f'{safe.ROLL},6,22', {'map': safe.ROLL}),
     ('safe_boulder_mid', 'walk', '6,29;8,29;8,61;16,61;wait:810;22,61;22,53;wait:270;22,39;8,39;8,43;wait:520;'
      '8,39;22,39;22,89;22,91;wait:200', {'map': safe.PIT_BELOW, 'changes': 1, 'after': 60, 'bytes': {'SAFE_FILL': 0x02}}),
+    # 엔돌(dq4ch3endor), 이야기 차례로: 왕 첫 알현(flag 없음) → 허락 전의 가게 주인 → 왕의 편지 뒤 허락 → 금화가 모자람 →
+    # 35001 골드로 가게를 삼(아침, 네네 옆으로) → 왕의 주문
+    ('endor_king', 'warp', _below(endor.THRONE, endor.KING[2]), {'map': endor.THRONE}),
+    ('endor_king_first', 'walk', talk('up', 6), {'map': endor.THRONE, 'off': ENDOR_OFF}),
+    ('endor_seller', 'warp', _below(endor.SHOP_UP, endor.SELLER[0][2]), {'map': endor.SHOP_UP}),
+    ('endor_seller_wish', 'walk', talk('up', 4), {'map': endor.SHOP_UP, 'off': ENDOR_OFF}),
+    ('endor_king_letter', 'warp', _below(endor.THRONE, endor.KING[2]), {'map': endor.THRONE, 'set': LETTER2_SET}),
+    ('endor_king_allow', 'walk', talk('up', 6), {'map': endor.THRONE, 'want': ['ENDOR_ALLOWED']}),
+    ('endor_seller_allowed', 'warp', _below(endor.SHOP_UP, endor.SELLER[0][2]), {'map': endor.SHOP_UP}),
+    ('endor_seller_poor', 'walk', talk('up', 6), {'map': endor.SHOP_UP, 'off': ['ENDOR_SHOP']}),
+    ('endor_seller_buy', 'walk', talk('up', 14),
+     {'set': _gold(endor.SHOP_PRICE + 1), 'map': endor.TOWN, 'cell': endor.NENE_SIDE[1], 'want': ['ENDOR_SHOP'],
+      'bytes': {'GOLD0': 1, 'GOLD1': 0, 'GOLD2': 0}, 'changes': 1, 'after': 900}),
+    ('endor_king_shop', 'warp', _below(endor.THRONE, endor.KING[2]), {'map': endor.THRONE}),
+    ('endor_king_order', 'walk', talk('up', 6), {'map': endor.THRONE, 'want': ['ENDOR_ORDER']}),
+    # 네네: 가게를 산 뒤 낮에는 「쉴래요?」 → 「예」 면 잠, 개통 소식이 왔으면 08A0 → 개통
+    ('endor_nene', 'warp', f'{endor.TOWN},{endor.NENE_SIDE[1][0]},{endor.NENE_SIDE[1][1] - 1}', {'map': endor.TOWN}),
+    ('endor_nene_sleep', 'walk', talk('right', 8), {'map': endor.TOWN, 'cell': endor.NENE_SIDE[1], 'changes': 1,
+                                                     'after': 600, 'items': [BENTO]}),
+    ('endor_nene_notice', 'walk', talk('right', 12), {'map': endor.TOWN, 'set': _set(endor.NOTICE),
+                                                       'want': ['ENDOR_OPENED']}),
+    # 납품: 주문 전에는 안내만, 주문 뒤 없으면 그대로, 칼 둘·갑옷 하나를 받고, 다 차면 60000 골드
+    ('endor_deliver', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]), {'map': endor.CASTLE_HALL}),
+    ('endor_deliver_none', 'walk', talk('up', 8), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0}}),
+    ('endor_deliver_some', 'walk', talk('up', 10),
+     {'map': endor.CASTLE_HALL, 'set': _items(endor.STEEL_SWORD, endor.STEEL_SWORD, endor.IRON_ARMOR),
+      'bytes': {'ENDOR_COUNT': 0x12}, 'items': [0x42, BENTO]}),
+    ('endor_deliver_full', 'walk', talk('up', 10),
+     {'map': endor.CASTLE_HALL,
+      'set': ';'.join((_items(endor.STEEL_SWORD, endor.IRON_ARMOR), _gold(0), f'{FLAGS["ENDOR_COUNT"][0] & 0xFFFF:04X}=66')),
+      'want': ['ENDOR_DELIVERED'], 'bytes': {'ENDOR_COUNT': 0x77, 'GOLD0': 0x60, 'GOLD1': 0xEA, 'GOLD2': 0}}),
+    # 수집가: 여신상을 25000 골드에. 낮의 수집가는 걸어 다녀 밤에 서 있는 자리로 본다
+    ('endor_collector', 'warp', _below(endor.COLLECTOR, endor.COLLECTORS[1][2]), {'map': endor.COLLECTOR,
+                                                                                    'poke': wc.NIGHT}),
+    ('endor_collector_sell', 'walk', talk('up', 4),
+     {'map': endor.COLLECTOR, 'poke': wc.NIGHT, 'set': ';'.join((_items(endor.STATUE), _gold(0))), 'want': ['ENDOR_SOLD'],
+      'bytes': {'GOLD0': 0xA8, 'GOLD1': 0x61, 'GOLD2': 0}, 'items': [0x42, BENTO]}),
+    # 단추를 누른 뒤 입구 층의 계단은 48/03 대신 물이 빠진 48/04 로(누르기 전은 48/03)
+    ('endor_cave_stair', 'warp', f'{endor.CAVE_ENTRY},22,8', {'map': endor.CAVE_ENTRY}),
+    ('endor_cave_wet', 'walk', 'up:40;wait:300', {'map': endor.CAVE_WET, 'changes': 1, 'after': 60, 'off': ['ENDOR_BUTTON']}),
+    ('endor_cave_stair2', 'warp', f'{endor.CAVE_ENTRY},22,8', {'map': endor.CAVE_ENTRY, 'set': _set(endor.BUTTON)}),
+    ('endor_cave_dry', 'walk', 'up:40;wait:300', {'map': endor.CAVE_DRY, 'changes': 1, 'after': 60}),
+    # 여신상 방(48/07, FC 40/05)의 상자 아래에서 위를 보고 しらべる → 은의 여신상
+    ('endor_statue', 'warp', f'{endor.STATUE_ROOM},12,10', {'map': endor.STATUE_ROOM}),
+    ('endor_statue_open', 'walk', SAFE_SEARCH, {'poke': SAFE_FACE_UP, 'items': [endor.STATUE]}),
+    # 여신상 동굴 단추: 「예」 면 물이 빠진 48/04 의 같은 칸으로
+    ('endor_button_side', 'warp', f'{endor.CAVE_WET},{BUTTON_CELL[0]},{BUTTON_CELL[1] + 1}', {'map': endor.CAVE_WET}),
+    ('endor_button', 'walk', f'up:40;wait:200;a:8;wait:60;a:8;wait:600',
+     {'map': endor.CAVE_DRY, 'cell': endor.BUTTON_LAND[1], 'want': ['ENDOR_BUTTON'], 'changes': 1, 'after': 60}),
 ]
 
 

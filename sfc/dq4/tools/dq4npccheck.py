@@ -182,6 +182,24 @@ def expected_codes(path):
     return {m["id"]: m["codes"] for m in doc["messages"]}
 
 
+def active_list(rom, layout, m, flags):
+    """그 맵에 지금 걸리는 인물 목록 주소: 옮긴 대체 표(layout 의 override_table, 줄마다 그룹·맵·flag 번호(bit7 이면
+    「꺼짐」)·마스크·목록 3바이트, 그룹 FF 로 끝)에서 flags({7E:2190+i: 값})로 처음 맞는 줄의 목록, 없으면 기본 목록.
+    사건 모듈이 대체 목록으로 덮은 맵(3장 엔돌 등)의 인물 표 장면이 그 목록과 견준다."""
+    base = int(layout["lists"][m].replace(":", ""), 16)
+    if "override_table" not in layout:
+        return base
+    group, number = int(m[:2], 16), int(m[3:], 16)
+    row = int(layout["override_table"].replace(":", ""), 16)
+    while rom.u8(row) != 0xFF:
+        flag, mask = rom.u8(row + 2), rom.u8(row + 3)
+        if (rom.u8(row), rom.u8(row + 1)) == (group, number) and \
+                bool(flags[0x7E2190 + (flag & 0x7F)] & mask) != bool(flag & 0x80):
+            return rom.u8(row + 4) | rom.u8(row + 5) << 8 | rom.u8(row + 6) << 16
+        row += 7
+    return base
+
+
 def walkable(source, x, y):
     return 0 <= x < source.w and 0 <= y < source.h and not block_prop(source, source.cell(x, y) & 31) & 0x80
 
@@ -484,7 +502,7 @@ def main():
                     continue
                 wram = wram[0] if isinstance(wram, tuple) else wram
                 flags = {0x7E2190 + i: wram[0x2190 + i] for i in range(0x170)}
-                at = int(layout["lists"][m].replace(":", ""), 16)
+                at = active_list(built, layout, m, flags)
                 placed = [(a, f) for a, _ in list_entries(built, at) if (f := parse(built, a, night))]
                 bad = compare(wram, table_values(built, placed, flags))
                 results[name] = {"ok": not bad, "people": len(placed), "mismatch": bad[:10]}

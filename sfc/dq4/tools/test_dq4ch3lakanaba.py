@@ -177,7 +177,8 @@ class ListTest(unittest.TestCase):
         gone = L.absent(c)
         self.assertIn((L.TOWN, *L.COUNTER_IN, False), gone)
         self.assertEqual(len(gone), 1 + len(L.STRAYS))
-        self.assertEqual(ev.absent(), gone)
+        # 공용 표는 모든 모듈의 것을 모은다: 이 모듈 몫이 다 들어 있으면 된다
+        self.assertLessEqual(gone, ev.absent())
 
 
 @unittest.skipUnless(DQ5.is_file(), 'local source ROM not present')

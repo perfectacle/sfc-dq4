@@ -288,6 +288,14 @@ def chapter3_cases():
                                     'want': [], 'map': safe.ROLL, 'maxf': 4000}
     out['safe-boulder-pit'] = {'warp': f'{safe.ROLL},6,22', 'set': '', 'walk': '6,73;wait:900;down:40;wait:300',
                                'free': '6,29', 'want': [], 'map': safe.PIT_BELOW, 'maxf': 4000}
+    # 여신상 동굴 단추 칸(FC 40/01 (11,02))의 두 열마다: 한 줄 아래(FC (11,03))에서 올라서 「예」 면 물이 빠진 48/04 의 같은 칸에 서고, 왼쪽
+    # 통로(FC (0C,02))로 걸어 간다
+    import dq4ch3endor as endor
+    bx0, _, _, by1 = endor._hero_rect(*endor.BUTTON_FC)
+    for x in (bx0, bx0 + 1):
+        out[f'endor-button-{x}'] = {'warp': f'{endor.CAVE_WET},{x},{by1}', 'set': '',
+                                    'walk': 'up:40;wait:200;a:8;wait:60;a:8;wait:800', 'free': '24,5',
+                                    'want': [('ENDOR_BUTTON', endor.BUTTON)], 'map': endor.CAVE_DRY, 'maxf': 3000}
     out.update(shop_cases(lakanaba))
     return out
 
