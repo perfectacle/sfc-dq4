@@ -552,6 +552,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4ch3endorcheck.py",
   "sfc/dq4/tools/dq4ch3safe.py",
+  "sfc/dq4/tools/dq4boulder.py",
   "sfc/dq4/tools/dq4ch3walkcheck.py",
   "sfc/dq4/tools/dq4ch3event.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
