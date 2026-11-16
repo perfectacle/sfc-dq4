@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -39,6 +40,81 @@ class ReleaseCheckTest(unittest.TestCase):
             self.assertEqual(r['status'], 'failed')
             self.assertIn('로컬 89.9%', r['detail'])
             self.assertIn('tools/tests 시험이 실패함', r['detail'])
+
+    def test_coverage_with_ci_records_measures_only_local_units(self):
+        """--ci-report 면 로컬 수에는 CI 빌드 줄을, CI 와 같게에는 CI 단위 줄을 더한다. unit 단계가 coverage 로
+        돌았으면 단위를 다시 돌지 않는다."""
+        got = {'unit': {'failed': [], 'lines': {'u.py': [1]}}, 'build': {'failed': [], 'lines': {'b.py': [2]}}}
+        with tempfile.TemporaryDirectory() as d:
+            ctx = {'logs': Path(d), 'dir': Path(d), 'rehearse': False, 'ci': {'coverage': got}, 'unit_covered': True,
+                   'unit_failed': []}
+            with mock.patch.object(rc, 'coverage_result', side_effect=[(91.0, {}), (80.5, {})]) as res, \
+                    mock.patch.object(rc, 'covered_units') as units, mock.patch.object(rc, 'measure') as measure:
+                r = rc.stage_coverage(ctx)
+            self.assertEqual(r['status'], 'passed', r)
+            units.assert_not_called()
+            measure.assert_not_called()
+            self.assertEqual([(c.args[2], c.kwargs['extra']) for c in res.call_args_list],
+                             [('local', {'b.py': [2]}), ('ci', {'u.py': [1]})])
+            got['build']['failed'] = ['build']
+            with mock.patch.object(rc, 'coverage_result', side_effect=[(91.0, {}), (80.5, {})]):
+                self.assertIn('CI build 시험이 실패함', rc.stage_coverage(ctx)['detail'])
+            ctx['ci'] = {'coverage': {'unit': got['unit']}}
+            r = rc.stage_coverage(ctx)
+        self.assertEqual(r['status'], 'failed')
+        self.assertIn('CI 커버리지 기록 없음(build', r['detail'])
+
+    def test_coverage_result_merges_ci_lines_by_repo_path(self):
+        import coverage
+        with tempfile.TemporaryDirectory() as d:
+            root, logs = Path(d) / 'repo', Path(d) / 'logs'
+            (root / 'pkg').mkdir(parents=True)
+            logs.mkdir()
+            mod = root / 'pkg' / 'm.py'
+            mod.write_text('a = 1\nb = 2\nc = 3\nd = 4\n')
+            data, _ = rc.coverage_paths(logs, 't')
+            local = coverage.CoverageData(basename=str(data), suffix='local')
+            local.add_lines({os.path.realpath(mod): [1]})
+            local.write()
+            with mock.patch.object(rc, 'build_path_files', return_value=[str(mod)]):
+                percent, lines = rc.coverage_result(root, logs, 't', extra={'pkg/m.py': [2, 3], 'gone.py': [1]})
+                self.assertEqual((percent, lines), (75.0, {'pkg/m.py': [1, 2, 3]}))
+                # 다시 모아도 앞서 모은 줄이 남는다
+                self.assertEqual(rc.coverage_result(root, logs, 't', extra={'pkg/m.py': [4]})[0], 100.0)
+                self.assertEqual(rc.coverage_result(root, logs, 'none')[0], 0.0)
+
+    def test_ci_coverage_records_lines_and_fails_only_on_build(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            out = root / 'up' / 'cov.json'
+            with mock.patch.object(rc, 'covered_units', return_value=['tools/tests']), \
+                    mock.patch.object(rc, 'covered_build', return_value=['build']) as build, \
+                    mock.patch.object(rc, 'coverage_result', return_value=(42.0, {'a.py': [1]})), \
+                    mock.patch.object(rc.guards, 'git', return_value='abc\n'), \
+                    mock.patch('builtins.print'):
+                self.assertEqual(rc.ci_coverage('unit', out, root=root), 0)
+                rec = json.loads(out.read_text(encoding='utf-8'))
+                self.assertEqual(rec, {'format': rc.COVERAGE_FORMAT, 'commit': 'abc', 'kind': 'unit', 'percent': 42.0,
+                                       'failed': ['tools/tests'], 'lines': {'a.py': [1]}})
+                self.assertEqual(rc.ci_coverage('build', out, Path('work/x'), root=root), 1)
+                self.assertEqual(build.call_args.args[4], Path('work/x'))
+            self.assertEqual(rc.load_coverage(root, 'abc')['build']['failed'], ['build'])
+            with self.assertRaisesRegex(ValueError, '커밋'):
+                rc.load_coverage(root, 'other')
+
+    def test_unit_stage_runs_under_coverage_when_coverage_follows(self):
+        cmds = []
+
+        def ok(cmd, log, env):
+            cmds.append(cmd)
+            log.write_text('Ran 2 tests')
+            return (1 if 'no/such' in cmd else 0), 1
+        with tempfile.TemporaryDirectory() as d:
+            ctx = {'dir': Path(d), 'logs': Path(d), 'rehearse': True, 'cover': True}
+            with mock.patch.object(rc, 'UNIT_DIRS', ('tools/tests',)), mock.patch.object(rc, 'sh', side_effect=ok):
+                rc.stage_unit(ctx)
+            self.assertIn(f'coverage run --rcfile={Path(d) / "coverage-local.ini"} -m unittest', cmds[0])
+            self.assertEqual((ctx['unit_covered'], ctx['unit_failed']), (True, []))
 
     def test_build_path_files_are_python_sources(self):
         files = rc.build_path_files()
@@ -270,6 +346,16 @@ class ReleaseCheckTest(unittest.TestCase):
         text, ok = rc.ci_summary(ci)
         self.assertTrue(ok)
         self.assertIn('연습 통과', text)
+
+    def test_ci_summary_cli_requires_sweeps_only_when_asked(self):
+        """PR 조각 결과에는 스윕이 없다. --require-sweeps 없이는 검사만으로 판정한다."""
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / 's.json').write_text(json.dumps({'commit': 'c', 'shard': [1, 1], 'local': [], 'rows': [
+                {'name': 'g', 'file': 'f', 'status': 'passed', 'detail': '1초'}]}))
+            with mock.patch('builtins.print'):
+                for extra, code in (([], 0), (['--require-sweeps'], 1)):
+                    with mock.patch.object(sys, 'argv', ['release_check.py', '--ci-summary', d, *extra]):
+                        self.assertEqual(rc.main(), code, extra)
 
     def test_ci_summary_fails_on_skipped(self):
         ci = {'commit': 'c', 'shards': 1, 'local': ['m'],

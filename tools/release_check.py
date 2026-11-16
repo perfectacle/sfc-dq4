@@ -9,7 +9,9 @@
   sweep     트랙의 release.toml 시드 스윕(시드 0 부터 N 개와 seeds.json 의 실패 시드)
             --ci-report 면 guards·sweep 은 CI 결과만 받고 에뮬레이터를 돌리지 않는다(로컬 몫 LOCAL_NEEDS 만 예외)
   coverage  빌드 경로(dq4publish.inputs 의 .py) 커버리지. 로컬(단위 전부 + 빌드 캐시 끈 빌드 한 번, 하위 프로세스도
-            잼) ≥ LOCAL_MIN, CI 와 같게(롬 링크 없는 임시 워크트리에서 롬·도구 환경 변수 없이 단위만) ≥ CI_MIN
+            잼) ≥ LOCAL_MIN, CI 와 같게(롬 링크 없는 임시 워크트리에서 롬·도구 환경 변수 없이 단위만) ≥ CI_MIN.
+            unit 단계와 함께 돌면 unit 단계가 coverage 로 돌아 단위를 다시 돌지 않는다. --ci-report 면 빌드와 CI 와
+            같게는 CI cold-build 잡의 기록(--ci-coverage)을 쓰고 로컬은 단위만 잰다
 
 관문 모드(--rehearse 아님)에서는 build 의 캐시 빌드 밖의 모든 단계가 같은 환경(gate_env)으로 돈다: 장면 캐시(DQ4_READSET=off), 빌드 단계
 캐시(DQ4_BUILD_CACHE=off), 서장 끝·시작 상태 캐시(DQ4_STATES_CACHE 를 이 실행 폴더의 빈 states/ 로, 처음 한 번 만들어 그
@@ -23,6 +25,7 @@
   uv run --locked python tools/release_check.py --rehearse --stages build,unit
   uv run --locked python tools/release_check.py --ci-report DIR  # guards·sweep 은 CI 결과, 로컬은 build·unit·coverage
   uv run --locked python tools/release_check.py --ci-summary DIR # CI report 잡: 조각 결과 요약(Markdown), 실패면 1
+  uv run --locked python tools/release_check.py --ci-coverage unit|build OUT [--build-out DIR]  # CI cold-build 잡
 
 --ci-report 의 DIR 은 배포 관문 워크플로(release-gate.yml → guard-shards.yml)의 조각 결과(guards.py --all --json)를 받은 폴더다. 조각이 모두
 있고 그 커밋이 지금 HEAD 여야 한다. CI 가 판정한 검사·스윕은 그 결과를 그대로 쓴다(실패를 로컬에서 다시 돌려 덮지 않는다).
@@ -35,6 +38,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -209,20 +213,27 @@ def unit_counts(text):
 
 
 def stage_unit(ctx):
+    """coverage 단계도 돌면(ctx['cover']) 단위를 coverage 로 돌려, coverage 단계가 단위를 다시 돌지 않게 한다."""
     rows, secs_all = [], 0
+    runner = 'python'
+    if ctx.get('cover'):
+        runner = f'coverage run --rcfile={coverage_paths(ctx["logs"], "local")[1]}'
     for d in UNIT_DIRS:
         if not (ROOT / d).is_dir():
             # CI 가 도는 폴더가 없어졌으면 그 시험이 빠진 것이라 통과로 치지 않는다
             rows.append({'dir': d, 'status': 'failed', 'tests': 0, 'skipped': 0, 'seconds': 0, 'detail': '폴더 없음'})
             continue
         log = ctx['logs'] / f'unit-{d.replace("/", "-")}.log'
-        code, secs = sh(f"cd {d} && uv run --locked python -m unittest discover -p 'test_*.py'", log, env_for(ctx))
+        code, secs = sh(f"cd {d} && uv run --locked {runner} -m unittest discover -p 'test_*.py'", log, env_for(ctx))
         ran, skipped = unit_counts(log.read_text(encoding='utf-8', errors='replace'))
         rows.append({'dir': d, 'status': 'passed' if code == 0 else 'failed', 'tests': ran, 'skipped': skipped,
                      'seconds': secs})
         secs_all += secs
     ok = bool(rows) and all(r['status'] == 'passed' for r in rows)
     missing = [r['dir'] for r in rows if r.get('detail') == '폴더 없음']
+    if ctx.get('cover'):
+        ctx['unit_covered'] = True
+        ctx['unit_failed'] = [r['dir'] + ('(폴더 없음)' if r.get('detail') else '') for r in rows if r['status'] != 'passed']
     return {'status': 'passed' if ok else 'failed', 'seconds': secs_all, 'rows': rows,
             'detail': (f'폴더 없음 {", ".join(missing)}; ' if missing else '') + f'{sum(r["tests"] for r in rows)}개, 건너뜀 {sum(r["skipped"] for r in rows)}개'}
 
@@ -268,7 +279,7 @@ def load_ci(folder):
             text, ok = text + '- **빌드 대조의 커밋이 조각 결과와 다름**\n', False
         build = {'ok': ok, 'text': text}
     return {'commit': commit, 'shards': n, 'rows': rows, 'sweeps': sweep_rows, 'local': local, 'cached': cached,
-            'build': build}
+            'build': build, 'coverage': load_coverage(folder, commit)}
 
 
 def ci_sweeps(ci, wanted):
@@ -377,17 +388,27 @@ def build_path_files(root=ROOT):
     return sorted(str(root / f) for f in dq4publish.inputs() if f.suffix == '.py' and not f.name.startswith('test_'))
 
 
+COVERAGE_FORMAT = 'release-coverage-1'
+COVERAGE_KINDS = ('unit', 'build')
+
+
 def coverage_rc(path, data):
     path.write_text(f'[run]\nparallel = true\npatch = subprocess\ndata_file = {data}\n', encoding='utf-8')
 
 
-def measure(root, logs, tag, env, build_out=None):
-    """root 에서 단위 테스트 전부(와 build_out 이 있으면 빌드 한 번)를 coverage 로 돌려 (퍼센트, 단계 실패 목록)."""
-    import coverage
+def coverage_paths(logs, tag):
+    """tag 몫 coverage 기록 파일과 설정 파일. 설정은 처음 부를 때 쓴다(같은 tag 의 단계들이 한 기록에 모인다)."""
     data = logs / f'coverage-{tag}' / '.coverage'
-    data.parent.mkdir(parents=True, exist_ok=True)
     rc = logs / f'coverage-{tag}.ini'
-    coverage_rc(rc, data)
+    if not rc.is_file():
+        data.parent.mkdir(parents=True, exist_ok=True)
+        coverage_rc(rc, data)
+    return data, rc
+
+
+def covered_units(root, logs, tag, env):
+    """root 에서 UNIT_DIRS 단위 테스트 전부를 coverage 로. 실패한 폴더 목록."""
+    _, rc = coverage_paths(logs, tag)
     failed = []
     for d in UNIT_DIRS:
         if not (root / d).is_dir():
@@ -397,35 +418,133 @@ def measure(root, logs, tag, env, build_out=None):
                      logs / f'coverage-{tag}-{d.replace("/", "-")}.log', env)
         if code != 0:
             failed.append(d)
-    if build_out is not None:
-        # 빌드 단계 캐시가 맞으면 단계 스크립트가 돌지 않아 재지 못한다. 연습이어도 끈다
-        code, _ = sh(f'cd {root} && uv run --locked coverage run --rcfile={rc} sfc/dq4/tools/dq4build.py --out {build_out}',
-                     logs / f'coverage-{tag}-build.log', dict(env if env is not None else os.environ, DQ4_BUILD_CACHE='off'))
-        if code != 0:
-            failed.append('build')
+    return failed
+
+
+def covered_build(root, logs, tag, env, build_out):
+    """출하 롬 빌드 한 번을 coverage 로(단계 스크립트까지). 실패하면 ['build']."""
+    _, rc = coverage_paths(logs, tag)
+    # 빌드 단계 캐시가 맞으면 단계 스크립트가 돌지 않아 재지 못한다. 연습이어도 끈다
+    code, _ = sh(f'cd {root} && uv run --locked coverage run --rcfile={rc} sfc/dq4/tools/dq4build.py --out {build_out}',
+                 logs / f'coverage-{tag}-build.log', dict(env if env is not None else os.environ, DQ4_BUILD_CACHE='off'))
+    return ['build'] if code != 0 else []
+
+
+def coverage_result(root, logs, tag, extra=None):
+    """tag 몫 기록을 모아 extra({저장소 상대 경로: 실행한 줄}, CI 가 잰 것)를 더하고 빌드 경로 파일로 보고서를 쓴다.
+    (퍼센트, 빌드 경로 파일마다 실행한 줄 {저장소 상대 경로: [줄]})."""
+    import coverage
+    data, rc = coverage_paths(logs, tag)
+    # combine 은 이미 모은 기록을 지우고 조각들로 새로 쓴다. 다시 불러도 앞서 모은 것이 남게 조각으로 돌린다
+    if data.is_file():
+        data.rename(data.with_name(f'{data.name}.combined'))
     cov = coverage.Coverage(data_file=str(data), config_file=str(rc))
     cov.combine(strict=False)
+    files = build_path_files(root)
+    if extra:
+        # coverage 는 실제 경로(심볼릭 링크를 푼 것)로 적고 보고서도 그것으로 찾는다
+        cov.get_data().add_lines({os.path.realpath(root / rel): lines for rel, lines in extra.items()
+                                  if (root / rel).is_file()})
     cov.save()
     with open(logs / f'coverage-{tag}-report.txt', 'w', encoding='utf-8') as out:
-        percent = cov.report(include=build_path_files(root), file=out, ignore_errors=True)
-    return round(percent, 1), failed
+        try:
+            percent = cov.report(include=files, file=out, ignore_errors=True)
+        except coverage.exceptions.NoDataError:
+            percent = 0.0
+    real = {os.path.realpath(f): f for f in files}
+    got = cov.get_data()
+    lines = {}
+    for f in got.measured_files():
+        if os.path.realpath(f) in real:
+            rel = Path(real[os.path.realpath(f)]).relative_to(root).as_posix()
+            lines[rel] = sorted(set(lines.get(rel, [])) | set(got.lines(f) or []))
+    return round(percent, 1), lines
 
 
-def stage_coverage(ctx):
-    t0 = time.time()
-    logs = ctx['logs']
-    local, lfail = measure(ROOT, logs, 'local', env_for(ctx), ctx['dir'] / 'coverage-build')
-    tmp = ctx['dir'] / 'ci-tree'
-    guards.git('worktree', 'add', '--detach', str(tmp), 'HEAD')
-    try:
-        ci, cfail = measure(tmp, logs, 'ci', env_for(ctx, {k: v for k, v in os.environ.items() if k not in CI_UNSET}))
-    finally:
-        guards.git('worktree', 'remove', '--force', str(tmp))
-    problems = [f'{n} 시험이 실패함(커버리지 실행)' for n in lfail + cfail]
+def measure(root, logs, tag, env, build_out=None, units=True):
+    """root 에서 단위 테스트 전부(units 가 거짓이면 이미 같은 tag 로 돈 것을 씀)와 build_out 이 있으면 빌드 한 번을
+    coverage 로 돌려 (퍼센트, 단계 실패 목록)."""
+    failed = covered_units(root, logs, tag, env) if units else []
+    if build_out is not None:
+        failed += covered_build(root, logs, tag, env, build_out)
+    return coverage_result(root, logs, tag)[0], failed
+
+
+def ci_coverage(kind, out, build_out=None, root=ROOT):
+    """CI cold-build 잡이 부른다. kind 'unit' 은 롬·도구 없는 지금 환경에서 단위 전부, 'build' 는 빌드 한 번을 coverage
+    로 재 out 에 빌드 경로 파일마다 실행한 줄을 적는다(롬 바이트는 들지 않는다). 단위 실패는 기록만 하고 0, 빌드
+    실패는 1(빌드 단계가 실패해야 한다)."""
+    logs = root / 'work' / 'ci-coverage' / kind
+    shutil.rmtree(logs, ignore_errors=True)
+    logs.mkdir(parents=True)
+    if kind == 'unit':
+        failed = covered_units(root, logs, kind, None)
+    else:
+        failed = covered_build(root, logs, kind, None, build_out)
+    percent, lines = coverage_result(root, logs, kind)
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({'format': COVERAGE_FORMAT, 'commit': guards.git('rev-parse', 'HEAD').strip(),
+                               'kind': kind, 'percent': percent, 'failed': failed, 'lines': lines}) + '\n',
+                   encoding='utf-8')
+    print(f'[coverage] {kind}: 빌드 경로 {percent}%, 실패 {failed or "없음"}', flush=True)
+    for log in sorted(logs.glob('coverage-*.log')):
+        text = log.read_text(encoding='utf-8', errors='replace').splitlines()
+        print(f'--- {log.name}', *text[-(60 if failed else 3):], sep='\n', flush=True)
+    return 1 if kind == 'build' and failed else 0
+
+
+def load_coverage(folder, commit):
+    """folder 의 CI 커버리지 기록(ci_coverage) {kind: 기록}. 커밋이 다르면 ValueError."""
+    out = {}
+    for f in sorted(Path(folder).rglob('*.json')):
+        try:
+            data = json.loads(f.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get('format') == COVERAGE_FORMAT:
+            if data['commit'] != commit:
+                raise ValueError(f'{f.name}: CI 커버리지의 커밋 {data["commit"][:12]} 이 조각 결과와 다름')
+            out[data['kind']] = data
+    return out
+
+
+def coverage_problems(local, ci, failed):
+    problems = [f'{n} 시험이 실패함(커버리지 실행)' for n in failed]
     if local < LOCAL_MIN:
         problems.append(f'로컬 {local}% < {LOCAL_MIN}%')
     if ci < CI_MIN:
         problems.append(f'CI 와 같게 {ci}% < {CI_MIN}%')
+    return problems
+
+
+def stage_coverage(ctx):
+    """--ci-report 면 빌드와 롬 없는 단위는 CI(cold-build 잡) 기록을 쓰고, 로컬은 단위만(unit 단계가 coverage 로
+    돌았으면 그 기록). 아니면 둘 다 로컬에서 잰다."""
+    t0 = time.time()
+    logs = ctx['logs']
+    units = not ctx.get('unit_covered')
+    if ctx.get('ci') is not None:
+        got = ctx['ci'].get('coverage') or {}
+        missing = [k for k in COVERAGE_KINDS if k not in got]
+        if missing:
+            return {'status': 'failed', 'seconds': round(time.time() - t0),
+                    'detail': f'CI 커버리지 기록 없음({", ".join(missing)}, build-digest-release-cold-ch1 artifact 를 받는다)'}
+        failed = (covered_units(ROOT, logs, 'local', env_for(ctx)) if units else list(ctx.get('unit_failed', [])))
+        failed += [f'CI {n}' for k in COVERAGE_KINDS for n in got[k]['failed']]
+        local = coverage_result(ROOT, logs, 'local', extra=got['build']['lines'])[0]
+        ci = coverage_result(ROOT, logs, 'ci', extra=got['unit']['lines'])[0]
+    else:
+        local, failed = measure(ROOT, logs, 'local', env_for(ctx), ctx['dir'] / 'coverage-build', units=units)
+        failed = list(ctx.get('unit_failed', [])) + failed if not units else failed
+        tmp = ctx['dir'] / 'ci-tree'
+        guards.git('worktree', 'add', '--detach', str(tmp), 'HEAD')
+        try:
+            ci, cfail = measure(tmp, logs, 'ci', env_for(ctx, {k: v for k, v in os.environ.items() if k not in CI_UNSET}))
+        finally:
+            guards.git('worktree', 'remove', '--force', str(tmp))
+        failed += cfail
+    problems = coverage_problems(local, ci, failed)
     return {'status': 'failed' if problems else 'passed', 'seconds': round(time.time() - t0), 'local': local, 'ci': ci,
             'detail': f'로컬 {local}%, CI 와 같게 {ci}%' + (f' — {"; ".join(problems)}' if problems else '')}
 
@@ -540,10 +659,21 @@ def main():
                     help='조각 결과를 요약해 Markdown 으로 찍고 끝낸다(CI report 잡). 모두 통과가 아니면 1')
     ap.add_argument('--require-build', action='store_true',
                     help='--ci-summary: 캐시 빌드와 무캐시 빌드의 대조가 있고 같아야 통과(배포 관문)')
+    ap.add_argument('--require-sweeps', action='store_true',
+                    help='--ci-summary: release.toml 스윕이 모두 CI 에서 통과해야 통과(sweeps 를 돌린 관문). 없으면 스윕은 '
+                         'CI 에 있는 것만 본다(PR·cache-warm)')
+    ap.add_argument('--ci-coverage', nargs=2, metavar=('KIND', 'OUT'),
+                    help='CI cold-build 잡: unit(단위 전부) 또는 build(--build-out 으로 빌드 한 번)를 coverage 로 재 OUT 에 적는다')
+    ap.add_argument('--build-out', type=Path, help='--ci-coverage build 의 빌드 출력 폴더')
     a = ap.parse_args()
+    if a.ci_coverage:
+        kind, out = a.ci_coverage
+        if kind not in COVERAGE_KINDS or (kind == 'build') != bool(a.build_out):
+            ap.error('--ci-coverage KIND 는 unit 또는 build, --build-out 은 build 에만')
+        return ci_coverage(kind, out, a.build_out)
     if a.ci_summary:
         try:
-            text, ok = ci_summary(load_ci(a.ci_summary), a.require_build, sweeps())
+            text, ok = ci_summary(load_ci(a.ci_summary), a.require_build, sweeps() if a.require_sweeps else None)
         except (OSError, ValueError, KeyError, TypeError) as e:
             print(f'# 배포 관문 CI 결과\n\n- 조각 결과를 읽지 못함: {type(e).__name__}: {e}')
             return 1
@@ -571,7 +701,7 @@ def main():
     tmp = root / f'run-{os.getpid()}'
     (tmp / 'logs').mkdir(parents=True, exist_ok=True)
     ctx = {'dir': tmp, 'logs': tmp / 'logs', 'rehearse': a.rehearse, 'seeds_n': a.seeds_n, 'parallel': a.parallel,
-           'timeout': a.timeout, 'ci': ci}
+           'timeout': a.timeout, 'ci': ci, 'cover': 'unit' in wanted and 'coverage' in wanted}
     states = '공유 캐시(연습)' if a.rehearse else '이 실행에서 새로 만듦(첫 생성 뒤 이 실행 안에서만 다시 씀)'
     stages = run_stages(ctx, wanted)
     end_head, end_dirty = commit()

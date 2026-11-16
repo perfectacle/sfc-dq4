@@ -30,8 +30,19 @@ dq4buildcache.run({inner!r}, src, "-o", out)
 '''
 
 
+def without_coverage(test):
+    """coverage 로 돌면 자식 Python 도 coverage 를 싣고 출력 자리 밖에 기록 파일을 써 추적기가 문제로 적는다. 시험이 그
+    환경에 기대지 않게 자식에게 넘기지 않는다."""
+    env = mock.patch.dict(os.environ)
+    env.start()
+    test.addCleanup(env.stop)
+    for k in ('COVERAGE_PROCESS_CONFIG', 'COVERAGE_PROCESS_START'):
+        os.environ.pop(k, None)
+
+
 class TracerTests(unittest.TestCase):
     def setUp(self):
+        without_coverage(self)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
@@ -85,6 +96,9 @@ TOOLS = all(os.environ.get(n) for n in ('ASAR', 'DQ4_GALMURI'))
 
 @unittest.skipUnless(ROMS and TOOLS, '롬(rom/dq5.sfc·dq4.nes)과 ASAR·DQ4_GALMURI 가 있어야 함')
 class ShipBuildKeyTests(unittest.TestCase):
+    def setUp(self):
+        without_coverage(self)
+
     def test_every_cached_stage_key_holds_what_the_stage_reads(self):
         with tempfile.TemporaryDirectory() as d:
             names, problems = keys.build_traced(Path(d) / 'out', ROOT / 'rom' / 'dq5.sfc', ROOT / 'rom' / 'dq4.nes',

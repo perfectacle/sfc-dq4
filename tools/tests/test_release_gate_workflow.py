@@ -383,6 +383,9 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
             self.assertIn(line, build)
         self.assertIn('uv run --frozen python sfc/dq4/tools/dq4build.py --out "work/cold/$VARIANT" "${args[@]}"',
                       run_texts(build))
+        self.assertIn('release_check.py --ci-coverage build work/ci-digest/coverage-build.json \\\n'
+                      '              --build-out work/cold/ch1\n', run_texts(build))
+        self.assertIn('if [ "$VARIANT" = ch1 ]; then', run_texts(build))
         self.assertIn('if [ -n "$NATIVE" ]; then export DQ4_NATIVE="$NATIVE"; fi', run_texts(build))
         keys = next(s for s in cold if 'dq4buildkeys.py' in run_texts(s))
         self.assertIn('dq4buildkeys.py --chapter2', run_texts(keys))
@@ -393,12 +396,34 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.assertEqual(matrices, [('ch1', "''", ''), ('ch2', '--chapter2', ''),
                                     ('ch1', "''", "''"), ('ch2', '--chapter2', "'off'")])
 
+    def test_cold_build_records_coverage_into_the_checked_digest_upload(self):
+        """롬 없는 단위 커버리지는 에셋·도구·롬이 오기 전에(CI 단위 시험 환경과 같게) 잰다. 두 기록은 롬 검사를 거쳐
+        올리는 work/ci-digest 에 둔다(release_check --ci-report 가 받는다)."""
+        cold = self.jobs['cold-build']
+        steps = [run_texts(s) + ''.join(s) for s in cold]
+        unit = next(i for i, s in enumerate(steps) if '--ci-coverage unit' in s)
+        self.assertIn('release_check.py --ci-coverage unit work/ci-digest/coverage-unit.json', steps[unit])
+        self.assertIn("if: matrix.variant == 'ch1'", steps[unit])
+        for later in ('perfectacle/sfc-dq4-assets', 'tools/ci_gate_setup.sh tools', './.github/actions/ci-roms'):
+            self.assertLess(unit, next(i for i, s in enumerate(steps) if later in s), later)
+        self.assertGreater(unit, next(i for i, s in enumerate(steps) if 'uv sync --locked' in s))
+        build = next(i for i, s in enumerate(steps) if '--ci-coverage build' in s)
+        check = next(i for i, s in enumerate(steps) if 'ci_artifact_check.py work/ci-digest' in s)
+        upload = next(i for i, s in enumerate(steps) if 'actions/upload-artifact' in s)
+        self.assertLess(build, check)
+        self.assertLess(check, upload)
+        self.assertIn('path: work/ci-digest', steps[upload])
+
     def test_build_verify_and_report_fail_on_other_bytes(self):
         self.assertRegex(self.text, r'\n  build-verify:\n    needs: \[build, rom, cold-build\]\n')
         self.assertIn('tools/ci_cache.py verify-build work/ci-digest', ''.join(self.jobs['build-verify']))
         self.assertRegex(self.text, r'\n  report:\n    needs: \[build, shard, build-verify\]\n')
         summary = next(s for s in self.jobs['report'] if '--ci-summary' in run_texts(s))
         self.assertIn('if [ "$MODE" = release ]; then need=(--require-build); fi', run_texts(summary))
+        # 스윕 판정은 스윕을 돌린 관문에서만. PR·cache-warm 에서 걸면 늘 「CI 결과 없음」 으로 실패한다
+        self.assertIn('if [ "$MODE" = release ] && [ "$SWEEPS" = true ]; then need+=(--require-sweeps); fi',
+                      run_texts(summary))
+        self.assertIn('SWEEPS: ${{ inputs.sweeps }}', ''.join(summary))
         shard = ''.join(self.jobs['shard'])
         self.assertIn('--kind "shard-$K"', shard)
         self.assertIn('cp "$f" work/ci-upload/', shard)
