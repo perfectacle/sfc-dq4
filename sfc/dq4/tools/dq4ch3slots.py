@@ -24,24 +24,24 @@ VARS_SLOT = 49
 VARS_AT = 0x7E2332 + VARS_SLOT * 26 + 1
 VARS_SIZE = 25
 
-# 빌릴 인물 스크립트는 이 해킹이 가지 않는 DQ5 맵(19/02·15/0B·11/00·1F/01·04/03·1F/08)의 목록에서 스크립트가 있는
-# 칸이다(dq5npcrelocate.script_slots). 칸 번호 하나가 낮·밤 스크립트를 함께 가질 수 있다.
+# 빌릴 인물 스크립트는 이 해킹이 가지 않는 DQ5 맵 목록에서 스크립트가 있고 한 시간대(낮 또는 밤)에만 놓이는 칸이다.
+# 낮·밤 두 벌 레코드를 빌리면 dq5npcrelocate 가 받지 않는다.
 # 사건 코드는 5C:D000~FFFF(3장 넘김·공용 장치 5C:C000~CFFF 뒤)와 5F:F800~FFFF. flag 는 2장 예비로 남았던 21FF~2207·
 # 2209~220C(dq4ch2slots 「flag 자리」의 근거 그대로). 2208 은 여덟 비트를 모두 쓴다
 SLOTS = {
     'L': Slot('레이크나바: 무기점 일·도시락·네네·톰 노인·톰 아들', 'dq4ch3lakanaba', (0x5CD000, 0x5CE000),
-              flags=(0x70, 0x71), scripts=(('05:ACA4', (0, 1, 2, 3, 5, 6, *range(9, 23))),), lists='ch3_lakanaba_',
+              flags=(0x70, 0x71), scripts=(('10:9B81', (0, 1, *range(8, 14))), ('10:A031', tuple(range(6)))), lists='ch3_lakanaba_',
               vars=(4, 10)),
     'S': Slot('북쪽 동굴과 금고', 'dq4ch3safe', (0x5CE000, 0x5CE800), flags=(0x72,),
-              scripts=(('05:A675', tuple(range(12))),), lists='ch3_safe_'),
+              scripts=(('10:C8FF', (0, 1, 4, 6, 7, 8, 9)),), lists='ch3_safe_'),
     'B': Slot('본몰 왕자·감옥·여우 마을·다리·개 토마스', 'dq4ch3bonmalmo', (0x5CE800, 0x5CF000), flags=(0x73, 0x74),
-              scripts=(('05:A3D2', tuple(range(10))),), lists='ch3_bonmalmo_'),
+              scripts=(('10:BEE5', (2, *range(4, 10))),), lists='ch3_bonmalmo_'),
     'E': Slot('엔돌: 편지·여신상 동굴·여신상 팔기·가게 사기·납품·용병', 'dq4ch3endor', (0x5CF000, 0x5CFC00),
-              flags=(0x75, 0x76), scripts=(('05:BACA', tuple(range(15))),), lists='ch3_endor_', vars=(10, 14)),
+              flags=(0x75, 0x76), scripts=(('10:8E0D', tuple(range(1, 8))), ('05:A8AE', (0, 1, 2, 3, 4, 6, 7))), lists='ch3_endor_', vars=(10, 14)),
     'T': Slot('굴 공사·개통·장 끝', 'dq4ch3tunnel', (0x5CFC00, 0x5D0000), flags=(0x77,),
               scripts=(('05:996C', (0, 1, 2, 3, 4, 5, 7, 14)),), lists='ch3_tunnel_'),
     'W': Slot('마을 사람 진행별 대사', 'dq4ch3towns', (0x5FF800, 0x600000), flags=(0x79,),
-              scripts=(('05:BE20', (0, 1, 2, 3, 5, 6)),), lists='ch3_towns_'),
+              scripts=(('10:B135', (3, 4, *range(6, 11))), ('10:CFF4', (2, 5, 7, 10, 11, 12))), lists='ch3_towns_'),
 }
 
 # 공용 장치(dq4ch3event)의 몫: flag 바이트 6F(대화 호출 결과·동행 비트), 변수 칸 +0~+3(날수 둘·시계)

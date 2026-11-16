@@ -258,18 +258,19 @@ class Dq5RomTest(unittest.TestCase):
         o = (ev.STUB_AT >> 16) * 0x8000 + (ev.STUB_AT & 0x7FFF)
         self.assertEqual(data[o - 8:o + ev.STUB_END - ev.STUB_AT], bytes(8 + ev.STUB_END - ev.STUB_AT))
 
-    def test_borrowed_lists_have_script_slots_at_the_reserved_entries(self):
+    def test_borrowed_lists_have_one_time_script_slots_at_the_reserved_entries(self):
+        # 낮·밤 두 벌 레코드는 dq5npcrelocate 가 빌리지 못하게 한다
+        import dq5npcrecord
         import dq5npcrelocate as R
         from dq5map import Rom
         rom = Rom(DQ5.read_bytes())
+        times = {(e['list'], e['index']): e['time'] for e in dq5npcrecord.dump(rom)['entries']}
         for k, s in SLOTS.items():
             for lst, idx in s.scripts:
-                at = int(lst.replace(':', ''), 16)
-                entries = R.list_entries(rom, at)
+                entries = R.list_entries(rom, int(lst.replace(':', ''), 16))
                 for i in idx:
-                    entry = entries[i][0]
-                    self.assertTrue(any(R.script_address(rom, entry, night) is not None for night in (False, True)),
-                                    f'{k} {lst} 칸 {i}')
+                    self.assertIsNotNone(R.script_address(rom, entries[i][0], False), f'{k} {lst} 칸 {i}')
+                    self.assertIn(times[lst, i], ('day', 'night'), f'{k} {lst} 칸 {i}')
 
 
 if __name__ == '__main__':
