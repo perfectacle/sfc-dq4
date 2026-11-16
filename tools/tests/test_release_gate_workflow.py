@@ -133,6 +133,19 @@ def runners(text, job):
     return len(re.findall(r'^          - ', include[1], re.M)) if include else 1
 
 
+def beside_peak(text):
+    """조각과 함께 돌 수 있는 잡이 한꺼번에 띄우는 러너 수의 최대. 다른 그런 잡을 (거쳐서라도) 기다리는 잡은 그것과 함께
+    돌지 않는다(build-verify 는 cold-build 가 끝나야 뜬다). 기다리는 깊이마다 러너를 더해 가장 큰 깊이를 본다."""
+    beside, needs = beside_shards(text), needs_of(text)
+
+    def depth(job):
+        return 1 + max((depth(j) for j in needs.get(job, ()) if j in beside), default=0) if job in beside else 0
+    levels = {}
+    for j in beside:
+        levels[depth(j)] = levels.get(depth(j), 0) + runners(text, j)
+    return max(levels.values(), default=0)
+
+
 def beside_shards(text):
     """조각 행렬과 함께 돌 수 있는 잡: 조각이 (거쳐서라도) 기다리지 않고, 조각을 기다리지도 않는 잡."""
     needs = needs_of(text)
@@ -470,7 +483,7 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         있는 잡(조각이 기다리는 잡도, 조각을 기다리는 잡도 아닌 것) 수 이상이어야 한다."""
         self.assertIn('  JOB_LIMIT: 20\n', self.text)
         fixed = int(re.search(r'^  FIXED_JOBS: (\d+)$', self.text, re.M)[1])
-        beside = sum(runners(self.text, j) for j in beside_shards(self.text))
+        beside = beside_peak(self.text)
         self.assertGreaterEqual(fixed, beside, f'조각과 함께 돌 수 있는 잡 {sorted(beside_shards(self.text))}: 러너 {beside}')
         self.assertEqual(self.text.count('inputs.shards'), 1, '입력 조각 수는 Plan shards 만 읽는다')
         shard = ''.join(self.jobs['shard'])
@@ -486,6 +499,7 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
 
     def test_jobs_beside_the_shards_are_the_release_build_check(self):
         self.assertEqual(beside_shards(self.text), {'cold-build', 'build-verify'})
+        self.assertEqual(beside_peak(self.text), 2, 'build-verify 는 cold-build 뒤에 떠 함께 돌지 않는다')
         self.assertEqual((runners(self.text, 'cold-build'), runners(self.text, 'rom'), runners(self.text, 'report')),
                          (2, 2, 1))
         self.assertEqual(needs_of(self.text)['shard'], {'build', 'rom'})

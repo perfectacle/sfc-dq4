@@ -51,9 +51,10 @@ env:
   LOCAL_NEEDS: macos
   # Free plan: at most 20 jobs run at once for the account. A run is build, two rom jobs, the shards and report;
   # mode release adds the two cold-build jobs and build-verify, which run beside the shards (build and rom end
-  # before them, report after). The shard count is capped at JOB_LIMIT - FIXED_JOBS so the run never queues behind itself.
+  # before them, report after; build-verify waits for cold-build, so at most two of them run at once). The shard
+  # count is capped at JOB_LIMIT - FIXED_JOBS so the run never queues behind itself.
   JOB_LIMIT: 20
-  FIXED_JOBS: 4
+  FIXED_JOBS: 2
 
 jobs:
   build:
