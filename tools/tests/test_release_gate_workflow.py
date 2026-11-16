@@ -312,6 +312,24 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.assertNotIn('ship-build', shard)
         self.assertIn('DQ4_PREBUILT=', shard)
 
+    def test_shard_count_fits_the_job_limit(self):
+        """무료 요금제는 계정 동시 잡이 20 이다. 한 실행이 제 잡끼리 줄 서지 않게 조각 수를 JOB_LIMIT - FIXED_JOBS 로
+        자르고, 그 뒤로는 inputs.shards 대신 자른 수(needs.build.outputs.count)를 쓴다."""
+        self.assertIn('  JOB_LIMIT: 20\n', self.text)
+        fixed = int(re.search(r'^  FIXED_JOBS: (\d+)$', self.text, re.M)[1])
+        self.assertEqual(fixed, len(set(self.jobs) - {'shard'}) + 1, '조각 밖 잡 수: build·report 에 rom 행렬 둘')
+        self.assertEqual(self.text.count('inputs.shards'), 1, '입력 조각 수는 Plan shards 만 읽는다')
+        shard = ''.join(self.jobs['shard'])
+        self.assertNotIn('inputs.shards', shard)
+        self.assertIn('needs.build.outputs.count', shard)
+        most = 20 - fixed
+        for f, pat in ((GATE, r'shards:\n(?:.*\n)*?\s+default: (\d+)'),
+                       (WORKFLOWS / 'cache-warm.yml', r'^\s+shards: (\d+)$')):
+            self.assertLessEqual(int(re.search(pat, f.read_text(encoding='utf-8'), re.M)[1]), most, f.name)
+        sys.path.insert(0, str(ROOT / 'tools'))
+        import guards
+        self.assertLessEqual(guards.PR_SHARDS_MAX, 8, 'PR 은 관문·cache-warm 과 한도를 나눠 씀')
+
     def test_mesence_unpacks_its_libraries_before_guards(self):
         """리눅스 MesenCE 는 처음 뜰 때 MesenCore.so 를 실행 파일 옆에 푼다. 처음 뜨는 것이 여럿 함께면 서로 덮어써
         Bus error 로 죽어(dq4-npc-walk 시드 기록이 빔), 셋업이 MESENCE 를 잡 환경에 넘기기 전에 한 번 띄워 둔다."""
