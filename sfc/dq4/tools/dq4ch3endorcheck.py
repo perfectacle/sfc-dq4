@@ -40,6 +40,12 @@ def sets(*flags, more=()):
     return ';'.join((CLEAR, *(_set(f) for f in flags), *more))
 
 
+def COUNT_SET(v):
+    return f'{walk.FLAGS["ENDOR_COUNT"][0] & 0xFFFF:04X}={v:02X}'
+
+
+# 맡긴 물건(7E:2250 + 물건 번호)에만 칼·갑옷 하나씩
+BAG_SET = f'{(ch3.BAG & 0xFFFF) + endor.STEEL_SWORD:04X}=01;{(ch3.BAG & 0xFFFF) + endor.IRON_ARMOR:04X}=01'
 SELLER_NIGHT = endor.SELLER[1][2]                     # 밤의 가게 주인(05,02). 그 아래에서 말을 건다
 NENE_NIGHT = endor.NENE[1][2]                          # 밤의 네네(04/08 (03,03))
 SON_NIGHT = endor.SON[1][2]
@@ -81,6 +87,27 @@ SEGMENTS = [
      {'map': endor.CASTLE_HALL, 'set': sets(endor.ORDER, more=(_items(endor.STEEL_SWORD),))}),
     ('deliver_no', 'walk', talk_no('up', 0, 4),
      {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0}, 'items': [0x42, walk.BENTO, endor.STEEL_SWORD]}),
+    # FC 15:$A118 실측 갈래: 가진 것이 없음, 칼만, 넘침(남은 수보다 많이 가짐 → 남은 만큼만 받고 다 참), 맡긴 물건뿐,
+    # 갑옷은 다 찼고 칼 하나(남은 갑옷 줄이 빠짐)
+    ('deliver_empty_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
+     {'map': endor.CASTLE_HALL, 'set': sets(endor.ORDER)}),
+    ('deliver_empty', 'walk', talk('up', 7), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0}}),
+    ('deliver_one_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
+     {'map': endor.CASTLE_HALL, 'set': sets(endor.ORDER, more=(_items(endor.STEEL_SWORD),))}),
+    ('deliver_one', 'walk', talk('up', 8), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0x01},
+                                            'items': [0x42, walk.BENTO]}),
+    ('deliver_over_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
+     {'map': endor.CASTLE_HALL,
+      'set': sets(endor.ORDER, more=(_items(*[endor.STEEL_SWORD] * 4, endor.IRON_ARMOR), _gold(0), COUNT_SET(0x64)))}),
+    ('deliver_over', 'walk', talk('up', 8), {'map': endor.CASTLE_HALL, 'want': ['ENDOR_DELIVERED'],
+                                             'bytes': {'ENDOR_COUNT': 0x77, 'GOLD0': 0x60, 'GOLD1': 0xEA},
+                                             'items': [0x42, walk.BENTO, endor.STEEL_SWORD]}),
+    ('deliver_bag_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
+     {'map': endor.CASTLE_HALL, 'set': sets(endor.ORDER, more=(BAG_SET,))}),
+    ('deliver_bag', 'walk', talk('up', 7), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0}}),
+    ('deliver_armors_full_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
+     {'map': endor.CASTLE_HALL, 'set': sets(endor.ORDER, more=(_items(endor.STEEL_SWORD), COUNT_SET(0x70)))}),
+    ('deliver_armors_full', 'walk', talk('up', 7), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0x71}}),
     ('deliver_done_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
      {'map': endor.CASTLE_HALL, 'set': sets(endor.ORDER, endor.DELIVERED)}),
     ('deliver_done', 'walk', talk('up', 1), {'map': endor.CASTLE_HALL}),
@@ -103,6 +130,10 @@ SEGMENTS = [
     ('collector_after_side', 'warp', _below(endor.COLLECTOR, COLLECTOR_NIGHT),
      {'map': endor.COLLECTOR, 'set': sets(endor.SOLD), 'poke': wc.NIGHT}),
     ('collector_after', 'walk', talk('up', 3), {'map': endor.COLLECTOR, 'poke': wc.NIGHT}),
+    # 낮의 수집가: 걸어 다니지만 난수가 묶여 있어, 들어선 뒤 한 칸 왼쪽으로 옮겨 가는 자리가 늘 같다. 그 아래에서 말을 건다
+    ('collector_day_side', 'warp', _below(endor.COLLECTOR, endor.COLLECTORS[0][2]),
+     {'map': endor.COLLECTOR, 'set': sets(), 'poke': wc.DAY}),
+    ('collector_day', 'walk', f"10,9;{talk('up', 3)}", {'map': endor.COLLECTOR, 'poke': wc.DAY}),
     # 단추에 「아니요」: 그대로 48/03, 칸을 떠났다가 다시 서야 또 묻는다
     ('button_no_side', 'warp', f'{endor.CAVE_WET},{walk.BUTTON_CELL[0]},{walk.BUTTON_CELL[1] + 1}',
      {'map': endor.CAVE_WET, 'set': sets()}),
@@ -117,10 +148,20 @@ MESSAGES = {
     'son_night': ['son_home'], 'nene_night': ['nene_late', 'nene_night', 'nene_morning', 'nene_bento'],
     'nene_no': ['nene_rest', 'nene_shopkeep'], 'nene_lie': ['nene_notice', 'nene_lie', 'nene_farewell'],
     'deliver_idle': ['deliver_idle'], 'deliver_done': ['deliver_thanks'],
+    'deliver_empty': ['deliver_ask', 'deliver_take', 'deliver_none', 'deliver_left', 'left_swords', 'left_armors',
+                      'deliver_more'],
+    'deliver_one': ['deliver_ask', 'deliver_take', 'deliver_swords', 'deliver_got', 'deliver_left', 'left_swords',
+                    'left_armors', 'deliver_more'],
+    'deliver_over': ['deliver_ask', 'deliver_take', 'deliver_swords', 'deliver_armors', 'deliver_got', 'deliver_full',
+                     'deliver_thanks'],
+    'deliver_bag': ['deliver_ask', 'deliver_take', 'deliver_none', 'deliver_left', 'left_swords', 'left_armors',
+                    'deliver_more'],
+    'deliver_armors_full': ['deliver_ask', 'deliver_take', 'deliver_swords', 'deliver_got', 'deliver_left',
+                            'left_swords', 'deliver_more'],
     'deliver_no': ['deliver_ask', 'deliver_left', 'left_swords', 'left_armors', 'deliver_more'],
     'guide_idle': ['guide_idle'], 'guide_order': ['guide_order'], 'guide_done': ['guide_done'],
     'collector_none': ['collector_wish'], 'collector_no': ['collector_offer', 'collector_no'],
-    'collector_after': ['collector_admire'], 'button_no': ['button'],
+    'collector_after': ['collector_admire'], 'collector_day': ['collector_wish'], 'button_no': ['button'],
 }
 
 

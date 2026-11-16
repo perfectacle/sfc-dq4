@@ -1,7 +1,8 @@
 """보행 메시지 넷째 자리(55·56) 검사(MesenCE 헤드리스).
 
-1장 롬의 메시지 묶음 셋을 넷째 자리로 옮긴 시험 롬을 만든다: 묶음 하나는 55:C000(색인 뱅크 1E), 하나는 55 끝에서
-56 으로 걸치게(디코더가 뱅크 끝에서 INC $F2 로 넘어감), 하나는 56:A000(색인 뱅크 1F). 색인 항목만 새 자리로 고치고
+1장 롬의 메시지 묶음 셋을 넷째 자리로 옮긴 시험 롬을 만든다: 묶음 하나는 뱅크 55(색인 뱅크 1E), 하나는 55 끝에서
+56 으로 걸치게(디코더가 뱅크 끝에서 INC $F2 로 넘어감), 하나는 뱅크 56(색인 뱅크 1F). 자리는 그 롬의 넷째 자리에서
+이미 놓인 메시지 뒤의 빈 곳으로 정한다(places). 색인 항목만 새 자리로 고치고
 옛 바이트는 그대로 두므로, 훅이 표를 거치지 않으면 다른 바이트를 읽어 코드가 달라진다. 서장 끝 상태(원래 롬으로
 만든 것, dq4freshstate)에서 두 장면의 첫 보행 메시지(24:8BAF)를 그 묶음의 번호로 바꿔 끼우고, 색인 훅이 돌려준 스트림
 주소와 디코더가 돌려준 코드를 원래 롬의 메시지와 견준다(lua/dq4msgbank.lua). 장면은 성 앞(36/00)의 빈 곳에 「はなす」
@@ -39,10 +40,11 @@ SCENES = {
     'boss': {'TO': bmc.BOSS_CELL, 'SET': bmc.HERO, 'LATESET': bmc.RNG, 'SETTLE': '120', 'MAXF': '1500',
              'TEST': 'up:20,idle:10,a:4,wait:40,' + ','.join(['a:4,wait:30'] * 30)},
 }
-# (묶음 번호, 둘 자리, 띄울 메시지). 자리가 None 이면 묶음 바이트의 가운데가 56:8000 에 오게 둔다. 띄울 메시지는 창에서
-# 끝까지 찍히는 것으로 고른다(dq4-josa-format.md 의 바꿔 끼우기 실측). 넷째 메시지 자리는 55:8000 부터 차므로(3장
-# 사건 메시지) 뱅크 55 첫 묶음은 그 뒤쪽 55:C000 에 둔다
-PLACES = ((0x05, 0x55C000, 0x057), (0x18, None, 0x18A), (0x1C, 0x56A000, 0x1CD))
+# (묶음 번호, 띄울 메시지). 차례대로 뱅크 55 안·55→56 걸침·뱅크 56 안에 둔다. 띄울 메시지는 창에서 끝까지 찍히는 것으로
+# 고른다(dq4-josa-format.md 의 바꿔 끼우기 실측)
+PLACES = ((0x05, 0x057), (0x18, 0x18A), (0x1C, 0x1CD))
+FOURTH, FOURTH_END, BORDER = 0x558000, 0x570000, 0x568000
+ALIGN = 0x100
 # (장면, 띄울 메시지)
 CASES = (('field', 0x057), ('field', 0x18A), ('field', 0x1CD), ('boss', 0x18A))
 
@@ -55,6 +57,20 @@ def group_bytes(data, banks, index, group):
     return lorom(index_cpu(v, banks)), lorom(end), v & 7
 
 
+def places(data, sizes):
+    """시험 묶음 셋의 파일 위치. 넷째 자리(55:8000~56:FFFF)에 이미 놓인 메시지(0 아닌 마지막 바이트) 뒤에서: 첫째는 뱅크 55,
+    둘째는 가운데가 56:8000 에 오게(걸침), 셋째는 뱅크 56. 자리가 모자라면 멈춘다(메시지가 넷째 자리를 그만큼 채움)."""
+    lo, hi, border = lorom(FOURTH), lorom(FOURTH_END - 1) + 1, lorom(BORDER)
+    used = next((o + 1 for o in range(hi - 1, lo - 1, -1) if data[o]), lo)
+    up = lambda o: -(-o // ALIGN) * ALIGN  # noqa: E731
+    first = up(used)
+    cross = border - sizes[1] // 2
+    third = up(cross + sizes[1])
+    if first + sizes[0] > cross or not first < border or third + sizes[2] > hi:
+        raise ValueError(f'넷째 메시지 자리에 시험 묶음을 둘 빈 곳이 모자람(메시지가 {used:06X} 까지, 묶음 {list(sizes)})')
+    return first, cross, third
+
+
 def test_rom(data):
     """(시험 롬, 묶음 목록). 묶음은 {'group','swap','bank','cross','expected'}."""
     _, banks = relocated(data)
@@ -64,18 +80,18 @@ def test_rom(data):
     messages = base_package(data)[0]
     out = bytearray(data)
     cases = []
-    for group, at, swap in PLACES:
-        start, end, bit = group_bytes(data, banks, index, group)
+    spans = [group_bytes(data, banks, index, group) for group, _ in PLACES]
+    spots = places(data, [end - start for start, end, _ in spans])
+    for k, ((group, swap), (start, end, bit), o) in enumerate(zip(PLACES, spans, spots)):
         chunk = data[start:end]
-        o = lorom(0x568000) - len(chunk) // 2 if at is None else lorom(at)
-        if at is None and not o < lorom(0x568000) < o + len(chunk):
+        if k == 1 and not o < lorom(BORDER) < o + len(chunk):
             raise ValueError('걸치게 둘 묶음이 뱅크 경계를 넘지 않음')
         if any(out[o:o + len(chunk)]):
             raise ValueError(f'{o:06X}~ 가 비어 있지 않음')
         out[o:o + len(chunk)] = chunk
         p = lorom(index) + 3 * group
         out[p:p + 3] = mm.index_entry(o, bit)
-        cases.append({'group': group, 'swap': swap, 'bank': o // 0x8000, 'cross': at is None,
+        cases.append({'group': group, 'swap': swap, 'bank': o // 0x8000, 'cross': k == 1, 'at': o,
                       'expected': [c for m in range(group * 16, swap + 1) for c in messages[m]]})
     again = base_package(bytes(out))[0]
     if again != messages:

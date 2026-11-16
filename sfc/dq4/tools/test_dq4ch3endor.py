@@ -150,9 +150,10 @@ class RunTest(unittest.TestCase):
         cpu.jsl(at['exit'], max_steps=4000)
         self.assertEqual((w[0xBD], cpu.a & 0xFF), (5, 2))
 
-    def deliver_case(self, count, items, records=1):
+    def deliver_case(self, count, items, records=1, arg=0):
         cpu, at = machine()
         w = cpu.wram
+        w[ev.ARG & 0xFFFF] = arg
         ctx = _ctx()
         w[0x201D] = records
         for r in range(4):
@@ -167,15 +168,21 @@ class RunTest(unittest.TestCase):
         flags = w[0x2190 + endor.IDX2]
         left = [bytes(w[(ev.PARTY_ITEMS & 0xFFFF) + ev.RECORD * r:][:12]).rstrip(b'\xFF') for r in range(len(items))]
         return (w[v + endor.VARS], w[v + endor.GAVE_SWORD], w[v + endor.GAVE_ARMOR],
-                {n for n, f in (('s', endor.GAVE_SWORDS), ('a', endor.GAVE_ARMORS), ('full', endor.FULL)) if flags & f[1]},
+                {n for n, f in (('s', endor.GAVE_SWORDS), ('a', endor.GAVE_ARMORS), ('full', endor.FULL),
+                                ('ls', endor.LEFT_SWORDS), ('la', endor.LEFT_ARMORS)) if flags & f[1]},
                 left)
 
     def test_deliver_takes_up_to_the_order_and_counts_in_nibbles(self):
         s, a = endor.STEEL_SWORD, endor.IRON_ARMOR
-        self.assertEqual(self.deliver_case(0, [[0x42, 0xBB]]), (0, 0, 0, set(), [bytes((0x42, 0xBB))]))
-        self.assertEqual(self.deliver_case(0, [[0x42, s, 0xBB, s, a]]), (0x12, 2, 1, {'s', 'a'}, [bytes((0x42, 0xBB))]))
+        self.assertEqual(self.deliver_case(0, [[0x42, 0xBB]]), (0, 0, 0, {'ls', 'la'}, [bytes((0x42, 0xBB))]))
+        self.assertEqual(self.deliver_case(0, [[0x42, s, 0xBB, s, a]]),
+                         (0x12, 2, 1, {'s', 'a', 'ls', 'la'}, [bytes((0x42, 0xBB))]))
         self.assertEqual(self.deliver_case(0x66, [[s, s, a, a]]), (0x77, 1, 1, {'s', 'a', 'full'}, [bytes((s, a))]))
-        self.assertEqual(self.deliver_case(0x70, [[a]]), (0x70, 0, 0, set(), [bytes((a,))]))
+        self.assertEqual(self.deliver_case(0x70, [[a]]), (0x70, 0, 0, {'ls'}, [bytes((a,))]))
+        # FC 실측: 칼 4·갑옷 1 을 64 에 내면 칼 3 만 받고 하나는 남음, 다 참
+        self.assertEqual(self.deliver_case(0x64, [[s, s, s, s, a]]), (0x77, 3, 1, {'s', 'a', 'full'}, [bytes((s,))]))
+        # 「아니요」(인자 1): 빼지 않고 남은 종류만
+        self.assertEqual(self.deliver_case(0x70, [[s, a]], arg=1), (0x70, 0, 0, {'ls'}, [bytes((s, a))]))
         # 일행 기록 1 도 보지만 일행 수 밖은 보지 않는다
         self.assertEqual(self.deliver_case(0, [[0x42], [s]], records=2)[:3], (0x01, 1, 0))
         self.assertEqual(self.deliver_case(0, [[0x42], [s]], records=1)[:3], (0x00, 0, 0))
