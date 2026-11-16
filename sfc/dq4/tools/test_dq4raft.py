@@ -182,5 +182,16 @@ class NativeTest(unittest.TestCase):
             self.assertEqual(crossed, [row])
 
 
+class ViewTest(unittest.TestCase):
+    def test_raft_view_counts_the_raft_slot_and_its_front_oam(self):
+        import dq4raftcheck as rc
+        x, y = rc.HERO_OAM[0] + 16, rc.HERO_OAM[1] + 16
+        rows = ['slot 08 2C 0B A1 B0', 'slot 09 2C 0B 01 30']
+        rows += [f'oam {k:02X} {x + 8 * (k & 1):02X} {y + 8 * (k >> 1):02X} 9B 30 0' for k in range(6)]
+        rows += ['oam 06 78 67 12 20 0', f'oam 07 {x:02X} {y:02X} 9B 20 0', f'oam 08 {x:02X} {y:02X} 9B 30 1']
+        self.assertEqual(rc.raft_view('\n'.join(rows)), (1, 6))
+        self.assertEqual(rc.raft_view('slot 08 80 80 A1 B0\noam 00 F7 F7 F7 F7 0'), (0, 0))
+
+
 if __name__ == '__main__':
     unittest.main()

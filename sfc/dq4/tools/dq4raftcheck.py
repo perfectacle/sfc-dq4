@@ -9,6 +9,10 @@
 
 본다: 전투가 걸린 맵·칸으로 돌아옴, 돌아온 뒤 같은 쪽으로 걸어 다른 FC 물 칸에 닿음.
 
+배가 화면에 보이는지도 본다(lua/dq4raftview.lua). 48/02 배 왼쪽 위 칸 (42,9)에 서서 30프레임 뒤:
+  shown    단추 전: 배 칸 (44,11)에 그림 A1 슬롯, 주인공 오른쪽 아래 16점 자리에 우선순위 3 OAM 6칸(물 BG 위)
+  removed  단추 뒤(FC 1C:$A55B 처럼 배를 치움): 그 슬롯·OAM 이 없음
+
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4raftcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/raftcheck
 """
 import argparse
@@ -32,11 +36,47 @@ import dq4ch3event as ch3  # noqa: E402
 import dq4freshstate  # noqa: E402
 
 GROUP = [(0x03, 1)]
+VIEW = TOOLS / "lua" / "dq4raftview.lua"
 START = (f"{0x2190 + ch3.CHAPTER3[0]:04X}|{ch3.CHAPTER3[1]:02X};"
          f"{0x2190 + endor.BUTTON[0]:04X}&{~endor.BUTTON[1] & 0xFF:02X}")
 # (이름, 순간이동 TO(한 셀 아래에 내림), 배에 타는 걸음, 배 셀, 전투 쪽)
 SCENES = {"entry": (f"{endor.CAVE_ENTRY},42,10", "44,11;wait:30", (44, 11), "right"),
           "lake": (f"{endor.CAVE_LOW_DRY},60,56", "60,55;58,55;58,53;wait:30", (58, 53), "right")}
+
+
+VIEW_TO = f"{endor.CAVE_ENTRY},42,8"
+RAFT_CELL = (0x2C, 0x0B)
+HERO_OAM = (0x78, 0x67)            # (42,9)에 선 주인공 OBJ 왼쪽 위 점(화면 가운데)
+VIEWS = {"shown": "", "removed": f"{0x2190 + endor.BUTTON[0]:04X}|{endor.BUTTON[1]:02X}"}
+
+
+def raft_view(text):
+    """view.txt → (배 칸의 A1 슬롯 수, 배 자리의 우선순위 3·화면 안 OAM 칸 수)."""
+    slots = oams = 0
+    x0, y0 = HERO_OAM[0] + 16, HERO_OAM[1] + 16
+    for line in text.splitlines():
+        f = line.split()
+        if f[0] == "slot" and (int(f[2], 16), int(f[3], 16), int(f[4], 16)) == (*RAFT_CELL, 0xA1):
+            slots += 1
+        elif f[0] == "oam":
+            x, y, attr, hi = int(f[2], 16), int(f[3], 16), int(f[5], 16), int(f[6])
+            if not hi & 1 and attr & 0x30 == 0x30 and x0 <= x < x0 + 16 and y0 <= y < y0 + 24:
+                oams += 1
+    return slots, oams
+
+
+def view(mesence, rom, state, out, name):
+    dest = out / name
+    seg = (f"{name}_warp", "warp", VIEW_TO, {"map": endor.CAVE_ENTRY})
+    r = wc.segment(mesence, rom, state, dest / seg[0], seg, wc.NO_ENCOUNTERS,
+                   ";".join(v for v in (START, VIEWS[name]) if v))
+    if r["status"] != "passed":
+        return name, {"ok": False, "error": f"{seg[0]}: {r['problems']}"}
+    wc.run(mesence, rom, VIEW, dest / "view", {"STATE": str(dest / seg[0] / "end.mss"), "WAIT": "30"}, 120)
+    log = dest / "view" / "view.txt"
+    slots, oams = raft_view(log.read_text(encoding="utf-8")) if log.exists() else (None, None)
+    want = (1, 6) if name == "shown" else (0, 0)
+    return name, {"ok": (slots, oams) == want, "slots": slots, "oam": oams, "want": want}
 
 
 def fc_cell(cell):
@@ -86,7 +126,9 @@ def main():
     state = dq4freshstate.resolve(args.state, mesence, rom, out / "start")
     data = rom.read_bytes()
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        results = dict(f.result() for f in [pool.submit(run, mesence, rom, data, state, out, n) for n in SCENES])
+        jobs = [pool.submit(run, mesence, rom, data, state, out, n) for n in SCENES]
+        jobs += [pool.submit(view, mesence, rom, state, out, n) for n in VIEWS]
+        results = dict(f.result() for f in jobs)
     ok = all(r["ok"] for r in results.values())
     result = {"status": "passed" if ok else "failed", "scenes": results}
     (out / "results.json").write_text(json.dumps(result, ensure_ascii=False, indent=1) + "\n")

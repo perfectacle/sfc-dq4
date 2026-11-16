@@ -602,10 +602,11 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-ch3-raft"
-why = "3장 여신상 동굴 배(dq4raft): 탄 채 걸음 전투를 하고 돌아와도 배에 탄 채 물 칸을 지나간다(48/02·48/06). 전투 뒤 맵을 다시 그리는 길에서 탐 flag·물 칸 표시(셀 +1 bit1)·배 자리가 지워지면 깨진다. 타기·넘어가기·내리기·여신상은 dq4-ch3-walk 의 raft_* 구간, 배 칸 밖 물로 못 걷는 것은 dq4-ch3-heroblock 의 raft-* 사례가 본다"
+why = "3장 여신상 동굴 배(dq4raft): 탄 채 걸음 전투를 하고 돌아와도 배에 탄 채 물 칸을 지나간다(48/02·48/06). 단추 전 48/02 의 쉬는 배가 물 BG 위(OAM 우선순위 3)에 보이고 단추 뒤에는 치워진다. 배 인물의 33A0 우선순위 고정이 빠지면 배가 물 뒤에 숨는다. 전투 뒤 맵을 다시 그리는 길에서 탐 flag·물 칸 표시(셀 +1 bit1)·배 자리가 지워지면 깨진다. 타기·넘어가기·내리기·여신상은 dq4-ch3-walk 의 raft_* 구간, 배 칸 밖 물로 못 걷는 것은 dq4-ch3-heroblock 의 raft-* 사례가 본다"
 paths = [
   "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4raftcheck.py",
+  "sfc/dq4/tools/lua/dq4raftview.lua",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
   "sfc/dq4/tools/dq4shards.py",
