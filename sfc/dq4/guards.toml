@@ -486,6 +486,7 @@ groups = ["ch1-build", "ch1-walk"]
 name = "dq4-ch3-towns"
 why = "3장 마을 사람(dq4ch3towns): 3장 그룹 맵마다 3장 동안 걸릴 수 있는 인물 목록의 모든 대화 갈래가 띄우는 메시지에 가나·한자가 0 이고(다른 모듈 몫으로 남긴 사람은 그 모듈 파일이 생기면 함께 0), 한글 메시지가 창을 넘지 않는지(dq4ch3townscheck). 사건 flag 하나씩(아들이 돌아옴·여우를 쫓음·왕자의 편지·가게를 삼)을 켜고 말을 바꾼 사람의 첫 메시지를 본다(npccheck --states). 엔돌은 FC 3장 목록대로 사람이 바뀌고 카지노는 닫혀 있어야 한다: 기본 목록(2장 대회 중)이나 2장 끝 우승 목록이 3장에 걸렸었다"
 paths = [
+  "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4chapter1.py",
   "sfc/dq4/tools/dq4npccheck.py",
@@ -1766,6 +1767,7 @@ groups = ["ch1-build"]
 name = "dq4-people-match"
 why = "원작 FC 인물 그림과 다른 갈래의 그림이 실리는 일(1장 바트랜드의 프레아·이무르의 엄마들이 노인 그림, FC 그림 13 → DQ5 09)을 에뮬레이터 없이 잡는다. 원작 그림 종류·DQ5 세트 종류는 sfc/dq4/people-kinds.toml"
 paths = [
+  "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4growth.py",
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4party.py",
