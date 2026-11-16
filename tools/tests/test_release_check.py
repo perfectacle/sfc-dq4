@@ -313,24 +313,70 @@ class ReleaseCheckTest(unittest.TestCase):
             self._digests(d, commit='d' * 40)
             self.assertFalse(rc.ci_summary(rc.load_ci(d), require_build=True)[1])
 
-    def test_guards_stage_keeps_ci_verdicts_and_runs_the_rest_locally(self):
-        """CI 가 통과·실패로 판정한 검사는 다시 돌리지 않고(실패를 덮지 않음), 로컬 몫과 CI 에서 돌리지 않은 것만 돈다."""
+    def test_guards_stage_keeps_ci_verdicts_and_runs_only_the_local_share(self):
+        """CI 결과가 있으면 로컬은 로컬 몫만 돈다. CI 가 판정한 검사는 다시 돌리지 않고(실패를 덮지 않음), CI 에서
+        돌리지 않음·결과 없음인 검사도 로컬 에뮬레이터로 메우지 않고 통과가 아닌 것으로 남긴다."""
         checks, _ = rc.guards.load(rc.guards.tracked())
-        a, b, c = checks[0], checks[1], checks[2]
+        a, b, c, d = checks[0], checks[1], checks[2], checks[3]
         ci = {'commit': 'x', 'shards': 1, 'local': [c['name']],
               'rows': [{'name': a['name'], 'file': a['file'], 'status': 'failed', 'detail': '종료 코드 1'},
-                       {'name': b['name'], 'file': b['file'], 'status': 'skipped', 'detail': '설정 안 된 환경 변수'}]}
+                       {'name': b['name'], 'file': b['file'], 'status': 'skipped', 'detail': '설정 안 된 환경 변수'}]
+              + [{'name': x['name'], 'file': x['file'], 'status': 'passed', 'detail': '1초'} for x in checks[4:]]}
         ctx = {'logs': Path('/nonexistent'), 'rehearse': False, 'timeout': 10, 'parallel': 1, 'ci': ci}
         with mock.patch.object(rc.guards, 'run_many', side_effect=lambda hit, *a, **k: [(x, 'passed', '1초') for x in hit]) as run, \
                 mock.patch.object(rc, 'env_for', return_value={}):
             st = rc.stage_guards(ctx)
-        ran = [x['name'] for x in run.call_args[0][0]]
-        self.assertNotIn(a['name'], ran)
-        self.assertIn(b['name'], ran)
-        self.assertIn(c['name'], ran)
+        self.assertEqual([x['name'] for x in run.call_args[0][0]], [c['name']])
         self.assertEqual(st['status'], 'failed')
-        self.assertEqual(next(r for r in st['rows'] if r['name'] == a['name'])['detail'], 'CI: 종료 코드 1')
+        rows = {r['name']: r for r in st['rows']}
+        self.assertEqual(rows[a['name']]['detail'], 'CI: 종료 코드 1')
+        self.assertEqual(rows[b['name']]['status'], 'skipped')
+        self.assertEqual((rows[d['name']]['status'], rows[d['name']]['detail']), ('skipped', 'CI 결과 없음'))
         self.assertEqual(len(st['rows']), len(checks))
+        ci['rows'] = [dict(r, status='passed') for r in ci['rows']] + [
+            {'name': d['name'], 'file': d['file'], 'status': 'passed', 'detail': '1초'}]
+        with mock.patch.object(rc.guards, 'run_many', side_effect=lambda hit, *a, **k: [(x, 'passed', '1초') for x in hit]), \
+                mock.patch.object(rc, 'env_for', return_value={}):
+            self.assertEqual(rc.stage_guards(ctx)['status'], 'passed')
+
+    def test_ci_sweeps_are_judged_from_ci_without_running(self):
+        """--ci-report 의 sweep 단계는 CI 결과만 받는다. 스윕 하나라도 실패·없음이면 실패, 실패 글에 시드."""
+        wanted = [{'file': 'sfc/dq4/release.toml', 'name': 'x'}, {'file': 'sfc/dq4/release.toml', 'name': 'y'}]
+        rows = rc.guards.merge_parts([
+            {'name': 'x', 'file': 'sfc/dq4/release.toml', 'status': 'passed', 'detail': '10초', 'part': [1, 2],
+             'seeds': [0], 'sweep': True},
+            {'name': 'x', 'file': 'sfc/dq4/release.toml', 'status': 'failed', 'detail': '종료 코드 1', 'part': [2, 2],
+             'seeds': [1], 'sweep': True}])
+        ci = {'commit': 'c', 'shards': 1, 'local': [], 'rows': [{'name': 'g', 'status': 'passed', 'detail': '1초'}],
+              'sweeps': rows}
+        ctx = {'ci': ci}
+        with mock.patch.object(rc, 'sweeps', return_value=wanted), \
+                mock.patch.object(rc, 'sh', side_effect=AssertionError('로컬에서 돌림')):
+            st = rc.stage_sweep(ctx)
+        self.assertEqual(st['status'], 'failed')
+        got = {r['name']: r for r in st['rows']}
+        self.assertEqual(got['x']['seeds'], [0, 1])
+        self.assertIn('시드 1: 종료 코드 1', got['x']['detail'])
+        self.assertEqual(got['y']['status'], 'skipped')
+        text, ok = rc.ci_summary(ci, wanted=wanted)
+        self.assertFalse(ok)
+        self.assertIn('## 시드 스윕', text)
+        self.assertIn('CI 결과 없음', text)
+        ci['sweeps'] = rc.guards.merge_parts([dict(r, status='passed', detail='5초') for r in (
+            {'name': n, 'file': 'f', 'part': [1, 1], 'seeds': [0], 'sweep': True} for n in ('x', 'y'))])
+        with mock.patch.object(rc, 'sweeps', return_value=wanted):
+            self.assertEqual(rc.stage_sweep(ctx)['status'], 'passed')
+        self.assertTrue(rc.ci_summary(ci, wanted=wanted)[1])
+
+    def test_load_ci_keeps_sweeps_apart(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / 's.json').write_text(json.dumps({'commit': 'c', 'shard': [1, 1], 'local': [], 'rows': [
+                {'name': 'g', 'file': 'f', 'status': 'passed', 'detail': '1초'},
+                {'name': 'x', 'file': 'r', 'status': 'passed', 'detail': '2초', 'part': [1, 1], 'seeds': [0],
+                 'sweep': True}]}))
+            ci = rc.load_ci(d)
+        self.assertEqual([r['name'] for r in ci['rows']], ['g'])
+        self.assertEqual([(r['name'], r['status']) for r in ci['sweeps']], [('x', 'passed')])
 
     def test_missing_unit_dir_fails(self):
         def ok(cmd, log, env):

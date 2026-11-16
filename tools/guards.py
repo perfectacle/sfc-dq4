@@ -44,6 +44,9 @@ PR 에서는 바뀐 파일이 그 검사의 paths 에 바로 맞을 때, 또는 
   python tools/guards.py --all --run --no-cache --shard 3/16 --exclude-needs macos --json OUT.json
                                                  등급·묶음과 상관없이 모든 검사 가운데 needs 에 macos 가 없는 것을
                                                  16 조각으로 나눠 셋째 조각만 돌리고 결과를 OUT.json 에(CI 배포 관문 잡)
+  python tools/guards.py --all --sweeps --run --no-cache --shard 3/16 --json OUT.json
+                                                 위에 더해 트랙마다 release.toml 의 시드 스윕도 단위로 펼쳐 함께
+                                                 나눈다(CI 배포 관문 잡. sweep_units)
   python tools/guards.py --record-times FILE…    보고서(release_check report.json 또는 --json 결과)의 검사 시간으로
                                                  guardshard-times.json 을 고쳐 씀
 
@@ -61,6 +64,11 @@ DQ4_UNIT_CACHE=DIR 이면(CI 조각, 캐시 켬) 검사 단위(검사, 하위 �
 DIR/<단위>/ 아래 따로 둔다(readset·states·calls). CI 가 단위마다 enc-cache 로 되살리고 저장해(--unit-slots), 조각 수·모드가
 다른 실행의 캐시를 단위 이름으로 찾는다. 캐시 안 항목은 롬 바이트·코드 지문으로 찾으므로 어느 실행이 남긴 것이든 맞을
 때만 쓰인다. 상태 캐시 파일은 DIR/_pool 을 거쳐 같은 조각의 단위끼리 나눈다(share_states).
+
+--sweeps 는 release.toml 의 [[sweep]] 을 검사 단위로 펼친다(sweep_units). 시드마다 따로 도는 스윕은 시드 하나가 단위
+하나(seed_unit, 출력 work/sweep/<이름>/seed-<시드>), parts 가 있는 스윕은 모든 시드를 받은 하위 조각 n 개다(도구가
+시드를 합쳐 판정할 때). 단위는 CI 조각 잡이 둔 출하 롬 SWEEP_ROM 을 읽는다. 결과 행은 "sweep": true 를 달고, 시드
+단위 행은 "part"·"seeds" 를 달아 merge_parts 가 스윕 하나로 합친다(실패 글에 시드).
 
 --run 은 같은 입력(.md 를 뺀 추적 파일 내용, 명령, --rom 롬 SHA-1)으로 이미 통과한 검사를 건너뛴다. [cache] key = "paths"
 인 트랙은 추적 파일 가운데 그 검사의 paths·묶음에 맞는 것, 그 트랙의 어느 검사도 paths 에 적지 않은 자료 파일
@@ -643,7 +651,7 @@ def with_parts(check, ks):
 
 def record_tags(check):
     """통과 기록 이름 꼬리: 하위 조각마다 하나(함께 돌아도 몫마다 따로 남겨 조각 수가 다른 실행이 쓴다)."""
-    return [f'~{k}of{check["part"][1]}' for k in part_ks(check)] or ['']
+    return [f'~{k}of{check["part"][1]}' for k in part_ks(check)] or [check.get('tag', '')]
 
 
 def unit_dir(check, root):
@@ -856,12 +864,17 @@ def shard_weights(checks, times=None, cached=None):
 
 
 def part_tag(check):
-    """하위 조각의 이름 꼬리(캐시·로그 파일 이름). 「~」 는 NAME 에 없어 cached_seconds 가 검사 이름으로 읽지 않는다."""
+    """하위 조각·스윕 시드 단위의 이름 꼬리(캐시·로그 파일 이름). 「~」 는 NAME 에 없어 cached_seconds 가 검사 이름으로
+    읽지 않는다."""
+    if check.get('tag'):
+        return check['tag']
     return '~{}of{}'.format(','.join(map(str, part_ks(check))), check['part'][1]) if check.get('part') else ''
 
 
 def unit_name(check):
-    """조각에 넣는 단위의 이름: 검사 이름, 하위 조각이면 「이름 k/n」."""
+    """조각에 넣는 단위의 이름: 검사 이름, 하위 조각이면 「이름 k/n」, 스윕 시드 단위면 「이름 시드 s」."""
+    if check.get('seed_unit'):
+        return f'{check["name"]} 시드 {check["seeds"][0]}'
     return ('{} {}/{}'.format(check['name'], ','.join(map(str, part_ks(check))), check['part'][1]) if check.get('part')
             else check['name'])
 
@@ -877,7 +890,9 @@ def expand_parts(checks):
 
 
 def unit_weight(check, weights):
-    return weights.get(check['name'], 1.0) / (check['part'][1] if check.get('part') else 1)
+    """단위 무게: 검사(스윕) 시간을 하위 조각·시드 단위 수로 나눈 것."""
+    of = check['part'][1] if check.get('part') else check['seed_unit'][1] if check.get('seed_unit') else 1
+    return weights.get(check['name'], 1.0) / of
 
 
 def shard_part(checks, k, n, weights):
@@ -918,13 +933,16 @@ def merge_parts(rows):
         have = {x['part'][0] for x in got if x['part'][1] == n}
         missing = sorted(set(range(1, n + 1)) - have)
         failed = [x for x in got if x['status'] == 'failed']
+
+        def unit(x):
+            return f'시드 {",".join(map(str, x["seeds"]))}' if x.get('seeds') else f'하위 조각 {x["part"][0]}/{n}'
         if failed:
             status = 'failed'
-            detail = '; '.join(f'하위 조각 {x["part"][0]}/{n}: {x["detail"]}' for x in failed)
+            detail = '; '.join(f'{unit(x)}: {x["detail"]}' for x in failed)
         elif missing or len(got) != n or any(x['status'] != 'passed' for x in got):
             status = 'skipped'
             detail = (f'하위 조각 {missing} 결과 없음' if missing else
-                      '; '.join(f'하위 조각 {x["part"][0]}/{n}: {x["detail"]}' for x in got if x['status'] != 'passed')
+                      '; '.join(f'{unit(x)}: {x["detail"]}' for x in got if x['status'] != 'passed')
                       or f'하위 조각 수가 맞지 않음 {[x["part"] for x in got]}')
         else:
             status = 'passed'
@@ -934,8 +952,103 @@ def merge_parts(rows):
             detail = (f'{sum(secs)}초(하위 조각 {n}개, 가장 긴 것 {max(secs)}초)' if not cached else
                       f'하위 조각 {n}개 가운데 {cached}개 캐시') + (f', {rest}' if rest and not cached else '')
         merged.append({'name': r, 'file': got[0]['file'], 'status': status, 'detail': detail,
-                       'parts': [{'part': x['part'], 'status': x['status'], 'detail': x['detail']} for x in got]})
+                       'parts': [{'part': x['part'], 'status': x['status'], 'detail': x['detail']}
+                                 | ({'seeds': x['seeds']} if x.get('seeds') else {}) for x in got]}
+                      | ({'sweep': True} if got[0].get('sweep') else {}))
     return merged
+
+
+SWEEP_FIELDS = {'name': str, 'why': str, 'run': str}
+SWEEP_OPTIONAL = {'seeds': int, 'needs': list, 'parts': int}
+SWEEP_SEEDS_N = 16
+# CI 조각 잡이 rom 잡에서 받아 두는 1장 출하 롬(guard-shards.yml 「Put the ship ROMs in place」)
+SWEEP_ROM = 'work/ch1/dq4-ch1-full.sfc'
+
+
+def load_sweeps(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
+    """(스윕 목록, 문제 목록). 트랙마다 release.toml 의 [[sweep]], 각 {'file': release.toml, **항목}."""
+    out, problems = [], []
+    for toml in sorted(f for f in files if PurePosixPath(f).name == 'release.toml'):
+        try:
+            data = tomllib.loads(read(toml))
+        except tomllib.TOMLDecodeError as e:
+            problems.append(f'{toml}: TOML 오류 {e}')
+            continue
+        for i, item in enumerate(data.get('sweep', [])):
+            where = f'{toml} sweep[{i}]'
+            bad = [k for k, kind in SWEEP_FIELDS.items() if not isinstance(item.get(k), kind)]
+            bad += [k for k, kind in SWEEP_OPTIONAL.items() if k in item and not isinstance(item[k], kind)]
+            bad += [k for k in item if k not in SWEEP_FIELDS and k not in SWEEP_OPTIONAL]
+            if bad:
+                problems.append(f'{where}: 칸이 없거나 꼴이 틀림 {bad}')
+                continue
+            if not NAME.match(item['name']):
+                problems.append(f'{where}: 이름 {item["name"]!r} 은 소문자·숫자·- 만')
+            missing = [k for k in ('{rom}', '{out}', '{seeds}') if k not in item['run']]
+            if missing:
+                problems.append(f'{where}: run 에 {missing} 가 없음')
+            if 'parts' in item and not 2 <= item['parts'] <= PARTS_MAX:
+                problems.append(f'{where}: parts 는 2~{PARTS_MAX} 정수')
+            out.append({'file': toml, **item})
+    names = [s['name'] for s in out]
+    problems += [f'스윕 이름 {n} 이 둘 이상' for n in sorted({n for n in names if names.count(n) > 1})]
+    return out, problems
+
+
+def seed_list(n, failed=()):
+    """시드 0 부터 n 개, 이어서 실패 시드(겹침 없이 차례 유지)."""
+    out = list(range(n))
+    for s in failed:
+        if s not in out:
+            out.append(s)
+    return out
+
+
+def failed_seeds(sweep, root=ROOT):
+    """그 트랙 폴더 seeds.json 에서 그 스윕 이름의 실패 시드. 없으면 빈 목록."""
+    path = Path(root) / PurePosixPath(sweep['file']).parent / 'seeds.json'
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text(encoding='utf-8'))
+    return [int(e['seed']) for e in data.get(sweep['name'], [])]
+
+
+def sweep_units(sweeps, seeds_n=SWEEP_SEEDS_N, rom=SWEEP_ROM, root=ROOT):
+    """스윕을 조각에 넣을 검사 단위로. 시드 단위는 tag(로그·통과 기록 이름 꼬리)와 seed_unit (i, n)을 단다. parts 스윕은
+    parts 를 그대로 두어 expand_parts 가 하위 조각으로 펼친다(DQ4_GUARD_PART, 도구가 시드 말고 장면 등으로 나눔)."""
+    out = []
+    for s in sweeps:
+        seeds = seed_list(s.get('seeds', seeds_n), failed_seeds(s, root))
+        base = {'name': s['name'], 'file': s['file'], 'why': s['why'], 'needs': s.get('needs', ['rom']), 'paths': [],
+                'own_paths': [], 'sweep': True}
+        if s.get('parts'):
+            out.append(dict(base, run=s['run'].format(rom=rom, out=f'work/sweep/{s["name"]}',
+                                                      seeds=','.join(map(str, seeds))),
+                            parts=s['parts'], seeds_all=seeds))
+            continue
+        for i, seed in enumerate(seeds, 1):
+            out.append(dict(base, run=s['run'].format(rom=rom, out=f'work/sweep/{s["name"]}/seed-{seed}', seeds=seed),
+                            seeds=[seed], seed_unit=(i, len(seeds)), tag=f'~seed{seed}'))
+    return out
+
+
+FAILED_SEED = re.compile(r'^\{.*\}$')
+
+
+def failed_seeds_in(text):
+    """검사 출력의 JSON 줄 가운데 "seed" 가 정수이고 "status" 가 failed 인 것의 시드(차례, 겹침 없음)."""
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not FAILED_SEED.match(line):
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get('status') == 'failed' and type(row.get('seed')) is int:
+            out.append(row['seed'])
+    return list(dict.fromkeys(out))
 
 
 def split_local(checks, names):
@@ -966,13 +1079,34 @@ def result_json(done, local, shard=None, cached=False):
     """--json 결과: 커밋, 조각, 캐시를 썼는가, 돈 검사의 결과, 로컬 몫(뺀 검사)."""
     return {'commit': git('rev-parse', 'HEAD').strip(), 'shard': list(shard) if shard else None, 'cached': cached,
             'rows': [{'name': c['name'], 'file': c['file'], 'status': s, 'detail': d}
-                     | ({'part': list(c['part'])} if c.get('part') else {}) for c, s, d in done],
+                     | ({'part': list(c['part'])} if c.get('part') else {})
+                     | ({'part': list(c['seed_unit']), 'seeds': c['seeds']} if c.get('seed_unit') else {})
+                     | ({'sweep': True} if c.get('sweep') else {}) for c, s, d in done],
             'local': [{'name': c['name'], 'file': c['file'], 'needs': c.get('needs', [])} for c in local]}
+
+
+def sweep_failure(check, status, detail, logs=None):
+    """시드를 합쳐 도는 스윕 단위(parts)가 실패하면 로그의 JSON 줄에서 실패한 시드를 읽어 글에 붙인다."""
+    if status != 'failed' or not check.get('sweep') or check.get('seed_unit'):
+        return detail
+    folder = Path(logs or ROOT / 'work' / 'guards')
+    log = folder / f'{check["name"]}{part_tag(check)}.log'
+    if not log.is_file() and check.get('part'):
+        # 한 조각에 든 하위 조각 여럿은 한 프로세스로 돌아 로그가 「이름~1,3ofn」 하나다(run_many 가 결과만 몫마다 나눔)
+        n, ks = check['part'][1], set(part_ks(check))
+        pat = re.compile(rf'{re.escape(check["name"])}~([\d,]+)of{n}\.log')
+        log = next((f for f in sorted(folder.glob(f'{check["name"]}~*of{n}.log'))
+                    if (m := pat.fullmatch(f.name)) and ks <= {int(x) for x in m[1].split(',') if x}), log)
+    try:
+        seeds = failed_seeds_in(log.read_text(encoding='utf-8', errors='replace'))
+    except OSError:
+        return detail
+    return f'{detail}, 실패 시드 {",".join(map(str, seeds))}' if seeds else f'{detail}, 실패 시드를 로그에서 못 읽음'
 
 
 def run_all(hit, parallel, timeout, no_cache=False, out=None, local=(), shard=None):
     """걸린 검사를 parallel 개씩 함께 돌리고 본문 결과 줄을 찍는다. out 이 있으면 결과를 JSON 으로. 모두 통과하면 0."""
-    done = run_many(hit, parallel, timeout, no_cache)
+    done = [(c, s, sweep_failure(c, s, d)) for c, s, d in run_many(hit, parallel, timeout, no_cache)]
     if out:
         write_atomic(Path(out), json.dumps(result_json(done, local, shard, not no_cache), ensure_ascii=False, indent=1)
                      + '\n')
@@ -1178,6 +1312,8 @@ def main():
                     help='--run 에서 걸린 검사 대신 이 검사들만 돌린다(tools/guards.py 를 바꾼 PR 의 대표 가드 셋)')
     ap.add_argument('--all', action='store_true', help='--base 없이 등급·묶음과 상관없이 모든 검사를 고른다(배포 관문)')
     ap.add_argument('--shard', metavar='k/n', help='--all 로 고른 검사를 시간이 고르게 n 조각으로 나눠 k 번째만')
+    ap.add_argument('--sweeps', action='store_true',
+                    help='--all 에 트랙마다 release.toml 의 시드 스윕(sweep_units)을 더한다(배포 관문 CI)')
     ap.add_argument('--exclude-needs', metavar='이름,…', default='',
                     help='--all 에서 needs 에 이 이름이 든 검사를 빼 「로컬 몫」 으로 찍는다(리눅스 CI 에서 결과가 다른 검사의 macos 등)')
     ap.add_argument('--json', type=Path, help='--all --run 결과(커밋·조각·결과·로컬 몫)를 이 파일에')
@@ -1197,8 +1333,8 @@ def main():
     if args.record_times:
         print(f'시간 {record_times(args.record_times)}개를 {SHARD_TIMES.name} 에 적음')
         return 0
-    if not args.all and (args.shard or args.exclude_needs or args.json):
-        ap.error('--shard·--exclude-needs·--json 은 --all 과 함께')
+    if not args.all and (args.shard or args.exclude_needs or args.json or args.sweeps):
+        ap.error('--shard·--exclude-needs·--json·--sweeps 는 --all 과 함께')
     if not args.base and (args.plan or args.local_only):
         ap.error('--plan·--local-only 는 --base 와 함께')
     files = tracked()
@@ -1214,6 +1350,12 @@ def main():
         if args.only:
             hit, bad = pick(checks, args.only)
             problems += bad
+        if args.sweeps:
+            sweeps, bad = load_sweeps(files)
+            problems += bad
+            taken = {c['name'] for c in checks}
+            problems += [f'{s["file"]}: 스윕 이름 {s["name"]} 이 검사 이름과 같음' for s in sweeps if s['name'] in taken]
+            hit = hit + sweep_units(sweeps)
         hit, local = split_local(hit, [n for n in args.exclude_needs.split(',') if n])
         if shard:
             hit = shard_part(expand_parts(hit), *shard, shard_weights(hit))

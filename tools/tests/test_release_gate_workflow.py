@@ -411,6 +411,24 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.assertNotIn('ship-build', shard)
         self.assertIn('DQ4_PREBUILT=', shard)
 
+    def test_release_gate_runs_the_seed_sweeps_in_the_shards(self):
+        """관문은 release.toml 시드 스윕도 같은 조각 행렬에서 돈다(잡 수가 늘지 않는다). 조각 목록·단위 캐시 자리·두 실행 단계가
+        inputs.sweeps 일 때 --sweeps 를 넘기고, 스윕은 mode release 에서만. 매일 데우기는 스윕을 돌리지 않는다."""
+        self.assertRegex(GATE.read_text(encoding='utf-8'), r'\n      mode: release\n      sweeps: true\n')
+        self.assertNotIn('sweeps', WARM.read_text(encoding='utf-8'))
+        self.assertIn('sweeps run only in mode release', self.text)
+        steps = [s for s in self.jobs['build'] + self.jobs['shard'] if 'tools/guards.py --all' in run_texts(s)]
+        # 조각 목록, 단위 캐시 자리, 두 실행 단계: 모두 같은 단위 목록이어야 조각이 같다
+        self.assertEqual(len(steps), 4)
+        for s in steps:
+            self.assertIn('SWEEPS: ${{ inputs.sweeps }}', s)
+            self.assertIn('if [ "$SWEEPS" = true ]; then only+=(--sweeps); fi', run_texts(s))
+            self.assertIn('guards.py --all "${only[@]}"', run_texts(s))
+        sys.path.insert(0, str(ROOT / 'tools'))
+        import guards
+        self.assertEqual(guards.SWEEP_ROM, 'work/ch1/dq4-ch1-full.sfc')
+        self.assertIn('work/ci-prebuilt/$v" "work/$v"', ''.join(self.jobs['shard']))
+
     def test_shard_count_fits_the_job_limit(self):
         """무료 요금제는 계정 동시 잡이 20 이다. 한 실행이 제 잡끼리 줄 서지 않게 조각 수를 JOB_LIMIT - FIXED_JOBS 로
         자르고, 그 뒤로는 inputs.shards 대신 자른 수(needs.build.outputs.count)를 쓴다. FIXED_JOBS 는 조각과 함께 돌 수
