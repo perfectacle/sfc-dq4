@@ -1159,6 +1159,71 @@ class SweepTest(unittest.TestCase):
                 script = re.search(r'python (\S+\.py)', s['run'].split('&&')[-1])[1]
                 self.assertIn('add_part_arg(', (guards.ROOT / script).read_text(encoding='utf-8'), s['name'])
 
+    def test_judged_sweep_merges_part_data_and_judges_once(self):
+        """judge 가 있는 parts 스윕: 몫 행에 로그의 sweep_data 를 싣고, merge_parts 가 몫을 모두 모아 한 번 판정한다."""
+        import tempfile
+        sweeps = [dict(self.SWEEPS[1], judge='t/j.py:judge')]
+        with mock.patch.object(guards, 'failed_seeds', return_value=[]):
+            parts = guards.expand_parts(guards.sweep_units(sweeps))
+        self.assertEqual({p['judge'] for p in parts}, {'t/j.py:judge'})
+        with tempfile.TemporaryDirectory() as d:
+            for k in (1, 2, 3, 4):
+                (Path(d) / f'b~{k}of4.log').write_text(f'{{"seed": 0, "status": "passed"}}\n{{"sweep_data":{{"k{k}":{k}}}}}\n')
+            self.assertEqual(guards.unit_data(parts[1], 'passed', '3초', d), {'k2': 2})
+            self.assertIsNone(guards.unit_data(parts[1], 'failed', '종료 코드 1', d))
+            self.assertIsNone(guards.unit_data(parts[1], 'passed', '캐시: 같은 입력으로 … 통과, 3초', d))
+            real = guards.unit_data
+            with mock.patch.object(guards, 'git', return_value='c\n'), \
+                    mock.patch.object(guards, 'unit_data', side_effect=lambda c, s, det: real(c, s, det, d)):
+                rows = guards.result_json([(p, 'passed', '3초') for p in parts], [])['rows']
+        self.assertEqual([r['data'] for r in rows], [{'k1': 1}, {'k2': 2}, {'k3': 3}, {'k4': 4}])
+        seen = []
+
+        def judge(spec):
+            def run(datas):
+                seen.append((spec, datas))
+                return ['x 구간 밖'] if any('bad' in d for d in datas) else []
+            return run
+        with mock.patch.object(guards, 'load_judge', side_effect=judge):
+            ok = guards.merge_parts(rows)[0]
+            self.assertEqual(ok['status'], 'passed')
+            self.assertIn('합친 판정 통과', ok['detail'])
+            self.assertNotIn('data', ok)
+            self.assertEqual(seen, [('t/j.py:judge', [{'k1': 1}, {'k2': 2}, {'k3': 3}, {'k4': 4}])])
+            bad = guards.merge_parts(rows[:3] + [dict(rows[3], data={'bad': 1})])[0]
+            self.assertEqual((bad['status'], bad['detail']), ('failed', '합친 판정: x 구간 밖'))
+            gone = guards.merge_parts(rows[:3] + [dict(rows[3], data=None)])[0]
+            self.assertEqual(gone['status'], 'skipped')
+            self.assertIn('원자료', gone['detail'])
+            cached = guards.merge_parts(rows[:3] + [dict(rows[3], data=None, detail='캐시: 같은 입력으로 t 통과, 3초')])[0]
+            self.assertEqual(cached['status'], 'passed')
+            self.assertIn('합친 판정 건너뜀', cached['detail'])
+            n = len(seen)
+            failed = guards.merge_parts(rows[:3] + [dict(rows[3], status='failed', detail='종료 코드 1', data=None)])[0]
+            self.assertEqual(failed['status'], 'failed')
+            self.assertEqual(len(seen), n)
+
+    def test_sweep_data_in_reads_the_last_line(self):
+        self.assertEqual(guards.sweep_data_in('a\n{"sweep_data":{"x":1}}\n{"sweep_data":{"x":2}}\nend'), {'x': 2})
+        self.assertIsNone(guards.sweep_data_in('{"sweep_data":{"x"'))
+        self.assertIsNone(guards.sweep_data_in('nothing'))
+
+    def test_judge_needs_parts_and_a_function(self):
+        text = ('[[sweep]]\nname = "a"\nwhy = "w"\nrun = "x {rom} {out} {seeds}"\njudge = "t.py:f"\n'
+                '[[sweep]]\nname = "b"\nwhy = "w"\nrun = "x {rom} {out} {seeds}"\nparts = 2\njudge = "t.py"\n'
+                '[[sweep]]\nname = "c"\nwhy = "w"\nrun = "x {rom} {out} {seeds}"\nparts = 2\njudge = "t/u.py:f"\n')
+        _, problems = guards.load_sweeps(['sfc/x/release.toml'], read=lambda f: text)
+        self.assertEqual(len(problems), 2, problems)
+
+    def test_repo_judges_load(self):
+        """release.toml 의 judge 는 실제 함수이고, 그 스윕 도구는 --split-seeds 로 원자료를 찍는다."""
+        judged = [s for s in guards.load_sweeps(guards.tracked())[0] if s.get('judge')]
+        self.assertTrue(judged)
+        for s in judged:
+            self.assertTrue(callable(guards.load_judge(s['judge'])), s['name'])
+            self.assertIn('--split-seeds', s['run'])
+            self.assertEqual(guards.load_judge(s['judge'])([]), [])
+
     def test_cli_needs_all_for_sweeps(self):
         import subprocess
         r = subprocess.run([sys.executable, str(guards.ROOT / 'tools' / 'guards.py'), '--sweeps'], capture_output=True,

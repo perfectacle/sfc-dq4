@@ -295,3 +295,89 @@ class PartTests(unittest.TestCase):
             self.assertEqual({w[:2] for w in work}, set(mine))
             got += work
         self.assertEqual(sorted(got), sorted(full))
+
+
+class SplitSeedTests(unittest.TestCase):
+    """--split-seeds: 몫을 (장면, 코어, 시드)로 나누고 분포 판정은 몫들의 원자료를 모아 judge_sweep 이 한다."""
+    NAMES = list(bs.DEFAULT_SCENES)
+    CORES = list(bs.cc.CORES)
+    SEEDS = list(range(32))
+
+    def test_seed_parts_cover_every_seed_once_and_do_not_move(self):
+        full = bs.seed_work(bs.work_units(self.NAMES, self.CORES), self.SEEDS)
+        for n in (1, 3, 16):
+            parts = [bs.part_seed_work(self.NAMES, self.CORES, self.SEEDS, (k, n)) for k in range(1, n + 1)]
+            got = [w for p in parts for w in p]
+            self.assertEqual(sorted(got), sorted(full), n)
+            self.assertEqual(len(got), len(set(got)), n)
+            self.assertEqual(parts, [bs.part_seed_work(self.NAMES, self.CORES, self.SEEDS, (k, n))
+                                     for k in range(1, n + 1)])
+
+    def test_the_longest_scene_spreads_its_seeds_over_parts(self):
+        heavy = [len({w[2] for w in bs.part_seed_work(self.NAMES, self.CORES, self.SEEDS, (k, 16))
+                      if w[:2] == ('party2', 'bsnes')}) for k in range(1, 17)]
+        self.assertGreater(sum(1 for h in heavy if h), 8, heavy)
+
+    @staticmethod
+    def summary(scene, core, seed, crit_every=None):
+        """결정적인 가짜 시드 요약. crit_every 면 그 간격으로 회심(작으면 99.9% 구간을 넘음)."""
+        n = 3 + (seed * 7 + len(scene) + len(core)) % 4
+        kinds = ['crit' if crit_every and (seed * n + i) % crit_every == 0 else 'normal' for i in range(n)]
+        tries = (seed + len(core)) % 3 if scene == 'flee' else 0
+        return {'seed': seed, 'start': 10, 'opening': (1 if seed % 11 == 3 else 2 if seed % 13 == 5 else 0),
+                'hits': [{'kind': k} for k in kinds], 'flee_tries': tries, 'fled': bool(tries and seed % 2)}
+
+    def units(self, crit_every=None, unstarted=()):
+        out = []
+        for s in ('attack', 'flee', 'spell'):
+            for c in self.CORES:
+                res = [self.summary(s, c, seed, crit_every if s == 'attack' else None) for seed in self.SEEDS]
+                for r in res:
+                    if (s, c, r['seed']) in unstarted:
+                        r['start'] = None
+                out.append({'scene': s, 'core': c, 'results': res})
+        return out
+
+    def whole(self, units):
+        """나누지 않을 때(몫 하나가 모든 시드)의 판정: 장면·코어마다 문제."""
+        groups = [(u['scene'], bs.core_key(u['core']),
+                   [(r['seed'], bs.distribution([r]), r.get('start') is not None) for r in u['results']])
+                  for u in units]
+        return {(s, c): bad for s, c, _, bad in bs.judge_units(groups, [])}
+
+    def split(self, units, n):
+        """시드 몫 n 개마다 그 몫의 시드만 남긴 결과로 sweep_data 를 찍고 judge_sweep 으로 합친다."""
+        datas = []
+        for k in range(1, n + 1):
+            mine = set(bs.part_seed_work([u['scene'] for u in units[::2]], self.CORES, self.SEEDS, (k, n)))
+            part = [dict(u, results=[r for r in u['results'] if (u['scene'], u['core'], r['seed']) in mine])
+                    for u in units]
+            datas.append(bs.sweep_data([u for u in part if u['results']]))
+        return bs.judge_sweep(datas)
+
+    def test_counts_add_up_to_the_whole(self):
+        for u in self.units():
+            got = bs.distribution([])
+            for r in u['results']:
+                got = bs.add_counts(got, bs.distribution([r]))
+            self.assertEqual(got, bs.distribution(u['results']))
+
+    def test_merged_verdict_is_the_unsplit_verdict(self):
+        for units in (self.units(), self.units(crit_every=3), self.units(crit_every=3, unstarted={('attack', 'bsnes', 4)})):
+            whole = self.whole(units)
+            want = sorted(f'{s}/{c} 시드 합: {p}' for (s, c), bad in whole.items() for p in bad)
+            for n in (1, 5, 16):
+                self.assertEqual(sorted(self.split(units, n)), want, n)
+        self.assertTrue(any(self.whole(self.units(crit_every=3)).values()))
+        self.assertFalse(any(self.whole(self.units()).values()))
+        self.assertEqual(self.whole(self.units(crit_every=3, unstarted={('attack', 'bsnes', 4)}))[('attack', 'bsnes')], [])
+
+    def test_repeated_data_from_a_process_running_two_parts_counts_once(self):
+        units = self.units(crit_every=3)
+        data = bs.sweep_data(units)
+        self.assertEqual(bs.judge_sweep([data, data]), bs.judge_sweep([data]))
+
+    def test_a_missing_part_shows_as_uneven_seeds(self):
+        units = self.units()
+        units[0] = dict(units[0], results=units[0]['results'][:-1])
+        self.assertTrue(any('시드가 다름' in p for p in bs.judge_sweep([bs.sweep_data(units)])))

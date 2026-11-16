@@ -68,7 +68,8 @@ DIR/<단위>/ 아래 따로 둔다(readset·states·calls). CI 가 단위마다 
 --sweeps 는 release.toml 의 [[sweep]] 을 검사 단위로 펼친다(sweep_units). 시드마다 따로 도는 스윕은 시드 하나가 단위
 하나(seed_unit, 출력 work/sweep/<이름>/seed-<시드>), parts 가 있는 스윕은 모든 시드를 받은 하위 조각 n 개다(도구가
 시드를 합쳐 판정할 때). 단위는 CI 조각 잡이 둔 출하 롬 SWEEP_ROM 을 읽는다. 결과 행은 "sweep": true 를 달고, 시드
-단위 행은 "part"·"seeds" 를 달아 merge_parts 가 스윕 하나로 합친다(실패 글에 시드).
+단위 행은 "part"·"seeds" 를 달아 merge_parts 가 스윕 하나로 합친다(실패 글에 시드). judge 가 있는 parts 스윕은 도구가
+로그에 찍은 {"sweep_data": …} 줄을 결과 행 "data" 로 옮기고, merge_parts 가 몫을 모두 모아 그 함수로 판정한다(judge_merged).
 
 --run 은 같은 입력(.md 를 뺀 추적 파일 내용, 명령, --rom 롬 SHA-1)으로 이미 통과한 검사를 건너뛴다. [cache] key = "paths"
 인 트랙은 추적 파일 가운데 그 검사의 paths·묶음에 맞는 것, 그 트랙의 어느 검사도 paths 에 적지 않은 자료 파일
@@ -951,6 +952,8 @@ def merge_parts(rows):
             cached = sum(x['detail'].startswith('캐시') for x in got)
             detail = (f'{sum(secs)}초(하위 조각 {n}개, 가장 긴 것 {max(secs)}초)' if not cached else
                       f'하위 조각 {n}개 가운데 {cached}개 캐시') + (f', {rest}' if rest and not cached else '')
+        if status == 'passed' and got[0].get('judge'):
+            status, detail = judge_merged(got[0]['judge'], got, detail)
         merged.append({'name': r, 'file': got[0]['file'], 'status': status, 'detail': detail,
                        'parts': [{'part': x['part'], 'status': x['status'], 'detail': x['detail']}
                                  | ({'seeds': x['seeds']} if x.get('seeds') else {}) for x in got]}
@@ -958,8 +961,34 @@ def merge_parts(rows):
     return merged
 
 
+def load_judge(spec, root=ROOT):
+    """'경로.py:함수' → 그 함수. 경로는 저장소 상대(트랙 도구)."""
+    import importlib.util
+    path, _, func = spec.partition(':')
+    path = Path(root) / path
+    mod = importlib.util.spec_from_file_location(f'_judge_{path.stem}', path)
+    module = importlib.util.module_from_spec(mod)
+    mod.loader.exec_module(module)
+    return getattr(module, func)
+
+
+def judge_merged(spec, got, detail, load=None):
+    """하위 조각이 모두 통과한 스윕을 몫들의 원자료("data")를 모아 spec 함수로 판정한다. (결과, 글). 원자료가 없는
+    몫이 캐시 통과뿐이면 통과로 두고 「합친 판정 건너뜀」 을 붙인다(캐시를 쓴 연습 실행). 그 밖에 원자료가 빠지면
+    돌리지 않음: 몫마다 통과해도 합친 판정 없이 통과로 칠 수 없다."""
+    missing = [x for x in got if x.get('data') is None]
+    if missing:
+        if all(x['detail'].startswith('캐시') for x in missing):
+            return 'passed', f'{detail}, 합친 판정 건너뜀(캐시 통과 몫)'
+        return 'skipped', f'하위 조각 {[x["part"][0] for x in missing]} 원자료(sweep_data) 없음'
+    problems = (load or load_judge)(spec)([x['data'] for x in got])
+    if problems:
+        return 'failed', f'합친 판정: {"; ".join(problems)}'
+    return 'passed', f'{detail}, 합친 판정 통과'
+
+
 SWEEP_FIELDS = {'name': str, 'why': str, 'run': str}
-SWEEP_OPTIONAL = {'seeds': int, 'needs': list, 'parts': int}
+SWEEP_OPTIONAL = {'seeds': int, 'needs': list, 'parts': int, 'judge': str}
 SWEEP_SEEDS_N = 16
 # CI 조각 잡이 rom 잡에서 받아 두는 1장 출하 롬(guard-shards.yml 「Put the ship ROMs in place」)
 SWEEP_ROM = 'work/ch1/dq4-ch1-full.sfc'
@@ -989,6 +1018,8 @@ def load_sweeps(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
                 problems.append(f'{where}: run 에 {missing} 가 없음')
             if 'parts' in item and not 2 <= item['parts'] <= PARTS_MAX:
                 problems.append(f'{where}: parts 는 2~{PARTS_MAX} 정수')
+            if 'judge' in item and ('parts' not in item or not re.fullmatch(r'[\w./-]+\.py:\w+', item['judge'])):
+                problems.append(f'{where}: judge 는 parts 스윕에만, 「경로.py:함수」')
             out.append({'file': toml, **item})
     names = [s['name'] for s in out]
     problems += [f'스윕 이름 {n} 이 둘 이상' for n in sorted({n for n in names if names.count(n) > 1})]
@@ -1024,7 +1055,7 @@ def sweep_units(sweeps, seeds_n=SWEEP_SEEDS_N, rom=SWEEP_ROM, root=ROOT):
         if s.get('parts'):
             out.append(dict(base, run=s['run'].format(rom=rom, out=f'work/sweep/{s["name"]}',
                                                       seeds=','.join(map(str, seeds))),
-                            parts=s['parts'], seeds_all=seeds))
+                            parts=s['parts'], seeds_all=seeds) | ({'judge': s['judge']} if s.get('judge') else {}))
             continue
         for i, seed in enumerate(seeds, 1):
             out.append(dict(base, run=s['run'].format(rom=rom, out=f'work/sweep/{s["name"]}/seed-{seed}', seeds=seed),
@@ -1081,14 +1112,13 @@ def result_json(done, local, shard=None, cached=False):
             'rows': [{'name': c['name'], 'file': c['file'], 'status': s, 'detail': d}
                      | ({'part': list(c['part'])} if c.get('part') else {})
                      | ({'part': list(c['seed_unit']), 'seeds': c['seeds']} if c.get('seed_unit') else {})
-                     | ({'sweep': True} if c.get('sweep') else {}) for c, s, d in done],
+                     | ({'sweep': True} if c.get('sweep') else {})
+                     | ({'judge': c['judge'], 'data': unit_data(c, s, d)} if c.get('judge') else {}) for c, s, d in done],
             'local': [{'name': c['name'], 'file': c['file'], 'needs': c.get('needs', [])} for c in local]}
 
 
-def sweep_failure(check, status, detail, logs=None):
-    """시드를 합쳐 도는 스윕 단위(parts)가 실패하면 로그의 JSON 줄에서 실패한 시드를 읽어 글에 붙인다."""
-    if status != 'failed' or not check.get('sweep') or check.get('seed_unit'):
-        return detail
+def unit_log(check, logs=None):
+    """검사 단위의 로그 파일(guards.py 가 쓴 것)."""
     folder = Path(logs or ROOT / 'work' / 'guards')
     log = folder / f'{check["name"]}{part_tag(check)}.log'
     if not log.is_file() and check.get('part'):
@@ -1097,6 +1127,39 @@ def sweep_failure(check, status, detail, logs=None):
         pat = re.compile(rf'{re.escape(check["name"])}~([\d,]+)of{n}\.log')
         log = next((f for f in sorted(folder.glob(f'{check["name"]}~*of{n}.log'))
                     if (m := pat.fullmatch(f.name)) and ks <= {int(x) for x in m[1].split(',') if x}), log)
+    return log
+
+
+SWEEP_DATA = '{"sweep_data":'
+
+
+def sweep_data_in(text):
+    """검사 출력의 마지막 {"sweep_data": …} 줄의 값. 없거나 못 읽으면 None."""
+    for line in reversed(text.splitlines()):
+        if line.startswith(SWEEP_DATA):
+            try:
+                return json.loads(line)['sweep_data']
+            except (ValueError, KeyError):
+                return None
+    return None
+
+
+def unit_data(check, status, detail='', logs=None):
+    """judge 가 있는 스윕 하위 조각이 이번에 돌아 통과했으면 로그의 원자료. 그 밖에는 None(캐시 통과면 로그가 지난
+    실행의 것일 수 있다)."""
+    if status != 'passed' or not check.get('judge') or detail.startswith('캐시'):
+        return None
+    try:
+        return sweep_data_in(unit_log(check, logs).read_text(encoding='utf-8', errors='replace'))
+    except OSError:
+        return None
+
+
+def sweep_failure(check, status, detail, logs=None):
+    """시드를 합쳐 도는 스윕 단위(parts)가 실패하면 로그의 JSON 줄에서 실패한 시드를 읽어 글에 붙인다."""
+    if status != 'failed' or not check.get('sweep') or check.get('seed_unit'):
+        return detail
+    log = unit_log(check, logs)
     try:
         seeds = failed_seeds_in(log.read_text(encoding='utf-8', errors='replace'))
     except OSError:

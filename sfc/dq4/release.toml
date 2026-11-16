@@ -5,6 +5,8 @@
 #   needs 돌리는 데 필요한 것(guards.toml 과 같은 뜻, 없으면 ["rom"])
 #   parts CI 에서 시드를 나누지 않고 모든 시드를 받은 하위 조각 n 개로 나눈다(도구가 시드를 합쳐 판정할 때, DQ4_GUARD_PART).
 #         없으면 시드 하나가 CI 단위 하나다(guards.sweep_units)
+#   judge parts 스윕에서 몫이 찍은 원자료({"sweep_data": …} 줄)를 report 가 모아 판정하는 「경로.py:함수」. 몫마다는
+#         시드별 판정만 하고, 시드를 합쳐 세는 판정은 이 함수가 한다(guards.judge_merged)
 
 [[sweep]]
 name = "dq4-walk-seeds"
@@ -22,10 +24,11 @@ seeds = 8
 [[sweep]]
 name = "dq4-battle-seeds"
 why = "전투 갈래(선제·기습·도망 실패·회심): 멈춤 없이 맵·곡으로 돌아온다"
-run = "uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4battlescene.py --rom {rom} --out {out} --jobs 4 --seeds {seeds}"
+run = "uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4battlescene.py --rom {rom} --out {out} --jobs 4 --split-seeds --seeds {seeds}"
 seeds = 32
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 parts = 16
+judge = "sfc/dq4/tools/dq4battlescene.py:judge_sweep"
 
 [[sweep]]
 name = "dq4-compat-walk-seeds"
