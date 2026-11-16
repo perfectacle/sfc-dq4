@@ -21,6 +21,8 @@ codes는 정수 배열: 원래 글자 000~3DA, 제어 1000~101D·1100~1118(16진
 id 가 지금 끝(원본은 3200) 이상이면 빈 번호 없이 이어 덧붙이고, 16개 묶음 끝까지 {1001} 한 코드 메시지로 채운다.
 최대 id 는 1FFF(8191). 덧붙이면 색인 표를 머리(트리 뒤, 글자 묶음 표 앞)로 옮기고 24:8BC3 의 색인 읽기
 뱅크·주소를 고친다. 3,200개만이면 쓰기는 예전과 같다.
+읽기(export --base, base_package, decoded_messages)는 24:9E07 의 OR 꼴 훅과 함께 표 꼴 훅(색인 뱅크 → 실제 뱅크
+32칸 표, table_hook)도 받는다. 쓰기는 OR 꼴만 만든다.
 """
 import argparse
 from collections import Counter
@@ -48,6 +50,14 @@ PAD = [0x1001]
 # 색인은 21비트라 훅이 뱅크 바이트에 창의 첫 뱅크를 OR 한다. 디코더 사본은 PHK·PLB 로 자기 뱅크만 읽으므로
 # 낮은 WRAM 거울이 없는 60~ 에서도 돈다(DQ4 메뉴가 65:8000 에서 실측). 7E·7F 는 WRAM 이라 7D 까지.
 WINDOWS = {0x20: (0x30, 0x3F), 0x60: (0x60, 0x7D)}
+OR_STUB = (bytes.fromhex('20 8d 8c a5 f2 09'), bytes.fromhex('85 f2 60'))
+# 표 꼴 훅: 24:9E07 이 JSR 8C8D 뒤 JSL 로 부르는 루틴. 색인 뱅크(21비트 주소의 위 5비트, 0~1F)로 32칸 표를 찾아 $F2 에
+# 실제 뱅크를 둔다. OR 꼴이 닿지 않는 뱅크(7E·7F 자리 등)를 쓰려는 것이다. 24:8BAF 는 M=1·X=0 으로 부르지만 훅은 P·A·X 를
+# 지키고 A 에 새 뱅크를 남겨, OR 꼴(LDA $F2 / ORA / STA $F2)과 같은 상태로 돌아간다. 표는 루틴 바로 뒤에 둔다.
+TABLE_STUB = (bytes.fromhex('20 8d 8c 22'), bytes.fromhex('60 ea ea'))
+TABLE_HOOK = (bytes.fromhex('08 c2 30 48 da a5 f2 29 1f 00 aa e2 20 bf'), bytes.fromhex('85 f2 fa c2 20 68 28 a5 f2 6b'))
+TABLE_HOOK_SIZE = len(TABLE_HOOK[0]) + 3 + len(TABLE_HOOK[1])
+BANK_SLOTS = 32
 
 
 def keys(value, allowed, name):
@@ -145,8 +155,7 @@ def read_messages(data):
 def index_table(data, mask):
     """보행 색인 표의 (CPU 주소, 메시지 수). 24:8BC3 이 원래 코드면 24:AF1E 의 3,200개다. 옮긴 표는 머리 끝의
     글자 묶음 표(옮기지 않았으면 메시지 0) 바로 앞에서 끝나므로 그 사이를 세 바이트씩 센다.
-    색인이 디코더와 다른 뱅크에 따로 있으면(DQ4 메뉴의 59:8000) 끝을 알려 주는 자료가 뒤에 없으므로,
-    항목이 앞으로 가는 동안을 센다."""
+    색인이 디코더와 다른 뱅크에 따로 있으면(DQ4 메뉴의 59:8000) separate_runs 로 센다."""
     rom = Rom(data)
     at = lorom(INDEX_LOAD)
     code = data[at:at + len(INDEX_LOAD_CODE)]
@@ -160,11 +169,11 @@ def index_table(data, mask):
     if code != expected:
         raise ValueError('지원하는 보행 색인 읽기 코드(24:8BC3)가 아님')
     if index >> 16 != rom.u24(DECODER + 1) >> 16:
-        groups = contiguous_groups(data, index, mask, separate_index_groups(rom, index))
+        groups, _ = separate_runs(data, index, mask)
         if not MESSAGES < groups * 16 <= MAX_MESSAGES:
             raise ValueError('따로 둔 보행 색인 표의 끝을 찾지 못함')
         return index, groups * 16
-    end = lorom((rom.u24(index) >> 3) | mask << 16)
+    end = lorom(index_cpu(rom.u24(index), mask))
     table = lorom(rom.u24(FONT_TABLE_OPERANDS[0][0]))
     if lorom(index) < table < end:
         end = table
@@ -178,46 +187,75 @@ def index_table(data, mask):
     return index, size // 3 * 16
 
 
-def separate_index_groups(rom, index):
-    """머리 밖에 따로 둔 색인 표의 묶음 수. 표는 한 뱅크 안이고, 뒤는 0 이라 앞으로 가지 않는 첫 항목에서 끝난다."""
-    n, last = 0, -1
-    while (index & 0xFFFF) + 3 * n + 3 <= 0x10000:
-        v = rom.u24(index + 3 * n)
-        if v <= last:
-            break
-        last = v
-        n += 1
-    return n
-
-
-def contiguous_groups(data, index, mask, groups):
-    """색인 항목 가운데 앞 묶음이 끝난 비트에서 다음 묶음이 시작하는 데까지의 묶음 수. 메시지는 비트로 이어 붙으므로
-    색인 뒤에 앞으로 가는 다른 자료가 이어져도 그 항목은 앞 묶음의 끝과 맞지 않아 여기서 잘린다."""
+def separate_runs(data, index, mask):
+    """머리 밖에 따로 둔 색인의 (묶음 수, 메시지가 놓인 파일 구간 목록). 표는 한 뱅크 안이고 0 인 항목에서 끝난다.
+    메시지는 비트로 이어 붙으므로 다음 묶음은 앞 묶음이 끝난 비트에서 시작한다. 메시지 자리가 차면 다음 묶음은 다른
+    뱅크의 자리로 건너뛴다(DQ4 의 dq4menumsg.SEGMENTS). 같은 뱅크 안에서 건너뛰거나 앞 구간 안으로 돌아가는 항목은
+    색인 뒤에 이어진 다른 자료로 보고 거기서 끊는다."""
     rom = Rom(data)
     decoder = rom.u24(DECODER + 1)
-    for k in range(groups - 1):
+    runs, k = [], 0
+    while (index & 0xFFFF) + 3 * k + 3 <= 0x10000:
+        v = rom.u24(index + 3 * k)
+        if not v:
+            break
+        start = lorom(index_cpu(v, mask))
+        joined = bool(runs) and start == runs[-1][1] - (1 if v & 7 else 0)
+        if runs and not joined and (start // BANK == (runs[-1][1] - 1) // BANK
+                                    or any(a <= start < b for a, b in runs)):
+            break
         try:
             _, end = decode_check(data, decoder=decoder, bank_mask=mask, with_end=True, index=index + 3 * k, count=16)
         except (IndexError, ValueError):
-            return k
-        v = rom.u24(index + 3 * k + 3)
-        start = lorom((v >> 3) | mask << 16)
-        if start != lorom(end) - (1 if v & 7 else 0):
-            return k + 1
-    return groups
+            break
+        if joined:
+            runs[-1][1] = lorom(end)
+        else:
+            runs.append([start, lorom(end)])
+        k += 1
+    return k, [tuple(r) for r in runs]
+
+
+def table_hook(at, banks):
+    """표 꼴 훅의 (24:9E07 에 둘 10바이트, at 에 둘 루틴과 표). banks 는 색인 뱅크 0~1F 마다의 실제 뱅크."""
+    if len(banks) != BANK_SLOTS or any(not 0 <= b <= 0x7D for b in banks):
+        raise ValueError(f'뱅크 표는 {BANK_SLOTS}칸, 칸마다 00~7D 여야 함')
+    stub = TABLE_STUB[0] + cpu_to_bytes(at) + TABLE_STUB[1]
+    return stub, TABLE_HOOK[0] + cpu_to_bytes(at + TABLE_HOOK_SIZE) + TABLE_HOOK[1] + bytes(banks)
+
+
+def hook_banks(data, at):
+    """at 의 표 꼴 훅이 쓰는 32칸 뱅크 표."""
+    code = data[lorom(at):lorom(at) + TABLE_HOOK_SIZE]
+    table = int.from_bytes(code[len(TABLE_HOOK[0]):len(TABLE_HOOK[0]) + 3], 'little')
+    if bytes(code) != TABLE_HOOK[0] + cpu_to_bytes(table) + TABLE_HOOK[1]:
+        raise ValueError(f'{at >> 16:02X}:{at & 0xFFFF:04X} 이 표 꼴 색인 훅이 아님')
+    banks = tuple(data[lorom(table):lorom(table) + BANK_SLOTS])
+    if len(banks) != BANK_SLOTS or any(b > 0x7D for b in banks):
+        raise ValueError(f'표 꼴 색인 훅의 뱅크 표({table:06X})가 롬 밖이거나 7E·7F 를 가리킴')
+    return banks
+
+
+def index_cpu(value, mask):
+    """색인 값(비트 위치를 뺀 21비트 주소)을 훅이 만드는 CPU 주소로. mask 는 relocated 의 둘째 값."""
+    if isinstance(mask, int):
+        return (value >> 3) | mask << 16
+    return mask[value >> 19 & 0x1F] << 16 | (value >> 3 & 0xFFFF)
 
 
 def relocated(data):
-    """보행 메시지를 옮긴 롬의 (디코더 주소, 색인 창 OR 값). 옮기지 않았으면 오류."""
+    """보행 메시지를 옮긴 롬의 (디코더 주소, 색인 창). 창은 OR 꼴 훅이면 OR 값(int), 표 꼴 훅이면 32칸 뱅크 표(tuple).
+    옮기지 않았으면 오류."""
     rom = Rom(data)
     call = lorom(DECODER)
-    stub = lorom(WALK_INDEX_STUB)
+    stub = data[lorom(WALK_INDEX_STUB):lorom(WALK_INDEX_STUB) + 10]
     if data[call] != 0x22 or data[call + 4] != 0x60:
         raise ValueError('새 보행 디코더 호출이 없음')
-    if data[stub:stub + 6] != bytes.fromhex('20 8d 8c a5 f2 09') or data[stub + 6] not in WINDOWS \
-            or data[stub + 7:stub + 10] != bytes.fromhex('85 f2 60'):
-        raise ValueError('지원하는 보행 색인 훅이 아님')
-    return rom.u24(DECODER + 1), data[stub + 6]
+    if stub[:6] == OR_STUB[0] and stub[6] in WINDOWS and stub[7:] == OR_STUB[1]:
+        return rom.u24(DECODER + 1), stub[6]
+    if stub[:4] == TABLE_STUB[0] and stub[7:] == TABLE_STUB[1]:
+        return rom.u24(DECODER + 1), hook_banks(data, int.from_bytes(stub[4:7], 'little'))
+    raise ValueError('지원하는 보행 색인 훅이 아님')
 
 
 def base_package(base):
@@ -238,7 +276,7 @@ def base_package(base):
     for at, k in FONT_TABLE_OPERANDS:
         if rom.u24(at) != table + k:
             raise ValueError(f'{at:06X}: 글자 묶음 표 피연산자가 서로 맞지 않음')
-    first = (rom.u24(index) >> 3) | mask << 16
+    first = index_cpu(rom.u24(index), mask)
     head_end = lorom(first)
     if table == FONT_GROUPS:
         font, glyphs = None, GLYPHS
@@ -268,11 +306,13 @@ def base_package(base):
         raise ValueError(f'메시지가 쓰는 글자 {used:03X} 가 글자 묶음 표의 글자 수 {glyphs:03X} 를 넘음')
     for codes in messages:
         valid_message(codes, glyphs, controls)
+    separate = index >> 16 != decoder >> 16 and index != INDEX
     if head_end == lorom(first):
         extents = [(lorom(decoder), lorom(end))]
     else:
-        extents = [(lorom(decoder), head_end), (lorom(first), lorom(end))]
-    if index >> 16 != decoder >> 16 and index != INDEX:
+        runs = separate_runs(base, index, mask)[1] if separate else [(lorom(first), lorom(end))]
+        extents = [(lorom(decoder), head_end), *runs]
+    if separate:
         extents.insert(1, (lorom(index), lorom(index) + total // 16 * 3))
     return messages, font, glyphs, extents, controls
 

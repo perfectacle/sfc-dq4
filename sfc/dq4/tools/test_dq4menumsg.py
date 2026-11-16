@@ -49,9 +49,29 @@ class LayoutTests(unittest.TestCase):
     def test_index_entry_crosses_lorom_bank(self):
         from dq5map import lorom
         o = lorom(mm.BASE & 0xFF8000)
-        start = ((mm.BASE >> 16) - mm.INDEX_BANK) << 16 | 0x8000
+        start = ((mm.BASE >> 16) - 0x60) << 16 | 0x8000
         self.assertEqual(mm.index_entry(o, 0), (start << 3).to_bytes(3, 'little'))
         self.assertEqual(mm.index_entry(o, 0x8000 * 8 + 5), ((start + 0x10000) << 3 | 5).to_bytes(3, 'little'))
+
+    def test_index_entry_maps_free_banks_to_wram_slots(self):
+        from dq5map import lorom
+        o = lorom(0x558000)
+        self.assertEqual(mm.index_entry(o, 0), (0x1E8000 << 3).to_bytes(3, 'little'))
+        self.assertEqual(mm.index_entry(o, 0x8000 * 8 + 3), (0x1F8000 << 3 | 3).to_bytes(3, 'little'))
+        with self.assertRaisesRegex(ValueError, '57'):
+            mm.index_entry(lorom(0x578000), 0)
+
+    def test_segments_sit_in_banks_the_hook_maps(self):
+        from dq5map import lorom
+        self.assertEqual(len(mm.BANKS), 32)
+        self.assertEqual(mm.BANKS[:0x1E], tuple(range(0x60, 0x7E)))
+        for lo, hi in mm.SEGMENTS:
+            for o in range(lorom(lo), lorom(hi - 1) + 1, 0x8000):
+                self.assertIn(o // 0x8000, mm.BANKS)
+        self.assertEqual(mm.HOOK_AT >> 16, mm.HEAD >> 16)
+        # dq5textwrite.separate_runs 는 다른 뱅크로 건너뛴 묶음만 다음 자리로 본다
+        for (_, hi), (lo, _) in zip(mm.SEGMENTS, mm.SEGMENTS[1:]):
+            self.assertNotEqual((hi - 1) >> 16, lo >> 16)
 
     def test_groups_refuse_overflow(self):
         with self.assertRaises(ValueError):
@@ -71,7 +91,7 @@ class LayoutTests(unittest.TestCase):
         self.assertEqual(bytes(d[b:b + 20]), blob[10:])
         for k, g in enumerate((0, 16, 32)):
             self.assertEqual(d[origin[k] + (starts[g] >> 3)], blob[starts[g] >> 3])
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, '메시지 010 부터 20바이트가 들어갈 곳이 없음'):
             mm.place(bytearray(0x400000), blob, starts, 48, ((0x618000, 0x618014),))
 
     def test_message_count_appends_gap_free_in_blocks_of_16(self):
@@ -113,7 +133,7 @@ class BuildTests(unittest.TestCase):
 
     def test_messages_decode_from_new_bank(self):
         from dq5hangul import decode_check
-        msgs = decode_check(self.out, mm.HEAD, mm.INDEX_BANK)
+        msgs = decode_check(self.out, mm.HEAD, mm.BANKS)
         for m, parts in mm.TEXTS.items():
             self.assertEqual(msgs[m], mm.codes(parts))
 
@@ -174,7 +194,7 @@ class SyntheticApplyTests(unittest.TestCase):
 
     def test_messages_round_trip_through_new_tree(self):
         from dq5hangul import decode_check
-        msgs = decode_check(self.out, mm.HEAD, mm.INDEX_BANK)
+        msgs = decode_check(self.out, mm.HEAD, mm.BANKS)
         self.assertEqual(len(msgs), mm.MESSAGES)
         for m, parts in mm.TEXTS.items():
             self.assertEqual(msgs[m], mm.codes(parts))
@@ -206,8 +226,13 @@ class SyntheticApplyTests(unittest.TestCase):
         from dq5map import lorom
         o = lorom(DECODER)
         self.assertEqual(self.out[o:o + 5], bytes((0x22, 0x00, 0x80, mm.HEAD >> 16, 0x60)))
+        from dq5textwrite import relocated, table_hook
+        stub, hook = table_hook(mm.HOOK_AT, mm.BANKS)
         o = lorom(WALK_INDEX_STUB)
-        self.assertEqual(self.out[o + 5:o + 7], bytes((0x09, mm.INDEX_BANK)))
+        self.assertEqual(self.out[o:o + len(stub)], stub)
+        o = lorom(mm.HOOK_AT)
+        self.assertEqual(self.out[o:o + len(hook)], hook)
+        self.assertEqual(relocated(self.out), (mm.HEAD, mm.BANKS))
         o = lorom(WALK_INDEX_CALL)
         self.assertEqual(self.out[o:o + 2], (WALK_INDEX_STUB & 0xFFFF).to_bytes(2, 'little'))
         h = lorom(mm.HEAD)
@@ -225,9 +250,29 @@ class SyntheticApplyTests(unittest.TestCase):
         self.assertEqual(load[1], mm.INDEX_AT >> 16)
         self.assertEqual([int.from_bytes(load[o:o + 2], 'little') for o in (5, 10, 15)],
                          [(mm.INDEX_AT & 0xFFFF) + k for k in range(3)])
-        msgs = decode_check(out, mm.HEAD, mm.INDEX_BANK, index=mm.INDEX_AT, count=mm.MESSAGES + 16)
+        msgs = decode_check(out, mm.HEAD, mm.BANKS, index=mm.INDEX_AT, count=mm.MESSAGES + 16)
         self.assertEqual(msgs[0xC81], mm.codes(extra[0xC81]))
         self.assertEqual(msgs[0xC82], [mm.END])
+
+    def test_groups_past_full_segments_land_in_the_fourth_bank(self):
+        """앞 자리가 차면 묶음이 55:8000~ 로 가고, 색인 뱅크 1E 를 거쳐 base_package 로 다시 풀린다."""
+        from dq5map import lorom
+        from dq5textwrite import base_package
+        extra = {m: [mm.PAUSE, '가나다라', mm.END] for m in range(0xC80, 0xCA0)}
+        tight = ((mm.BASE, mm.BASE + 0x400), (0x558000, 0x570000))
+        with mock.patch.object(mm, 'message', original), mock.patch.object(mm, 'SEGMENTS', tight):
+            out, info = mm.apply(self.rom, self.font, extra)
+        index = out[lorom(mm.INDEX_AT):lorom(mm.INDEX_AT) + (mm.MESSAGES + 32) // 16 * 3]
+        banks = {int.from_bytes(index[k:k + 3], 'little') >> 19 for k in range(0, len(index), 3)}
+        self.assertIn(0x1E, banks)
+        self.assertTrue(any(out[lorom(0x558000):lorom(0x558000) + 0x100]))
+        messages, _, _, extents, _ = base_package(out)
+        self.assertEqual(len(messages), mm.MESSAGES + 32)
+        self.assertEqual(messages[0xC9F], mm.codes(extra[0xC9F]))
+        self.assertEqual([a for a, _ in extents[2:]], [lorom(mm.BASE), lorom(0x558000)])
+        for m, parts in mm.TEXTS.items():
+            self.assertEqual(messages[m], mm.codes(parts))
+        self.assertTrue(any(line.startswith('메시지 자리 남은 바이트') for line in info))
 
     def test_rejects(self):
         from dq5hangul import WALK_INDEX_CALL

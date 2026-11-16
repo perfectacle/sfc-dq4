@@ -14,7 +14,7 @@ from dq5text import NODES_0, NODES_1, ROOT  # noqa: E402
 from dq5text import FONT_GROUPS, FONT_TABLE_OPERANDS, GLYPHS  # noqa: E402
 from dq5textwrite import (  # noqa: E402
     FORMAT, INDEX_LOAD, INDEX_LOAD_CODE, MAX_MESSAGES, base_package, compile_messages, decoded_messages, index_table,
-    overrides, parse_at, patch, tree, valid_message,
+    TABLE_HOOK_SIZE, overrides, parse_at, patch, relocated, table_hook, tree, valid_message,
 )
 
 
@@ -313,6 +313,39 @@ class TextWriteTests(unittest.TestCase):
         short[font_at + 5] = 0x08
         with self.assertRaisesRegex(ValueError, '글자 묶음 표의 글자 수'):
             base_package(bytes(short))
+
+    def test_table_hook_maps_index_banks(self):
+        """표 꼴 훅(24:9E07 → JSL 루틴, 색인 뱅크 32칸 표)을 OR 꼴과 같은 메시지로 읽는다."""
+        stub, hook = table_hook(0x5AFFC0, tuple(range(0x60, 0x7E)) + (0x55, 0x56))
+        self.assertEqual(stub, bytes.fromhex('20 8d 8c 22 c0 ff 5a 60 ea ea'))
+        self.assertEqual(hook[:TABLE_HOOK_SIZE], bytes.fromhex(
+            '08 c2 30 48 da a5 f2 29 1f 00 aa e2 20 bf db ff 5a 85 f2 fa c2 20 68 28 a5 f2 6b'))
+        self.assertEqual(hook[TABLE_HOOK_SIZE:], bytes(range(0x60, 0x7E)) + b'\x55\x56')
+        with self.assertRaises(ValueError):
+            table_hook(0x5AFFC0, tuple(0x60 | i for i in range(31)) + (0x7F,))
+        grown = [[i % 987, 0x1001] for i in range(MESSAGES + 32)]
+        rom = bytearray(rebuild(self.data, compile_messages(self.data, grown, '65:8000'), 4))
+        self.assertEqual(relocated(bytes(rom))[1], 0x60)
+        # 머리·색인·메시지를 65 에서 55 로 옮기고, 색인 뱅크 5 만 표에서 55 로 돌린다
+        old, new = lorom(0x658000), lorom(0x558000)
+        rom[new:new + 0x8000], rom[old:old + 0x8000] = rom[old:old + 0x8000], bytes(0x8000)
+        rom[lorom(DECODER) + 1:lorom(DECODER) + 4] = (0x558000).to_bytes(3, 'little')
+        rom[lorom(INDEX_LOAD) + 1] = 0x55
+        banks = [0x60 | i for i in range(30)] + [0x55, 0x56]
+        banks[5] = 0x55
+        stub, hook = table_hook(0x5AFFC0, banks)
+        rom[lorom(0x249E07):lorom(0x249E07) + len(stub)] = stub
+        rom[lorom(0x5AFFC0):lorom(0x5AFFC0) + len(hook)] = hook
+        self.assertEqual(relocated(bytes(rom)), (0x558000, tuple(banks)))
+        self.assertEqual(decoded_messages(bytes(rom)), grown)
+        bad = bytearray(rom)
+        bad[lorom(0x5AFFC0) + 7] = 0x09
+        with self.assertRaisesRegex(ValueError, '표 꼴 색인 훅이 아님'):
+            relocated(bytes(bad))
+        bad = bytearray(rom)
+        bad[lorom(0x5AFFC0) + TABLE_HOOK_SIZE + 3] = 0x7E
+        with self.assertRaisesRegex(ValueError, '7E·7F'):
+            relocated(bytes(bad))
 
     def test_malformed_tree_does_not_loop(self):
         manifest = compile_messages(self.data, [[0, 0x1001] for _ in range(MESSAGES)])

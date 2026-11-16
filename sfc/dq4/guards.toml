@@ -1736,6 +1736,36 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출�
 groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
+name = "dq4-msg-banks"
+why = "보행 메시지 색인 훅(24:9E07)이 표 꼴로 색인 뱅크 1E·1F 를 빈 뱅크 55·56 으로 돌려야 넷째 메시지 자리를 읽는다. 1장 롬의 묶음 셋을 55:8000·55→56 걸침·56:A000 으로 옮긴 시험 롬에서, 성 앞 「はなす」 와 탑 위 보스에게 거는 말의 메시지를 그 번호로 바꿔 끼워 훅 뒤 스트림 뱅크와 디코더가 돌려준 코드가 원래 메시지와 같아야 한다(OR 60 훅이면 7E:8000 을 읽어 실패)"
+paths = [
+  "sfc/dq4/tools/dq4msgbankcheck.py",
+  "sfc/dq4/tools/lua/dq4msgbank.lua",
+  "sfc/dq4/tools/dq4menumsg.py",
+  "sfc/dq5/tools/dq5textwrite.py",
+  "sfc/dq5/tools/dq5hangul.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4battlemsgcheck.py",
+  "sfc/dq4/tools/dq4readset.py",
+  "sfc/dq4/tools/lua/dq4readset.lua",
+  "sfc/dq5/tools/lua/dq5warp.lua",
+  "sfc/dq5/tools/dq5exitcheck.py",
+  "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4npccheck.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/lua/dq4battlemsgswap.lua",
+  "sfc/dq4/tools/lua/dq4holdwalk.lua",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/dq5npcrecordcheck.py",
+  "sfc/dq5/tools/lua/dq5npcrecordcheck.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4msgbankcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-msgbank"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
 name = "dq4-well-reset"
 why = "우물 바닥 스위치가 전멸·이어 하기 뒤 꺼져야 한다(FC $6E05). 전멸 장면은 1장 롬(서장 끝의 다시 시작 자리 36 그대로인 wipe-own 포함)에서 돌지만, 기록·리셋·이어 하기 장면은 1장 롬에 선실이 없어 groups.sfc 에서 돈다(25:8278 훅과 부르는 코드가 1장 롬과 같은지 보고 시작)"
 paths = [
