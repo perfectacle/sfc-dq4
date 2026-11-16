@@ -123,7 +123,7 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         self.jobs = jobs(self.text)
 
     def test_parser_sees_the_jobs(self):
-        self.assertEqual(set(self.jobs), {'build', 'rom', 'shard', 'report'})
+        self.assertEqual(set(self.jobs), {'build', 'rom', 'cold-build', 'build-verify', 'shard', 'report'})
         self.assertTrue(all(self.jobs.values()))
 
     def test_gate_is_manual_only(self):
@@ -162,9 +162,10 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
                 self.assertRegex(m[1], r'^[\w.-]+/[\w./-]+@[0-9a-f]{40}$', m[1])
 
     def test_roms_come_only_from_the_composite_action(self):
-        uses = [s for steps in self.jobs.values() for s in steps if './.github/actions/ci-roms' in s]
-        self.assertEqual(len(uses), sum('ci_artifact_check.py' in run_texts(s) for st in self.jobs.values() for s in st)
-                         + 1, '롬을 받는 잡마다(빌드 잡 + 올리는 잡) ci-roms 를 쓴다')
+        users = sorted(name for name, steps in self.jobs.items() if any('./.github/actions/ci-roms' in s for s in steps))
+        self.assertEqual(users, ['cold-build', 'rom', 'shard'])
+        for name in users:
+            self.assertEqual(sum('./.github/actions/ci-roms' in s for s in self.jobs[name]), 1, name)
         for f in (WORKFLOW, GATE):
             self.assertNotIn('ci_gate_setup.sh roms', f.read_text(encoding='utf-8'))
         action = ACTION.read_text(encoding='utf-8')
@@ -290,10 +291,8 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         for s in runs:
             self.assertIn('--exclude-needs "$LOCAL_NEEDS"', run_texts(s))
         self.assertRegex(self.text, r'LOCAL_NEEDS:\s*macos\n')
-        build = ''.join(self.jobs['rom'])
-        self.assertIn("DQ4_BUILD_CACHE: ${{ inputs.cache && format('{0}/work/cache', github.workspace) || 'off' }}", build)
         for s in self.jobs['rom'] + self.jobs['shard']:
-            if 'ship-cache' in s or 'unit-cache' in s or '--unit-slots' in s or 'guard-results-' in s:
+            if 'unit-cache' in s or '--unit-slots' in s or 'guard-results-' in s:
                 cond = with_value(s, 'if') or ''
                 self.assertIn('inputs.cache', cond, s)
 
@@ -326,6 +325,48 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
             self.assertEqual(with_value(s, 'prefix'), f'${{{{ steps.slots.outputs.p{i} }}}}')
             self.assertEqual(with_value(s, 'name'), f'unit-{i}')
             self.assertEqual(with_value(s, 'if'), f"steps.slots.outputs.p{i} != ''")
+
+    def test_ship_rom_uses_the_build_caches_in_every_mode(self):
+        """rom 잡은 관문에서도 빌드 단계 캐시를 쓴다. 대신 같은 실행의 cold-build 와 바이트를 견준다."""
+        build = ''.join(self.jobs['rom'])
+        self.assertIn('DQ4_BUILD_CACHE: ${{ github.workspace }}/work/cache', build)
+        ship = [s for s in self.jobs['rom'] if './.github/actions/ship-cache' in s]
+        self.assertEqual(len(ship), 2)
+        for s in ship:
+            self.assertIsNone(with_value(s, 'if'), s)
+        self.assertIn('tools/ci_cache.py digest --dir "work/$VARIANT" --variant "$VARIANT" --kind cached', build)
+
+    def test_cold_build_runs_with_every_cache_off_beside_the_shards(self):
+        cold = self.jobs['cold-build']
+        text = ''.join(cold)
+        self.assertRegex(self.text, r"\n  cold-build:\n    needs: build\n    if: inputs.mode == 'release'\n")
+        for banned in ('./.github/actions/ci-tools', './.github/actions/enc-cache', './.github/actions/ship-cache',
+                       'actions/cache', 'DQ4_PREBUILT', 'ci_cache.py ship-build', 'ci_cache.py prebuilt'):
+            self.assertNotIn(banned, text, banned)
+        self.assertIn('enable-cache: false', text)
+        self.assertIn('rm -rf assets/sfc/dq4/cache/sound', text)
+        self.assertIn('tools/ci_gate_setup.sh tools', text)
+        build = next(s for s in cold if 'dq4build.py' in run_texts(s))
+        for line in ("DQ4_BUILD_CACHE: 'off'", "DQ4_SOUND_CACHE: 'off'", "DQ4_READSET: 'off'"):
+            self.assertIn(line, build)
+        self.assertIn('dq4build.py --out work/cold/ch1 >', run_texts(build))
+        self.assertIn('DQ4_NATIVE=off uv run --frozen python sfc/dq4/tools/dq4build.py --out work/cold/ch2 --chapter2',
+                      run_texts(build))
+        keys = next(s for s in cold if 'dq4buildkeys.py' in run_texts(s))
+        self.assertIn('dq4buildkeys.py --chapter2', run_texts(keys))
+        self.assertIn('--kind cold', text)
+        # 무캐시 빌드의 변형(work/cold/ch1·ch2) = rom 행렬의 변형
+        self.assertEqual(re.findall(r'^\s+- variant: (\S+)$', self.text, re.M), ['ch1', 'ch2'])
+
+    def test_build_verify_and_report_fail_on_other_bytes(self):
+        self.assertRegex(self.text, r'\n  build-verify:\n    needs: \[build, rom, cold-build\]\n')
+        self.assertIn('tools/ci_cache.py verify-build work/ci-digest', ''.join(self.jobs['build-verify']))
+        self.assertRegex(self.text, r'\n  report:\n    needs: \[build, shard, build-verify\]\n')
+        summary = next(s for s in self.jobs['report'] if '--ci-summary' in run_texts(s))
+        self.assertIn('if [ "$MODE" = release ]; then need=(--require-build); fi', run_texts(summary))
+        shard = ''.join(self.jobs['shard'])
+        self.assertIn('--kind "shard-$K"', shard)
+        self.assertIn('cp "$f" work/ci-upload/', shard)
 
     def test_ship_roms_are_built_once_for_every_guard_variant(self):
         """가드가 부르는 dq4build.py 의 인자 조합(--out 빼고)은 모두 rom 잡 행렬에 있고, 조각은 빌드하지 않고

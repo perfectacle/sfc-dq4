@@ -19,6 +19,10 @@ ship-cache)이 부른다. 형식: sfc/dq4/docs/dq4-release-check-format.md 「CI
                                                            DQ4_PREBUILT 의 같은 빌드를 복사, 없으면 dq4build.py
   python tools/ci_cache.py slots --file F --count N        guards.py --unit-slots 목록을 p0=…·d0=… 줄로(GITHUB_OUTPUT 용,
                                                            빈 자리는 빈 값). composite action unit-cache 가 부른다
+  python tools/ci_cache.py digest --dir D --variant V --kind K --out FILE
+                                                           빌드 폴더 D 의 파일마다 SHA-256(롬 바이트는 담지 않음)
+  python tools/ci_cache.py verify-build DIR                DIR 아래 digest 들을 견줌: 변형마다 캐시 빌드(rom 잡)·조각이 받은 것이
+                                                           무캐시 빌드(cold 잡)와 바이트가 같아야 0. 단계별 표(Markdown)
 """
 import argparse
 import hashlib
@@ -282,6 +286,109 @@ def prebuilt(out, extra):
     return subprocess.run([sys.executable, str(DQ4_TOOLS / 'dq4build.py'), '--out', str(out), *extra]).returncode
 
 
+DIGEST_FORMAT = 'dq4-build-digest/1'
+# 빌드 폴더 맨 위 이름 → 그것을 쓰는 빌드 단계(dq4build.build 차례). 대조 표를 단계 차례로 찍는다
+STAGE_OF = (('titlelayers', ('title',)), ('chapter1 messages', ('messages.json',)),
+            ('titlelayerpatch', ('title.sfc', 'title.ips', 'title.json')),
+            ('overture build', ('overture.sfc', 'overture.ips', 'overture.json', 'overture.txt')),
+            ('menupatch build', ('menu.sfc', 'menu.ips')), ('chapter1 build', ('dq4-ch1.sfc', 'dq4-ch1.ips')),
+            ('soundset·sparfx', ('dq4-ch1-sound.sfc', 'dq4-ch1-sound.ips', 'dq4-ch1-sound.json')),
+            ('people', ('leader', 'dq4-ch1-full.sfc')), ('ledger', ('ledger.json',)))
+# 견줄 때 「무캐시 빌드」 쪽 종류. 나머지(cached, shard-k)는 모두 이것과 같아야 한다
+COLD = 'cold'
+
+
+def digest(folder, variant, kind):
+    """빌드 폴더의 파일마다 SHA-256. 미리 만든 빌드 표시(MANIFEST)는 뺀다(롬 잡과 무캐시 잡이 같은 커밋이라 같지만,
+    빌드 결과가 아니다)."""
+    folder = Path(folder)
+    files = {}
+    for f in files_of(folder):
+        rel = f.relative_to(folder).as_posix()
+        if rel == MANIFEST:
+            continue
+        with f.open('rb') as fh:
+            files[rel] = hashlib.file_digest(fh, 'sha256').hexdigest()
+    return {'format': DIGEST_FORMAT, 'variant': variant, 'kind': kind, 'commit': head_commit(), 'files': files}
+
+
+def load_digests(folder):
+    """folder 아래 digest JSON 들(DIGEST_FORMAT)."""
+    out = []
+    for f in sorted(Path(folder).rglob('*.json')):
+        try:
+            data = json.loads(f.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        if isinstance(data, dict) and data.get('format') == DIGEST_FORMAT:
+            out.append(data)
+    return out
+
+
+def stage_name(rel):
+    top = rel.split('/')[0]
+    return next((name for name, tops in STAGE_OF if top in tops), '기타')
+
+
+def stage_hashes(files):
+    """{단계: 그 단계 파일들(경로·해시)을 묶은 해시}."""
+    groups = {}
+    for rel in sorted(files):
+        groups.setdefault(stage_name(rel), []).append(f'{rel}\0{files[rel]}')
+    return {k: hashlib.sha256('\n'.join(v).encode()).hexdigest() for k, v in groups.items()}
+
+
+def verify_build(digests, variants=('ch1', 'ch2'), need_cached=True):
+    """(Markdown, 같은가). 변형마다 무캐시 빌드가 하나 있어야 하고, 캐시 빌드(need_cached 면 꼭)와 조각이 받은 것은 모두
+    그것과 파일 목록·바이트가 같아야 한다. 커밋도 모두 같아야 한다."""
+    lines, ok = ['## 캐시 빌드와 무캐시 빌드 대조', ''], True
+    commits = {d['commit'] for d in digests}
+    if len(commits) > 1:
+        lines.append(f'- **커밋이 서로 다름**: {sorted(commits)}')
+        ok = False
+    for v in variants:
+        mine = [d for d in digests if d['variant'] == v]
+        cold = [d for d in mine if d['kind'] == COLD]
+        others = [d for d in mine if d['kind'] != COLD]
+        if len(cold) != 1:
+            lines.append(f'- {v}: **무캐시 빌드 결과가 {len(cold)}개**(하나여야 함)')
+            ok = False
+            continue
+        if need_cached and not any(d['kind'] == 'cached' for d in others):
+            lines.append(f'- {v}: **캐시 빌드 결과가 없음**')
+            ok = False
+        ref = cold[0]['files']
+        bad = [d for d in others if d['files'] != ref]
+        kinds = sorted({d['kind'] for d in others})
+        if not bad:
+            rom = next((n for n in FINAL_ROMS if n in ref), None)
+            lines.append(f'- {v}: 같음(파일 {len(ref)}개, {rom} SHA-256 `{ref.get(rom, "-")[:16]}`, '
+                         f'견준 것 {", ".join(kinds) or "-"})')
+            continue
+        ok = False
+        lines.append(f'- {v}: **캐시가 무캐시 빌드와 다른 롬을 냈다 — 캐시 키에 빠진 입력**(다른 것 '
+                     f'{", ".join(sorted({d["kind"] for d in bad}))})')
+        lines += ['', f'| 단계 | 무캐시 | ' + ' | '.join(d['kind'] for d in bad) + ' |',
+                  '| --- | --- |' + ' --- |' * len(bad)]
+        cold_st = stage_hashes(ref)
+        bad_st = [stage_hashes(d['files']) for d in bad]
+        order = [name for name, _ in STAGE_OF] + ['기타']
+        for name in order:
+            if name not in cold_st and not any(name in b for b in bad_st):
+                continue
+            cells = []
+            for b in bad_st:
+                got = b.get(name)
+                cells.append('같음' if got == cold_st.get(name) else f'**{(got or "없음")[:12]}**')
+            lines.append(f'| {name} | `{cold_st.get(name, "없음")[:12]}` | ' + ' | '.join(cells) + ' |')
+        for d in bad:
+            diff = sorted(k for k in set(ref) | set(d['files']) if ref.get(k) != d['files'].get(k))
+            lines += ['', f'{d["kind"]} 에서 다른 파일({len(diff)}개): ' + ', '.join(f'`{k}`' for k in diff[:20])
+                      + (' …' if len(diff) > 20 else '')]
+        lines.append('')
+    return '\n'.join(lines) + '\n', ok
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -306,6 +413,13 @@ def main():
     p = sub.add_parser('slots')
     p.add_argument('--file', required=True)
     p.add_argument('--count', type=int, required=True)
+    p = sub.add_parser('digest')
+    p.add_argument('--dir', required=True)
+    p.add_argument('--variant', required=True)
+    p.add_argument('--kind', required=True, help=f'{COLD}(무캐시 빌드)·cached(rom 잡)·shard-k(조각이 받은 것)')
+    p.add_argument('--out', required=True)
+    p = sub.add_parser('verify-build')
+    p.add_argument('folder')
     a, extra = ap.parse_known_args()
     if a.cmd not in ('ship-build', 'prebuilt') and extra:
         ap.error(f'모르는 인자 {extra}')
@@ -321,6 +435,21 @@ def main():
         sys.exit(prebuilt(a.out, extra))
     elif a.cmd == 'slots':
         print('\n'.join(slots(a.file, a.count)))
+    elif a.cmd == 'digest':
+        if not any(Path(a.dir, n).is_file() for n in FINAL_ROMS):
+            raise SystemExit(f'::error::{a.dir} 에 빌드한 롬이 없음')
+        doc = digest(a.dir, a.variant, a.kind)
+        Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(a.out).write_text(json.dumps(doc, indent=1) + '\n', encoding='utf-8')
+        print(f'{a.dir}: 파일 {len(doc["files"])}개 → {a.out}')
+    elif a.cmd == 'verify-build':
+        text, ok = verify_build(load_digests(a.folder))
+        print(text, end='')
+        summary = os.environ.get('GITHUB_STEP_SUMMARY')
+        if summary:
+            with open(summary, 'a', encoding='utf-8') as f:
+                f.write(text)
+        sys.exit(0 if ok else 1)
     else:
         ship_build(a.out, a.chunks, extra)
 

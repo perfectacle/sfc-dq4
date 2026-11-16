@@ -382,6 +382,15 @@ class MainTests(unittest.TestCase):
                 self.run_main(Path(tmp), '--budget', 'nonsense')
 
 
+class SoundCacheTests(unittest.TestCase):
+    def test_cache_folder_defaults_to_the_asset_repository_and_turns_off(self):
+        with mock.patch.dict('os.environ', {'DQ4_SOUND_CACHE': ''}):
+            self.assertEqual(soundset.sound_cache('/a'), Path('/a/sfc/dq4/cache/sound'))
+            self.assertEqual(soundset.sound_cache('/a', Path('/c')), Path('/c'))
+        with mock.patch.dict('os.environ', {'DQ4_SOUND_CACHE': 'off'}):
+            self.assertIsNone(soundset.sound_cache('/a', Path('/c')))
+
+
 class ScorePathAndProvisionalMapTests(unittest.TestCase):
     def test_score_path_needs_exactly_one_file(self):
         with tempfile.TemporaryDirectory() as tmp:

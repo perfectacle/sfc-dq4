@@ -25,12 +25,17 @@ import time
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 TOOL_DIRS = (HERE, ROOT / 'sfc' / 'dq5' / 'tools', ROOT / 'fc' / 'dq4' / 'tools')
+# 도구가 이름으로 읽는 저장소 자료 파일 자리(도구 폴더 밖). 'adopt.tsv' 같은 이름 문자열을 여기서도 찾는다
+DATA_DIRS = (ROOT / 'nds' / 'dq4' / 'tables',)
 FILE_NAME = re.compile(r'[\w.-]+\.\w+')
 DIR_NAME = re.compile(r'[A-Za-z]\w{2,}')
 # 도구가 결과를 쓰는 인자. 이 뒤의 경로는 키에 넣지 않고(빌드마다 임시 폴더가 다름) 결과로 저장한다.
 OUT_FLAGS = ('-o', '--out', '--ips', '--report')
 # 도구가 읽는 환경 변수. 값이 가리키는 파일·폴더 내용을 키에 넣는다
-ENV_INPUTS = ('ASAR', 'DQ4_GALMURI', 'NDS_FS')
+ENV_INPUTS = ('ASAR', 'DQ4_GALMURI', 'NDS_FS', 'DQ4_ASSETS')
+# 폴더 전체 대신 이 아래 폴더만 키에 넣는 환경 변수(자원 저장소는 커서 통째로 해시하지 않는다). 도구가 그 밖을 읽으면
+# test_dq4buildcachekeys 가 잡는다
+ENV_SUBDIRS = {'DQ4_ASSETS': ('nds/dq4/monster/pose',)}
 # 켜면 도구가 출력 인자 밖에 파일을 쓰는 환경 변수. 켜져 있으면 캐시하지 않는다
 ENV_OUTPUTS = ('DQ4_NAMEENTRY_SYMBOLS', 'DQ4_WINDOWNAME_SYMBOLS')
 # 이만큼 쓰이지 않은 칸은 새 칸을 넣을 때 지운다
@@ -39,7 +44,7 @@ KEEP_SECONDS = 7 * 24 * 3600
 
 @functools.cache
 def _resolve(name):
-    for d in TOOL_DIRS:
+    for d in TOOL_DIRS + DATA_DIRS:
         if (d / name).is_file():
             return d / name
     return None
@@ -94,12 +99,10 @@ def sources(*entries):
 @functools.cache
 def _toolkit_hash():
     """설치된 kr_patch 소스. 편집 설치나 워크트리마다 다른 .venv 도 키를 나누게 uv.lock 대신 실제 파일을 본다."""
-    try:
-        import kr_patch
-    except ImportError:
+    base = _toolkit_dir()
+    if base is None:
         return b''
     h = hashlib.sha256()
-    base = Path(kr_patch.__file__).parent
     for path in sorted(base.rglob('*.py')):
         h.update(str(path.relative_to(base)).encode() + b'\0' + _digest(path))
     return h.digest()
@@ -127,6 +130,7 @@ def _strings(doc):
 
 
 def _content(path, h, seen):
+    """path(파일·폴더) 내용을 h 에 넣는다. seen 에는 내용을 넣은 파일·폴더의 실제 경로가 남는다(key_inputs)."""
     path = path.resolve()
     if path in seen:
         return
@@ -155,18 +159,22 @@ def _content(path, h, seen):
                 break
 
 
-def _key(tool, args):
-    """(키, 출력 경로). --out=경로·-o경로 처럼 붙여 쓴 출력은 알아보지 못하니 None(캐시하지 않음)."""
+def _key(tool, args, seen=None):
+    """(키, 출력 경로). --out=경로·-o경로 처럼 붙여 쓴 출력은 알아보지 못하니 None(캐시하지 않음).
+    seen 을 주면 인자·환경 변수에서 내용을 넣은 파일·폴더가 담긴다."""
     if any(a.startswith(tuple(f + '=' for f in OUT_FLAGS)) or (a.startswith('-o') and a != '-o') for a in args):
         return None, []
     if any(os.environ.get(name) for name in ENV_OUTPUTS):
         return None, []
+    seen = set() if seen is None else seen
     h = hashlib.sha256(_tool_hash(tool).encode() + Path(tool).name.encode())
     for name in ENV_INPUTS:
         value = os.environ.get(name, '')
         h.update(f'\0env {name}={value}'.encode())
-        if value and Path(value).exists():
-            _content(Path(value), h, set())
+        for part in ENV_SUBDIRS.get(name, ('',)) if value else ():
+            h.update(f'\0sub {part}'.encode())
+            if (Path(value) / part).exists():
+                _content(Path(value) / part, h, seen)
     outs = []
     for i, a in enumerate(args):
         if i and args[i - 1] in OUT_FLAGS:
@@ -175,10 +183,34 @@ def _key(tool, args):
         elif (os.sep in a or FILE_NAME.fullmatch(a)) and Path(a).exists():
             # 임시 폴더 경로는 빌드마다 달라 이름과 내용만 넣는다
             h.update(b'\0file' + Path(a).name.encode())
-            _content(Path(a), h, set())
+            # 인자마다 따로 센다: 두 인자가 같은 파일을 가리켜도 둘 다 내용을 넣는다
+            one = set()
+            _content(Path(a), h, one)
+            seen |= one
         else:
             h.update(b'\0arg' + a.encode())
     return h.hexdigest()[:40], outs
+
+
+def _toolkit_dir():
+    try:
+        import kr_patch
+    except ImportError:
+        return None
+    return Path(kr_patch.__file__).resolve().parent
+
+
+def key_inputs(tool, args):
+    """키가 내용을 담는 것: (파일·폴더 실제 경로 집합, 툴킷 폴더(그 안의 .py 만 키에 듦), 환경 변수 이름).
+    폴더는 그 아래 파일 전부가 든다. 파이썬 판·uv.lock(설치된 다른 패키지)도 키에 들지만 여기 적지 않는다.
+    test_dq4buildcachekeys 가 빌드 단계를 돌리며 실제로 연 파일·읽은 환경 변수를 이것과 맞춰 본다."""
+    tool = Path(tool).resolve()
+    seen = set()
+    for path in sources(tool):
+        seen.add(path.resolve())
+    seen.add((ROOT / 'uv.lock').resolve())
+    _key(tool, [str(a) for a in args], seen)
+    return seen, _toolkit_dir(), ENV_INPUTS + ENV_OUTPUTS
 
 
 @functools.cache

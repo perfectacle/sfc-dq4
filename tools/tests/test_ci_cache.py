@@ -135,6 +135,48 @@ class CiCacheTest(unittest.TestCase):
             self.quiet(ci_cache.prebuilt, out, ['--chapter2'])           # 커밋이 다름
             self.assertTrue(run.called)
 
+    def _build(self, name, rom=b'rom', leader=b'l'):
+        out = self.tmp / name
+        (out / 'leader').mkdir(parents=True)
+        (out / 'dq4-ch1-full.sfc').write_bytes(rom)
+        (out / 'dq4-ch1.sfc').write_bytes(b'ch1')
+        (out / 'leader' / 'x.bin').write_bytes(leader)
+        (out / ci_cache.MANIFEST).write_text('{"commit": "x"}')
+        return out
+
+    def test_digest_hashes_every_build_file_but_the_prebuilt_mark(self):
+        doc = ci_cache.digest(self._build('a'), 'ch1', 'cold')
+        self.assertEqual(sorted(doc['files']), ['dq4-ch1-full.sfc', 'dq4-ch1.sfc', 'leader/x.bin'])
+        self.assertEqual((doc['variant'], doc['kind'], doc['format']), ('ch1', 'cold', ci_cache.DIGEST_FORMAT))
+        self.assertNotIn('rom', str(doc['files'].values()))
+
+    def test_verify_build_needs_every_kind_to_match_the_cold_build(self):
+        cold = ci_cache.digest(self._build('cold'), 'ch1', 'cold')
+        same = ci_cache.digest(self._build('cached'), 'ch1', 'cached')
+        text, ok = ci_cache.verify_build([cold, same], variants=('ch1',))
+        self.assertTrue(ok, text)
+        bad = ci_cache.digest(self._build('shard', leader=b'other'), 'ch1', 'shard-2')
+        text, ok = ci_cache.verify_build([cold, same, bad], variants=('ch1',))
+        self.assertFalse(ok)
+        self.assertIn('캐시 키에 빠진 입력', text)
+        # 단계 표에서 다른 것은 인물 단계뿐
+        self.assertRegex(text, r'\| people \| `[0-9a-f]{12}` \| \*\*[0-9a-f]{12}\*\* \|')
+        self.assertRegex(text, r'\| chapter1 build \| `[0-9a-f]{12}` \| 같음 \|')
+        self.assertIn('`leader/x.bin`', text)
+        # 무캐시 빌드나 캐시 빌드가 빠져도, 다른 변형이 비어도 통과가 아니다
+        self.assertFalse(ci_cache.verify_build([same], variants=('ch1',))[1])
+        self.assertFalse(ci_cache.verify_build([cold], variants=('ch1',))[1])
+        self.assertFalse(ci_cache.verify_build([cold, same])[1])
+        self.assertFalse(ci_cache.verify_build([cold, dict(same, commit='other')], variants=('ch1',))[1])
+
+    def test_load_digests_reads_only_digest_files(self):
+        import json
+        (self.tmp / 'd' / 'sub').mkdir(parents=True)
+        (self.tmp / 'd' / 'sub' / 'a.json').write_text(json.dumps(ci_cache.digest(self._build('a'), 'ch1', 'cold')))
+        (self.tmp / 'd' / 'shard-1.json').write_text('{"commit": "c", "rows": []}')
+        (self.tmp / 'd' / 'bad.json').write_text('{')
+        self.assertEqual([d['kind'] for d in ci_cache.load_digests(self.tmp / 'd')], ['cold'])
+
     def test_unpack_without_a_restored_tar(self):
         self.quiet(ci_cache.unpack, 'none', self.tmp / 'd', '')
         self.assertFalse((self.tmp / 'd').exists())
