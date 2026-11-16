@@ -6,8 +6,10 @@ DQ5 트랙 dq5hangul.py retree(2MB, 뱅크 30)와 같은 방법을 4MB 통합 �
   5A:8000~  보행 모드 디코더(24:9E02~9E46 사본, 표 피연산자와 끝 RTL 만 바꿈), 비트 마스크, 트리 1·0, 폰트 묶음 표
   64:C400~  메시지 3,200개(와 덧붙인 것). 뱅크 69 끝까지. 3200 이상을 덧붙이면 색인 표는 59:8000
   24:9E02   JSL 5A:8000 / RTS
-  24:9E07   JSR 8C8D / LDA $F2 / ORA #$60 / STA $F2 / RTS — 색인은 21비트라 뱅크를 60 아래로 적고 풀 때 OR 한다.
-            24:8C8D 는 전투 메시지(24:8C60)도 부르므로 그 안은 고치지 않는다
+  24:9E07   JSR 8C8D / JSL 5A:FFC0 / RTS — 색인은 21비트라 뱅크를 0~1F 로 적고, 훅이 32칸 표로 실제 뱅크를 찾는다
+            (dq5textwrite.table_hook). 0~1D 는 60~7D, 1E·1F 는 55·56. 24:8C8D 는 전투 메시지(24:8C60)도 부르므로
+            그 안은 고치지 않는다
+  55:8000~  넷째 메시지 자리(56 끝까지)
   24:8BD7   JSR 8C8D → JSR 9E07
   24:AF1E   새 색인(3,200개일 때). 덧붙이면 24:8BC3 의 색인 읽기 뱅크·주소를 머리의 표로 바꾼다
   24:A63C·A660·A6C2·A673  폰트 묶음 표 피연산자 → 65 의 새 표
@@ -31,7 +33,7 @@ from dq5hangul import (DECODER, DECODER_END, MASK_OPERAND, MESSAGES, NODES_0_OPE
                        encode, glyph_bits)
 from dq5map import Rom, lorom  # noqa: E402
 from dq5text import FONT_GROUPS, FONT_TABLE_OPERANDS, GLYPHS, INDEX, font_groups, message  # noqa: E402
-from dq5textwrite import INDEX_LOAD, INDEX_LOAD_CODE, MAX_MESSAGES  # noqa: E402
+from dq5textwrite import INDEX_LOAD, INDEX_LOAD_CODE, MAX_MESSAGES, table_hook  # noqa: E402
 
 # 디코더 사본·트리 표·글자 묶음 표(머리)는 HEAD 뱅크에, 메시지는 BASE~LIMIT 에 둔다. 디코더가 PHK/PLB 로 자기 뱅크에서
 # 트리를 읽으므로 머리는 한 뱅크 안이어야 한다. 머리(약 10KB)를 메시지 덩어리 앞에 두면 3장 대사까지 넣은 뒤 덩어리가
@@ -42,9 +44,14 @@ BASE = 0x64C400
 LIMIT = 0x6A0000
 # 덩어리가 차면 다음 16개 묶음부터 이어 쓰는 자리. 61 은 메뉴 빌드가 61:A72E 까지 쓰고 그 뒤가 비어 있다(늘 몫으로 띄움).
 # 셋째 자리 71:A000~ 은 곡 단계(dq4soundpatch)가 71:8000~93FF 의 고정 자리만 쓰고 비어 있다. 곡 단계는 메시지 뒤에
-# 비었는지 보며 쓰므로 그 자리가 이쪽으로 늘면 곡 빌드가 멈춘다. 색인이 60 기준 21비트라 60~7F 안이어야 한다.
-SEGMENTS = ((BASE, LIMIT), (0x61B000, 0x620000), (0x71A000, 0x720000))
-INDEX_BANK = 0x60
+# 비었는지 보며 쓰므로 그 자리가 이쪽으로 늘면 곡 빌드가 멈춘다. 넷째 55~56 은 3장 롬까지 뱅크 전체가 비어 있다.
+# 자리는 BANKS 가 실제 뱅크로 바꿔 주는 뱅크 안이어야 한다.
+SEGMENTS = ((BASE, LIMIT), (0x61B000, 0x620000), (0x71A000, 0x720000), (0x558000, 0x570000))
+# 색인 뱅크(0~1F) → 실제 뱅크. 7E·7F 는 WRAM 이라 그 두 칸을 빈 뱅크 55·56 으로 돌린다. 둘이 이어져 있어 디코더가 뱅크 끝에서
+# 다음 뱅크로 넘어가도(INC $F2) 맞다.
+BANKS = tuple(0x60 | i for i in range(0x1E)) + (0x55, 0x56)
+# 표 꼴 훅(루틴과 표, 59바이트). 머리(HEAD) 뱅크의 끝이라 머리가 자라도 이 앞에서 멈춘다.
+HOOK_AT = 0x5AFFC0
 # 3200 이상을 덧붙일 때의 색인(16개마다 3바이트). 메시지 덩어리(BASE~LIMIT)가 3장 대사까지 차서 덩어리 밖에 둔다.
 # 24:8BC3 이 DB 를 이 뱅크로 두고 abs 로 읽으므로(64·65 와 같이 WRAM 거울 없는 뱅크) 59 도 같다.
 INDEX_AT = 0x598000
@@ -164,10 +171,12 @@ def plan_groups(sizes, start=GLYPH_START):
 
 
 def index_entry(stream, bit):
-    """메시지 시작 비트 → 색인 3바이트. stream 은 메시지 첫 바이트의 파일 오프셋. 24:9E07 이 뱅크에 INDEX_BANK 를 OR 한다."""
+    """메시지 시작 비트 → 색인 3바이트. stream 은 메시지 첫 바이트의 파일 오프셋. 24:9E07 훅이 색인 뱅크를 BANKS 로 바꾼다."""
     off = stream + (bit >> 3)
-    cpu = (off // 0x8000) << 16 | 0x8000 | off % 0x8000
-    return cpu_to_bytes((cpu - (INDEX_BANK << 16)) << 3 | bit & 7)
+    bank = off // 0x8000
+    if bank not in BANKS:
+        raise ValueError(f'{bank:02X}: 색인 뱅크 표(BANKS)에 없는 뱅크')
+    return cpu_to_bytes((BANKS.index(bank) << 16 | 0x8000 | off % 0x8000) << 3 | bit & 7)
 
 
 def place(d, blob, starts, total, segments=SEGMENTS):
@@ -194,8 +203,24 @@ def place(d, blob, starts, total, segments=SEGMENTS):
         k = j
     if k < len(groups):
         left = len(blob) - (starts[groups[k]] >> 3)
-        raise ValueError(f'메시지가 자리를 넘음(묶음 {k} 부터 {left}바이트 남음)')
+        room = sum(lorom(hi - 1) + 1 - lorom(lo) for lo, hi in segments)
+        raise ValueError(f'메시지가 자리를 넘음: 메시지 {groups[k]:03X} 부터 {left}바이트가 들어갈 곳이 없음'
+                         f'(메시지 {len(blob)}바이트, 자리 {room}바이트, {segments_text(segments)})')
     return origin
+
+
+def segments_text(segments):
+    return ', '.join(f'{lo >> 16:02X}:{lo & 0xFFFF:04X}~' for lo, _ in segments)
+
+
+def free_bytes(d, segments=SEGMENTS):
+    """자리마다 마지막 0 아닌 바이트 뒤로 남은 바이트 수."""
+    out = []
+    for lo, hi in segments:
+        a, b = lorom(lo), lorom(hi - 1) + 1
+        used = next((i for i in range(b - 1, a - 1, -1) if d[i]), a - 1) + 1
+        out.append(b - used)
+    return out
 
 
 def message_count(ids):
@@ -259,12 +284,13 @@ def apply(data, font, extra=None):
     t1 = b''.join(n[0].to_bytes(2, 'little') for n in nodes)
     t0 = b''.join(n[1].to_bytes(2, 'little') for n in nodes)
     head = bytes(decoder) + mask + t1 + t0 + bytes(table)
-    if (HEAD & 0xFFFF) + len(head) > 0x10000:
-        raise ValueError(f'디코더와 트리 표가 뱅크 {HEAD >> 16:02X} 를 넘음')
+    # 머리 끝 뒤에는 0 인 5바이트가 있어야 base_package 가 글자 묶음 표의 끝을 찾는다
+    if HEAD + len(head) + 5 > HOOK_AT:
+        raise ValueError(f'디코더와 트리 표가 {HOOK_AT:06X} 의 색인 훅에 닿음')
     if any(d[lorom(HEAD):lorom(HEAD) + len(head)]):
         raise ValueError(f'{HEAD:06X}~ 가 비어 있지 않음')
     d[lorom(HEAD):lorom(HEAD) + len(head)] = head
-    origin = place(d, bytes(blob), starts, total)
+    origin = place(d, bytes(blob), starts, total, SEGMENTS)
     index = b''.join(index_entry(origin[m // 16], starts[m]) for m in range(0, total, 16))
     index_table = index_at if grown else INDEX
     if grown and ((INDEX_AT & 0xFFFF) + len(index) > 0x10000 or any(d[lorom(INDEX_AT):lorom(INDEX_AT) + len(index)])):
@@ -280,7 +306,10 @@ def apply(data, font, extra=None):
             raise ValueError(f'{INDEX_LOAD:06X}: 예상한 원래 바이트가 아님')
         d[p:p + len(load)] = load
 
-    stub = bytes((0x20, 0x8D, 0x8C, 0xA5, 0xF2, 0x09, INDEX_BANK, 0x85, 0xF2, 0x60))
+    stub, hook = table_hook(HOOK_AT, BANKS)
+    if any(d[lorom(HOOK_AT):lorom(HOOK_AT) + len(hook)]):
+        raise ValueError(f'{HOOK_AT:06X}~ 가 비어 있지 않음')
+    d[lorom(HOOK_AT):lorom(HOOK_AT) + len(hook)] = hook
     for addr, new, old in (
             (DECODER, bytes((0x22, *cpu_to_bytes(HEAD), 0x60)), bytes.fromhex('088b4bab')),
             (WALK_INDEX_STUB, stub, bytes.fromhex('20c21064f4a2ba07e220')),
@@ -295,12 +324,14 @@ def apply(data, font, extra=None):
         d[lorom(a):lorom(a) + 3] = cpu_to_bytes(font_at + k)
 
     out = bytes(d)
-    again = decode_check(out, HEAD, INDEX_BANK, index=index_table, count=total)
+    again = decode_check(out, HEAD, BANKS, index=index_table, count=total)
     for m in range(total):
         if again[m] != msgs[m]:
             raise ValueError(f'메시지 {m:03X}: 다시 풀기가 다름')
     info = [(f'잎 {len(tree)}, 노드 {len(nodes)}, 최장 부호 {max(map(len, tree.values()))}비트, '
              f'메시지 {len(blob)}바이트 {BASE:06X}~ 부터 {len(set(origin))}곳(머리 {len(head)}바이트 {HEAD:06X}~)'),
+            '메시지 자리 남은 바이트 ' + ', '.join(f'{lo >> 16:02X}:{lo & 0xFFFF:04X}~ {n}'
+                                            for (lo, _), n in zip(SEGMENTS, free_bytes(out, SEGMENTS))),
             '글자 묶음 ' + ', '.join(f'{n}자 {w}×{h} {at:06X}' for n, w, h, at in groups)]
     return out, info
 

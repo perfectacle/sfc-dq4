@@ -380,7 +380,8 @@ def wintest(data):
 
 def decode_check(data, decoder=None, bank_mask=0x20, with_end=False, index=INDEX, count=MESSAGES):
     """디코더의 트리 피연산자와 색인을 따라 메시지 전체를 푼다. 기본값은 retree 배치다.
-    index·count 는 색인 표 CPU 주소와 메시지 수(16의 배수)다.
+    index·count 는 색인 표 CPU 주소와 메시지 수(16의 배수)다. bank_mask 는 색인 뱅크(0~1F)에 OR 할 값, 또는
+    색인 뱅크를 실제 뱅크로 바꾸는 32칸 표(dq5textwrite 의 표 꼴 훅)다.
     with_end 면 (메시지, 마지막 메시지의 마지막 비트가 든 바이트 다음 CPU 주소)를 돌려준다."""
     rom = Rom(data)
     decoder = NEW_BANK << 16 | 0x8000 if decoder is None else decoder
@@ -392,7 +393,11 @@ def decode_check(data, decoder=None, bank_mask=0x20, with_end=False, index=INDEX
     remaining_bits = len(data) * 8
     for g in range(count // 16):
         v = rom.u24(index + g * 3)
-        addr, bit = (v >> 3) | (bank_mask << 16), v & 7
+        if isinstance(bank_mask, int):
+            addr = (v >> 3) | (bank_mask << 16)
+        else:
+            addr = bank_mask[v >> 19 & 0x1F] << 16 | (v >> 3 & 0xFFFF)
+        bit = v & 7
         for _m in range(16):
             msg = []
             while True:
