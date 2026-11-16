@@ -24,6 +24,9 @@ from dq4ch3slots import SLOTS, VARS_AT  # noqa: E402
 # 7E:2208 은 DQ5 가 색인 쓰기로만 덮는 자리(dq4ch2slots 「flag 자리」). 2장 첫머리·텐페·사건 전투가 bit0·1·2·4·6·7 을 쓴다
 CHAPTER3 = (0x78, 0x08)        # 7E:2208 bit3  3장 진행 중(2장 끝에서 켬). 주인공 그림·성장·장비를 톨네코로
 OPENING = (0x78, 0x20)         # 7E:2208 bit5  3장 첫머리(제목 상자·서두·네네)를 기다림. 옮길 때 켜고 첫머리 끝에 끔
+# 7E:21A3 bit5(맵을 옮기면 지워짐): 첫머리가 끝난 뒤 아직 집을 다시 불러오지 않음. FC 는 맵에 들 때마다 $628B 를 FF 로
+# 쓰고 네네(대화 057)가 bit6 이 꺼져 있으면 「집을 나서면 곧장 서쪽으로」(080A)라 하므로, 첫머리 직후에만 그 말이다
+FRESH = (0x13, 0x20)
 
 HOUSE = '3E/01'                # FC 16/01 레이크나바 톨네코의 집
 START_CELL = (0x1B * 2, 0x05 * 2 + 1)    # FC 3장 시작 (1B,05)
@@ -227,7 +230,7 @@ def scripts(first_message, native_points):
     return [{"address": OPENER_SCRIPT, "commands": [
         _cmd('3F'), _cmd('37', *_al(native_points['box3'])), msg('opening'),
         _cmd('37', *_al(native_points['reveal'])), msg('nene_call'),
-        _cmd('05', *_al(at['pad'])), msg('nene_wake'),
+        _cmd('05', *_al(at['pad'])), msg('nene_wake'), _cmd('10', *FRESH),
         _cmd('11', OPENING[0], ~OPENING[1] & 0xFF), _cmd('40'), _cmd('16')]}] + \
         [s for ctx in contexts(first_message, points=native_points) if hasattr(ctx.module, 'scripts')
          for s in ctx.module.scripts(ctx)]
@@ -267,14 +270,15 @@ def npc_lists(ported, first_talk=None):
     return new + more_new, first + over + [o for o in more_over if not o.get('first')]
 
 
-def apply(data, original, dq4):
-    """original: 원래 DQ5 롬(기록 틀), dq4: FC 롬 경로(톨네코 시작 값·소지품). 넘김·공용 장치, 대화 호출 표와 입구,
+def apply(data, original, dq4, first_message=None):
+    """original: 원래 DQ5 롬(기록 틀), dq4: FC 롬 경로(톨네코 시작 값·소지품), first_message: 3장 메시지 첫 번호
+    (dq4chapter1.chapter3_message, 사건 모듈 네이티브의 이벤트가 메시지를 띄울 때). 넘김·공용 장치, 대화 호출 표와 입구,
     사건 모듈의 네이티브·훅을 쓴다."""
     d = bytearray(data)
     code, _ = native(original, dq4)
     places = [(CODE_AT, code), (TABLE_AT, call_table()), (STUB_AT, stub())]
     hooks = []
-    for ctx in contexts(original=original):
+    for ctx in contexts(first_message, original=original):
         if hasattr(ctx.module, 'native'):
             more, _ = ctx.module.native(ctx)
             start, end = ctx.slot.code
@@ -411,8 +415,21 @@ def _gold(at, pay):
     return a.bytes() + LEAVE
 
 
+def _next_day(at):
+    """날이 바뀜(잠): 용병 날수 둘을 하나씩 늘리고(FF 에서 멈춤, FC 15:$9F79 의 $628C·$628D), 톰 노인 밀기 중·교회 도착을
+    지운다(같은 루틴이 $6280 bit5·4 를 지워 다음 날 다시 밀 수 있음). 대화 호출로도, 사건 모듈 네이티브의 JSL 로도 부른다."""
+    import dq4ch3lakanaba as lakanaba
+    body = bytearray(ENTER)
+    for a in (SCOTT_DAYS, LAWRENCE_DAYS):
+        body += bytes((0xAF,)) + _al(a) + bytes((0x1A, 0xF0, 0x04, 0x8F)) + _al(a)
+    tom = 0x7E2190 + lakanaba.TOM_PUSH[0]
+    body += bytes((0xAF,)) + _al(tom) + bytes((0x29, ~(lakanaba.TOM_PUSH[1] | lakanaba.TOM_DONE[1]) & 0xFF, 0x8F)) + _al(tom)
+    return bytes(body) + LEAVE
+
+
 # 대화 호출로 부르는 공용 장치. 모듈의 CALLS 가 {이름: (장치 또는 자기 네이티브 이름, 인자)} 로 고른다
-COMMON_ROUTINES = {'give': _give, 'take': _take, 'pay': lambda at: _gold(at, True), 'earn': lambda at: _gold(at, False)}
+COMMON_ROUTINES = {'give': _give, 'take': _take, 'pay': lambda at: _gold(at, True), 'earn': lambda at: _gold(at, False),
+                   'next_day': _next_day}
 
 
 def _param(routine, param):
@@ -632,6 +649,11 @@ def start_messages(first_message):
         if hasattr(ctx.module, 'start_messages'):
             out.update(ctx.module.start_messages(ctx))
     return out
+
+
+def absent():
+    """{(맵, DQ5 셀 x, y, 밤)}: 사건 모듈이 3장 처음 상태에서 없앤 인물(dq4npccheck --chapter3 이 말 걸지 않음)."""
+    return {k for ctx in contexts() if hasattr(ctx.module, 'absent') for k in ctx.module.absent(ctx)}
 
 
 def state_messages(first_message):

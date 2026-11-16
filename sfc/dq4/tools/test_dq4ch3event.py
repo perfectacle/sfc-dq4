@@ -151,13 +151,14 @@ class ScriptTest(unittest.TestCase):
         script = ev.scripts(0x1100, POINTS)[0]
         self.assertEqual(script['address'], ev.OPENER_SCRIPT)
         cmds = script['commands']
-        self.assertEqual([c['op'] for c in cmds], ['3F', '37', '21', '37', '21', '05', '21', '11', '40', '16'])
+        self.assertEqual([c['op'] for c in cmds], ['3F', '37', '21', '37', '21', '05', '21', '10', '11', '40', '16'])
         self.assertEqual(cmds[1]['args'], list(_al(POINTS['box3'])))
         self.assertEqual(cmds[3]['args'], list(_al(POINTS['reveal'])))
         self.assertEqual([cmds[k]['args'] for k in (2, 4, 6)],
                          [[m[k] & 0xFF, m[k] >> 8] for k in ('opening', 'nene_call', 'nene_wake')])
         self.assertEqual(cmds[5]['args'], list(_al(ev.native()[1]['pad'])))
-        self.assertEqual(cmds[7]['args'], [ev.OPENING[0], ~ev.OPENING[1] & 0xFF])
+        self.assertEqual(cmds[7]['args'], list(ev.FRESH))
+        self.assertEqual(cmds[8]['args'], [ev.OPENING[0], ~ev.OPENING[1] & 0xFF])
 
     def test_chapter_two_ender_hands_over_only_in_the_chapter_three_build(self):
         import dq4ch2ending as en

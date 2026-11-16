@@ -27,6 +27,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 import dq4ch1walkcheck as wc  # noqa: E402
 import dq4ch2walkcheck as cw  # noqa: E402
 import dq4ch3event as ch3  # noqa: E402
+import dq4ch3lakanaba as lakanaba  # noqa: E402
 import dq4ch3opencheck as opening  # noqa: E402
 import dq4ch3safe as safe  # noqa: E402
 import dq4chapterwalk as cwk  # noqa: E402
@@ -43,6 +44,8 @@ FLAGS = {
     'SAFE_YES': wc.flag(safe.YES),
     # 톨네코 물건 칸 2(칸 0 옷, 칸 1 도시락 다음): 금고 상자를 열면 철 금고가 들어오는 칸
     'SAFE_SLOT': (0x7E2056 + 2, 0xFF),
+    'BENTO': wc.flag(lakanaba.BENTO_TODAY), 'SEEN': wc.flag(lakanaba.SEEN), 'SHIFT': wc.flag(lakanaba.SHIFT),
+    'TOM_PUSH': wc.flag(lakanaba.TOM_PUSH), 'SCOTT_DAYS': (ch3.SCOTT_DAYS, 0xFF),
 }
 
 TOWN = '3E/00'                 # FC 16/00 레이크나바
@@ -117,6 +120,19 @@ SEGMENTS = [
     ('safe_return', 'walk', f'8,9;wait:60;8,8;wait:300;{SAFE_FLOOR};a:8;wait:200;a:8;wait:200;{CLOSE}',
      {'map': safe.VAULT, 'cell': (8, 8), 'bytes': {'SAFE_SLOT': 0xFF}, 'off': SAFE_OFF}),
     ('safe_reopen', 'walk', f'8,9;wait:60;{SAFE_SEARCH}', {'poke': SAFE_FACE_UP, 'items': [safe.IRON_SAFE]}),
+    # 레이크나바(dq4ch3lakanaba). 네네: 오늘 도시락 전이라 잠 → 아침(날수 + 1) → 오늘 도시락. 손님 갈래·톰을 교회까지
+    # 미는 길은 dq4ch3lakanabacheck 가 롬 사본·톰 자리로 본다
+    ('nene_house', 'warp', f'{ch3.HOUSE},54,6', {'map': ch3.HOUSE}),
+    ('nene_sleep', 'walk', talk('down', 10), {'map': ch3.HOUSE, 'want': ['BENTO'], 'bytes': {'SCOTT_DAYS': 1}}),
+    # 톰 노인: 「예」 뒤 밀리는 인물이 되고, 밀며 집 남쪽으로 걸어 나간다(막히면 끝 셀이 다름)
+    ('tom_room', 'warp', f'{TOWN},48,24', {'map': TOWN}),
+    ('tom_ask', 'walk', talk('up', 5), {'map': TOWN, 'want': ['TOM_PUSH']}),
+    ('tom_push', 'walk', '50,25;50,21;48,21;48,25', {'map': TOWN, 'cell': (48, 25)}),
+    # 무기점 첫 출근: 문 밖에 서면 꾸지람 뒤 카운터 안으로 걸려 들어간다
+    ('shop_door', 'warp', f'{TOWN},20,52', {'map': TOWN}),
+    # 꾸지람 뒤 주인이 비키고 주인공이 걷는 동안 누른 A 는 버려지므로 넉넉히 누른다
+    ('shop_first', 'walk', f'16,53;{taps(12)};{CLOSE}',
+     {'map': TOWN, 'cell': lakanaba.COUNTER_IN, 'want': ['SEEN', 'SHIFT'], 'maxf': 2400}),
 ]
 
 

@@ -264,8 +264,11 @@ def chapter3_cases():
     # 네네(낮, 침대 머리 위 칸)에게 위 칸에서 아래로 말을 건다. 침대(시작 칸)는 FC 에서 막힌 블록이라 맵을 다시 불러온
     # 뒤에는 설 수 없고, 순간이동으로 세우면 「その方向には誰もいない」(129)만 떴다. 순간이동은 TO 한 셀 아래에 내린다.
     # 말이 끝나면 위 줄로 돌아 방 오른쪽으로 걸어 간다(오른쪽 칸은 침대). 말이 끝난 뒤 A 를 더 누르면 다시 말을 걸어
-    # 창이 남으므로 닫기만 누른다. distinct 1: 129 밖의 메시지가 하나
-    out = {'nene-above': {'hop': CH3_HOP, 'warp': f'{ch3.HOUSE},{nx},{ny - 3}', 'set': '',
+    # 창이 남으므로 닫기만 누른다. distinct 1: 129 밖의 메시지가 하나. 오늘 도시락 flag 를 켜 두어 잠 갈래(맵을 다시
+    # 불러옴) 대신 한마디(dq4ch3lakanaba 「forgot」)만 하게 한다
+    import dq4ch3lakanaba as lakanaba
+    bento = f'{0x2190 + lakanaba.BENTO_TODAY[0]:04X}={lakanaba.BENTO_TODAY[1]:02X}'
+    out = {'nene-above': {'hop': CH3_HOP, 'warp': f'{ch3.HOUSE},{nx},{ny - 3}', 'set': bento,
                           'walk': f'{wc.talk("down", 12)};wait:120;{close};{close};{nx},{ny - 4}', 'free': f'{nx + 4},{ny - 4}',
                           'want': [], 'map': ch3.HOUSE, 'distinct': 1, 'maxf': 2500}}
     # 북쪽 동굴 수문 앞 칸(FC 한 칸 = 주인공 두 열)마다: 아래에서 올라서 「예」 면 물살에 밀려 옮겨 가고 조작이 돌아온다
@@ -276,6 +279,21 @@ def chapter3_cases():
         for x in (x0, x0 + 1):
             out[f'safe-{side}-{x}'] = {'warp': f'{safe.GATES},{x},{y1 + 2}', 'set': '', 'walk': yes, 'free': free,
                                        'want': want, 'map': spec['to'][0], 'maxf': 4000}
+    out.update(shop_cases(lakanaba))
+    return out
+
+
+# 레이크나바 무기점 첫 출근: 문 칸이나 문 밖 칸에 들어서면 꾸지람(02F3) 뒤 카운터 안 (4,53)으로 걸려 들어가 031D. 문 밖
+# 오른쪽·위·아래에서 들어선다. 끝나면 카운터 안 방 위쪽으로 다시 걷는다
+SHOP_APPROACH = [('shop-right', '20,52'), ('shop-above', '16,48'), ('shop-below', '16,56')]
+
+
+def shop_cases(lakanaba):
+    out = {}
+    for name, warp in SHOP_APPROACH:
+        out[name] = {'warp': f'{lakanaba.TOWN},{warp}', 'set': '', 'walk': f'16,53;{wc.taps(12)};{pc.CLOSE}',
+                     'free': f'{lakanaba.COUNTER_IN[0]},{lakanaba.COUNTER_IN[1] - 4}', 'hero_at': lakanaba.COUNTER_IN,
+                     'want': [('SEEN', lakanaba.SEEN), ('SHIFT', lakanaba.SHIFT)], 'maxf': 2600}
     return out
 
 
