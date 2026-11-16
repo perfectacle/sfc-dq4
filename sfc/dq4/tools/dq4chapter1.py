@@ -768,7 +768,8 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False, chapter3=False):
     out = bytearray(dq4ch2event.apply(out, original,
                                       chapter2_message(dq4npcport.FIRST_MESSAGE + len(ported_messages))))
     import dq4ch3event
-    out = bytearray(dq4ch3event.apply(out, original, dq4))
+    out = bytearray(dq4ch3event.apply(out, original, dq4,
+                                      chapter3_message(dq4npcport.FIRST_MESSAGE + len(ported_messages))))
     out = bytearray(dq4party.apply_recruits(out, dq5, dq4))
     import dq4josa
     out = bytearray(dq4josa.apply(out))

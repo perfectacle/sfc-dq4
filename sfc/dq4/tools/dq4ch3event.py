@@ -267,14 +267,15 @@ def npc_lists(ported, first_talk=None):
     return new + more_new, first + over + [o for o in more_over if not o.get('first')]
 
 
-def apply(data, original, dq4):
-    """original: 원래 DQ5 롬(기록 틀), dq4: FC 롬 경로(톨네코 시작 값·소지품). 넘김·공용 장치, 대화 호출 표와 입구,
+def apply(data, original, dq4, first_message=None):
+    """original: 원래 DQ5 롬(기록 틀), dq4: FC 롬 경로(톨네코 시작 값·소지품), first_message: 3장 메시지 첫 번호
+    (dq4chapter1.chapter3_message, 사건 모듈 네이티브의 이벤트가 메시지를 띄울 때). 넘김·공용 장치, 대화 호출 표와 입구,
     사건 모듈의 네이티브·훅을 쓴다."""
     d = bytearray(data)
     code, _ = native(original, dq4)
     places = [(CODE_AT, code), (TABLE_AT, call_table()), (STUB_AT, stub())]
     hooks = []
-    for ctx in contexts(original=original):
+    for ctx in contexts(first_message, original=original):
         if hasattr(ctx.module, 'native'):
             more, _ = ctx.module.native(ctx)
             start, end = ctx.slot.code
@@ -411,8 +412,18 @@ def _gold(at, pay):
     return a.bytes() + LEAVE
 
 
+def _next_day(at):
+    """날이 바뀜(잠): 용병 날수 둘을 하나씩 늘린다(FF 에서 멈춤, FC 15:$9F79 의 $628C·$628D). 대화 호출로도, 사건 모듈
+    네이티브의 JSL 로도 부른다."""
+    body = bytearray(ENTER)
+    for a in (SCOTT_DAYS, LAWRENCE_DAYS):
+        body += bytes((0xAF,)) + _al(a) + bytes((0x1A, 0xF0, 0x04, 0x8F)) + _al(a)
+    return bytes(body) + LEAVE
+
+
 # 대화 호출로 부르는 공용 장치. 모듈의 CALLS 가 {이름: (장치 또는 자기 네이티브 이름, 인자)} 로 고른다
-COMMON_ROUTINES = {'give': _give, 'take': _take, 'pay': lambda at: _gold(at, True), 'earn': lambda at: _gold(at, False)}
+COMMON_ROUTINES = {'give': _give, 'take': _take, 'pay': lambda at: _gold(at, True), 'earn': lambda at: _gold(at, False),
+                   'next_day': _next_day}
 
 
 def _param(routine, param):
