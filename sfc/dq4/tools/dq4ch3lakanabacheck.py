@@ -201,18 +201,23 @@ CASES = {
 
 
 def message_ids(messages_path):
-    """{메시지 이름: 번호}: 같은 빌드의 messages.json 에서 이 모듈 메시지의 글(끝 코드를 뺀 코드)로 찾는다."""
+    """{메시지 이름: 번호}: 같은 빌드의 messages.json 에서 이 모듈 메시지의 글(끝 코드를 뺀 코드)로 찾는다. 다른 모듈에
+    같은 글(FC 의 같은 메시지)이 있을 수 있어, 이 모듈 차례대로 이어지는 번호를 고른다."""
     doc = json.loads(Path(messages_path).read_text(encoding='utf-8'))['messages']
-    body = {tuple(json.dumps(c) for c in codes[:-1]): int(k, 16) for k, codes in doc.items()}
-    out = {}
-    for name, codes in L.MESSAGES.items():
-        key = tuple(json.dumps(c) for c in codes[:-1])
+    body = {}
+    for k, codes in doc.items():
+        body.setdefault(tuple(json.dumps(c) for c in codes[:-1]), set()).add(int(k, 16))
+    names = list(L.MESSAGES)
+    found = []
+    for name in names:
+        key = tuple(json.dumps(c) for c in L.MESSAGES[name][:-1])
         if key not in body:
             raise SystemExit(f'{messages_path}: 메시지 {name} 이 없음(롬과 같은 빌드인지)')
-        out[name] = body[key]
-    first = out[next(iter(L.MESSAGES))]
-    if [out[n] - first for n in L.MESSAGES] != list(range(len(L.MESSAGES))):
+        found.append(body[key])
+    firsts = [m for m in sorted(found[0]) if all(m + i in ids for i, ids in enumerate(found))]
+    if not firsts:
         raise SystemExit('메시지 번호가 이 모듈 차례대로 이어지지 않음')
+    out = {name: firsts[0] + i for i, name in enumerate(names)}
     return out
 
 
