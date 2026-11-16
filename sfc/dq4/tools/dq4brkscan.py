@@ -73,6 +73,9 @@ def blobs():
         if problems:
             raise ValueError('; '.join(problems))
         out.append((name, mod.CODE_AT, blob, entries))
+    # 2장 native 뒤에 붙는 꼬리(합류·바구니 이벤트 자료와 걸음 훅). 3장 용병 걸음 훅이 그 걸음 훅을 JSL 로 부른다
+    tail, tail_at = dq4ch2event.tail_native(0)
+    out.append(('ch2tail', dq4ch2event.CODE_AT + len(dq4ch2event.native()[0]), tail, [tail_at['step']]))
     # 2장 사건 모듈: 자료인 이름은 모듈의 DATA_ENTRIES, PHP 로 시작하지 않는 코드는 CODE_ENTRIES 에 둔다
     for ctx in dq4ch2event.contexts():
         if hasattr(ctx.module, 'native'):

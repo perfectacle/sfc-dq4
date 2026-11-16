@@ -30,6 +30,7 @@ import dq4ch2event as ch2  # noqa: E402
 import dq4ch3event as ch3  # noqa: E402
 from dq4chapterbox import ENTER, LEAVE  # noqa: E402
 from dq4itemport import BENTO, STATUE  # noqa: E402
+import dq4mercenary as merc  # noqa: E402
 
 say, narrate = ch1.say, ch1.narrate
 pages = ch2._speaker_pages
@@ -62,7 +63,7 @@ FLAGS = (ALLOWED, SHOP, ORDER, DELIVERED, SOLD, SON_CHEER, NOTICE, OPENED, BUTTO
 LETTER1 = (0x73, 0x10)         # 왕자의 편지를 모니카에게 전함(FC $6280&01)
 LETTER2 = (0x73, 0x20)         # 왕의 편지를 본몰 왕에게 전함(FC $6283&01)
 
-TOWN, CASTLE_HALL, THRONE, SHOP_UP, COLLECTOR = '40/00', '40/02', '40/06', '40/08', '40/0A'
+TOWN, CASTLE_HALL, THRONE, SHOP_UP, COLLECTOR, BARD_HALL = '40/00', '40/02', '40/06', '40/08', '40/0A', '40/0B'
 # 여신상 동굴: FC 40/0k 는 SFC 48/(02+k). test_dq4ch3endor 가 dq4groupbuild.placement 와 견준다
 CAVE_GROUP = 0x48
 CAVE_ENTRY, CAVE_WET, CAVE_DRY, CAVE_LOW_WET, CAVE_LOW_DRY, STATUE_ROOM = (
@@ -82,6 +83,10 @@ SELLER = ((SHOP_UP, 'day', (0x03, 0x03)), (SHOP_UP, 'night', (0x05, 0x02)), (SHO
 SON = ((SHOP_UP, 'day', (0x01, 0x03)), (SHOP_UP, 'night', (0x05, 0x03)))
 NENE = ((TOWN, 'day', (0x06, 0x1C)), (SHOP_UP, 'night', (0x03, 0x03)))
 COLLECTORS = ((COLLECTOR, 'day', (0x06, 0x03)), (COLLECTOR, 'night', (0x07, 0x05)))
+SCOTT = (TOWN, 'day', (0x05, 0x13))                                     # FC 04/00 슬롯 0D, 대화 071
+LAWRENCE = ((BARD_HALL, 'day', (0x07, 0x08)), (BARD_HALL, 'night', (0x07, 0x08)))   # FC 04/0B 슬롯 06, 대화 051
+# FC 3장 밤에 04/0B 는 레코드 4((05,08)의 둘째 로렌스)를 숨긴다(1C:$A51E)
+BARD_HIDDEN = ((BARD_HALL, 'night', (0x05, 0x08)),)
 # 가게를 사기 전(1C:$A3B9·$A4E2)에는 네네·아들이 없고, 산 뒤에는 주인이 없다
 BEFORE_SHOP = SON + NENE
 AFTER_SHOP = SELLER
@@ -221,11 +226,12 @@ MESSAGES = {
     # 여신상 동굴 단추(FC 03B3)
     'button': narrate('단추가 있다./눌러 보겠습니까?'),
 }
-TALKS = ('king', 'seller', 'son', 'nene', 'deliver', 'guide', 'collector', 'button')
+MESSAGES.update(merc.MESSAGES)
+TALKS = ('king', 'seller', 'son', 'nene', 'deliver', 'guide', 'collector', 'button') + merc.TALKS
 CALLS = {'pay_shop': ('pay', SHOP_PRICE), 'earn_statue': ('earn', STATUE_PRICE), 'take_statue': ('take', STATUE),
          'earn_delivery': ('earn', DELIVERY_PAY), 'move_in': ('move_in', 0), 'sleep': ('sleep', 0),
          'deliver': ('deliver', 0), 'count': ('deliver', 1),
-         'show_swords': ('show', GAVE_SWORD), 'show_armors': ('show', GAVE_ARMOR),
+         **merc.CALLS, 'show_swords': ('show', GAVE_SWORD), 'show_armors': ('show', GAVE_ARMOR),
          'left_swords': ('left', 0), 'left_armors': ('left', 4)}
 
 
@@ -313,7 +319,7 @@ def _left():
 
 
 def _deliver(ctx):
-    """대화 호출. 인자 0(납품 「예」): 일행 기록 0~3 의 소지품에서 철 갑옷, 그다음 강철 검을 주문 수 7 이 찰 때까지 빼고
+    """대화 호출. 인자 0(납품 「예」): 톨네코 소지품에서 철 갑옷, 그다음 강철 검을 주문 수 7 이 찰 때까지 빼고
     (넘는 몫은 소지품에 남음, 맡긴 물건은 세지 않음. FC 15:$A212 실측) 납품 수 니블에 더한다. 이번에 받은 수를 변수 칸
     +1·+2 에, 받았으면 GAVE_SWORDS·GAVE_ARMORS, 둘 다 7 이면 FULL. 인자 1(「아니요」)은 빼지 않는다. 끝에 아직 남은
     종류마다 LEFT_SWORDS·LEFT_ARMORS(FC 는 남은 수가 0 인 줄을 띄우지 않음, 15:$A159·$A196)."""
@@ -330,14 +336,11 @@ def _deliver(ctx):
         if shift:
             a(0x4A, 0x4A, 0x4A, 0x4A)
         a(0x29, 0x0F, 0xC9, ORDERED).br(BCC, f'more{k}').brl(f'done{k}').label(f'more{k}')
-        for r in range(ch3.PARTY_MAX):
-            a(lda(0x7E201D), 0xC9, r + 1).br(BCS, f'r{k}{r}').brl(f'done{k}').label(f'r{k}{r}')
-            take_item(a, ch3.PARTY_ITEMS + ch3.RECORD * r, ch3.EQUIP + ch3.RECORD * r, item, f'miss{k}{r}',
-                      p=f't{k}{r}')
-            a(0xE2, 0x30, lda(vars_at + VARS), 0x18, 0x69, 1 << shift, sta(vars_at + VARS))
-            a(lda(vars_at + gave), 0x1A, sta(vars_at + gave))
-            a(lda(_flag_addr(flag)), 0x09, flag[1], sta(_flag_addr(flag))).brl(f'k{k}')
-            a.label(f'miss{k}{r}')
+        # 3장 일행에서 물건을 가진 것은 톨네코(기록 0)뿐이다(용병 기록은 물건이 없음)
+        take_item(a, ch3.PARTY_ITEMS, ch3.EQUIP, item, f'done{k}', p=f't{k}')
+        a(0xE2, 0x30, lda(vars_at + VARS), 0x18, 0x69, 1 << shift, sta(vars_at + VARS))
+        a(lda(vars_at + gave), 0x1A, sta(vars_at + gave))
+        a(lda(_flag_addr(flag)), 0x09, flag[1], sta(_flag_addr(flag))).brl(f'k{k}')
         a.label(f'done{k}')
     a.label('left')(0xE2, 0x30)
     for flag, shift in ((LEFT_SWORDS, 0), (LEFT_ARMORS, 4)):
@@ -466,28 +469,29 @@ def native(ctx):
     put('button_event', _event_bytes(_button_tokens(at)))
     put('push', dq4prologue._event_start(at['button_event']))
     put('exit', _exit(ctx))
+    merc.natives(ctx, put, at, _event_bytes)
     return bytes(out), at
 
 
 # dq4brkscan: PHP 로 시작하지 않는 진입점. exit 는 P 를 부른 쪽이 PLP 로 되돌리는 훅, *_event 는 이벤트 스크립트 자료
-CODE_ENTRIES = ('exit',)
-DATA_ENTRIES = ('move_in_event', 'sleep_event', 'button_event')
+CODE_ENTRIES = ('exit',) + merc.CODE_ENTRIES
+DATA_ENTRIES = ('move_in_event', 'sleep_event', 'button_event') + merc.DATA_ENTRIES
 
 
 def events(ctx):
-    return [_move_in_tokens(ctx, ctx.at), _sleep_tokens(ctx, ctx.at), _button_tokens(ctx.at)]
+    return [_move_in_tokens(ctx, ctx.at), _sleep_tokens(ctx, ctx.at), _button_tokens(ctx.at)] + merc.events(ctx)
 
 
 def hooks(ctx):
     """금고 동굴 모듈이 2A:F7AB 에 둔 JSL 의 대상을 이 모듈의 출구 루틴으로 바꾼다(그 루틴이 금고 동굴 루틴을 먼저 부름)."""
     import dq4ch3safe as safe
     old = next(new for site, _, new in safe.hooks(_safe_ctx(ctx)) if site == safe.EXIT_SITE)
-    return [(safe.EXIT_SITE, old, bytes((0x22, *_al(ctx.at['exit']))) + old[4:])]
+    return [(safe.EXIT_SITE, old, bytes((0x22, *_al(ctx.at['exit']))) + old[4:])] + merc.hooks(ctx)
 
 
 # 빌린 인물 스크립트(DQ5 01/09 대체 목록 10:8E0D, dq4ch3slots E 칸 1): 단추를 묻는 보이지 않는 인물
 SCRIPT_LIST = '10:8E0D'
-SCRIPTS = {'button': ('10:8E1B', 1)}
+SCRIPTS = {'button': ('10:8E1B', 1), 'scott': ('10:8E41', 2), 'lawrence': ('10:8E5A', 3)}
 
 
 def _cmd(op, *args, **kw):
@@ -507,7 +511,15 @@ def scripts(ctx):
               _cmd('09', 0x80 | ASKED[0], ASKED[1]), _off(ASKED), _cmd('06', *PRESSED, target='push'),
               _cmd('05', *_al(at['away_button'])), _cmd('03', target='wait'),
               {**_off(PRESSED), "label": 'push'}, _cmd('3F'), call(at['push']), _cmd('16')]
-    return [{"address": SCRIPTS['button'][0], "commands": button}]
+    out = [{"address": SCRIPTS['button'][0], "commands": button}]
+    # 용병: 고용했으면 숨는다(FC 장소별 손질 1C:$A3B9·$A51E 가 고용한 용병을 숨김). 이 방문에 고용하면 그 자리에서 숨는다.
+    # 스콧은 FC 처럼 처음 자리 둘레를 걷는다(옮긴 걷는 사람 틀 05:8857 칸 6 의 19 03 03)
+    for who, walk in (('scott', [_cmd('19', 0x03, 0x03)]), ('lawrence', [])):
+        f = merc.FLAGS[who]
+        out.append({"address": SCRIPTS[who][0], "commands": [
+            _cmd('06', *f, target='gone'), *walk, _cmd('09', 0x80 | f[0], f[1]),
+            {**_cmd('28'), "label": 'gone'}, _cmd('16')]})
+    return out
 
 
 # ---- 대화 ----
@@ -553,13 +565,14 @@ def talk_scripts(ctx):
     asked = on(ASKED)
     button = [say_('button'), when(YES, [on(PRESSED), asked], [asked])]
     bodies = {'king': [king], 'seller': seller, 'son': [son], 'nene': [nene], 'deliver': [deliver],
-              'guide': [guide], 'collector': [collector], 'button': button}
+              'guide': [guide], 'collector': [collector], 'button': button,
+              **dict(zip(merc.TALKS, merc.talk_scripts(ctx)))}
     return [bodies[name] for name in TALKS]
 
 
 # ---- 인물 목록 ----
 
-def _copy(lists, mp, talks, drop=()):
+def _copy(lists, mp, talks, drop=(), sources=None):
     """옮긴 목록 lists[mp] 를 베껴 talks({(낮·밤, FC 칸): 대화})의 사람 대화를 바꾸고 drop 의 사람을 뺀다. 바꿀·뺄
     사람이 없으면 멈춘다(기본 목록은 고치지 않는다: 2장 엔돌도 같은 목록을 쓴다)."""
     want = {(t, cell(*fc)): talk for t, fc, talk in talks}
@@ -573,6 +586,9 @@ def _copy(lists, mp, talks, drop=()):
         if key in want:
             hit.add(key)
             e = {**e, "fields": {**e["fields"], "talk": want[key]}}
+            if sources and key in sources:
+                # 빌린 스크립트는 이동 간격이 0 이면 돌지 않는다(dq4ch2event._invisible)
+                e = {**e, "from": sources[key], "fields": {**e["fields"], "interval": max(1, e["fields"]["interval"])}}
         entries.append(e)
     missing = (set(want) | gone) - hit
     if missing:
@@ -590,7 +606,10 @@ def npc_lists(lists, ctx):
     if TOWN not in lists:
         return [], []           # 인물 없이 옮긴 목록(dq4npcport.port 의 with_people=False)
     t = ctx.talk
-    talks = {TOWN: [(tm, fc, t['nene']) for tm, fc in _who(NENE, TOWN)],
+    src = lambda who: {"list": SCRIPT_LIST, "index": SCRIPTS[who][1]}  # noqa: E731
+    sources = {(SCOTT[1], cell(*SCOTT[2])): src('scott'), **{(tm, cell(*fc)): src('lawrence') for _, tm, fc in LAWRENCE}}
+    talks = {TOWN: [(tm, fc, t['nene']) for tm, fc in _who(NENE, TOWN)] + [(SCOTT[1], SCOTT[2], t['scott'])],
+             BARD_HALL: [(tm, fc, t['lawrence']) for _, tm, fc in LAWRENCE],
              CASTLE_HALL: [(DELIVER[1], DELIVER[2], t['deliver']), (GUIDE[1], GUIDE[2], t['guide'])],
              THRONE: [(KING[1], KING[2], t['king'])],
              SHOP_UP: [(tm, fc, t['seller']) for tm, fc in _who(SELLER, SHOP_UP)] +
@@ -603,19 +622,20 @@ def npc_lists(lists, ctx):
         return {"map": m, "flag": flag[0], "when": "on", "mask": flag[1], "list": f"new:{name}"}
     for mp in (TOWN, SHOP_UP):
         name = f'ch3_endor_{mp.replace("/", "")}_shop'
-        new.append({"name": name, "entries": _copy(lists, mp, talks[mp], _who(AFTER_SHOP, mp))})
+        new.append({"name": name, "entries": _copy(lists, mp, talks[mp], _who(AFTER_SHOP, mp), sources)})
         over.append(on(mp, SHOP, name))
-    for mp in (TOWN, CASTLE_HALL, THRONE, SHOP_UP, COLLECTOR):
+    for mp in (TOWN, CASTLE_HALL, THRONE, SHOP_UP, COLLECTOR, BARD_HALL):
         name = f'ch3_endor_{mp.replace("/", "")}'
-        new.append({"name": name, "entries": _copy(lists, mp, talks[mp], _who(BEFORE_SHOP, mp))})
+        new.append({"name": name, "entries": _copy(lists, mp, talks[mp], _who(BEFORE_SHOP + BARD_HIDDEN, mp),
+                                                   sources)})
         over.append(on(mp, ch3.CHAPTER3, name))
     lists[CAVE_WET]["entries"] += ch2._invisible({"list": SCRIPT_LIST, "index": SCRIPTS['button'][1]}, t['button'])
     return new, over
 
 
 def absent(ctx):
-    """{(맵, DQ5 셀 x, y, 밤)}: 3장 처음(가게를 사기 전)에 없는 네네·아들."""
-    return {(m, *cell(*fc), t == 'night') for m, t, fc in BEFORE_SHOP}
+    """{(맵, DQ5 셀 x, y, 밤)}: 3장 처음(가게를 사기 전)에 없는 네네·아들과 밤의 둘째 로렌스."""
+    return {(m, *cell(*fc), t == 'night') for m, t, fc in BEFORE_SHOP + BARD_HIDDEN}
 
 
 def start_messages(ctx):
@@ -626,4 +646,5 @@ def start_messages(ctx):
            (GUIDE[0], cell(*GUIDE[2]), False): m['guide_idle']}
     out.update({(mp, cell(*fc), tm == 'night'): m['seller_old'] for mp, tm, fc in SELLER})
     out.update({(mp, cell(*fc), tm == 'night'): m['collector_wish'] for mp, tm, fc in COLLECTORS})
+    out.update({(mp, cell(*fc), tm == 'night'): m['lawrence_offer'] for mp, tm, fc in LAWRENCE})
     return out

@@ -52,6 +52,8 @@ FLAGS = {
     **{f'ENDOR_{k}': wc.flag(getattr(endor, k)) for k in ('ALLOWED', 'SHOP', 'ORDER', 'DELIVERED', 'SOLD', 'SON_CHEER',
                                                           'NOTICE', 'OPENED', 'BUTTON', 'ASKED', 'PRESSED')},
     'ENDOR_COUNT': (ch3.VARS_AT + ch3.SLOTS['E'].vars[0] + endor.VARS, 0xFF),
+    'SCOTT': wc.flag(ch3.SCOTT), 'LAWRENCE': wc.flag(ch3.LAWRENCE), 'LAWRENCE_DAYS': (ch3.LAWRENCE_DAYS, 0xFF),
+    'PARTY_N': (0x7E201D, 0xFF), 'PARTY1': (ch3.PARTY_ITEMS - 0x16 + ch3.RECORD, 0xFF),
     'GOLD0': (ch3.GOLD_AT, 0xFF), 'GOLD1': (ch3.GOLD_AT + 1, 0xFF), 'GOLD2': (ch3.GOLD_AT + 2, 0xFF),
 }
 
@@ -63,7 +65,10 @@ HOPS = {ch3.HOUSE: f'{TOWN},4,26'}
 def effects(data):
     """구간이 flag 말고 기록(7E:2000~2A9F)에 남기는 것(구간 이름 → SET(set)·dq5warp.lua PARTY(party)). 묶음 첫
     구간에 둔다. 롬의 기록 틀을 읽는 것이 있어 롬 바이트를 받는다."""
-    return {}
+    import dq4mercenary as merc
+    rec = merc.record(data, 'lawrence')
+    party = ';'.join(f'{(ch3.PARTY_ITEMS - 0x16 + ch3.RECORD) + k & 0xFFFF:04X}={b:02X}' for k, b in enumerate(rec))
+    return {'endor_lawrence_hire': {'set': f'{party};201D=02;201F=02;201E=02;2021=01;2029=01'}}
 
 
 def battle_patch(data, kind):
@@ -231,6 +236,19 @@ SEGMENTS = [
     ('endor_cave_wet', 'walk', 'up:40;wait:300', {'map': endor.CAVE_WET, 'changes': 1, 'after': 60, 'off': ['ENDOR_BUTTON']}),
     ('endor_cave_stair2', 'warp', f'{endor.CAVE_ENTRY},22,8', {'map': endor.CAVE_ENTRY, 'set': _set(endor.BUTTON)}),
     ('endor_cave_dry', 'walk', 'up:40;wait:300', {'map': endor.CAVE_DRY, 'changes': 1, 'after': 60}),
+    # 용병 로렌스(dq4mercenary): 600 골드로 고용하면 일행 기록 1 이 손님 로렌스(+0 = C0 | 29)
+    ('endor_lawrence', 'warp', _below(endor.BARD_HALL, endor.LAWRENCE[0][2]), {'map': endor.BARD_HALL}),
+    ('endor_lawrence_hire', 'walk', talk('up', 8),
+     {'map': endor.BARD_HALL, 'set': ';'.join((_gold(600), f'{ch3.LAWRENCE_DAYS & 0xFFFF:04X}=03')), 'want': ['LAWRENCE'],
+      'bytes': {'PARTY_N': 2, 'PARTY1': 0xE9, 'LAWRENCE_DAYS': 0, 'GOLD0': 0, 'GOLD1': 0}}),
+    # 날수: 시간이 01FF 인 필드 걸음에 하루가 지나고(3 → 4), 날수 5 인 필드 걸음에 0379 뒤 일행에서 빠진다
+    ('endor_day_side', 'warp', TOWN_WEST, {'map': TOWN, 'set': f'{ch3.LAWRENCE_DAYS & 0xFFFF:04X}=03'}),
+    ('endor_day', 'walk', 'left:64;wait:60;down:16', {'field': True, 'cell': (FIELD_OUT[0], FIELD_OUT[1] + 2),
+                                                       'set': '075E=FF;075F=01',
+                                       'bytes': {'LAWRENCE_DAYS': 4, 'PARTY_N': 2}, 'want': ['LAWRENCE']}),
+    ('endor_leave_side', 'warp', TOWN_WEST, {'map': TOWN, 'set': f'{ch3.LAWRENCE_DAYS & 0xFFFF:04X}=05'}),
+    ('endor_leave', 'walk', f'left:64;wait:60;down:16;wait:60;{taps(6)};{CLOSE}', {'field': True, 'poke': wc.DAY, 'off': ['LAWRENCE'],
+                                                           'bytes': {'PARTY_N': 1}}),
     # 여신상 방(48/07, FC 40/05)의 상자 아래에서 위를 보고 しらべる → 은의 여신상
     ('endor_statue', 'warp', f'{endor.STATUE_ROOM},12,10', {'map': endor.STATUE_ROOM}),
     ('endor_statue_open', 'walk', SAFE_SEARCH, {'poke': SAFE_FACE_UP, 'items': [endor.STATUE]}),

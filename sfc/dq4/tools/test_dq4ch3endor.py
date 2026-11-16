@@ -107,7 +107,9 @@ class PlaceTest(unittest.TestCase):
 class HookTest(unittest.TestCase):
     def test_exit_hook_takes_over_the_safe_jsl(self):
         ctx = _ctx()
-        (site, old, new), = endor.hooks(ctx)
+        (site, old, new), *rest = endor.hooks(ctx)
+        self.assertEqual([h[0] for h in rest], [endor.merc.PICTURE_TABLE + endor.merc.KINDS[w] for w in endor.merc.WHO] +
+                         [endor.merc.AI_AT, endor.merc.STEP_HOOK_AT])
         safe_new = next(n for s, _, n in safe.hooks(_ctx('S')) if s == safe.EXIT_SITE)
         self.assertEqual((site, old), (safe.EXIT_SITE, safe_new))
         self.assertEqual(new, bytes((0x22, *endor._al(ctx.at['exit']))) + safe_new[4:])
@@ -183,9 +185,8 @@ class RunTest(unittest.TestCase):
         self.assertEqual(self.deliver_case(0x64, [[s, s, s, s, a]]), (0x77, 3, 1, {'s', 'a', 'full'}, [bytes((s,))]))
         # 「아니요」(인자 1): 빼지 않고 남은 종류만
         self.assertEqual(self.deliver_case(0x70, [[s, a]], arg=1), (0x70, 0, 0, {'ls'}, [bytes((s, a))]))
-        # 일행 기록 1 도 보지만 일행 수 밖은 보지 않는다
-        self.assertEqual(self.deliver_case(0, [[0x42], [s]], records=2)[:3], (0x01, 1, 0))
-        self.assertEqual(self.deliver_case(0, [[0x42], [s]], records=1)[:3], (0x00, 0, 0))
+        # 3장에서 물건을 가진 것은 톨네코(기록 0)뿐이라 다른 기록은 보지 않는다
+        self.assertEqual(self.deliver_case(0, [[0x42], [s]], records=2)[:3], (0x00, 0, 0))
 
     def test_deliver_keeps_the_equip_bits_of_the_other_items(self):
         cpu, at = machine()
@@ -240,11 +241,12 @@ class TalkTest(unittest.TestCase):
         for k, body in enumerate(endor.talk_scripts(ctx)):
             dq5talkwrite.encode_script(body, f'엔돌 {endor.TALKS[k]}')
         self.assertEqual(len(endor.talk_scripts(ctx)), len(endor.TALKS))
-        (script,) = endor.scripts(ctx)
-        self.assertEqual(script['address'], endor.SCRIPTS['button'][0])
+        self.assertEqual([x['address'] for x in endor.scripts(ctx)], [endor.SCRIPTS[k][0] for k in ('button', 'scott',
+                                                                                                     'lawrence')])
 
     def test_absent_are_the_people_before_the_shop(self):
-        self.assertEqual(endor.absent(_ctx()), {(m, *endor.cell(*fc), t == 'night') for m, t, fc in endor.BEFORE_SHOP})
+        self.assertEqual(endor.absent(_ctx()), {(m, *endor.cell(*fc), t == 'night')
+                                                for m, t, fc in endor.BEFORE_SHOP + endor.BARD_HIDDEN})
 
 
 if __name__ == '__main__':
