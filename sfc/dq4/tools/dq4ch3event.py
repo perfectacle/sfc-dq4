@@ -416,11 +416,14 @@ def _gold(at, pay):
 
 
 def _next_day(at):
-    """날이 바뀜(잠): 용병 날수 둘을 하나씩 늘린다(FF 에서 멈춤, FC 15:$9F79 의 $628C·$628D). 대화 호출로도, 사건 모듈
-    네이티브의 JSL 로도 부른다."""
+    """날이 바뀜(잠): 용병 날수 둘을 하나씩 늘리고(FF 에서 멈춤, FC 15:$9F79 의 $628C·$628D), 톰 노인 밀기 중·교회 도착을
+    지운다(같은 루틴이 $6280 bit5·4 를 지워 다음 날 다시 밀 수 있음). 대화 호출로도, 사건 모듈 네이티브의 JSL 로도 부른다."""
+    import dq4ch3lakanaba as lakanaba
     body = bytearray(ENTER)
     for a in (SCOTT_DAYS, LAWRENCE_DAYS):
         body += bytes((0xAF,)) + _al(a) + bytes((0x1A, 0xF0, 0x04, 0x8F)) + _al(a)
+    tom = 0x7E2190 + lakanaba.TOM_PUSH[0]
+    body += bytes((0xAF,)) + _al(tom) + bytes((0x29, ~(lakanaba.TOM_PUSH[1] | lakanaba.TOM_DONE[1]) & 0xFF, 0x8F)) + _al(tom)
     return bytes(body) + LEAVE
 
 

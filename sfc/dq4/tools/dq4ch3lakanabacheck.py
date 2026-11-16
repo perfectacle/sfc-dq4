@@ -120,11 +120,13 @@ def buyer(result, **more):
 INTRO = ['is_shop', 'show']
 CASES = {
     # 네네: 오늘 도시락 전(3장 처음)이면 잠 → 아침 → 도시락 말. HP 를 낮춰 두면 채워진다. 날수 + 1
-    'nene_sleep': {'steps': [HOP, ('house', 'warp', f'{L.HOUSE},54,6', {'set': '2042=05'}),
+    # 잠은 톰 노인 flag 도 지운다(FC 15:$9F79)
+    'nene_sleep': {'steps': [HOP, ('house', 'warp', f'{L.HOUSE},54,6',
+                                   {'set': '2042=05;' + _set(L0=L0(L.TOM_DONE))}),
                              ('talk', 'walk', f'{wc.talk("down", 10)}', {'maxf': 2400})],
                    'msgs': ['home', 'goodnight', 'morning', 'bento'],
-                   'check': all_of(same(SCOTT_DAYS=1, LAWRENCE_DAYS=1, TIME0=0x50, HP0=20, ITEM1=L.BENTO),
-                                   lambda s: [] if s.get('L0', 0) & L.BENTO_TODAY[1] else ['오늘 도시락 flag 꺼짐'])},
+                   'check': same(SCOTT_DAYS=1, LAWRENCE_DAYS=1, TIME0=0x50, HP0=20, ITEM1=L.BENTO,
+                                 L0=L0(L.BENTO_TODAY))},
     'nene_forgot': {'steps': [HOP, ('house', 'warp', f'{L.HOUSE},54,6', {'set': _set(L0=L0(L.BENTO_TODAY))}),
                               ('talk', 'walk', f'{wc.talk("down", 3)}', {'maxf': 1200})],
                     'msgs': ['forgot'], 'check': same(SCOTT_DAYS=0)},
@@ -183,6 +185,13 @@ CASES = {
                       ('house', 'warp', f'{L.HOUSE},60,16', {}), ('town', 'warp', f'{L.TOWN},46,8', {})],
             'msgs': ['son_lend'], 'check': lambda s: [] if s.get('COMMON', 0) & ch3.DOG[1] else ['DOG 꺼짐'],
             'dog_gone': True},
+    # 여우를 쫓은 뒤(본몰 FOXED) 개를 데리고 아들에게: 「예」 면 돌려줌(DOG 끔, DOG_BACK)
+    'son_return': {'steps': [('son', 'warp', f'{L.TOWN},46,8',
+                              {'set': f'{0x2190 + L.FOXED[0]:04X}={L.FOXED[1]:02X};'
+                                      f'{_a(FLAGS["COMMON"][0]):04X}={ch3.DOG[1]:02X}'}),
+                             ('ask', 'walk', f'{wc.talk("up", 6)}', {'maxf': 1400})],
+                   'msgs': ['son_return', 'son_thanks', 'son_luck'],
+                   'check': same(COMMON=0, L0=L0(L.DOG_BACK))},
     # 필드에서 마을로 들면 오늘 도시락·출근 flag 가 꺼진다(FC 는 필드로 나갈 때 $6285 를 지움)
     'field': {'steps': [('side', 'warp', f'{L.TOWN},4,26', {'set': _set(L0=L0(L.BENTO_TODAY, L.SHIFT, L.SEEN))}),
                         ('out', 'walk', 'left:64', {'field': True, 'poke': wc.DAY}),

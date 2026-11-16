@@ -11,8 +11,8 @@ FC 를 헤드리스로 잰 흐름(fc/dq4/docs/dq4-chapter3-format.md 「무기�
          사는 손님·파는 손님과 값 흥정은 FC 난수 문턱 그대로이고, 일삯이 100 이 넘으면 가게를 닫고(0341) 밤이 된다.
          아래층 주인(052)에게 말하면 일찍 그만둔다.
   톰     「예」(0816) 뒤 밀리는 인물이 되고, 교회 안(FC X 0C~10, Y 04~06)에 닿으면 03AE 와 2~12 골드.
-  톰 아들 084B 로 개 토마스를 빌려준다(공용 flag DOG). 우리의 개는 DOG 동안 숨는다. 돌려주기(0899)는 여우를 쫓은 뒤라
-         그 목록을 만드는 본몰 모듈이 아들 대화를 son_return_talk() 로 바꾼다.
+  톰 아들 084B 로 개 토마스를 빌려준다(공용 flag DOG). 우리의 개는 DOG 동안 숨는다. 여우를 쫓은 뒤(본몰 FOXED)에는
+         돌려받는다(0899).
 """
 from pathlib import Path
 import sys
@@ -62,6 +62,7 @@ DISCOUNT = (0x14, 0x40)        # 흥정: 깎아 줌(0330)
 RAISE = (0x14, 0x80)           # 흥정: 값을 올림(0331)
 LUCK40 = (0x13, 0x40)          # 7E:21A3 bit6(맵을 옮기면 지워짐): 같은 r2 < 40(웃돈을 받아들임)
 TEMP = 0x7E21A4
+FOXED = (0x73, 0x01)           # 본몰 모듈(dq4ch3slots B)의 여우를 쫓음(FC $6280&02). 조건으로만 본다
 PACE = 0x7E21A2                # 다음 손님까지 남은 차례(맵을 옮기면 0)
 ANSWERED = ch2.ANSWERED        # 7E:21A3 bit0 대화가 끝남(맵을 옮기면 지워짐)
 
@@ -266,7 +267,7 @@ MESSAGES = {
 DATA_ENTRIES = ('ids', 'prices', 'wages', 'close_event', 'sleep_event')
 
 TALKS = ('nene', 'popolo_day', 'popolo_night', 'late', 'master', 'quit', 'buyer_intro', 'buyer', 'seller', 'tom',
-         'son', 'son_return')
+         'son')
 # 첫 칸(표 칸 0)은 네네의 잠: dq4ch3opencheck 의 공용 장치 시험이 이 칸을 바꿔 네네 대화로 부른다
 CALLS = {'sleep': ('sleep', 0), 'where': ('where', 0), 'prep': ('prep', 0), 'result': ('result', 0),
          'haggle': ('haggle', 0), 'sell': ('sell', 0),
@@ -652,25 +653,21 @@ def talk_scripts(ctx, flip_buy=False):
                                  [say_('tom_hello'), say_('tom_ask'),
                                   when(YES, [say_('tom_go'), on(TOM_PUSH)], [say_('tom_no')])])])],
                 [say_('tom_night')])]
-    son = [when(flag(ch3.DOG), [say_('son_dog')], [say_('son_lend'), on(ch3.DOG)])]
-    son_return = [when(flag(DOG_BACK), [say_('son_luck')],
-                       [when(flag(ch3.DOG), [say_('son_return'),
-                                             when(YES, [say_('son_thanks'), say_('son_luck'), _flag_off(ch3.DOG),
-                                                        on(DOG_BACK)],
-                                                  [say_('son_later')])],
-                             [say_('son_lend'), on(ch3.DOG)])])]
+    # 여우를 쫓은 뒤(본몰 모듈의 FOXED, FC $6280&02)에는 개를 돌려받는 갈래(FC 대화 055)
+    lend = [when(flag(ch3.DOG), [say_('son_dog')], [say_('son_lend'), on(ch3.DOG)])]
+    son = [when(flag(FOXED),
+                [when(flag(DOG_BACK), [say_('son_luck')],
+                      [when(flag(ch3.DOG), [say_('son_return'),
+                                            when(YES, [say_('son_thanks'), say_('son_luck'), _flag_off(ch3.DOG),
+                                                       on(DOG_BACK)],
+                                                 [say_('son_later')])],
+                            lend)])],
+                lend)]
     bodies = {'nene': [nene], 'popolo_day': [say_('popolo_day')], 'popolo_night': [say_('popolo_night')],
               'late': [say_('late')], 'master': master, 'quit': quit_, 'buyer_intro': intro, 'buyer': buyer,
               'seller': seller,
-              'tom': tom, 'son': son, 'son_return': son_return}
+              'tom': tom, 'son': son}
     return [bodies[name] for name in TALKS]
-
-
-def son_return_talk(ctx=None):
-    """여우를 쫓은 뒤(본몰 모듈의 flag) 톰 아들에게 줄 대화 번호: 개를 돌려받는 0899 갈래. 본몰 모듈이 그 목록에서
-    ctx.retalk(lists, '3E/00', SON, son_return_talk()) 처럼 쓴다."""
-    me = next(c for c in ch3.contexts() if c.module.__name__ == __name__.split('.')[-1])
-    return me.talk['son_return']
 
 
 # ---- 인물 스크립트 ----
