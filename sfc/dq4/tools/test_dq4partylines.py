@@ -144,7 +144,6 @@ class GroupTests(unittest.TestCase):
                 if missing:
                     found[name] = '배치 표 그룹에 없음 ' + ','.join(f'{g:02X}' for g in sorted(missing))
         known = {
-            '개': '배치 표 그룹에 없음 3F,40,47,48',
         }
         self.assertEqual(found, known)
 
