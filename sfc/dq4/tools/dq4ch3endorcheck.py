@@ -73,8 +73,10 @@ STOCK_SET = ';'.join(f'{(ch3.VARS2_AT + ch3.SLOTS["E"].vars2[0] + shop.STOCK + k
 # 커서가 아님, cursor:2 가 도시락을 고름) 첫 커서(장비하지 않은 첫 칸, 도시락)에서 아래로 한 칸 누른다
 TALK_DOWN = 'down:8;wait:30;a:8;wait:60;a:8;wait:60'
 YES, NO = 'ask:600;cursor:0;a:8', 'ask:600;cursor:1;a:8'
-# 036B 「예」, 매상(036D) 첫 쪽을 넘기면 물건 창. 강철 검을 골라 036F 「예」, 0371 「아니요」, 0374 「아니요」 → 0375
-COUNTER_WALK = f'{TALK_DOWN};{YES};wait:120;a:8;wait:250;down:8;wait:40;a:8;{YES};{NO};{NO};{wc.taps(1, 90)};{CLOSE}'
+# 036B 「예」, 매상(036D)을 넘기면(창 00 → 34 → 37) 팔기 물건 창이 뜨므로 그때까지 A 로 넘긴다(dq4walk.lua open). 강철 검을
+# 골라 036F 「예」, 0371 「아니요」, 0374 「아니요」 → 0375
+SELL_LIST = 0x37
+COUNTER_WALK = f'{TALK_DOWN};{YES};open:{SELL_LIST};wait:20;down:8;wait:40;a:8;{YES};{NO};{NO};{wc.taps(1, 90)};{CLOSE}'
 # 036B 「예」(매상 없음), 물건 창을 B 로 그만두고 0374 「예」 → 가게 물건 창(BRK 95 0F)을 B 로 닫고 0375
 VIEW_WALK = f'{TALK_DOWN};{YES};wait:150;b:8;{YES};wait:150;b:8;wait:60;{wc.taps(1, 90)};{CLOSE}'
 # 톨네코 소지품이 없으면 0334 → 0374 「예」 → 가게가 비었으면 0376 만

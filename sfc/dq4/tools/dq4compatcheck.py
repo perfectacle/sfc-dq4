@@ -312,11 +312,12 @@ class Walker:
                         press, wi = None, wi + 1
                     elif press % 12 >= 6:
                         buttons = {'down' if p[0] == 'pick' or c < p[1] else 'up'}
-                elif p[0] == 'ask':
+                elif p[0] in ('ask', 'open'):
                     w = self.rd(wc.WINDOW)
-                    press, since = (p[1], 0) if press is None else (press, since)
+                    want = wc.ASK_WINDOW if p[0] == 'ask' else p[1]
+                    press, since = ((p[1] if p[0] == 'ask' else wc.OPEN_MAX), 0) if press is None else (press, since)
                     press -= 1
-                    if w == wc.ASK_WINDOW or press <= 0:
+                    if w == want or press <= 0:
                         press, wi = None, wi + 1
                     else:
                         buttons = {'a'} if since % 16 < 8 else set()

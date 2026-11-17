@@ -5,6 +5,8 @@
 --   cursor:K  고르기 창 커서(7E:0AD7)가 K 가 될 때까지 아래(K 가 크면)·위를 6프레임 누르고 6프레임 뗀다(많아야 120 프레임)
 --   ask:N     물음 창(창 번호 32, 예/아니요)이 뜰 때까지 A 를 8프레임 누르고 8프레임 떼며 글을 넘긴다(많아야 N 프레임).
 --             창이 뜬 프레임부터 누르지 않으므로 넘기는 A 가 물음에 답하지 않는다(누른 채로 뜬 A 는 새 입력이 아님)
+--   open:W    창 번호가 W(10진)가 될 때까지 ask 와 같이 A 로 글을 넘긴다(많아야 1200 프레임). 물음 창이 아닌 창(가게
+--             팔기 목록 55 = 37 등)이 뜰 때까지 넘길 때 쓴다
 --   pick:K    DQ5 가게 사기 목록에서 고른 물건 번호(7E:0F22, 10진 K)가 K 가 될 때까지 아래를 cursor 처럼 누른다. 목록 커서는
 --             0AD7 이 아니고, 목록이 열려야 움직이므로 열림을 함께 기다린다
 -- 프레임 수만 정해 누르면, 앞 장·앞 모듈이 메시지를 더해 창이 뜨는 때가 바뀔 때 누른 방향이 물음 창 커서를 옮겼다.
@@ -33,7 +35,7 @@ for tok in string.gmatch(os.getenv("WAYPOINTS") or "", "[^;]+") do
     pts[#pts + 1] = {tonumber(x), tonumber(y)}
   else
     local b, f = tok:match("^(%a+):(%d+)$")
-    if b == "until" or b == "cursor" or b == "ask" or b == "pick" then
+    if b == "until" or b == "cursor" or b == "ask" or b == "pick" or b == "open" then
       pts[#pts + 1] = {kind = b, arg = tonumber(f)}
     else
       pts[#pts + 1] = {b, tonumber(f)}
@@ -93,15 +95,16 @@ emu.addEventCallback(function()
         log[#log + 1] = string.format("f%05d until timeout window %02X", n, w)
         press = nil; wi = wi + 1
       end
-    elseif p.kind == "ask" then
+    elseif p.kind == "ask" or p.kind == "open" then
       local w = emu.read(0x7E0A00, m)
-      if press == nil then press = p.arg; since = 0 end
+      local want = p.kind == "ask" and 0x32 or p.arg
+      if press == nil then press = p.kind == "ask" and p.arg or 1200; since = 0 end
       press = press - 1
-      if w == 0x32 then
-        log[#log + 1] = string.format("f%05d ask window 32", n)
+      if w == want then
+        log[#log + 1] = string.format("f%05d %s window %02X", n, p.kind, w)
         press = nil; wi = wi + 1
       elseif press <= 0 then
-        log[#log + 1] = string.format("f%05d ask timeout window %02X", n, w)
+        log[#log + 1] = string.format("f%05d %s timeout window %02X", n, p.kind, w)
         press = nil; wi = wi + 1
       else
         if since % 16 < 8 then L.press({a = true}) end
