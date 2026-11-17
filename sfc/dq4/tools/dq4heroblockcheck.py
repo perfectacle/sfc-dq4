@@ -251,104 +251,12 @@ def king_cases(ch2):
     return out
 
 
-# 3장 톨네코 집(3E/01): 출발 상태가 그 맵이라 마을(3E/00) 왼쪽 가장자리를 거쳐 들어간다
-CH3_HOP = '3E/00,4,26'
-# 48/02 의 배 인물 슬롯: 목록 첫 인물이라 첫 인물 슬롯(dq5npclists.SLOT_FIRST)
-RAFT_SLOT = 0x08
-
-
 def chapter3_cases():
-    """3장 사건 사례. 출발 상태는 3장 톨네코 집(dq4ch3walkcheck.head). 사건 모듈이 주인공 칸으로 거는 사건을 더하면
-    그 사건을 걸 수 있는 칸마다 여기에 사례를 둔다(꼴은 chapter2_cases 와 같고, 같은 맵이면 hop)."""
-    import dq4ch3event as ch3
-    close = pc.CLOSE
-    nx, ny = ch3.NENE_CELL
-    # 네네(낮, 침대 머리 위 칸)에게 위 칸에서 아래로 말을 건다. 침대(시작 칸)는 FC 에서 막힌 블록이라 맵을 다시 불러온
-    # 뒤에는 설 수 없고, 순간이동으로 세우면 「その方向には誰もいない」(129)만 떴다. 순간이동은 TO 한 셀 아래에 내린다.
-    # 말이 끝나면 위 줄로 돌아 방 오른쪽으로 걸어 간다(오른쪽 칸은 침대). 말이 끝난 뒤 A 를 더 누르면 다시 말을 걸어
-    # 창이 남으므로 닫기만 누른다. distinct 1: 129 밖의 메시지가 하나. 오늘 도시락 flag 를 켜 두어 잠 갈래(맵을 다시
-    # 불러옴) 대신 한마디(dq4ch3lakanaba 「forgot」)만 하게 한다
-    import dq4ch3lakanaba as lakanaba
-    bento = f'{0x2190 + lakanaba.BENTO_TODAY[0]:04X}={lakanaba.BENTO_TODAY[1]:02X}'
-    out = {'nene-above': {'hop': CH3_HOP, 'warp': f'{ch3.HOUSE},{nx},{ny - 3}', 'set': bento,
-                          'walk': f'{wc.talk("down", 12)};wait:120;{close};{close};{nx},{ny - 4}', 'free': f'{nx + 4},{ny - 4}',
-                          'want': [], 'map': ch3.HOUSE, 'distinct': 1, 'maxf': 2500}}
-    # 북쪽 동굴 수문 앞 칸(FC 한 칸 = 주인공 두 열)마다: 아래에서 올라서 「예」 면 물살에 밀려 옮겨 가고 조작이 돌아온다
-    import dq4ch3safe as safe
-    yes = 'up:40;wait:230;a:8;wait:60;a:8;wait:1300'
-    for side, spec, free, want in (('right', safe.RIGHT, '18,47', []), ('left', safe.LEFT, '20,27', [('SAFE_DRAINED', safe.DRAINED)])):
-        x0, _, _, y1 = spec['rect']
-        for x in (x0, x0 + 1):
-            out[f'safe-{side}-{x}'] = {'warp': f'{safe.GATES},{x},{y1 + 2}', 'set': '', 'walk': yes, 'free': free,
-                                       'want': want, 'map': spec['to'][0], 'maxf': 4000}
-    # 구르는 바위(3E/07): 풀리는 칸 (03~04,0E)를 주인공 두 열(셀 X 6·7·8)로 지나 왼쪽 통로를 내려가 기다리면 바위가 바로
-    # 위에서 멈춘다. 위로 밀어도 지나가지 못하고, 줄 1E 로 비켜 가운데 통로로 걸어 갈 수 있어야 한다(바위가 일행과 겹치거나
-    # 길을 영영 막지 않음). 구덩이 바로 위에서 기다리면 갇히지 않고 구덩이로 떨어져 3E/08 로
-    for x in (6, 7, 8):
-        out[f'safe-boulder-{x}'] = {'warp': f'{safe.ROLL},{x},22', 'set': '',
-                                    'walk': f'{x},49;wait:500;up:30;wait:60;{x},61', 'free': '20,61',
-                                    'want': [], 'map': safe.ROLL, 'maxf': 4000}
-    out['safe-boulder-pit'] = {'warp': f'{safe.ROLL},6,22', 'set': '', 'walk': '6,73;wait:900;down:40;wait:300',
-                               'free': '6,29', 'want': [], 'map': safe.PIT_BELOW, 'maxf': 4000}
-    # 여신상 동굴 단추 칸(FC 40/01 (11,02))의 두 열마다: 한 줄 아래(FC (11,03))에서 올라서 「예」 면 물이 빠진 48/04 의 같은 칸에 서고, 왼쪽
-    # 통로(FC (0C,02))로 걸어 간다. 위는 물음 창이 뜬(18~26프레임) 뒤로 넉넉히 누른다: 40 이면 메시지 번호만 다른 롬에서
-    # x 34 의 커서가 「아니요」 로 갔다(창이 뜨는 프레임과 떼는 프레임이 가까움)
-    import dq4ch3endor as endor
-    bx0, _, _, by1 = endor._hero_rect(*endor.BUTTON_FC)
-    for x in (bx0, bx0 + 1):
-        out[f'endor-button-{x}'] = {'warp': f'{endor.CAVE_WET},{x},{by1}', 'set': '',
-                                    'walk': 'up:80;wait:200;a:8;wait:60;a:8;wait:800', 'free': '24,5',
-                                    'want': [('ENDOR_BUTTON', endor.BUTTON)], 'map': endor.CAVE_DRY, 'maxf': 3000}
-    # 여신상 동굴 배(48/02, FC 40/00 배 (16,05)). 배 칸이 아닌 물 칸으로는 못 걷는다: 배 위 칸 (15,04)에서 오른쪽 물
-    # (16,04)로 밀기, 배를 타고 한 칸 가서 땅에 내린 뒤(배는 (16,05)에 남음) 위 칸에서 다시 물로 밀기. 배는 단추 앞에만 있다
-    off = f'{0x2190 + endor.BUTTON[0]:04X}&{~endor.BUTTON[1] & 0xFF:02X}'
-    out['raft-water'] = {'warp': f'{endor.CAVE_ENTRY},42,8', 'set': off, 'walk': 'right:40;wait:30', 'hero_at': (42, 9),
-                         'free': '24,9', 'want': [], 'map': endor.CAVE_ENTRY, 'maxf': 2000}
-    out['raft-left-water'] = {'warp': f'{endor.CAVE_ENTRY},42,10', 'set': off,
-                              'walk': '44,11;46,11;44,11;42,11;42,9;right:40;wait:30', 'hero_at': (42, 9),
-                              'free': '24,9', 'want': [], 'not': [('RAFT_RIDING', safe.RIDING)], 'map': endor.CAVE_ENTRY,
-                              'maxf': 3000, 'ride': (RAFT_SLOT,)}
-    # 뚫린 굴의 이주민 둘은 조작을 막지 않고 서쪽 계단 (05,0F) 까지 걸어 사라진다. 주인공이 그 계단(엔돌 쪽에서 든 도착
-    # 칸)이나 길 가운데 (0A,08) 에 서 있으면 다가와 기다리고, 주인공이 길 옆((03,0F)·(0B,08))으로 비키면 지나가 사라진다
-    import dq4ch3tunnel as tunnel
-    sx, sy = tunnel.OPEN_ARRIVAL
-    for name, (x, y), (ax, ay) in (('stairs', (sx, sy), tunnel.cell(0x03, 0x0F)),
-                                   ('path', tunnel.cell(0x0A, 0x08), tunnel.cell(0x0B, 0x08))):
-        away = f'{ax},{ay}'
-        out[f'tunnel-migrants-{name}'] = {'warp': f'{tunnel.OPEN_MAP},{x},{y - 1}', 'set': '', 'walk': f'wait:900;{away};wait:600',
-                                          'free': away, 'want': [], 'map': tunnel.OPEN_MAP, 'maxf': 3000}
-    out.update(shop_cases(lakanaba))
-    out.update(bonmalmo_cases())
-    return out
-
-
-# 레이크나바 무기점 첫 출근: 문 칸이나 문 밖 칸에 들어서면 꾸지람(02F3) 뒤 카운터 안 (4,53)으로 걸려 들어가 031D. 문 밖
-# 오른쪽·위·아래에서 들어선다. 끝나면 카운터 안 방 위쪽으로 다시 걷는다
-SHOP_APPROACH = [('shop-right', '20,52'), ('shop-above', '16,48'), ('shop-below', '16,56')]
-
-
-def shop_cases(lakanaba):
-    out = {}
-    for name, warp in SHOP_APPROACH:
-        out[name] = {'warp': f'{lakanaba.TOWN},{warp}', 'set': '', 'walk': f'16,53;{wc.taps(12)};{pc.CLOSE}',
-                     'free': f'{lakanaba.COUNTER_IN[0]},{lakanaba.COUNTER_IN[1] - 4}', 'hero_at': lakanaba.COUNTER_IN,
-                     'want': [('SEEN', lakanaba.SEEN), ('SHIFT', lakanaba.SHIFT)], 'maxf': 2600}
-    return out
-
-
-def bonmalmo_cases():
-    """본몰·여우 마을(dq4ch3bonmalmo): 말을 건 쪽과 상관없이 장면 뒤 조작이 돌아오고 인물이 주인공을 지나가지 않는지.
-    여우 장면은 촌장 오른쪽에서(걷기 검사는 왼쪽), 왕자는 아래에서(걷기 검사는 오른쪽) 말을 건다."""
-    import dq4ch3bonmalmo as bm
-    cx, cy = bm.CHIEF
-    px, py = bm.PRINCE['day']
-    wx, wy = bm.FOREST_WAKE
-    return {'bm-fox-right': {'warp': f'{bm.FOX_TOWN},{cx + 2},{cy - 1}', 'set': '21FF|02',
-                             'walk': f'{wc.talk("left", 4)};wait:400;{wc.taps(16, 80)};wait:600;{pc.CLOSE}',
-                             'free': f'{wx},{wy - 4}', 'want': [('BM_FOXED', bm.FOXED)], 'map': bm.FOREST, 'maxf': 7000},
-            'bm-prince-below': {'warp': f'{bm.CASTLE},{px},{py + 1}', 'set': '',
-                                'walk': f'{wc.talk("up", 10)};wait:300', 'free': f'{px + 4},{py + 2}',
-                                'want': [('BM_PRINCE_MET', bm.PRINCE_MET)], 'map': bm.CASTLE, 'maxf': 3000}}
+    """3장 사건 사례. 출발 상태는 3장 톨네코 집(dq4ch3walkcheck.head). 사례는 사건 모듈 옆 dq4ch3<모듈>_checks.py 의
+    hero_cases() 가 낸다(dq4ch3checks): 사건 모듈이 주인공 칸으로 거는 사건을 더하면 그 사건을 걸 수 있는 칸마다
+    사례를 둔다(꼴은 chapter2_cases 와 같고, 출발 상태와 같은 맵이면 hop)."""
+    import dq4ch3checks
+    return dq4ch3checks.merged('hero_cases')
 
 
 def overlaps(text, ride=()):

@@ -12,8 +12,10 @@
 
 docstring 과 빈칸이 든 글(도움말)은 보지 않는다.
 
+  등록 장치  REGISTRIES 의 모듈(importlib 로 사건 모듈 옆 표를 들이는 dq4ch3checks)은 그 glob 에 맞는 파일에 닿는다
+
 못 보는 길(이런 길로 닿는 파일은 paths 에 손으로 적는다):
-  - importlib·__import__ 로 불러오는 모듈
+  - REGISTRIES 밖에서 importlib·__import__ 로 불러오는 모듈
   - 변수·f-string·이어 붙이기로 만든 파일 이름(하위 프로세스 인자를 조립하는 것 포함. dq4build 단계는 STAGES 의
     글자 상수라 잡힌다), Lua 의 dofile·loadfile 에 계산한 경로를 주는 것
   - 계산한 이름으로 여는 자료 파일(폴더째 읽는 그림 등)과 환경 변수가 가리키는 파일, 저장소 밖 툴킷 Lua(LIBDIR)
@@ -52,6 +54,10 @@ GROUP_ROOTS = {
 }
 # dq4-ch3-* 밖에서 3장 모듈이 롬에 싣는 것을 보는 검사
 CH3_CONTENT_CHECKS = ('dq4-people-match', 'dq4-people-event-lines', 'dq4-wrap-routine', 'dq4-msg-banks', 'dq4-rom-ledger')
+# 등록 장치를 따라 importlib 로 들이는 파일: 그 모듈에 닿으면 이 glob 에 맞는 추적 파일에 닿는다
+REGISTRIES = {
+    'sfc/dq4/tools/dq4ch3checks.py': ('sfc/dq4/tools/dq4ch3*_checks.py',),
+}
 # 3장 맵(그룹)과 옮긴 인물 목록을 만드는 파일
 CH3_SCENE_FILES = ('sfc/dq4/tools/dq4npcport.py', 'sfc/dq4/tools/dq4groupbuild.py')
 FILE_NAME = re.compile(r'[\w./-]+\.(?:py|lua|asm)')
@@ -145,7 +151,8 @@ def asm_refs(path):
 @lru_cache(maxsize=None)
 def refs(path):
     if path.endswith('.py'):
-        return frozenset(py_refs(path))
+        reg = {f for f in tracked() for p in REGISTRIES.get(path, ()) if PurePosixPath(f).full_match(p)}
+        return frozenset(py_refs(path) | reg)
     if path.endswith('.lua'):
         return frozenset(lua_refs(path))
     if path.endswith('.asm'):

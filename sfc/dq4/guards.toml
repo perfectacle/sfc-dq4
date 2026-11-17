@@ -314,6 +314,10 @@ paths = [
   "sfc/dq4/tools/dq4ch2tempe.py",
   "sfc/dq4/tools/dq4chapter1.py",
   "sfc/dq4/tools/dq4heroblockcheck.py",
+  "sfc/dq4/tools/dq4ch3checks.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
+  "sfc/dq4/tools/dq4ch3walkparts.py",
+  "sfc/dq4/tools/dq4ch3*_checks.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
   "sfc/dq4/tools/lua/dq4heroblock.lua",
   "sfc/dq4/tools/lua/dq4walkstate.lua",
@@ -404,6 +408,7 @@ name = "dq4-ch3-open"
 why = "3장 넘김과 첫머리: 우승 뒤 빈 산트하임에서 성 앞마당으로 내려가 2장 끝 서술 → 3장 넘김(아리나 일행 맡기기·톨네코 기록·금화 0·2장 flag 끔) → 레이크나바 톨네코 집에서 3장 상자·서두·네네의 부름·방향 키·네네가 깨우는 말을 넘겨, 3장 flag 켜짐·첫머리 대기 꺼짐·일행 수 1·톨네코 기록(물건 칸 1 도시락)·맡긴 아리나 기록·3장 변수 칸이 0 인지 본다. 이어 3장 사건 등록 견본(dq4ch3lakanaba)으로 네네에게 말을 걸어 도시락이 있으면 그대로, 비우면 받고 flag 가 켜지는지, 대화 호출 표 칸을 공용 장치(give·take·pay·earn)로 바꾼 롬 사본마다 금화·물건·결과 flag 를 본다. 두 번 걸어 기록이 같아야 한다. 2장 끝 인물의 3장 갈래(--chapter3), 3장 장면 상자, 네네 자리의 빌린 스크립트, 방향 키 네이티브, 사건 등록(EVENTS·대화 번호), 대화 호출 입구(06:FE00)·dispatch·공용 장치, 사건 물건 자리를 바꾸면 깨진다"
 paths = [
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4itemport.py",
   "sfc/dq4/tools/dq4npcport.py",
@@ -429,6 +434,7 @@ name = "dq4-ch3-walk"
 why = "3장 사건 구간을 3장 출발 상태(첫머리 뒤 톨네코 집, 조작 풀림)에서 묶음마다 따로 걸어 flag·끝 맵·끝 셀·바이트를 본다. 지금은 첫머리 뒤 침대에서 문을 지나 계단으로 마을에 내려서기, 마을 왼쪽 가장자리로 필드에 나가 입구 아래 칸에 서기, 다시 마을 도착 칸에 들기. 북쪽 동굴은 입구에서 금고까지 순간이동 없이(수문 → 구르는 바위로 왼쪽 구덩이 메우기 → 금고 상자)와 돌아오면 떨어짐, 바위를 가운데 구덩이로. 출발 상태(2장 출발 상태에서 빈 성 → 2장 끝 → 3장 첫머리)도 묶음도 두 번 걸어 기록이 같아야 한다(운으로 통과 금지)"
 paths = [
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4boulder.py",
   "sfc/dq4/tools/dq4raft.py",
@@ -455,6 +461,7 @@ paths = [
   "sfc/dq4/tools/dq4npccheck.py",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4ch2event.py",
   "sfc/dq4/tools/dq4ch1event.py",
@@ -482,6 +489,7 @@ why = "3장 사건이 주인공이 선 칸에 따라 멈추거나 엇나가지 �
 paths = [
   "sfc/dq4/tools/dq4heroblockcheck.py",
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4boulder.py",
   "sfc/dq4/tools/dq4raft.py",
@@ -504,6 +512,7 @@ why = "3장 마을 사람(dq4ch3towns): 3장 그룹 맵마다 3장 동안 걸릴
 paths = [
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4chapter1.py",
   "sfc/dq4/tools/dq4npccheck.py",
   "sfc/dq4/tools/dq4npcport.py",
@@ -539,6 +548,7 @@ paths = [
   "sfc/dq4/tools/dq4boulder.py",
   "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4itemport.py",
   "sfc/dq4/tools/dq4prologue.py",
@@ -569,6 +579,7 @@ paths = [
   "sfc/dq4/tools/dq4compatcheck.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4boulder.py",
   "sfc/dq4/tools/dq4raft.py",
@@ -616,6 +627,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5cdldump.lua",
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4groupbuild.py",
 ]
@@ -677,6 +689,7 @@ paths = [
   "sfc/dq4/tools/lua/dq4warpmsg.lua",
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4groupbuild.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3endor && uv run --locked python sfc/dq4/tools/dq4ch3endorcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3endor --repeat 2"
@@ -693,6 +706,7 @@ paths = [
   "sfc/dq4/tools/dq4fieldport.py",
   "fc/dq4/tools/dq4field.py",
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4boulder.py",
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4groupbuild.py",
@@ -708,6 +722,7 @@ name = "dq4-ch3-tunnel"
 why = "3장 굴(dq4ch3tunnel)을 두 롬과 견준다: FC 42/00·42/01 인물 칸과 대화 번호, 이주민·나그네의 FC 걷기 블록 목표 칸, 계단과 동쪽 끝 열(장 끝 판정), 빌린 DQ5 05:996C 스크립트 칸과 그 길이, 맵 도착 예외 2A:F29D 의 원래 바이트. 롬이 없으면 건너뛰는 시험이라 롬을 두고 돈다. 공사비·재개·뚫린 입구·장 끝 서술·엔딩 곡·끝 상자는 dq4-ch3-walk, 이주민과 주인공 겹침은 dq4-ch3-heroblock, 인물 첫 말은 dq4-ch3-npc 가 본다"
 paths = [
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/test_dq4ch3tunnel.py",
   "sfc/dq4/tools/dq4chapterbox.py",
   "sfc/dq4/tools/dq4boulder.py",
@@ -815,6 +830,10 @@ name = "dq4-ch2-heroblock"
 why = "2장 사건이 주인공이 선 칸에 따라 멈추거나 엇나가지 않게: 벽 앞 셀에 왼쪽·위·아래에서 들어서기, 벽 앞 물음에 아니요 뒤 다시 묻기, 필드 네 걸음 합류(아래·왼쪽·오른쪽), 텐페 신부에게 세 쪽에서 말 걸어 제단 앞 셀로"
 paths = [
   "sfc/dq4/tools/dq4heroblockcheck.py",
+  "sfc/dq4/tools/dq4ch3checks.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
+  "sfc/dq4/tools/dq4ch3walkparts.py",
+  "sfc/dq4/tools/dq4ch3*_checks.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
   "sfc/dq4/tools/dq4ch2*.py",
   "sfc/dq4/tools/dq4ch1walkcheck.py",
@@ -976,6 +995,10 @@ paths = [
   "sfc/dq4/tools/dq4fieldencountercheck.py",
   "sfc/dq4/tools/dq4fieldport.py",
   "sfc/dq4/tools/dq4heroblockcheck.py",
+  "sfc/dq4/tools/dq4ch3checks.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
+  "sfc/dq4/tools/dq4ch3walkparts.py",
+  "sfc/dq4/tools/dq4ch3*_checks.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
   "sfc/dq5/tools/dq5exitcheck.py",
   "sfc/dq4/tools/dq4build.py",
@@ -1755,6 +1778,7 @@ paths = [
   "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/wrapcheck && uv run --locked python sfc/dq4/tools/dq4wrapcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/wrapcheck --jobs 4"
@@ -1771,6 +1795,10 @@ paths = [
   "sfc/dq4/tools/dq4doorstandcheck.py",
   "sfc/dq4/tools/dq4freshstate.py",
   "sfc/dq4/tools/dq4heroblockcheck.py",
+  "sfc/dq4/tools/dq4ch3checks.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
+  "sfc/dq4/tools/dq4ch3walkparts.py",
+  "sfc/dq4/tools/dq4ch3*_checks.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
   "sfc/dq4/tools/dq4ch1walkcheck.py",
   "sfc/dq4/tools/dq4pins.py",
@@ -1929,6 +1957,7 @@ paths = [
   "fc/dq4/tools/dq4talk.py",
   "sfc/dq4/tools/dq4boulder.py",
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4raft.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4peoplematchcheck.py --rom work/ch1/dq4-ch1-full.sfc --json work/peoplematch/match.json"
@@ -2057,6 +2086,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
   "sfc/dq4/tools/dq4boulder.py",
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4raft.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4msgbankcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-msgbank"
@@ -3458,6 +3488,7 @@ paths = [
   "sfc/dq4/tools/dq4people.py",
   # 3장 사건·마을 사람 모듈이 인물을 더하고 빼면 dq4people 의 그림 배치가 바뀌어 1장 화면 인물이 달라질 수 있다
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4windowtext.py",
   "sfc/dq4/tools/dq4titleanimation.py",
   "sfc/dq4/tools/dq4titleassets.py",
@@ -3541,6 +3572,7 @@ paths = [
   "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/peopleevent1 work/peopleevent2 work/peopleevent3 && uv run --locked python sfc/dq4/tools/dq4peopleeventcheck.py --chapter 1 --rom work/ch1/dq4-ch1-full.sfc --out work/peopleevent1 --json work/peopleevent/ch1.json && uv run --locked python sfc/dq4/tools/dq4peopleeventcheck.py --chapter 2 --rom work/ch2/dq4-ch1-full.sfc --out work/peopleevent2 --json work/peopleevent/ch2.json && uv run --locked python sfc/dq4/tools/dq4peopleeventcheck.py --chapter 3 --rom work/ch3/dq4-ch1-full.sfc --out work/peopleevent3 --json work/peopleevent/ch3.json"
@@ -3855,6 +3887,10 @@ ch1-walk = [
   "sfc/dq4/tools/dq4ch2walkcheck.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
   "sfc/dq4/tools/dq4ch3walkcheck.py",
+  "sfc/dq4/tools/dq4ch3checks.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
+  "sfc/dq4/tools/dq4ch3walkparts.py",
+  "sfc/dq4/tools/dq4ch3*_checks.py",
   "sfc/dq4/tools/dq4ch3opencheck.py",
   "sfc/dq4/tools/dq4chapter1.py",
   "sfc/dq4/tools/dq4chapterbox.py",

@@ -122,10 +122,11 @@ class RegisteredModuleTest(unittest.TestCase):
         self.assertEqual(list(ev.EVENTS), [m for m in order if (HERE / f'{m}.py').is_file()])
         self.assertIn('dq4ch3lakanaba', ev.EVENTS)
         # 사건 모듈처럼 보이는 3장 파일은 모두 예약표에 있다(오타로 등록이 빠지지 않게)
-        tools = {'dq4ch3event', 'dq4ch3slots', 'dq4ch3opencheck'}
+        tools = {'dq4ch3event', 'dq4ch3slots', 'dq4ch3opencheck', 'dq4ch3checks', 'dq4ch3walkparts'}
         for path in HERE.glob('dq4ch3*.py'):
             if path.stem not in tools and not path.stem.endswith('check'):
-                self.assertIn(path.stem, order, f'{path.name}: dq4ch3slots.SLOTS 에 없는 3장 모듈')
+                # 사건 모듈 옆 검사 표(dq4ch3checks 가 모음)는 그 모듈 이름 + _checks
+                self.assertIn(path.stem.removesuffix('_checks'), order, f'{path.name}: dq4ch3slots.SLOTS 에 없는 3장 모듈')
 
     def test_modules_stay_in_their_slots(self):
         for ctx in ev.contexts(0x1000):

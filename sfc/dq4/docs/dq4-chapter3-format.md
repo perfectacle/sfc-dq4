@@ -419,11 +419,14 @@ FC 실측(`rom/dq4.nes`, 1장 왕좌의 방 상태에서 `$615A` = 2, 금화 100
 
 ### 붙이는 법
 
-1. **flag**: 사건 모듈의 flag 를 `dq4ch3walkcheck.FLAGS` 에 한 줄(`'NAME': wc.flag(모듈.FLAG)`). 바이트 전체를 볼 칸은 `(주소, 0xFF)` 로 두고 선택 `bytes` 로 봅니다.
-2. **걷기 구간**: `dq4ch3walkcheck.SEGMENTS` 에 사건 하나를 「순간이동 구간 하나 + 걷기 구간 여럿」 으로 더합니다. 순간이동 구간마다 새 묶음이고, 묶음 첫 구간에는 앞 구간들의 `want` 가 켜지고 `off` 가 꺼진 채로 놓입니다. 선택은 [2장 표](dq4-chapter2-format.md#걷기-검사에-구간-붙이기)와 같고 `set`(그 구간 시작에 한 번 두는 SET, 뒤 묶음에 잇지 않음)을 더했습니다. 일행·물건처럼 뒤 묶음까지 이어져야 하는 기록은 `dq4ch3walkcheck.effects` 에 `구간 이름 → {'set': …}` 으로 둡니다. 출발 상태와 같은 맵(`3E/01`)으로 순간이동하면 `HOPS`(마을 왼쪽 가장자리)를 먼저 들릅니다. 순간이동은 `TO` 의 한 셀 아래에 내립니다. 사건 전투는 선택 `battle`(모듈 `BATTLES` 의 몬스터를 덮음, `dq4ch3walkcheck.battle_patch`).
+사건의 검사 표는 사건 모듈 옆 `dq4ch3<모듈>_checks.py` 하나에 둡니다(`dq4ch3checks` 머리말). 파일이 있으면 `SLOTS` 차례로 들어오므로, 사건을 더하거나 고치는 PR 은 자기 `_checks` 파일만 고칩니다. 3장 공용 자리·입력 조각(`TOWN`·`gold`·`items`·`SEARCH` 등)은 `dq4ch3walkparts.py`, 공용 구간(`house`~`town_in`)과 공용 flag 는 `dq4ch3walkcheck` 에 있습니다.
+
+0. **차례**: 걷기 표는 묶음마다 앞 구간의 `want`·`off` 를 누적해 시작하고 flag 표 차례가 기록(WATCH·SET) 차례라, 잇는 차례가 결과에 닿습니다. `dq4ch3walkcheck.SEGMENT_ORDER`·`FLAG_ORDER` 는 모듈로 나누기 전의 차례를 고정한 것이고 새 모듈은 고치지 않습니다: 거기 없는 모듈·묶음은 `SLOTS` 차례로 뒤에 붙습니다. 한 모듈이 표를 여러 곳에 끼워야 하면 `SEGMENT_BLOCKS`·`FLAG_BLOCKS` 로 묶음을 나눕니다(`dq4ch3safe_checks`).
+1. **flag**: `_checks` 의 `FLAGS` 에 한 줄(`'NAME': wc.flag(모듈.FLAG)`). 바이트 전체를 볼 칸은 `(주소, 0xFF)` 로 두고 선택 `bytes` 로 봅니다.
+2. **걷기 구간**: `_checks` 의 `SEGMENTS` 에 사건 하나를 「순간이동 구간 하나 + 걷기 구간 여럿」 으로 더합니다. 순간이동 구간마다 새 묶음이고, 묶음 첫 구간에는 앞 구간들의 `want` 가 켜지고 `off` 가 꺼진 채로 놓입니다. 선택은 [2장 표](dq4-chapter2-format.md#걷기-검사에-구간-붙이기)와 같고 `set`(그 구간 시작에 한 번 두는 SET, 뒤 묶음에 잇지 않음)을 더했습니다. 일행·물건처럼 뒤 묶음까지 이어져야 하는 기록은 `_checks` 의 `effects(data)` 가 `구간 이름 → {'set': …}` 으로 냅니다. 출발 상태와 같은 맵(`3E/01`)으로 순간이동하면 `HOPS`(마을 왼쪽 가장자리)를 먼저 들릅니다. 순간이동은 `TO` 의 한 셀 아래에 내립니다. 사건 전투는 선택 `battle`(모듈 `BATTLES` 의 몬스터를 덮음, `dq4ch3walkcheck.battle_patch`).
 3. **말 걸기 기대값**: npccheck 는 3장 flag 를 켜고 주인공 물건 칸을 톨네코 처음 소지품(`dq4ch3event.start` 의 `items`)으로 둔 상태에서 말을 겁니다. 사건이 말을 바꾼 인물은 `dq4ch3event.start_messages(first)`(`(맵, FC 대화 번호, 밤 또는 None) → 메시지 번호`)에, 처음 목록에서 뺀 인물은 `dq4ch3event.absent()` 에 둡니다. npccheck 는 두 함수가 있으면 씁니다. `first` 는 3장 메시지 첫 번호(`dq4chapter1.chapter3_message`)입니다. 그 밖의 인물은 옮긴 일본어 임시 대사의 번호(인물 보고서 `npc-report.json` 의 `message`)를 기대합니다.
-4. **주인공 막기**: 주인공 칸으로 거는 사건은 `dq4heroblockcheck.chapter3_cases` 에 그 사건을 걸 수 있는 칸마다 사례를 둡니다(`warp`·`set`·`walk`·`want`·`free`·`hero_at`·`distinct`, 같은 맵이면 `hop`).
-5. **호환성·인물 팔레트**: `dq4ch3walkcheck.SEGMENTS` 를 그대로 걸으므로 따로 붙일 것이 없습니다.
+4. **주인공 막기**: 주인공 칸으로 거는 사건은 `_checks` 의 `hero_cases()` 에 그 사건을 걸 수 있는 칸마다 사례를 둡니다(`warp`·`set`·`walk`·`want`·`free`·`hero_at`·`distinct`, 출발 상태와 같은 맵이면 `hop` 에 `dq4ch3walkparts.HOP`). `dq4heroblockcheck.chapter3_cases` 가 모읍니다. 1C 로 걷는데 겹침 피하기 장치를 쓰지 않는 인물 스크립트는 `_checks` 의 `PASS_NO_DEVICE` 에 까닭을 둡니다(`test_dq4heroblock`).
+5. **호환성·인물 팔레트**: `dq4ch3walkcheck.SEGMENTS`(모은 표)를 그대로 걸으므로 따로 붙일 것이 없습니다. 가드는 `sfc/dq4/tools/dq4ch3*.py` glob 으로 `_checks` 파일을 이미 덮습니다.
 
 ```sh
 uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3
