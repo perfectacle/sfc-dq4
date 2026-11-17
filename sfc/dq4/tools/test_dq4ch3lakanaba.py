@@ -73,6 +73,7 @@ class FlagTest(unittest.TestCase):
         # 재고 칸 차례가 가게 목록의 덧붙임 차례와 같다(ブーメラン·くさりがま·はじゃのつるぎ)
         self.assertEqual(len(dq4shopport.LAKANABA_STOCK), len(L.GOODS) - L.STOCKED)
 
+    @unittest.skipUnless(DQ5.is_file() and (ROOT / 'rom' / 'dq4.nes').is_file(), 'local source ROMs not present')
     def test_looks_are_pictures_of_the_day_town(self):
         import dq4npcport
         lists, _, _ = dq4npcport.port(DQ5, ROOT / 'rom' / 'dq4.nes')
