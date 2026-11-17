@@ -1384,9 +1384,11 @@ class BuildFlowTests(unittest.TestCase):
     가짜로 바꾼다."""
     RED, GREEN, BLUE = (255, 0, 0), (0, 255, 0), (8, 16, 248)
 
-    def person(self, role, new_set=None, palette=None, flag=None):
+    def person(self, role, new_set=None, palette=None, flag=None, pictures=None):
         from types import SimpleNamespace
-        return SimpleNamespace(role=role, new_set=new_set, palette=palette, flag=flag)
+        if pictures is None:
+            pictures = P.LEADER_PICTURES if new_set is not None else (0x90,)
+        return SimpleNamespace(role=role, new_set=new_set, palette=palette, flag=flag, pictures=pictures)
 
     def rows(self, over=False):
         p = self.person
@@ -1456,6 +1458,14 @@ class BuildFlowTests(unittest.TestCase):
         self.assertEqual([r['set'] for r in doc['sets']], ['90', '91', '92'])
         self.assertEqual([(r['set'], r['palette']) for r in doc['new_sets']], [('A5', 0), ('A6', 0)])
         self.assertEqual(doc['gfx'], [{'gfx': f'{g:02X}', 'set': s} for g, s in zip(P.LEADER_PICTURES, ('A5', 'A6'))])
+
+    def test_a_follower_new_set_links_to_its_own_picture(self):
+        # 3장 용병처럼 주인공이 아닌 인물의 새 세트는 그 인물 그림 번호에 잇는다(주인공 두 그림은 그대로)
+        rows = self.rows() + [(self.person('merc', new_set=2, palette='z', flag=(0x12, 0x40), pictures=(0x5A,)),
+                               0xA7, 'simple', 41, 32, [], 5, [self.BLUE])]
+        doc = self.run_build(rows)['sprite']
+        want = [{'gfx': f'{g:02X}', 'set': s} for g, s in zip(P.LEADER_PICTURES, ('A5', 'A6'))]
+        self.assertCountEqual(doc['gfx'], [{'gfx': '5A', 'set': 'A7'}, *want])
 
     def test_patches_go_on_sprites_then_palettes_then_the_swap(self):
         calls = self.run_build(self.rows())

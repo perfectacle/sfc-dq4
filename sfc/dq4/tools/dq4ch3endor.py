@@ -581,9 +581,10 @@ def talk_scripts(ctx):
 
 # ---- 인물 목록 ----
 
-def _copy(lists, mp, talks, drop=(), sources=None):
-    """옮긴 목록 lists[mp] 를 베껴 talks({(낮·밤, FC 칸): 대화})의 사람 대화를 바꾸고 drop 의 사람을 뺀다. 바꿀·뺄
-    사람이 없으면 멈춘다(기본 목록은 고치지 않는다: 2장 엔돌도 같은 목록을 쓴다)."""
+def _copy(lists, mp, talks, drop=(), sources=None, looks=None):
+    """옮긴 목록 lists[mp] 를 베껴 talks({(낮·밤, FC 칸): 대화})의 사람 대화를 바꾸고 drop 의 사람을 뺀다. looks
+    ({(낮·밤, 셀): 그림})의 사람은 그림도 바꾼다. 바꿀·뺄 사람이 없으면 멈춘다(기본 목록은 고치지 않는다: 2장 엔돌도
+    같은 목록을 쓴다)."""
     want = {(t, cell(*fc)): talk for t, fc, talk in talks}
     gone = {(t, cell(*fc)) for t, fc in drop}
     hit, entries = set(), []
@@ -598,6 +599,8 @@ def _copy(lists, mp, talks, drop=(), sources=None):
             if sources and key in sources:
                 # 빌린 스크립트는 이동 간격이 0 이면 돌지 않는다(dq4ch2event._invisible)
                 e = {**e, "from": sources[key], "fields": {**e["fields"], "interval": max(1, e["fields"]["interval"])}}
+            if looks and key in looks:
+                e = {**e, "fields": {**e["fields"], "gfx": looks[key]}}
         entries.append(e)
     missing = (set(want) | gone) - hit
     if missing:
@@ -632,6 +635,9 @@ def npc_lists(lists, ctx):
     t = ctx.talk
     src = lambda who: {"list": SCRIPT_LIST, "index": SCRIPTS[who][1]}  # noqa: E731
     sources = {(SCOTT[1], cell(*SCOTT[2])): src('scott'), **{(tm, cell(*fc)): src('lawrence') for _, tm, fc in LAWRENCE}}
+    # 용병은 고용 뒤 따라 걷는 그림(dq4mercenary.PICTURES)과 같은 그림으로 세운다
+    looks = {(SCOTT[1], cell(*SCOTT[2])): merc.PICTURES['scott'],
+             **{(tm, cell(*fc)): merc.PICTURES['lawrence'] for _, tm, fc in LAWRENCE}}
     talks = {TOWN: [(tm, fc, t['nene']) for tm, fc in _who(NENE, TOWN)] + [(SCOTT[1], SCOTT[2], t['scott'])],
              BARD_HALL: [(tm, fc, t['lawrence']) for _, tm, fc in LAWRENCE],
              CASTLE_HALL: [(DELIVER[1], DELIVER[2], t['deliver']), (GUIDE[1], GUIDE[2], t['guide'])],
@@ -646,12 +652,12 @@ def npc_lists(lists, ctx):
         return {"map": m, "flag": flag[0], "when": "on", "mask": flag[1], "list": f"new:{name}"}
     for mp in (TOWN, SHOP_UP):
         name = f'ch3_endor_{mp.replace("/", "")}_shop'
-        new.append({"name": name, "entries": _copy(lists, mp, talks[mp], _who(AFTER_SHOP, mp), sources)})
+        new.append({"name": name, "entries": _copy(lists, mp, talks[mp], _who(AFTER_SHOP, mp), sources, looks)})
         over.append(on(mp, SHOP, name))
     for mp in (TOWN, CASTLE_HALL, THRONE, SHOP_UP, COLLECTOR, BARD_HALL):
         name = f'ch3_endor_{mp.replace("/", "")}'
         new.append({"name": name, "entries": _copy(lists, mp, talks[mp], _who(BEFORE_SHOP + BARD_HIDDEN, mp),
-                                                   sources)})
+                                                   sources, looks)})
         over.append(on(mp, ch3.CHAPTER3, name))
     lists[CAVE_WET]["entries"] += ch2._invisible({"list": SCRIPT_LIST, "index": SCRIPTS['button'][1]}, t['button'])
     return new, over

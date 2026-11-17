@@ -40,6 +40,9 @@ CODE_AT, CODE_END = 0x5CC000, 0x5CD000   # dq4ch2slots.CHAPTER3_CODE
 # 대화 호출 표(4바이트 칸: 주소 3·인자 1). 그 앞까지가 넘김·공용 장치 네이티브
 TABLE_AT = 0x5CCC00
 TORNEKO_PICTURE = 0x7A         # 3장 동안 주인공 그림: DQ4 가 쓰지 않는 DQ5 그림(세트 46, 37타일)에 NDS 톨네코를 싣는다
+# 용병 스콧·로렌스의 그림(서 있을 때와 따라 걸을 때 같음). DQ4 가 쓰지 않고 말 걸기에서 건너뛰지 않는 DQ5 그림이고,
+# 32타일 넘게 비는 세트가 없어 dq4people 이 새 세트(72·73)로 잇는다
+SCOTT_PICTURE, LAWRENCE_PICTURE = 0x5A, 0x5F
 TORNEKO_NAME = '톨네코'
 FC_TORNEKO = 5                 # dq4growth.FC_TORNEKO
 # FC 3장 시작: 금화 0, 귀환 자리 12(16/00 교회), 다녀온 비트 $6165 = 40(그룹 16). fc/dq4/tools/dq4event.py chapters
