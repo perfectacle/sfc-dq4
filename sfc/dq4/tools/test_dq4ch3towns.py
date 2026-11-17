@@ -42,7 +42,7 @@ class RegisterTest(unittest.TestCase):
         code, at = W.native(ctx())
         start, end = ev.SLOTS['W'].code
         self.assertLessEqual(start + len(code), end)
-        self.assertEqual(set(W.CALLS), set(W.OUT_TO))
+        self.assertEqual(set(W.CALLS), {*W.OUT_TO, 'armor_buy'})
 
     def test_every_talk_has_a_body_and_every_message_is_used(self):
         c = ctx()
@@ -51,7 +51,11 @@ class RegisterTest(unittest.TestCase):
         used = set()
         for b in bodies:
             _msgs(b, used)
-        self.assertEqual(used, set(c.msg.values()))
+        native = {c.msg[n] for n in W.ARMOR_MESSAGES}
+        self.assertEqual(used | native, set(c.msg.values()))
+        code, _ = W.native(c)
+        for n in W.ARMOR_MESSAGES:
+            self.assertIn(bytes((0xA9, c.msg[n] & 0xFF, c.msg[n] >> 8)), code, n)
 
     def test_flags_match_the_modules_that_own_them(self):
         for module, names in W.OWNERS.items():

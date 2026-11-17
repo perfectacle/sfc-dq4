@@ -4,6 +4,7 @@
 붙들어 처음 칸에 세운다.
 """
 import dq4ch1walkcheck as wc
+import dq4ch3event as ch3
 import dq4ch3towns as W
 
 # 인물 칸 08~1F 의 이동 간격을 0 으로(dq4screencheck.SHOP_HOLD 와 같음)
@@ -21,12 +22,34 @@ def _out(name):
     return mp, W.cell(*fc)
 
 
-FLAGS = {'TOWNS_SCOLDED': wc.flag(W.NANNY_SCOLDED)}
+FLAGS = {'TOWNS_SCOLDED': wc.flag(W.NANNY_SCOLDED),
+         # 톨네코 물건 칸 0·1 과 금화(방어구 매입)
+         'TOWNS_ITEM0': (ch3.PARTY_ITEMS, 0xFF), 'TOWNS_ITEM1': (ch3.PARTY_ITEMS + 1, 0xFF),
+         'TOWNS_GOLD0': (ch3.GOLD_AT, 0xFF), 'TOWNS_GOLD1': (ch3.GOLD_AT + 1, 0xFF), 'TOWNS_GOLD2': (ch3.GOLD_AT + 2, 0xFF)}
+LEATHER = 0x48                 # DQ5 かわのよろい(FC 26, 값 180)
+CLUB = 0x02                    # DQ5 こんぼう(무기: 사지 않음)
+# 물건 칸 0·1 = かわのよろい·こんぼう(장비 비트 없음), 나머지 빈 칸, 금화 0
+BUY_SET = ';'.join([f'{(ch3.PARTY_ITEMS & 0xFFFF) + k:04X}={v:02X}' for k, v in enumerate([LEATHER, CLUB] + [0xFF] * 10)] +
+                   [f'{(ch3.EQUIP & 0xFFFF) + k:04X}=00' for k in range(2)] +
+                   [f'{(ch3.GOLD_AT & 0xFFFF) + k:04X}=00' for k in range(3)])
+BUYER = W.cell(0x04, 0x15)
+YES_A = 'a:8;wait:60'
+NO = 'wait:60;down:8;wait:40;a:8;wait:60'
 # 본몰 왕자 낮 자리(FC (01,0B))의 오른쪽 셀과 유모(FC (06,07)) 아래 셀. 왕자 방은 FC 열 06 의 줄 09 가 벽이라 열 04 로 오른다
 PRINCE_RIGHT = W.cell(0x02, 0x0B)
 NANNY_BELOW = W.cell(0x06, 0x08)
 
 SEGMENTS = [
+    # 본몰 방어구 매입(FC 대화 060): 「예」 → 첫 물건 かわのよろい 를 골라 「예」(금화 + 값, 칸이 빔) → 「또」 「예」 →
+    # 둘째로 당겨진 こんぼう 를 고르면 082D → 「또」 「아니오」 로 0833
+    ('towns_buyer_side', 'warp', f'{W.BONMALMO},{BUYER[0]},{BUYER[1] + 1}',
+     {'map': W.BONMALMO, 'poke': f'{wc.DAY};{HOLD}', 'set': BUY_SET}),
+    ('towns_buy_armor', 'walk',
+     f'up:8;wait:30;a:8;wait:60;a:8;wait:120;{YES_A};a:8;wait:120;a:8;wait:120;a:8;wait:120;{YES_A};a:8;wait:120;'
+     f'{YES_A};a:8;wait:120;a:8;wait:120;a:8;wait:120;{NO};a:8;wait:120;a:8;wait:120;{wc.pc.CLOSE}',
+     {'map': W.BONMALMO, 'bytes': {'TOWNS_ITEM0': CLUB, 'TOWNS_ITEM1': 0xFF, 'TOWNS_GOLD1': 0, 'TOWNS_GOLD2': 0},
+      'poke': f'{wc.DAY};{HOLD}'}),
+
     # 본몰 왕자를 낮에 처음 만나 쫓겨난 그 방문에 유모에게 말을 걸면 03B1(본몰 NANNY_SCOLDED). 다시 든 방문의 0836 은
     # npccheck 상태 towns_prince
     ('towns_prince_side', 'warp', f'{W.BONMALMO},{PRINCE_RIGHT[0]},{PRINCE_RIGHT[1] - 1}',

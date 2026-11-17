@@ -22,6 +22,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 import dq4chapter1 as ch1  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 import dq4ch3event as ch3  # noqa: E402
+from dq4neneshop import _mark  # noqa: E402
 
 say = ch1.say
 pages = ch2._speaker_pages
@@ -200,6 +201,14 @@ MESSAGES = {
     'armor_ask': say('이 성에는 방어구가 모자라네.', '자네가 가진 방어구를 팔아 주지 않겠나?'),  # 0829
     'armor_no': say('그런가, 아쉽구먼.'),                                                    # 082A
     'armor_none': say('그런데 자네는 팔 물건을 하나도 갖고 있지 않잖나. 다음에 다시 오게.'),  # 082B
+    'armor_which': say('어느 것을 팔아 주겠나?'),                                             # 082C
+    'armor_enough': say('미안하지만 무기나 다른 물건이라면 이미 충분히 있다네.'),             # 082D
+    'armor_item': _mark(say('②로군.')),                                                       # 082E 앞
+    'armor_offer': _mark(say('그렇다면 ①골드에 사들이지. 괜찮겠나?')),                         # 082E 뒤
+    'armor_taken': say('확실히 받았네!'),                                                     # 082F
+    'armor_sorry': say('그런가, 아쉽구먼.'),                                                  # 0830
+    'armor_more': say('그 밖에도 무언가 팔아 주겠나?'),                                       # 0832
+    'armor_bye': say('그럼 또 방어구를 손에 넣거든 팔러 오게.'),                              # 0833
     # 엔돌 3장 목록(FC 1C:$869A·$868E·$877D·$860D·$87EC)의 사람
     'profit': say('헤에, 여기 엔돌에 돈 벌러 왔어?', '이 마을엔 여러 가지 돈벌이 이야기가 있으니까.'),  # 0676
     'clouds': say('저것 봐, 구름이 저렇게 빨리 흘러가.', '어딘가에서 안 좋은 일이 일어나고 있는 걸까……'),  # 0675
@@ -283,7 +292,8 @@ def talk_scripts(ctx):
         'bridge': [when(flag(FOXED), [s('bridge_soon')], [s('bridge_wait')])],
         'jail': [when(flag(FOXED), [s('jail_broke')], [s('jail_hint')])],
         # 매입은 옮기지 않았다: 「예」 면 팔 것이 없다는 말(FC 082B)로 끝난다
-        'armor_buyer': [s('armor_ask'), when(YES, [s('armor_none')], [s('armor_no')])],
+        # 고르기·값·되묻기는 대화 호출 armor_buy(네이티브)가 FC 15:$A54C 차례대로 한다
+        'armor_buyer': [s('armor_ask'), when(YES, [ctx.call('armor_buy')], [s('armor_no')])],
         'gate': [s('gate_ask'), when(YES, [s('gate_in')], [s('gate_no')])],
         'drunk': [s('drunk_ask'), when(YES, [s('drunk_yes')], [s('drunk_no')])],
         'statue_merchant': [s('statue_ask'), when(YES, [s('statue_me_too')], [s('statue_oops')])],
@@ -550,7 +560,15 @@ def _resumed():
 # ---- 내보내기(파수꾼이 말한 뒤 일행을 다른 자리로) ----
 
 DATA_ENTRIES = tuple(f'{name}_event' for name in OUT_TO)
-CALLS = {name: (name, 0) for name in OUT_TO}
+CALLS = {**{name: (name, 0) for name in OUT_TO}, 'armor_buy': ('armor_buy', 0)}
+# 네이티브 armor_buy 가 띄우는 메시지(대화 스크립트에는 없음)
+ARMOR_MESSAGES = ('armor_none', 'armor_which', 'armor_enough', 'armor_item', 'armor_offer', 'armor_taken', 'armor_sorry',
+                  'armor_more', 'armor_bye')
+# 매입하는 장비 칸(DQ5 23:B231 bit0-2: 1 갑옷, 2 방패, 3 투구 = FC 종류 1~3)
+ARMOR_SLOTS = (1, 2, 3)
+EQUIP_SLOT = 0x23B231
+# FC 의 r1 < F8(248/256): DQ5 00:953A 는 (r × A) >> 8 이라 A = 32 로 받아 31 보다 작으면 같은 갈래
+COMMON_BELOW, COMMON_OF = 31, 32
 
 
 def _warp_event(name):
@@ -570,7 +588,70 @@ def native(ctx):
     for name in OUT_TO:
         put(f'{name}_event', _warp_event(name))
         put(name, dq4prologue._event_start(at[f'{name}_event']))
+    put('armor_buy', _armor_buy(ctx.msg or {k: 0 for k in MESSAGES}))
     return bytes(out), at
+
+
+def _armor_buy(m):
+    """대화 호출: FC 15:$A54C. 톨네코(일행 칸 0) 소지품이 비었으면 082B. 아니면 DQ5 팔기 물건 창으로 고르게 해
+    방어구(갑옷·방패·투구)가 아니면 082D, 맞으면 값 × (54 + ⌊r × 27/256⌋)/64(드물게 (96 + ⌊r × 33/256⌋)/64)를
+    부르고 「예」 면 금화에 더하고 소지품에서 뺀 뒤 082F, 「아니요」 면 0830. 0832 「예」 면 되풀이, 아니면 0833.
+    장비 중인 물건도 산다(FC 실측). 창 받침과 임시 칸은 엔돌 네네 가게(dq4neneshop)의 것을 함께 쓴다."""
+    from dq4ch2endor import BCC, BCS, BEQ, BNE, sta
+    import dq4neneshop as nene
+    from dq4ch3slots import LOW_STUBS
+    brk = nene.low_stubs(LOW_STUBS[0])[1]
+    show = nene._show
+    p, acc, cnt = nene.TEMP & 0xFFFF, (nene.TEMP + 3) & 0xFFFF, (nene.TEMP + 6) & 0xFFFF
+    slot, item = (nene.PICK + 1) & 0xFFFF, (nene.PICK + 2) & 0xFFFF
+    w = lambda op, addr: bytes((op, addr & 0xFF, addr >> 8))  # noqa: E731
+
+    def j(name):
+        return bytes((0x22, *nene._al(brk[name])))
+    from dq4chapterbox import ENTER, LEAVE
+    a = nene._asm()(ENTER, 0xF4, 0x7E, 0x7E, 0xAB, 0xAB, 0xE2, 0x30)
+    a(0x22, *nene._al(nene.SHOP_ENTER), 0xE2, 0x30, j('window'), j('close'))
+    a.label('round')(0x64, 0x42, j('count'), 0xA5, 0x46).br(BNE, 'has')
+    show(a, m['armor_none'])
+    a.brl('end')
+    a.label('has')
+    show(a, m['armor_which'])
+    a(0x22, *nene._al(nene.PICKER_RESET), 0x64, 0xE4, j('pick'), 0xA5, 0xE8).br(0x10, 'picked')(j('close')).brl('bye')
+    a.label('picked')(0x85, 0x43, w(0x8D, slot), 0x64, 0x42, j('item'))
+    a(0xA5, 0x46, 0x48, j('close'), 0x68, w(0x8D, item), 0x85, 0xF5, 0xAA)
+    a(0xBF, *nene._al(EQUIP_SLOT), 0x29, 0x07, 0xC9, ARMOR_SLOTS[0]).br(BCC, 'other')(0xC9, ARMOR_SLOTS[-1] + 1).br(BCC, 'armor')
+    a.label('other')
+    show(a, m['armor_enough'])
+    a.brl('more')
+    a.label('armor')
+    show(a, m['armor_item'])
+    # 값 p(3바이트) = BRK 94 02 → $46~$48
+    a(w(0xAD, item), 0x85, 0x42, j('price'), 0xA5, 0x46, w(0x8D, p), 0xA5, 0x47, w(0x8D, p + 1), 0xA5, 0x48, w(0x8D, p + 2))
+    a(0xA9, COMMON_OF, 0x22, *nene._al(nene.RANDOM), 0xC9, COMMON_BELOW).br(BCS, 'rare')
+    a(0xA9, 27, 0x22, *nene._al(nene.RANDOM), 0x18, 0x69, 54).br(0x80, 'mult')
+    a.label('rare')(0xA9, 33, 0x22, *nene._al(nene.RANDOM), 0x18, 0x69, 96)
+    a.label('mult')(w(0x8D, cnt), w(0x9C, acc), w(0x9C, acc + 1), w(0x9C, acc + 2))
+    a.label('add')(0x18, w(0xAD, acc), w(0x6D, p), w(0x8D, acc), w(0xAD, acc + 1), w(0x6D, p + 1), w(0x8D, acc + 1))
+    a(w(0xAD, acc + 2), w(0x6D, p + 2), w(0x8D, acc + 2), w(0xCE, cnt)).br(BNE, 'add')
+    for _ in range(6):                                                                 # ÷ 64
+        a(w(0x4E, acc + 2), w(0x6E, acc + 1), w(0x6E, acc))
+    a(w(0xAD, acc), 0x85, 0xF5, w(0xAD, acc + 1), 0x85, 0xF6, w(0xAD, acc + 2), 0x85, 0xF7)
+    show(a, m['armor_offer'])
+    a(j('ask'), 0xA5, 0xE8, 0x48, j('close'), 0x68).br(BEQ, 'sell')
+    show(a, m['armor_sorry'])
+    a.brl('more')
+    a.label('sell')(0x18, w(0xAD, acc), 0x6F, *nene._al(nene.GOLD_AT), sta(nene.GOLD_AT))
+    a(w(0xAD, acc + 1), 0x6F, *nene._al(nene.GOLD_AT + 1), sta(nene.GOLD_AT + 1))
+    a(w(0xAD, acc + 2), 0x6F, *nene._al(nene.GOLD_AT + 2), sta(nene.GOLD_AT + 2))
+    a(0x64, 0x42, w(0xAD, slot), 0x85, 0x43, j('drop'))
+    show(a, m['armor_taken'])
+    a.label('more')
+    show(a, m['armor_more'])
+    a(j('ask'), 0xA5, 0xE8, 0x48, j('close'), 0x68).br(BNE, 'bye').brl('round')
+    a.label('bye')
+    show(a, m['armor_bye'])
+    a.label('end')
+    return a.bytes() + LEAVE
 
 
 def events(ctx):
