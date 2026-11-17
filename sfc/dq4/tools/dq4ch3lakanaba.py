@@ -790,7 +790,9 @@ def scripts(ctx):
     # 52 가 아니라 2B 로: 52 로 치운 인물은 다시 걷지 못했다(손님 스크립트와 같은 실측). 일찍 그만둔 날(DONE)은 FC 처럼
     # ($6285 bit0 이 꺼져 슬롯 13 이 섬) 카운터에 서서 가게를 열어 준다. 다만 아래층에서 올라온 주인공이 계단 앞 칸
     # (4,55)에 서므로, 주인공이 카운터 바깥으로 나간 뒤에 선다(그 칸 위가 주인 자리라 먼저 서면 주인공이 갇혔다, 실측)
-    master = [_if_off(SEEN, 'hide'), _if_off(SHIFT, 'stand'), _if_off(DONE, 'shift'),
+    # 첫 출근 전(SEEN 꺼짐)에 맵을 불러오면 첫 출근 주인이 출근을 맡고, 이 주인은 맵 구석에서 그날 가게를 닫을 때를 기다린다
+    # (숨기만 하고 멈추면 첫날 일삯이 100 을 넘어도 가게가 닫히지 않았다, 실측)
+    master = [_if_off(SEEN, 'shift'), _if_off(SHIFT, 'stand'), _if_off(DONE, 'shift'),
               _cmd('2B', *PARK), poll(at['hero_across']), _cmd('2B', *COUNTER_IN), _cmd('2F', 0x11),
               _wait_on(START) | {"label": "stand"}, _and_off(START), _cmd('3F'), _cmd('2B', *PARK),
               call(at['counter_walk']), poll(at['at_counter']), call(at['face_right']), msg('how'),

@@ -178,6 +178,14 @@ CASES = {
                                    ([] if s.get('GOLD0', 0) == 95 + L.wages()[0][PICK] else
                                     [f"금화 {s.get('GOLD0')}"]),
                          more={'cell': L.SHOP_DOOR}, extra_set={'WAGE0': 95}, maxf=3800),
+    # 첫날(맵을 첫 출근 전에 불러옴)에도 일삯이 100 을 넘으면 주인이 걸어 나와 가게를 닫는다
+    'first_close': {'variant': buyer('sold'),
+                    'steps': [('door', 'warp', f'{L.TOWN},20,52', {'set': _set(WAGE0=95)}),
+                              ('scold', 'walk', f'16,53;{taps(6)};{CLOSE}', {'maxf': 1600, 'cell': L.COUNTER_IN}),
+                              ('customer', 'walk', f'{WAIT_CUSTOMER};{CLOSE}', {'maxf': 3800, 'cell': L.SHOP_DOOR})],
+                    'msgs': ['late', 'how', *INTRO, 'buy', 'bought', 'closing'],
+                    'check': lambda s: ([] if s.get('TIME0') == L.NIGHT_TIME else [f"시각 {s.get('TIME0')}"]) +
+                                       ([] if s.get('L0', 0) & L.DONE[1] else ['오늘 일 마침 꺼짐'])},
     # 아래층 주인에게 그만두기: 일삯을 금화로, 오늘 일 마침
     'quit': {'steps': [('cellar', 'warp', f'{L.CELLAR},14,10', {'set': _set(L0=SEEN_SHIFT, WAGE0=50)}),
                        ('ask', 'walk', f'{wc.talk("up", 6)}', {'maxf': 1400})],
