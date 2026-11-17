@@ -68,10 +68,10 @@ def walk_story(w, seed):
             results.append(r)
             print(json.dumps(r, ensure_ascii=False), flush=True)
             break
-        rng = wc.rng_for(seed)
+        rng, held = check.segment_rng(opt, seed)
         cc.apply_sets(w.c, ';'.join(v for v in (rng, story.writes_set(opt)) if v))
         w.pokes = [(0x7E0000 + int(a, 16), int(v, 16)) for a, v in (p.split('=') for p in rng.split(';'))] \
-            if opt.get('rng') else []
+            if held else []
         runner = tokens.Runner(w, opt.get('tokmax', tokens.TOKMAX))
         problems, t0 = [], time.monotonic()
         try:

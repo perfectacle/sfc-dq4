@@ -82,17 +82,22 @@ def data_of(rom):
     return Path(rom).read_bytes()
 
 
+def segment_rng(opt, seed):
+    """(구간 시작에 둘 난수 SET, 구간 내내 묶는지). libretro 판(dq4story3compat)도 같은 값을 쓴다."""
+    if 'rng_fixed' in opt:
+        # 시드와 상관없이 정한 난수(떠돌이 상인을 만나는 값, 스콧이 걸음 도중에 멈추지 않는 값)를 구간 내내 묶는다
+        return ';'.join(f'{a:04X}={v:02X}' for a, v in zip((0x075B, 0x075C, 0x075D), opt['rng_fixed'])), True
+    return wc.rng_for(seed), bool(opt.get('rng'))
+
+
 def segment(mesence, rom, state, dest, seg, seed, flags):
     """구간 하나를 state 에서 걷는다. 토막이 ending:<장면> 이면 끝 상자에서 버튼으로 리셋되는지(dq4ch1walkcheck.ending)."""
     name, toks, opt = seg
     if toks.startswith('ending:'):
         return {**wc.ending(mesence, rom, state, dest, seed, toks.split(':', 1)[1]), 'name': name}
-    rng = wc.rng_for(seed)
-    if 'rng_fixed' in opt:
-        # 시드와 상관없이 정한 난수(떠돌이 상인을 만나는 값, 스콧이 걸음 도중에 멈추지 않는 값)를 구간 내내 묶는다
-        rng = ';'.join(f'{a:04X}={v:02X}' for a, v in zip((0x075B, 0x075C, 0x075D), opt['rng_fixed']))
+    rng, held = segment_rng(opt, seed)
     start = ';'.join(v for v in (rng, story.writes_set(opt)) if v)
-    poke = ';'.join(f'7E{v}' for v in rng.split(';')) if opt.get('rng') or 'rng_fixed' in opt else ''
+    poke = ';'.join(f'7E{v}' for v in rng.split(';')) if held else ''
     patch = '' if opt.get('encounters') else wc.NO_ENCOUNTERS
     if 'battle' in opt:
         patch += ';' + tw.battle_patch(data_of(rom), opt['battle'])
