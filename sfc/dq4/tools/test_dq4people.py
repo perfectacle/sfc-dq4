@@ -746,6 +746,22 @@ class UsageTests(unittest.TestCase):
             self.assertEqual(P.chapter_groups(3), [0x40])
             self.assertEqual(P.chapter_groups(9), [])
 
+    def test_chapter2_party_lines_cover_every_map_group_the_chapter2_events_use(self):
+        # 엔돌 무술 대회는 3장 그룹 40 의 맵이다. 그 그룹이 빠지면 대회장·대기실·엔돌 마을에서 아리나·브라이·크리프트가
+        # 1장 일행 줄 색(초록·파랑)으로 그려졌다
+        import importlib
+        maps = P.flag_maps(P.CHAPTER2)
+        modules = [importlib.import_module(n) for n in
+                   ('dq4ch2event', 'dq4ch2endor', 'dq4ch2frenol', 'dq4ch2king', 'dq4ch2ending')]
+        used = {v for m in modules for k, v in vars(m).items()
+                if k.isupper() and isinstance(v, str) and len(v) == 5 and v[2] == '/'}
+        self.assertIn('40/07', used)
+        for m in sorted(used):
+            self.assertIn(f'{m[:2]}/FF', maps, m)
+        self.assertEqual(maps[-3:], ['FE/00', 'FE/01', 'FE/02'])
+        # 3장 톨네코 줄은 2장 그룹을 덮지 않는다
+        self.assertNotIn('3D/FF', P.flag_maps(P.CHAPTER3))
+
 
 class RecolorTests(unittest.TestCase):
     def test_recolor_moves_a_colour_before_the_touches(self):

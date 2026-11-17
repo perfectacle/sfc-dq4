@@ -45,6 +45,9 @@ from dq4ch3event import CHAPTER3, TORNEKO_PICTURE  # noqa: E402
 
 # 전용 줄 깃발 → 그 줄을 덮는 장(dq4groupbuild.LINKS 의 chapter). 표에 없는 깃발은 2장
 FLAG_CHAPTERS = {CHAPTER2: 2, CHAPTER3: 3}
+# 그 장 일행이 들르는 다른 장의 그룹. 2장 엔돌(무술 대회)은 3장 그룹 40 이라, 빠지면 대회장·대기실·마을에서 일행 줄이
+# 1장 색으로 남는다(dq4ch2endor 의 맵)
+FLAG_VISITS = {CHAPTER2: (0x40,)}
 from dq4chapter1 import apply_writes, lorom  # noqa: E402
 from dq4romassets import set_checksum  # noqa: E402
 import dq5npcrecord  # noqa: E402
@@ -1209,6 +1212,13 @@ def chapter_groups(chapter):
     return sorted(g for g, maps in dq4groupbuild.LINKS.items() if any(m.get('chapter') == chapter for m in maps))
 
 
+def flag_maps(flag):
+    """깃발이 붙은 전용 줄(2장 일행·3장 톨네코)을 그 깃발이 켜졌을 때 덮는 맵: 그 장의 그룹, 그 장 일행이 들르는 다른 장의
+    그룹(FLAG_VISITS), 필드 세계 셋."""
+    groups = sorted({*chapter_groups(FLAG_CHAPTERS.get(flag, 2)), *FLAG_VISITS.get(flag, ())})
+    return [f'{g:02X}/FF' for g in groups] + [f'FE/{w:02X}' for w in range(3)]
+
+
 def usage(base):
     """{그림: 나오는 DQ4 맵 그룹들}. 곡 롬의 인물 목록에서 읽고, 대체 목록은 overrides 로 맵에 잇는다."""
     doc = dq5npcrecord.dump(base)
@@ -1421,12 +1431,10 @@ def assemble(base, dq5, assets, out, work, squeeze):
     map_doc = {'format': 'dq5objpalette/1',
                'new_map_palettes': [{'map': f'{g:02X}/FF', 'line': f'{0x08 + line:02X}', 'flag': 'FF', 'mask': '00',
                                      'colors': bgr(row)} for (g, line), row in sorted(board.items())]}
-    # 깃발이 붙은 전용 줄(2장 일행·3장 톨네코)은 그 장의 그룹과 필드 세계 셋에서 그 깃발이 켜졌을 때 덮는다
-    def every(flag):
-        return [f'{g:02X}/FF' for g in chapter_groups(FLAG_CHAPTERS.get(flag, 2))] + [f'FE/{w:02X}' for w in range(3)]
     map_doc['new_map_palettes'] += [{'map': m, 'line': f'{0x08 + line:02X}', 'flag': f'{p.flag[0]:02X}',
                                      'mask': f'{p.flag[1]:02X}', 'colors': bgr(pal)}
-                                    for p, _, _, _, _, _, line, pal in rows if p.flag is not None for m in every(p.flag)]
+                                    for p, _, _, _, _, _, line, pal in rows if p.flag is not None
+                                    for m in flag_maps(p.flag)]
     maps = dq5objpalette.patch(Rom(base.read_bytes()), map_doc, MAP_PALETTES_AT)
     (work / 'maps.dq5patch.json').write_text(json.dumps(maps, ensure_ascii=False, indent=1) + '\n')
     palettes = dq5objpalette.patch(Rom((work / 'mid.sfc').read_bytes()), pal_doc, PALETTES_AT)
