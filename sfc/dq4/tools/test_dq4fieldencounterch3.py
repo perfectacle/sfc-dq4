@@ -13,6 +13,10 @@ DQ4, DQ5 = ROOT / 'rom' / 'dq4.nes', ROOT / 'rom' / 'dq5.sfc'
 # fc/dq4/docs/dq4-chapter3-format.md 「전투 뒤 물건」
 DOC_TABLE = [(16, 0x01), (4, 0x02), (2, 0x04), (2, 0x05), (0, 0x06), (4, 0x25), (4, 0x26), (2, 0x27), (0, 0x28),
              (4, 0x3D), (4, 0x3E), (4, 0x46), (4, 0x47), (4, 0x53), (2, 0x54), (4, 0x56)]
+ITEMS = [(t, k) for k, (t, _) in enumerate(DOC_TABLE)]
+# 지어낸 무리 고르기 표: 구역 78 은 낮·밤 목록이 다르고 구역 35 는 던전(낮·밤 같음)
+DAY, NIGHT = ([(1, 25), (2, 25), (5, 23)], [(1, 25), (2, 25)]), ([(1, 25), (4, 50), (9, 23)], [(1, 25), (4, 50)])
+PICKS = [(35, 0x42, 8, 0, {'day': NIGHT, 'night': NIGHT}), (78, 0x16, 8, 0, {'day': DAY, 'night': NIGHT})]
 
 
 class ModelTests(unittest.TestCase):
@@ -33,14 +37,22 @@ class ModelTests(unittest.TestCase):
             self.assertAlmostEqual(m.drop_chance(DOC_TABLE, level), want, places=3)
 
     def test_code_and_sites(self):
-        blob, labels = m.ch3_code([(78, 0x210, 0), (35, 0x210, 0)], [(t, k) for k, (t, _) in enumerate(DOC_TABLE)])
-        self.assertLess(len(blob), 0x200)
+        blob, labels = m.ch3_code([78, 35], PICKS, ITEMS)
+        self.assertLess(len(blob), 0x400)
         self.assertEqual(blob[labels['thresholds'] - m.CH3_CODE_AT:][:16], bytes(t for t, _ in DOC_TABLE))
         zones = blob[labels['zones'] - m.CH3_CODE_AT:labels['thresholds'] - m.CH3_CODE_AT]
-        self.assertEqual(zones, bytes((0xB4, 0x06, 0x10, 0x02, 0, 0, 0x02, 0x03, 0x10, 0x02, 0, 0)))
+        self.assertEqual(zones, bytes((0xB4, 0x06, 0x02, 0x03)))
+        # 무리 고르기 표: 구역마다 [구역 × 22][낮 묶음][밤 묶음], 같은 목록은 한 벌(NIGHT 두 목록 + DAY 두 목록)
+        at = labels['picks'] - m.CH3_CODE_AT
+        row = blob[at:at + 2 + 2 * m.PICK_BLOCK]
+        self.assertEqual(row[:4], bytes((0x02, 0x03, 8, 0)))
+        self.assertEqual(row[2:2 + m.PICK_BLOCK], row[2 + m.PICK_BLOCK:])
+        first = int.from_bytes(row[4:6], 'little') | m.CH3_CODE_AT & 0xFF0000
+        self.assertEqual(blob[first - m.CH3_CODE_AT:][:7], bytes((3, 1, 25, 4, 50, 9, 23)))
+        self.assertEqual(len(blob) - at, 2 * (2 + 2 * m.PICK_BLOCK) + 7 + 5 + 7 + 5)
         # 훅 자리는 원래 명령 경계에서 같은 길이로 덮는다
         self.assertEqual(len(m.NIGHT_ORIG), 6)
-        self.assertEqual(len(m.WEIGHT_ORIG), 5)
+        self.assertEqual((len(m.PICK_ORIG), len(m.COUNT_ORIG), len(m.SECOND_ORIG)), (6, 5, 6))
         self.assertEqual(len(m.DROP_ORIG), 7)
         # 25:8966 의 BNE 는 JSL 뒤 두 바이트에서 25:8970 으로 간다
         self.assertEqual(m.DROP_SITE + 4 + 2 + 4, 0x258970)
@@ -54,8 +66,7 @@ class ModelTests(unittest.TestCase):
 
     def test_code_has_no_brk_and_stays_in_its_share(self):
         # BRK 처리기는 BRK 가 놓인 뱅크를 DB 로 둔다: 4E 코드에서 부르면 WRAM 대신 롬을 읽는다
-        rows = [(32, 0, 0), (33, 0x200, 0), (78, 0x210, 0), (35, 0x210, 0)]
-        blob, labels = m.ch3_code(rows, [(t, k) for k, (t, _) in enumerate(DOC_TABLE)])
+        blob, labels = m.ch3_code([32, 33, 78, 35], PICKS, ITEMS)
         self.assertLessEqual(m.CH3_CODE_AT + len(blob), m.CH3_CODE_END)
         from kr_patch.sfc.dis65816 import decode
         from kr_patch.sfc.mapper import LoROM
@@ -75,11 +86,32 @@ class ModelTests(unittest.TestCase):
                 pc += n
 
     def test_merchant_writes_include_the_wake_hook(self):
-        rows = [(32, 0, 0), (33, 0x200, 0), (78, 0x210, 0), (35, 0x210, 0)]
-        blob, labels = m.ch3_code(rows, [(t, k) for k, (t, _) in enumerate(DOC_TABLE)])
-        # 표에는 3장 필드 구역 넷이 모두(마스크가 없는 14 도 상인이 나오는 구역)
+        blob, labels = m.ch3_code([32, 33, 78, 35], PICKS, ITEMS)
         zones = blob[labels['zones'] - m.CH3_CODE_AT:labels['thresholds'] - m.CH3_CODE_AT]
-        self.assertEqual(len(zones), 6 * 4)
+        self.assertEqual(len(zones), 2 * 4)
+
+    def test_pick_follows_the_cumulative_weight(self):
+        # r = S × 난수 >> 8, 누적 무게가 r 이상인 첫 칸: 첫 칸은 r = 0 도 받아 무게보다 하나 많다
+        entries = [(0, 10), (1, 0), (2, 30)]
+        self.assertEqual(m.fc_pick(entries, 0), 0)
+        odds = m.fc_pick_odds(entries)
+        self.assertEqual(sum(odds.values()), 256)
+        self.assertEqual(odds, {0: sum(1 for x in range(256) if 40 * x >> 8 <= 10), 2: sum(1 for x in range(256) if 40 * x >> 8 > 10)})
+        # 무게 0 인 첫 칸도 r = 0 이면 고른다. 합 FF 면 난수 그대로
+        self.assertEqual(m.fc_pick([(3, 0), (4, 9)], 0), 3)
+        self.assertEqual(m.fc_pick([(3, 0xFE), (4, 1)], 0xFF), 4)
+        with self.assertRaises(ValueError):
+            m.fc_pick([(0, 200), (1, 100)], 0)
+
+    def test_species_odds(self):
+        self.assertEqual(m.species_odds(8, 0), {2: 1 - 8 / 256, 3: 8 / 256, 4: 0.0})
+        self.assertAlmostEqual(sum(m.species_odds(32, 64).values()), 1.0)
+
+    def test_rng_is_dq5_23_eafd(self):
+        # ×3 + 15AD(32비트), 난수 바이트는 위 16비트의 아래 바이트
+        self.assertEqual(m.rng_next(0), (0x15AD, 0))
+        self.assertEqual(m.rng_next(0x00010000), (0x000315AD, 3))
+        self.assertEqual(m.rng_next(0xFFFFFFFF)[0], (0xFFFFFFFF * 3 + 0x15AD) & 0xFFFFFFFF)
 
 
 @unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), 'rom/dq4.nes and rom/dq5.sfc')
@@ -146,20 +178,22 @@ class RomTests(unittest.TestCase):
         self.assertEqual(self.dq5[(0x06 & 0x7F) * 0x8000 + (m.WAKE_SITE & 0x7FFF):][:4], m.WAKE_ORIG)
 
     def test_every_chapter3_field_zone_is_in_the_table(self):
-        import dq4fieldencounter
-        report = {f'{z:02X}': {'zone': z} for z in dq4fieldencounter.CH3_FIELD}
-        self.assertEqual([r[0] for r in m.ch3_zone_masks(self.prg, report)], list(dq4fieldencounter.CH3_FIELD))
+        report = {f'{z:02X}': {'zone': z} for z in m.CH3_FIELD}
+        self.assertEqual(m.merchant_zones(report), list(m.CH3_FIELD))
 
     def test_items_have_dq5_counterparts(self):
         items = m.dq5_drop_items(self.prg, self.dq5)
         self.assertEqual(len(set(items)), 16)
 
-    def test_masks_take_out_the_night_slots_by_day(self):
-        # 구역 15 칸 10(ホイミスライム 한 무리), 16·17 칸 4·10(メラゴースト)은 밤에만. 3장 구역의 칸 0·6 은 비어 밤 마스크 0
-        self.assertEqual(m.ch3_masks(self.prg, 0x14), (0, 0))
-        self.assertEqual(m.ch3_masks(self.prg, 0x15), (1 << 9, 0))
-        self.assertEqual(m.ch3_masks(self.prg, 0x16), (1 << 4 | 1 << 9, 0))
-        self.assertEqual(m.ch3_masks(self.prg, 0x17), (1 << 4 | 1 << 9, 0))
+    def test_lists_take_out_the_night_slots_by_day(self):
+        # 구역 16 칸 4·10(メラゴースト, DQ5 칸 4·9)은 밤에만, 칸 0·5·6 은 비어 있다. FC 칸 차례라 한 마리 칸 11(DQ5 칸 5)이
+        # 맨 뒤. 둘째 무리부터는 낮 칸 0~3·밤 1~4
+        _, _, origin, _ = m.placed(self.prg, 0x16)
+        day, night = m.pick_lists(self.prg, 0x16, origin, 'day'), m.pick_lists(self.prg, 0x16, origin, 'night')
+        self.assertEqual([k for k, _ in day[0]], [1, 2, 3, 6, 7, 8, 5])
+        self.assertEqual([k for k, _ in night[0]], [1, 2, 3, 4, 6, 7, 8, 9, 5])
+        self.assertEqual(([k for k, _ in day[1]], [k for k, _ in night[1]]), ([1, 2, 3], [1, 2, 3, 4]))
+        self.assertEqual(dict(night[0])[4], 50)
 
     def test_chapter3_zones_are_the_reached_ones(self):
         # dq4fieldencounter.CH3_ZONES 는 FC 3장 일행이 걸어 닿는 필드 구역과 그 입구 던전의 구역
@@ -174,6 +208,158 @@ class RomTests(unittest.TestCase):
         dungeon = {z for g in groups if g in lists for z in lists[g] if z != 0xFF}
         self.assertEqual(set(dq4fieldencounter.CH3_FIELD), field)
         self.assertEqual(set(dq4fieldencounter.CH3_DUNGEON), dungeon)
+
+
+@unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), 'rom/dq4.nes and rom/dq5.sfc')
+class PickTests(unittest.TestCase):
+    """무리 고르기: 모형(fc_pick·species_odds)이 FC 루틴(6502 해석기)과 같고, 훅(65816 해석기)이 모형과 같다."""
+
+    @classmethod
+    def setUpClass(cls):
+        import json
+        import subprocess
+        import tempfile
+        import dq4groupbuild
+        from kr_patch.fc import ines
+        cls.prg = ines.prg(DQ4.read_bytes())
+        cls.dq5 = DQ5.read_bytes()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'enc.json'
+            subprocess.run([sys.executable, str(m.DQ5_TOOLS / 'dq5encounterwrite.py'), str(DQ5), 'dump', '-o',
+                            str(path)], check=True, capture_output=True)
+            orig = json.loads(path.read_text(encoding='utf-8'))
+        _, _, cls.report = m.docs(cls.prg, cls.dq5, orig, dq4groupbuild.dungeon_zones(cls.prg).values())
+        cls.picks = m.pick_rows(cls.prg, cls.report)
+
+    def fc_cpu(self, z, mode, prg=None):
+        import dq4cpu
+        import dq4encounter
+        rec = dq4encounter.zone(self.prg, z)
+        cpu = dq4cpu.CPU(prg or self.prg, 0x18)
+        cpu.ram[0x41] = 0x80 if mode == 'dungeon' else 0
+        cpu.wram[0x62ED - 0x6000] = 0x90 if mode == 'night' else 0x10      # 78 이상이 밤
+        slots = rec['addr'] + 2
+        cpu.ram[0], cpu.ram[1], cpu.ram[0x0E] = slots & 0xFF, slots >> 8, rec['row'] * 18
+        return cpu, rec
+
+    def test_model_is_the_fc_slot_pick(self):
+        # 18:$9D6B 마스크, $9D9C FF 칸 빼기, $9DBB 합, $9DDE 고르기. 난수는 모두 $C891 을 거친다(BRK 17 0F 의 10:$A1F6 도)
+        for z, mode in ((0x04, 'day'), (0x04, 'night'), (0x16, 'day'), (0x16, 'night'), (0x42, 'dungeon'),
+                        (0x00, 'day'), (0x0C, 'night')):
+            first, _ = m.pick_lists(self.prg, z, {i: i for i in range(14)}, mode)
+            for rnd in range(256):
+                cpu, _ = self.fc_cpu(z, mode)
+                cpu.hooks[0xC891] = lambda c, v=rnd: setattr(c, 'a', v)
+                cpu.stubs.add(0xC891)
+                for f in (0x9D6B, 0x9D9C, 0x9DBB, 0x9DDE):
+                    cpu.call(f)
+                self.assertEqual(cpu.y, m.fc_pick(first, rnd), (hex(z), mode, rnd))
+
+    def test_model_is_the_fc_group_of_species(self):
+        # 18:$9EB9: 둘째 무리, 난수 < 바이트 14 면 셋째, 그다음 난수 < 바이트 15 면 넷째(바이트를 덮어 넷째도 본다)
+        import dq4encounter
+        rng = random.Random(14)
+        for z, mode in ((0x04, 'day'), (0x16, 'night'), (0x42, 'dungeon')):
+            rec = dq4encounter.zone(self.prg, z)
+            _, second = m.pick_lists(self.prg, z, {i: i for i in range(14)}, mode)
+            for third, fourth in ((8, 0), (0x80, 0x40), (0xFF, 0xFF)):
+                prg = bytearray(self.prg)
+                o = 0x18 * 0x4000 + (dq4encounter.WEIGHTS + 18 * rec['row'] + 14 & 0x3FFF)
+                prg[o:o + 2] = bytes((third, fourth))
+                for _ in range(60):
+                    slot = rng.choice([i for i in range(5) if rec['slots'][i] != 0xFF])
+                    rnds = [rng.randrange(256) for _ in range(5)]
+                    cpu, _ = self.fc_cpu(z, mode, bytes(prg))
+                    cpu.wram[0x6E45 - 0x6000:0x6E49 - 0x6000] = b'\xFF' * 4
+                    left = list(rnds)
+                    cpu.hooks[0xC891] = lambda c: setattr(c, 'a', left.pop(0) if left else 0xFF)
+                    cpu.stubs.add(0xC891)
+                    cpu.y = slot
+                    cpu.call(0x9EB9)
+                    got = [g for g in cpu.wram[0x6E45 - 0x6000:0x6E49 - 0x6000] if g != 0xFF]
+                    it = iter(rnds)
+                    want = [rec['slots'][slot], rec['slots'][m.fc_pick(second, next(it))]]
+                    if next(it) < third:
+                        want.append(rec['slots'][m.fc_pick(second, next(it))])
+                        if next(it) < fourth:
+                            want.append(rec['slots'][m.fc_pick(second, next(it))])
+                    self.assertEqual(got, want, (hex(z), mode, third, fourth, slot, rnds))
+
+    def dq5_cpu(self, blob, state):
+        import w65816
+        rom = bytearray(self.dq5) + bytes(max(0, 0x400000 - len(self.dq5)))
+        o = (m.CH3_CODE_AT >> 16 & 0x7F) * 0x8000
+        rom[o:o + len(blob)] = blob
+        cpu = w65816.Cpu(bytes(rom), bytearray(0x20000))
+        cpu.dbr, cpu.p = 0x23, 0x20                    # 훅 자리: M 8비트, X 16비트, DB 23
+        cpu.wram[m.RNG_LOW:m.RNG_LOW + 4] = state.to_bytes(4, 'little')
+        return cpu
+
+    def test_hooks_pick_like_the_model(self):
+        # 표의 모든 구역·낮밤에서 난수 상태마다 첫 칸(pick), 종 수(count, 셋째·넷째 바이트를 덮은 표도), 둘째부터의
+        # 칸(pick2)이 모형과 같고 난수를 모형만큼 돌린다
+        class Got(Exception):
+            pass
+
+        def grab(c, k):
+            raise Got(k, c.a & 0xFF, bytes(c.wram[m.RNG_LOW:m.RNG_LOW + 4]),
+                      c.wram[m.PICK & 0xFFFF] | c.wram[(m.PICK & 0xFFFF) + 1] << 8)
+        rng = random.Random(5)
+        merchant = m.merchant_zones(self.report)
+        items = [(0, 0)] * m.DROP_SLOTS
+        heavy = [(z, fc, 0x80, 0x40, modes) for z, fc, _, _, modes in self.picks]
+        for picks in (self.picks, heavy):
+            blob, labels = m.ch3_code(merchant, picks, items)
+            for zone, _, third, fourth, modes in picks:
+                for night in (False, True):
+                    first, second = modes['night' if night else 'day']
+                    for _ in range(12):
+                        state = rng.randrange(1 << 32)
+                        cpu = self.dq5_cpu(blob, state)
+                        cpu.wram[0x075E] = 0xF8 if night else 0x50
+                        cpu.x = zone * m.CH3_ZONE_RECORD
+                        for k in ('pick_slot', 'pick_none'):
+                            cpu.hooks[labels[k]] = lambda c, k=k: grab(c, k)
+                        with self.assertRaises(Got) as got:
+                            cpu.jsl(labels['pick'])
+                        kind, slot, after, block = got.exception.args
+                        s1, r = m.rng_next(state)
+                        self.assertEqual((kind, slot, after), ('pick_slot', m.fc_pick(first, r), s1.to_bytes(4, 'little')))
+
+                        cpu = self.dq5_cpu(blob, state)
+                        cpu.wram[m.PICK & 0xFFFF:(m.PICK & 0xFFFF) + 2] = block.to_bytes(2, 'little')
+                        cpu.hooks[labels['count_done']] = lambda c: grab(c, 'count')
+                        with self.assertRaises(Got) as got:
+                            cpu.jsl(labels['count'])
+                        s, r = m.rng_next(state)
+                        want = 0
+                        if r < third:
+                            s, r = m.rng_next(s)
+                            want = 1 + (r < fourth)
+                        self.assertEqual((cpu.wram[0x0C], got.exception.args[2]), (want, s.to_bytes(4, 'little')))
+
+                        cpu = self.dq5_cpu(blob, state)
+                        cpu.wram[m.PICK & 0xFFFF:(m.PICK & 0xFFFF) + 2] = block.to_bytes(2, 'little')
+                        cpu.jsl(labels['pick2'])
+                        self.assertEqual((cpu.a & 0xFF, cpu.p & 1), (m.fc_pick(second, m.rng_next(state)[1]), 1))
+        # 표에 없는 구역은 원래 고르기(23:E904)로 가고 PICK = FFFF
+        cpu = self.dq5_cpu(blob, 1)
+        cpu.x = 0xE6 * m.CH3_ZONE_RECORD
+        cpu.hooks[m.FIRST_LOOP] = lambda c: grab(c, 'orig')
+        with self.assertRaises(Got) as got:
+            cpu.jsl(labels['pick'])
+        self.assertEqual((got.exception.args[0], got.exception.args[3]), ('orig', 0xFFFF))
+
+    def test_table_has_every_zone_and_fits(self):
+        # docs 가 레코드를 쓰는 구역 모두(바다 81·82 포함), 목록 무게 합은 8비트
+        zones = [r[0] for r in self.picks]
+        self.assertEqual(len(zones), len(set(zones)))
+        self.assertLessEqual({r['zone'] for r in self.report.values()}, set(zones))
+        self.assertIn(81, zones)
+        for *_, modes in self.picks:
+            for first, second in modes.values():
+                self.assertTrue(first and second)
+                self.assertLessEqual(sum(w for _, w in first), 0xFF)
 
 
 if __name__ == '__main__':

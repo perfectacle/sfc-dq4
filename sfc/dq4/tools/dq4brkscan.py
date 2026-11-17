@@ -102,12 +102,14 @@ def blobs():
             if problems:
                 raise ValueError('; '.join(problems))
             out.append((name, ctx.far_at, blob, entries))
-    # 3장 조우·전투 뒤 물건·떠돌이 상인 훅(dq4fieldencounter.ch3_code, 뱅크 4E). 표 내용은 롬 없이 모르나 코드 자리와
-    # 길이는 같다(필드 구역 넷, 16칸). 진입점마다 그 훅 자리의 M·X 폭
+    # 무리 고르기·3장 전투 뒤 물건·떠돌이 상인 훅(dq4fieldencounter.ch3_code, 뱅크 4E). 표 내용은 롬 없이 모르나 코드
+    # 자리와 길이는 같다(표는 코드 뒤). 진입점마다 그 훅 자리의 M·X 폭
     import dq4fieldencounter as fe
-    blob, at = fe.ch3_code([(0, 0, 0)] * len(fe.CH3_FIELD), [(0, 0)] * fe.DROP_SLOTS)
-    widths = {'night': (True, False), 'weight': (True, False), 'wake': (True, False), 'drop': (True, True),
-              'talk': (True, True)}
+    lists = ([(0, 1)], [(0, 1)])
+    blob, at = fe.ch3_code([0] * len(fe.CH3_FIELD), [(0, 0, 0, 0, {'day': lists, 'night': lists})],
+                           [(0, 0)] * fe.DROP_SLOTS)
+    widths = {'encounter': (True, False), 'pick': (True, False), 'count': (True, False), 'pick2': (True, False),
+              'wake': (True, False), 'drop': (True, True), 'talk': (True, True)}
     out.append(('ch3monsters', fe.CH3_CODE_AT, blob, [(at[k], m8, x8) for k, (m8, x8) in widths.items()]))
     scenes = box.GAME_SCENES
     lay = box.Layout(box.CODE_AT, scenes, b'', [bytes(box.BOX_W * box.BOX_H * 2)] * len(scenes), box.palettes())

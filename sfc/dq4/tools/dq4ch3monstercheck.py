@@ -8,9 +8,9 @@
   zones    3장 구역의 DQ5 구역 레코드·고정 무리가 dq4fieldencounter.docs 대로
   table    훅의 3장 전용 표(문턱 16칸·물건 16칸)가 FC 12:$928E·$929E 와 그 물건의 DQ5 짝
 장면(서장 끝 출발 상태에서 dq5warp.lua FIELD 로 3장 필드 구역에 서고 3장 flag 를 켬):
-  zone-ZZ-day·night  조우 계수를 FF 로 덮어 걸음마다 싸우게 하고 시각($075E)을 낮·밤으로 묶어 걷는다. 첫 무리의 칸 무게
-           (23:E918 의 $00~$0A)가 그 구역 레코드 무게에서 FC 첫 무리 마스크로 빠진 칸을 0 으로 한 것과 같고, 둘째 종의
-           무게(23:EAC1 의 $00~$04)도 그렇다. 싸운 무리는 그 구역에서 그 때 고를 수 있는 몬스터뿐(낮의 메라 고스트 없음)
+  zone-ZZ-day·night  조우 계수를 FF 로 덮어 걸음마다 싸우게 하고 시각($075E)을 낮·밤으로 묶어 걷는다. 무리 고르기 훅이
+           낸 첫 칸·종 수·둘째부터의 칸이 들어올 때의 난수 상태로 FC 모형이 낸 것과 같다(dq4fieldencountercheck.pick_problems).
+           싸운 무리는 그 구역에서 그 때 고를 수 있는 몬스터뿐(낮의 메라 고스트 없음)
   drop-LL  무리를 버블 슬라임 하나(HP 1)로 덮고 걸으며 이겨, 이길 때마다 훅이 굴린 시작 칸·rand(256)·그때 레벨로
            dq4fieldencounter.drop_roll 이 낸 칸과 훅이 얻은 칸(없음 포함)이 같고, 얻었으면 25:89B3 이 그 물건을 받는다.
            LL 은 처음 톨네코 레벨(FC 실측의 01·28·63, 16진). 이겨 오르면 오른 레벨로 견준다. 얻은 물건은 끝에 가진
@@ -58,8 +58,6 @@ from kr_patch.fc import ines  # noqa: E402
 CELLS = {0x14: (0x06, 0x02), 0x15: (0x06, 0x04), 0x16: (0x05, 0x05), 0x17: (0x07, 0x05)}
 CLOCK = {'day': '7E075E=50 7E075F=00', 'night': '7E075E=F8 7E075F=00'}
 DELAYS = (0, 9)
-FIRST, SECOND = '23E918', '23EAC1'          # 첫 무리·둘째 종 칸 무게를 다 읽은 곳(LDA $0F)
-WEIGHTS = ','.join(f'7E{k:04X}' for k in range(0, 12, 2))
 FIGHT_EXITS = fec.EXITS
 DROP_MONSTER = dq4monport.CH3[0x0A][0]       # 버블 슬라임
 DROP_LEVELS = (0x01, 0x28, 0x63)
@@ -189,19 +187,6 @@ def table_problems(data, labels, prg, dq5):
     return out
 
 
-def masked(weights, mask):
-    return [0 if mask >> k & 1 else w for k, w in enumerate(weights)]
-
-
-def weight_lines(rows, pc, n):
-    out = []
-    for _, at, kv in rows:
-        if at == pc:
-            b = b''.join(int(kv[f'7E{k:04X}'], 16).to_bytes(2, 'little') for k in range(0, 12, 2))
-            out.append(list(b[:n]))
-    return out
-
-
 def drop_rolls(rows, labels):
     """[{level, start, rolls, hit, given}] 이길 때마다 훅이 표를 굴린 기록."""
     pcs = {f"{labels[k]:06X}": k for k in ('drop', 'start', 'rolled', 'hit', 'none')}
@@ -328,7 +313,8 @@ def main():
     progress, grid, report = dq4fieldencounter.docs(prg, dq5, enc, dq4groupbuild.dungeon_zones(prg).values())
     table = dq4fieldencounter.fc_drop_table(prg)
     items = dq4fieldencounter.dq5_drop_items(prg, dq5)
-    _, labels = dq4fieldencounter.ch3_code(dq4fieldencounter.ch3_zone_masks(prg, report), list(zip((t for t, _ in table), items)))
+    labels = dq4fieldencounter.ch3_labels(prg, dq5, report)
+    picks = dq4fieldencounter.pick_rows(prg, report)
 
     results = {}
     problems, rows = record_problems(data, prg, dq5)
@@ -357,48 +343,30 @@ def main():
         field = stand(z)
         name = f'zone-{z:02X}-{mode}-{delay}'
         patch = dq4fieldport.warp_patch(data, *field)
-        # 떠돌이 상인(조우의 1/10)이 걸리면 대화에 걷기가 멈춘다: 무게를 보는 장면에서는 끈다(상인은 merchant-*)
+        # 떠돌이 상인(조우의 1/10)이 걸리면 대화에 걷기가 멈춘다: 무리를 보는 장면에서는 끈다(상인은 merchant-*)
         patch += ';' + dq4fieldencounter.no_merchant_patch(prg, dq5, report)
         got = dq4groupcheck.scene(mesence, rom, state, out, name, FIELD='{},{}'.format(*field),
                                   ROMPATCH=f'{patch};{fec.RATES}', TEST=f'wait:{delay},{fec.WALK}', MAXF='2600',
-                                  TRACE=','.join([FIRST, SECOND, *FIGHT_EXITS]), LOG=f'{WEIGHTS},{fec.LOG}',
-                                  SET=ch3_set, POKE=CLOCK[mode])
+                                  TRACE=','.join([fec.pick_trace(labels), *FIGHT_EXITS]),
+                                  LOG=f'{fec.PICK_LOG},{fec.LOG}', SET=ch3_set, POKE=CLOCK[mode])
         trace = list(fec.lines(out / name / 'trace.txt')) if (out / name / 'trace.txt').exists() else []
-        rec = next(r for r in progress['encounters'] if r['index'] == report[f'{z:02X}']['zone'])
-        weights = [s['weight'] for s in rec['slots']] + [rec['fixed']['weight']]
-        day, night = dq4fieldencounter.ch3_masks(prg, z)
-        mask = day if mode == 'day' else night
-        want_first, want_second = masked(weights, mask), masked(weights, mask)[:5]
-        first, second = weight_lines(trace, FIRST, 11), weight_lines(trace, SECOND, 5)
+        area = report[f'{z:02X}']['zone']
+        seen, problems = fec.pick_problems(trace, labels, picks)
         allowed = {dq4fieldencounter.MONSTERS[m]
                    for m in dq4encounter.zone_monsters(prg, z, mode)}
         fights = [(FIGHT_EXITS[at], fec.groups(kv)) for _, at, kv in trace if at in FIGHT_EXITS]
-        problems = []
         if 'error' in got:
             problems.append(got['error'])
-        if not first:
-            problems.append('첫 무리 무게를 읽지 않음')
-        problems += [f'첫 무리 무게 {w}, 기대 {want_first}' for w in first if w != want_first]
-        problems += [f'둘째 종 무게 {w}, 기대 {want_second}' for w in second if w != want_second]
+        if not seen['pick']:
+            problems.append('첫 무리를 고르지 않음')
         if not fights:
             problems.append('싸우지 않음')
         problems += [f'{kind} 무리 {g} 에 고를 수 없는 몬스터' for kind, g in fights
                      if not {m for m, _ in g} <= allowed]
-        return name, {'fc_zone': f'{z:02X}', 'dq5_zone': rec['index'], 'mode': mode, 'mask': f'{mask:03X}',
-                      'first': first[:1], 'second': second[:1], 'fights': fights,
-                      'fc_first': fc_first(z, mode), 'dq5_first': dq5_first(want_first),
+        first, _ = next(r for r in picks if r[0] == area)[4][mode]
+        return name, {'fc_zone': f'{z:02X}', 'dq5_zone': area, 'mode': mode, 'picks': seen, 'fights': fights,
+                      'first_odds': {f'{k}': n for k, n in dq4fieldencounter.fc_pick_odds(first).items()},
                       'problems': problems, 'ok': not problems}
-
-    def fc_first(z, mode):
-        """FC 첫 무리 칸별 확률(/1)과 DQ5 의 같은 칸 확률: 무게를 3비트로 줄인 차이를 보고만 한다."""
-        rec = dq4encounter.zone(prg, z)
-        picks = dq4encounter.pick(prg, rec['slots'], rec['row'], dq4encounter.MASK_FIRST[mode])
-        total = sum(picks.values()) if isinstance(picks, dict) else None
-        return {f'{k}': round(v / total, 3) for k, v in picks.items()} if total else picks
-
-    def dq5_first(weights):
-        total = sum(weights)
-        return {f'{k}': round(w / total, 3) for k, w in enumerate(weights) if w}
 
     def drop_scene(name, level, sure=False, off=False):
         field = stand(0x14)
