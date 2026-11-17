@@ -240,21 +240,23 @@ def cell(x, y):
 
 
 def ctl(v, at):
-    """인물 명령 05 가 매 프레임 부름(늘 A = 1 을 돌려 되풀이). TICK 프레임마다: 멈춰 있고 처음 자리면 주인공이 풀리는 칸에
-    섰는지 보고 막이를 걷고 움직이기 시작, 움직이면 step 뒤 자리가 바뀌었으면 place, 구덩이에 닿았으면 바위를 치우고 그
-    구덩이를 덮고 메움 비트."""
+    """인물 명령 05 가 부를 때마다(약 8프레임, 늘 A = 1 을 돌려 되풀이): 멈춰 있고 처음 자리면 주인공이 풀리는 칸에 섰는지
+    보고 막이를 걷고 움직이기 시작. 움직이는 동안은 TICK 번째 부름마다 step 뒤 자리가 바뀌었으면 place, 구덩이에 닿았으면
+    바위를 치우고 그 구덩이를 덮고 메움 비트.
+    풀림 판정은 TICK 에 묶지 않는다: 주인공은 풀리는 FC 줄을 16프레임 안팎에 지나가므로 TICK 번째 부름에만 보면 위상에
+    따라 놓친다(snes9x 실측. FC 는 걸음마다 1D 이벤트로 본다)."""
     from dq4ch2endor import BCC, BCS, BEQ, BNE, BRA, lda, sta
     a = _asm()(0x08, 0xE2, 0x30)
+    a(lda(v(ST)), 0x29, 0x03).br(BEQ, 'idle')
     a(lda(v(CNT)), 0x1A, sta(v(CNT)), 0xC9, TICK).br(BCS, 'tick').brl('out')
-    a.label('tick')(0xA9, 0x00, sta(v(CNT)))
-    a(lda(v(ST)), 0x29, 0x03).br(BNE, 'run')
-    a(lda(v(BY)), 0xC9, START[1]).br(BNE, 'out1')(0xA2, 0x00)
+    a.label('tick')(0xA9, 0x00, sta(v(CNT))).brl('run')
+    a.label('idle')(lda(v(BY)), 0xC9, START[1]).br(BNE, 'out1')(0xA2, 0x00)
     _fc_of(a, v)
     (xs, ty) = TRIGGER
     a(lda(v(HX)), 0xC9, xs[0]).br(BCC, 'out1')(0xC9, xs[1] + 1).br(BCS, 'out1')
     a(lda(v(HY)), 0xC9, ty).br(BNE, 'out1')
     gx, gy = cell(*GATE)
-    a(0xA9, 0x82, sta(v(ST)), 0xA9, gx, sta(v(HX)), 0xA9, gy, sta(v(HY)), 0x22, _al(at['copy_block']))
+    a(0xA9, 0x82, sta(v(ST)), 0xA9, 0x00, sta(v(CNT)), 0xA9, gx, sta(v(HX)), 0xA9, gy, sta(v(HY)), 0x22, _al(at['copy_block']))
     a.label('out1').brl('out')
     a.label('run')(lda(v(BX)), 0x48, lda(v(BY)), 0x48, 0x20, *(at['step'] & 0xFFFF).to_bytes(2, 'little'))
     a(0x68, 0xCF, _al(v(BY))).br(BNE, 'moved')(0x68, 0xCF, _al(v(BX))).br(BEQ, 'pit').br(BRA, 'go')
