@@ -27,6 +27,16 @@ class BrkScanTest(unittest.TestCase):
         low = bytes((0x08, 0x22, 0x9A, 0xFE, 0x24, 0x28, 0x6B))      # JSL 24:FE9A 는 낮은 뱅크라 괜찮음
         self.assertEqual(scan.scan(0x5E0000, low, [0x5E0000])[1], [])
 
+    def test_chapter3_monster_hooks_are_scanned_with_their_widths(self):
+        # 뱅크 4E 의 3장 조우·전투 뒤 물건·떠돌이 상인 훅. X 16비트로 들어오는 밤 갈래(LDX #$0000)를 8비트로 읽으면
+        # 어긋나므로 진입점마다 폭을 준다. 전투 뒤 물건 갈래에 창 열기 BRK 95 를 넣으면 잡힌다
+        name, base, blob, entries = next(b for b in scan.blobs() if b[0] == 'ch3monsters')
+        self.assertEqual(scan.scan(base, blob, entries)[1], [])
+        drop = next(e[0] for e in entries if (e[1], e[2]) == (True, True) and blob[e[0] - base] != 0x08)
+        bad = bytearray(blob)
+        bad[drop - base:drop - base + 2] = bytes((0x00, 0x95))
+        self.assertTrue(any('BRK 95 금지' in p for p in scan.scan(base, bytes(bad), entries)[1]))
+
     def test_brk_at_blob_end(self):
         self.assertTrue(scan.scan(0x5E0000, bytes((0x08, 0x00)), [0x5E0000])[1])
 

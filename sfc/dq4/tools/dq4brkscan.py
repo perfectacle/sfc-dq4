@@ -102,6 +102,13 @@ def blobs():
             if problems:
                 raise ValueError('; '.join(problems))
             out.append((name, ctx.far_at, blob, entries))
+    # 3장 조우·전투 뒤 물건·떠돌이 상인 훅(dq4fieldencounter.ch3_code, 뱅크 4E). 표 내용은 롬 없이 모르나 코드 자리와
+    # 길이는 같다(필드 구역 넷, 16칸). 진입점마다 그 훅 자리의 M·X 폭
+    import dq4fieldencounter as fe
+    blob, at = fe.ch3_code([(0, 0, 0)] * len(fe.CH3_FIELD), [(0, 0)] * fe.DROP_SLOTS)
+    widths = {'night': (True, False), 'weight': (True, False), 'wake': (True, False), 'drop': (True, True),
+              'talk': (True, True)}
+    out.append(('ch3monsters', fe.CH3_CODE_AT, blob, [(at[k], m8, x8) for k, (m8, x8) in widths.items()]))
     scenes = box.GAME_SCENES
     lay = box.Layout(box.CODE_AT, scenes, b'', [bytes(box.BOX_W * box.BOX_H * 2)] * len(scenes), box.palettes())
     out.append(('chapterbox', box.CODE_AT, lay.blob,
@@ -110,10 +117,11 @@ def blobs():
 
 
 def scan(base, blob, entries, others=()):
-    """({BRK 명령: [주소]}, [문제], {덩어리 밖 대상}). others 는 따로 훑는 다른 덩어리의 (시작, 끝).
+    """({BRK 명령: [주소]}, [문제], {덩어리 밖 대상}). entries 는 주소(M·X 8비트로 들어옴) 또는 (주소, m8, x8).
+    others 는 따로 훑는 다른 덩어리의 (시작, 끝).
     뱅크 40 이상인데 어느 덩어리에도 없는 곳으로 나가면 훑지 못한 높은 뱅크 코드라 문제로 친다."""
     found, problems, seen, exits = {}, [], set(), set()
-    work = [(e, True, True, ()) for e in entries]
+    work = [(e, True, True, ()) if isinstance(e, int) else (*e, ()) for e in entries]
 
     def inside(a):
         return base <= a < base + len(blob)
