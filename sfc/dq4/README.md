@@ -22,7 +22,8 @@ dq4 트랙이 SFC DQ5 엔진에 넣으려고 만드는 결과물(포팅용 인�
 - [docs/dq4-josa-format.md](docs/dq4-josa-format.md): 받침을 보고 고르는 조사 코드와 필드·가게·여관·교회 시스템 메시지
 - [docs/dq4-battle-text-format.md](docs/dq4-battle-text-format.md): 전투 메시지 432개 한글(전투 중 빈 BG3 칸 풀, 한글 구간·글자 표, 이름·조사, 창 테두리·줄 올림)
 - [docs/dq4-chapter1-format.md](docs/dq4-chapter1-format.md): 1장 첫머리(새 게임 첫 맵, 왕좌의 방 연출, 한글 대사, 인물 배치, 바트랜드 성 곡)
-- [docs/dq4-chapter2-format.md](docs/dq4-chapter2-format.md): 2장 첫머리(1장 끝에서 넘어가기, 아리나 일행, 산트하임 왕좌의 방 연출)
+- [docs/dq4-chapter2-format.md](docs/dq4-chapter2-format.md): 2장 첫머리(1장 끝에서 넘어가기, 아리나 일행, 산트하임 왕좌의 방 연출). 사건 모듈마다의 문서는 그 안 「사건 모듈 문서」
+- [docs/dq4-chapter3-format.md](docs/dq4-chapter3-format.md): 3장 넘김과 첫머리, 3장 사건 등록·예약표·검사 틀. 사건 모듈마다의 문서는 그 안 「사건 모듈 문서」
 - [docs/dq4-compat-format.md](docs/dq4-compat-format.md): 호환성 검사(높은 뱅크 BRK 목록의 정적 검사, MesenCE 열린 버스 프로브, libretro bsnes·snes9x 1장 걷기)
 - [docs/dq4-savefixture-format.md](docs/dq4-savefixture-format.md): 저장 기록으로 시작하는 검사(SRAM 칸 만들기, 이어 할 자리 `7E:2033`, 저장되지 않는 것, bsnes·snes9x 에 넣기)
 - [docs/dq4-release-check-format.md](docs/dq4-release-check-format.md): 배포 관문(tools/release_check.py)의 단계·캐시를 쓰지 않는 까닭·시드 스윕(release.toml)·보고서
