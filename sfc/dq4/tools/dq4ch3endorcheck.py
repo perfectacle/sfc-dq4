@@ -20,11 +20,13 @@ import dq4ch1walkcheck as wc  # noqa: E402
 import dq4ch3endor as endor  # noqa: E402
 import dq4ch3tunnel as tunnel  # noqa: E402
 import dq4ch3event as ch3  # noqa: E402
+import dq4ch3endor_checks as endor_checks  # noqa: E402
 import dq4ch3walkcheck as walk  # noqa: E402
+import dq4ch3walkparts as parts  # noqa: E402
 import dq4chapterwalk as cwk  # noqa: E402
 
 CLOSE = wc.pc.CLOSE
-_set, _items, _below, _gold = walk._set, walk._items, walk._below, walk._gold
+_set, _items, _below, _gold = parts.set_flag, parts.items, endor_checks.below, parts.gold
 talk = wc.talk
 # 3장 출발 상태의 엔돌 flag 를 모두 끄고 갈래의 flag 만 켠다
 CLEAR = f'{0x2190 + endor.IDX:04X}=00;{0x2190 + endor.IDX2:04X}=00'
@@ -92,7 +94,7 @@ SEGMENTS = [
     ('deliver_no_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
      {'map': endor.CASTLE_HALL, 'set': sets(endor.ORDER, more=(_items(endor.STEEL_SWORD),))}),
     ('deliver_no', 'walk', talk_no('up', 0, 4),
-     {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0}, 'items': [0x42, walk.BENTO, endor.STEEL_SWORD]}),
+     {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0}, 'items': [0x42, parts.BENTO, endor.STEEL_SWORD]}),
     # FC 15:$A118 실측 갈래: 가진 것이 없음, 칼만, 넘침(남은 수보다 많이 가짐 → 남은 만큼만 받고 다 참), 맡긴 물건뿐,
     # 갑옷은 다 찼고 칼 하나(남은 갑옷 줄이 빠짐)
     ('deliver_empty_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
@@ -101,13 +103,13 @@ SEGMENTS = [
     ('deliver_one_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
      {'map': endor.CASTLE_HALL, 'set': sets(endor.ORDER, more=(_items(endor.STEEL_SWORD),))}),
     ('deliver_one', 'walk', talk('up', 8), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0x01},
-                                            'items': [0x42, walk.BENTO]}),
+                                            'items': [0x42, parts.BENTO]}),
     ('deliver_over_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
      {'map': endor.CASTLE_HALL,
       'set': sets(endor.ORDER, more=(_items(*[endor.STEEL_SWORD] * 4, endor.IRON_ARMOR), _gold(0), COUNT_SET(0x64)))}),
     ('deliver_over', 'walk', talk('up', 8), {'map': endor.CASTLE_HALL, 'want': ['ENDOR_DELIVERED'],
                                              'bytes': {'ENDOR_COUNT': 0x77, 'GOLD0': 0x60, 'GOLD1': 0xEA},
-                                             'items': [0x42, walk.BENTO, endor.STEEL_SWORD]}),
+                                             'items': [0x42, parts.BENTO, endor.STEEL_SWORD]}),
     ('deliver_bag_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
      {'map': endor.CASTLE_HALL, 'set': sets(endor.ORDER, more=(BAG_SET,))}),
     ('deliver_bag', 'walk', talk('up', 7), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0}}),
@@ -132,7 +134,7 @@ SEGMENTS = [
     ('collector_no_side', 'warp', _below(endor.COLLECTOR, COLLECTOR_NIGHT),
      {'map': endor.COLLECTOR, 'set': sets(more=(_items(endor.STATUE),)), 'poke': wc.NIGHT}),
     ('collector_no', 'walk', talk_no('up', 1, 1), {'poke': wc.NIGHT, 'map': endor.COLLECTOR, 'off': ['ENDOR_SOLD'],
-                                                 'items': [0x42, walk.BENTO, endor.STATUE]}),
+                                                 'items': [0x42, parts.BENTO, endor.STATUE]}),
     ('collector_after_side', 'warp', _below(endor.COLLECTOR, COLLECTOR_NIGHT),
      {'map': endor.COLLECTOR, 'set': sets(endor.SOLD), 'poke': wc.NIGHT}),
     ('collector_after', 'walk', talk('up', 3), {'map': endor.COLLECTOR, 'poke': wc.NIGHT}),
@@ -154,7 +156,7 @@ SEGMENTS = [
     ('scott_hire', 'walk', talk('up', 6), {'map': endor.TOWN, 'want': ['SCOTT'],
                                            'bytes': {'PARTY_N': 2, 'PARTY1': 0xE8, 'GOLD0': 0, 'GOLD1': 0}}),
     # 단추에 「아니요」: 그대로 48/03, 칸을 떠났다가 다시 서야 또 묻는다
-    ('button_no_side', 'warp', f'{endor.CAVE_WET},{walk.BUTTON_CELL[0]},{walk.BUTTON_CELL[1] + 1}',
+    ('button_no_side', 'warp', f'{endor.CAVE_WET},{endor_checks.BUTTON_CELL[0]},{endor_checks.BUTTON_CELL[1] + 1}',
      {'map': endor.CAVE_WET, 'set': sets()}),
     ('button_no', 'walk', f'up:40;wait:200;down:8;wait:30;a:8;wait:200;{CLOSE};wait:300',
      {'map': endor.CAVE_WET, 'off': ['ENDOR_BUTTON', 'ENDOR_ASKED', 'ENDOR_PRESSED']}),

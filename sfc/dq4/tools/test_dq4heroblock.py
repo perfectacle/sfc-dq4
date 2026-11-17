@@ -16,12 +16,10 @@ HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4ch1event as ev  # noqa: E402
-import dq4ch3bonmalmo as bm  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 import dq4ch2frenol as fr  # noqa: E402
 import dq4ch2king as king  # noqa: E402
-import dq4ch3lakanaba as lakanaba  # noqa: E402
-import dq4ch3tunnel as tunnel  # noqa: E402
+import dq4ch3checks  # noqa: E402
 import dq4chapter1 as ch  # noqa: E402
 import dq4prologue as pro  # noqa: E402
 
@@ -32,9 +30,7 @@ WALK_EXEMPT = {
     ch.WALK_OUT_RIGHT: '1장 첫머리 전사: 위와 같음',
     ev.OLD_MAN_SCRIPT: '성 앞 노인: 조작을 막지 않고 주인공 쪽으로 2셀 앞까지만 따라온다(_old_man_step)',
     fr.SCRIPTS[fr.USE['trio']]: '프레놀 납치범 셋: 조작을 막지 않고 서쪽 길로 나간다. 주인공이 길에 서면 비킬 때까지 기다린다',
-    tunnel.SCRIPTS['migrant'][1]: '뚫린 굴 이주민: 조작을 막지 않고 서쪽 계단으로 나간다. 토막마다 그 둘레에 주인공이 '
-                                  '없을 때 걷는다(dq4ch3tunnel.GAP, tunnel-migrants-* 사례 겹침 0)',
-    tunnel.SCRIPTS['traveler'][1]: '뚫린 굴 나그네: 조작을 막지 않고 동쪽 계단으로 나간다. 이주민과 같음',
+    **dq4ch3checks.merged('WALK_EXEMPT'),
 }
 # 주인공 걸음이 있어도 되는 이벤트: (모듈, at 이름) → 시작 칸을 못 박는 판정
 MOVE_PINNED = {
@@ -187,12 +183,7 @@ PASS_NO_DEVICE = {
        for (_, script), (_, path, _) in ev._distinct(zip(ev.SOLDIER_SRCS, ev.THRONE_SOLDIERS)) if path},
     **{king.SCRIPTS[king.USE[name]]: '탑 꼭대기 엘프: 주인공이 줄 0C(셀 Y 26) 아래에서 들어설 때 걸리고, 엘프는 그보다 위 '
        '셀 Y 17·19 에서 위로만 걸음(elves-up·elves-right 사례 겹침 0)' for name in ('elf_a', 'elf_b')},
-    lakanaba.SCRIPTS['customer'][2]: '레이크나바 손님: 주인공이 카운터 안 (4,53)에 선 뒤 조작을 막고서야 카운터 바깥 '
-    '(12,53)~(8,53) 만 걷고, 맵 구석으로 사라진 뒤 조작을 푼다(dq4ch3lakanabacheck 손님 사례)',
-    lakanaba.SCRIPTS['first_master'][2]: '레이크나바 첫 출근 주인: 주인공이 문 칸·문 밖(X 14 이상)에 서면 조작을 막고 X 12 '
-    '이하((12,53)→(10,53)→(10,49))로만 비킴(heroblock shop-right·shop-above·shop-below)',
-    bm.SCRIPTS['fox'][2]: '숲의 여우: 장면 동안 주인공은 (04,0C)에 묶이고 여우는 (05,0D)→(05,04) 열로만 걸음(bm-fox-right 사례 겹침 0)',
-    bm.SCRIPTS['gaade'][2]: '돈 가아데: 주인공 아래 줄(FC Y 0D)로만 걸음(bm-fox-right 사례 겹침 0)',
+    **dq4ch3checks.merged('PASS_NO_DEVICE'),
 }
 
 
