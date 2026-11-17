@@ -875,6 +875,11 @@ def npc_lists(lists, ctx):
         house[:] = [e for e in house if (e["time"], _at(e)) != NENE_WALKER[1:]]
         if before - len(house) != 1:
             raise SystemExit(f'{HOUSE}: 둘째 네네 {NENE_WALKER[2]} 이 {before - len(house)}명')
+        # 첫머리 목록(dq4ch3event ch3_opening)은 이 손질 전에 기본 목록을 베낀 것이라 둘째 네네가 남는다. 첫머리 뒤 집을 다시
+        # 불러오기 전까지 걸려 있으므로 거기서도 뺀다. dq4ch3event 가 뒤에 같은 목록 객체의 첫머리 네네 대화를 바꾸므로 제자리에서
+        for lst in getattr(ctx, 'made_all', {}).values():
+            if lst["name"] == 'ch3_opening':
+                lst["entries"][:] = [e for e in lst["entries"] if (e["time"], _at(e)) != NENE_WALKER[1:]]
         for time, c in NENE.items():
             ctx.retalk(lists, HOUSE, c, t['nene'], time=time)
         # 낮 네네는 FC 슬롯 07 처럼 집 안을 돌아다닌다(128프레임마다 한 걸음, 실측). 첫머리는 따로 목록(dq4ch3event

@@ -230,6 +230,12 @@ class PortedListTest(unittest.TestCase):
         self.assertEqual([(e['fields']['x'], e['fields']['y']) for e in nenes], [L.NENE['day']])
         # 낮 네네는 돌아다니는 틀(FC 슬롯 07 의 걸음 간격)
         self.assertEqual((nenes[0]['from'], nenes[0]['fields']['interval']), (dq4npcport.WALK, 15))
+        # 첫머리 목록에도 둘째 네네가 없다(첫머리 뒤 집을 다시 불러오기 전까지 걸리는 목록)
+        lists2, _, _ = dq4npcport.port(DQ5, ROOT / 'rom' / 'dq4.nes')
+        new, _ = ev.npc_lists(lists2)
+        opening = next(lst for lst in new if lst['name'] == 'ch3_opening')['entries']
+        self.assertFalse([e for e in opening if (e['time'], (e['fields']['x'], e['fields']['y'])) == L.NENE_WALKER[1:]])
+        self.assertEqual(len([e for e in opening if e['time'] == 'day' and e['fields']['gfx'] == nenes[0]['fields']['gfx']]), 1)
         cellar = by[L.CELLAR]['entries']
         self.assertEqual([e['from'] for e in cellar if e['time'] == 'day'
                           and (e['fields']['x'], e['fields']['y']) == L.QUIT_MASTER[2]], [L._src('cellar')])
