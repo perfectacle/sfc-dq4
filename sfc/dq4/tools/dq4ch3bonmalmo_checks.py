@@ -31,6 +31,8 @@ BM_YES = 'ask:800;cursor:0'
 BM_PRINCE_HOLD = wc.DAY + ';7E3308=00'
 # 여우 마을 필드 입구 블록(FC (7C,34))의 왼쪽 위 칸
 BM_FOX_GATE = (0x7C * 2, 0x34 * 2)
+# 여우 마을 촌장 집 앞 줄(셀 Y 5)의 X 26. 한 줄 걷기 bm_fox 와 같은 길(40 줄 → 48 줄 → 위 → 왼쪽)
+DOG_PAST = (26, 5)
 BM_FULL = ';'.join(f'{0x2058 + k:04X}=02' for k in range(10))
 # 본몰 성 출구 줄(dq4groupbuild LINKS 3F arrival (11,1F) 위 칸)과 나가면 서는 필드 칸, 다리(FC (6F,4F)) 서쪽·동쪽 칸
 BM_GATE = (0x11 * 2, 0x1E * 2 + 1)
@@ -64,8 +66,10 @@ SEGMENTS = [
     # 개가 따라오면 FC (14,13)에 설 때 마을의 개가 짖고(02F1) 촌장 옆 (0D,01)로 달려간다. 개는 주인공 칸도 지나간다
     ('bm_dog_town', 'warp', f'{bm.FOX_TOWN},{bm.DOG_TRIGGER[0]},{bm.DOG_TRIGGER[1] + 2}',
      {'map': bm.FOX_TOWN, 'set': '21FF|02', 'poke': wc.DAY}),
-    ('bm_dog', 'walk', f'{bm.DOG_TRIGGER[0]},{bm.DOG_TRIGGER[3]};wait:200;{taps(3, 80)};wait:900',
-     {'map': bm.FOX_TOWN, 'cell': (bm.DOG_TRIGGER[0], bm.DOG_TRIGGER[3]), 'poke': wc.DAY}),
+    # 장면 뒤 개가 달린 길 끝 칸 (0F,02)을 지나 촌장 집 앞까지 걷는다(숨기만 하고 자리를 치우지 않으면 그 칸이 막혔다)
+    ('bm_dog', 'walk', f'{bm.DOG_TRIGGER[0]},{bm.DOG_TRIGGER[3]};wait:200;{taps(3, 80)};wait:900;'
+     f'40,23;48,23;48,{DOG_PAST[1]};{DOG_PAST[0]},{DOG_PAST[1]}',
+     {'map': bm.FOX_TOWN, 'cell': DOG_PAST, 'poke': wc.DAY}),
     # 개가 따라오면 촌장이 놀라 숲으로 바뀌고, 여우가 빌어 「예」 면 강철 갑옷, 돈 가아데가 떠나 FOXED
     ('bm_fox_town', 'warp', f'{bm.FOX_TOWN},{bm.CHIEF[0] - 2},{bm.CHIEF[1] - 1}',
      {'map': bm.FOX_TOWN, 'set': '21FF|02', 'poke': wc.DAY}),

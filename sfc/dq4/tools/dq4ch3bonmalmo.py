@@ -24,6 +24,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 import dq4chapter1 as ch1  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 import dq4ch3event as ch3  # noqa: E402
+import dq4ch1event  # noqa: E402
 from dq4chapterbox import ENTER, LEAVE  # noqa: E402
 from dq4ch2endor import Asm, BCC, BEQ, BNE, lda, sta  # noqa: E402
 from dq4itemport import KING_LETTER, PRINCE_LETTER  # noqa: E402
@@ -97,6 +98,8 @@ DOG_TRIGGER = (0x14 * 2, 0x13 * 2 + 1, 0x14 * 2 + 1, 0x13 * 2 + 2)
 DOG_FROM = cell(0x14, 0x14)
 DOG_RUN = (cell(0x14, 0x0C), cell(0x19, 0x0C), cell(0x19, 0x02), cell(0x0F, 0x02))
 DOG_STAND = cell(0x0D, 0x01)
+# 짖은 뒤 이 맵 동안 따라 걷던 개가 줄을 떠남(FC 는 일행 슬롯 1 을 숨김). 걷는 그림 장치가 이 맵에서만 본다
+DOG_AWAY = dq4ch1event.DOG_AWAY
 DOG_SPEED = 0x02               # 인물 명령 1E(7E:3360). 빌린 레코드의 속도로는 걷기가 끝나지 않을 수 있다(dq4ch3lakanaba)
 # 3장 레이크나바 우리의 개(dq4ch3lakanaba.DOG) 그림을 쓴다
 KENNEL_DOG = ('3E/00', cell(0x1B, 0x04))
@@ -306,6 +309,7 @@ def native(ctx):
     put('jingle', ENTER + _fanfare(ITEM_SONG) + LEAVE)
     put('bridge_hook', _bridge_hook(SEA_FRAMES, BRIDGE_CELLS))
     put('enter_hook', _enter_hook())
+    put('refresh', ENTER + dq4ch1event.REFRESH + LEAVE)
     put('dog_trigger', dq4prologue._inside(*DOG_TRIGGER))
     return bytes(out), at
 
@@ -441,8 +445,8 @@ def scripts(ctx):
     # 숨기는 것은 개 따라 걷기 장치 몫
     village_dog = [_cmd('28'), _cmd('52'), _cmd('1E', DOG_SPEED), _if_off(ch3.DOG, 'stay'), _if_on(FOXED, 'stay'),
                    poll(at['dog_trigger']), _cmd('3F'),
-                   msg('woof'), _cmd('50', *DOG_FROM), _cmd('53'), _cmd('4F'), _cmd('1C'), *walk(DOG_RUN), _cmd('51'),
-                   _cmd('4F'), _cmd('50', *DOG_STAND), _cmd('53'), _cmd('4F'), _cmd('40'), _cmd('16', label='stay')]
+                   msg('woof'), _or(DOG_AWAY), call(at['refresh']), _cmd('50', *DOG_FROM), _cmd('53'), _cmd('4F'), _cmd('1C'), *walk(DOG_RUN), _cmd('51'),
+                   _cmd('4F'), _cmd('52'), _cmd('50', *DOG_STAND), _cmd('53'), _cmd('4F'), _cmd('40'), _cmd('16', label='stay')]
     bodies = {'nanny': nanny, 'village_dog': village_dog, 'village_dog_night': list(village_dog), 'fox': fox, 'gaade': gaade, 'son': son}
     return [{"address": SCRIPTS[name][2], "commands": bodies[name]} for name in SCRIPTS]
 

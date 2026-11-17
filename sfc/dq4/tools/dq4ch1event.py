@@ -32,6 +32,10 @@ BOSS_WON = (0x57, 0x40)         # 7E:21E7 bit6  탑 위 보스를 이김(FC $628
 # 3장 개 토마스가 따라옴(dq4ch3event.DOG, FC $6286&04). 1·2장에는 쓰지 않는 바이트(dq4ch3slots 공용 몫)
 DOG = (0x6F, 0x02)
 FC_DOG_PICTURE = 0x24
+# 여우 마을 48/00(FC 18/00)에서 개가 촌장 옆으로 달려간 뒤 그 맵 동안 줄을 떠남(dq4ch3bonmalmo.DOG_AWAY, 7E:21A3 bit2).
+# 맵 안 임시 비트라 다른 맵에서는 다른 뜻(1장 탑 SOLDIER_UP)이므로 이 맵일 때만 본다
+DOG_AWAY = (0x13, 0x04)
+DOG_AWAY_MAP = '48/00'
 KIDS_FOLLOW = (0x57, 0x80)      # 7E:21E7 bit7  구한 아이들이 따라옴(FC $6283&20). 이무르에 데려다주면 끈다
 # 아래는 DQ5 레ヌール城 04/05 의 인물 스크립트만 읽는 비트(이 해킹은 04/05 에 가지 않음, dq5flags.py)
 SOLDIER_LEFT = (0x06, 0x01)     # 7E:2196 bit0  탑의 병사가 먼저 돌아감(FC $6280&80)
@@ -1041,12 +1045,17 @@ def _followers(origin):
         a.b(0xA9, PICTURES[FC_CHILD_PICTURE]).word(0x20, 'add')
     # FC 는 개를 걷는 줄 칸으로 그린다(1E:$AAFF, 용병이 있으면 그 뒤). 일행 뒤에 붙으므로 용병 뒤가 된다
     a.label('dog').long(0xAF, 'dog_flag').b(0x29, DOG[1]).rel(0xF0, 'done')
-    a.b(0xA9, PICTURES[FC_DOG_PICTURE]).word(0x20, 'add')
+    away_bc, away_bd = (int(v, 16) for v in DOG_AWAY_MAP.split('/'))
+    a.long(0xAF, 'away').b(0x29, DOG_AWAY[1]).rel(0xF0, 'add_dog')
+    a.b(0xAF, 0xBE, 0x00, 0x7E).rel(0x10, 'add_dog')
+    a.b(0xAF, 0xBC, 0x00, 0x7E, 0xC9, away_bc).rel(0xD0, 'add_dog')
+    a.b(0xAF, 0xBD, 0x00, 0x7E, 0xC9, away_bd).rel(0xF0, 'done')
+    a.label('add_dog').b(0xA9, PICTURES[FC_DOG_PICTURE]).word(0x20, 'add')
     a.label('done').b(0x28, 0x6B)
     a.label('add').b(0x48, 0xAF, 0x67, 0x19, 0x7E, 0xAA, 0x68, 0x9F, 0x6F, 0x19, 0x7E, 0xA9, 0x00, 0x9F, 0x78, 0x19, 0x7E,
                      0xE8, 0x8A, 0x8F, 0x67, 0x19, 0x7E, 0x60)
     code, _ = a.assemble({'flare': flag(FLARE_FOLLOWS), 'reunited': flag(REUNITED), 'kids_flag': flag(KIDS_FOLLOW),
-                          'dog_flag': flag(DOG)})
+                          'dog_flag': flag(DOG), 'away': flag(DOG_AWAY)})
     return code
 
 

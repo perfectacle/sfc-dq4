@@ -111,6 +111,13 @@ class BridgeTest(unittest.TestCase):
     def test_cells_are_the_fc_bridges(self):
         self.assertEqual(bm.bridge_cells(DQ4), self.CELLS)
 
+    def test_follower_dog_leaves_only_in_the_fox_town(self):
+        # 걷는 그림 장치는 맵 안 임시 비트를 이 맵에서만 본다(다른 맵에서는 다른 뜻)
+        import dq4ch1event
+        self.assertEqual(dq4ch1event.DOG_AWAY_MAP, bm.FOX_TOWN)
+        self.assertEqual(bm.DOG_AWAY, dq4ch1event.DOG_AWAY)
+        self.assertNotIn(bm.DOG_AWAY, (bm.NANNY_SCOLDED, bm.NANNY_GO))
+
     def test_enter_hook_goes_before_the_entrance_hook(self):
         (site, orig, new), = [h for h in bm.hooks(_ctx()) if h[0] == bm.ENTER_SITE]
         import dq4groupbuild
