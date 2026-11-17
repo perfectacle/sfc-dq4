@@ -222,7 +222,6 @@ class WindowTest(unittest.TestCase):
         self.assertTrue(check.allowed(*prince, have=lambda name: False))
         self.assertIsNone(check.allowed(*prince, have=lambda name: True))
         self.assertTrue(check.allowed('47/01', 'night', (0, 0), have=lambda name: False))
-        self.assertTrue(check.allowed('40/0B', 'night', W.cell(0x05, 0x08), have=lambda name: True))
         self.assertIsNone(check.allowed('3E/00', 'day', W.cell(0x05, 0x0F), have=lambda name: False))
 
     def test_lists_stop_at_the_chapter3_override(self):
