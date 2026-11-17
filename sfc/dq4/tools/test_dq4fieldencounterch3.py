@@ -52,6 +52,28 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(blob[labels['found'] - m.CH3_CODE_AT:][:3], bytes((0xA9, m.MERCHANT_RATE, 0x00)))
         self.assertEqual((m.TALK_SHOP, m.TALK_INN), (0x02, 0x06))
 
+    def test_code_has_no_brk_and_stays_in_its_share(self):
+        # BRK 처리기는 BRK 가 놓인 뱅크를 DB 로 둔다: 4E 코드에서 부르면 WRAM 대신 롬을 읽는다
+        rows = [(32, 0, 0), (33, 0x200, 0), (78, 0x210, 0), (35, 0x210, 0)]
+        blob, labels = m.ch3_code(rows, [(t, k) for k, (t, _) in enumerate(DOC_TABLE)])
+        self.assertLessEqual(m.CH3_CODE_AT + len(blob), m.CH3_CODE_END)
+        from kr_patch.sfc.dis65816 import decode
+        from kr_patch.sfc.mapper import LoROM
+        rom = bytearray(0x400000)
+        o = (m.CH3_CODE_AT >> 16 & 0x7F) * 0x8000
+        rom[o:o + len(blob)] = blob
+        for start, end in (('drop', 'zones'),):
+            pc, m8, x8 = labels[start], True, True
+            while pc < labels[end]:
+                text, n, _, _ = decode(bytes(rom), pc, m8=m8, x8=x8, mapper=LoROM())
+                op = blob[pc - m.CH3_CODE_AT]
+                self.assertNotEqual(op, 0x00, text)
+                if op in (0xC2, 0xE2):
+                    v = blob[pc - m.CH3_CODE_AT + 1]
+                    m8 = m8 if not v & 0x20 else op == 0xE2
+                    x8 = x8 if not v & 0x10 else op == 0xE2
+                pc += n
+
     def test_merchant_writes_include_the_wake_hook(self):
         rows = [(32, 0, 0), (33, 0x200, 0), (78, 0x210, 0), (35, 0x210, 0)]
         blob, labels = m.ch3_code(rows, [(t, k) for k, (t, _) in enumerate(DOC_TABLE)])
