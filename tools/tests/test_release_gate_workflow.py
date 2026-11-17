@@ -458,7 +458,8 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
         args = set(re.findall(r'^\s+args:\s*(.*)$', top_block(self.text, 'jobs') and '\n'.join(top_block(self.text, 'jobs')), re.M))
         args = {a.strip().strip("'") for a in args}
         used = set()
-        for toml in list(ROOT.glob('*/*/guards.toml')) + [ROOT / 'sfc' / 'dq4' / 'release.toml']:
+        for toml in (list(ROOT.glob('*/*/guards.toml')) + list(ROOT.glob('*/*/guards.d/*.toml'))
+                     + [ROOT / 'sfc' / 'dq4' / 'release.toml']):
             for m in re.finditer(r'dq4build\.py --out \S+((?: --[\w-]+)*)', toml.read_text(encoding='utf-8')):
                 used.add(m[1].strip())
         self.assertTrue(used)
