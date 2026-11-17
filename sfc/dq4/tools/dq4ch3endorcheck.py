@@ -57,7 +57,7 @@ SON_NIGHT = endor.SON[1][2]
 GUIDE = endor.GUIDE[2]
 COLLECTOR_NIGHT = endor.COLLECTORS[1][2]
 NENE_DAY = endor.cell(*endor.NENE[0][2])
-COPPER_SWORD = 0x01
+CHEAP = 0x01                                           # DQ5 물건 01(값 50)
 
 
 def sales_set(n):
@@ -66,14 +66,23 @@ def sales_set(n):
     return ';'.join(f'{(at + k) & 0xFFFF:04X}={n >> 8 * k & 0xFF:02X}' for k in range(3))
 
 
-# 가게 칸 0~2 에 강철 검(2000G) 둘·구리 검
+# 가게 칸 0~2 에 강철 검(2000G) 둘·물건 01(50G)
 STOCK_SET = ';'.join(f'{(ch3.VARS2_AT + ch3.SLOTS["E"].vars2[0] + shop.STOCK + k) & 0xFFFF:04X}={item + 1:02X}'
-                     for k, item in enumerate((endor.STEEL_SWORD, endor.STEEL_SWORD, COPPER_SWORD)))
-# 물음(036B)에 「예」, 매상 첫 쪽을 넘기면 물건 창. 첫 커서는 장비하지 않은 첫 칸(칸 1 도시락)이라 아래로 한 칸(강철 검),
-# 값 안내에 「예」, 「더?」 에 「아니요」
-COUNTER_WALK = ('down:8;wait:30;a:8;wait:60;a:8;wait:60;a:8;wait:120;a:8;wait:150;'
-                'down:8;wait:30;a:8;wait:150;a:8;wait:150;down:8;wait:30;a:8;wait:120;'
-                f'{wc.taps(2, 90)};{CLOSE}')
+                     for k, item in enumerate((endor.STEEL_SWORD, endor.STEEL_SWORD, CHEAP)))
+# 카운터 위에서 말을 건다. 물음은 창 상태로 넘긴다(dq4walk.lua ask·cursor). 팔기 물건 창(37)은 cursor 로 옮겨지지 않아(0AD7 이
+# 커서가 아님, cursor:2 가 도시락을 고름) 첫 커서(장비하지 않은 첫 칸, 도시락)에서 아래로 한 칸 누른다
+TALK_DOWN = 'down:8;wait:30;a:8;wait:60;a:8;wait:60'
+YES, NO = 'ask:600;cursor:0;a:8', 'ask:600;cursor:1;a:8'
+# 036B 「예」, 매상(036D) 첫 쪽을 넘기면 물건 창. 강철 검을 골라 036F 「예」, 0371 「아니요」, 0374 「아니요」 → 0375
+COUNTER_WALK = f'{TALK_DOWN};{YES};wait:120;a:8;wait:250;down:8;wait:40;a:8;{YES};{NO};{NO};{wc.taps(1, 90)};{CLOSE}'
+# 036B 「예」(매상 없음), 물건 창을 B 로 그만두고 0374 「예」 → 가게 물건 창(BRK 95 0F)을 B 로 닫고 0375
+VIEW_WALK = f'{TALK_DOWN};{YES};wait:150;b:8;{YES};wait:150;b:8;wait:60;{wc.taps(1, 90)};{CLOSE}'
+# 톨네코 소지품이 없으면 0334 → 0374 「예」 → 가게가 비었으면 0376 만
+EMPTY_WALK = f'{TALK_DOWN};{YES};{YES};{wc.taps(1, 90)};{CLOSE}'
+NO_ITEMS = ';'.join(f'{(ch3.PARTY_ITEMS & 0xFFFF) + k:04X}=FF' for k in range(12)) + \
+    f';{(ch3.PARTY_ITEMS - 2) & 0xFFFF:04X}=00;{(ch3.PARTY_ITEMS - 1) & 0xFFFF:04X}=00'
+NO_STOCK = ';'.join(f'{(ch3.VARS2_AT + ch3.SLOTS["E"].vars2[0] + shop.STOCK + k) & 0xFFFF:04X}=00'
+                    for k in range(shop.STOCK_SLOTS))
 
 # (이름, 방법, 인자, 선택): dq4ch3walkcheck.SEGMENTS 와 같은 꼴. 순간이동 구간마다 묶음이고, 묶음 첫 구간 set 이 flag 를 둔다
 SEGMENTS = [
@@ -112,8 +121,17 @@ SEGMENTS = [
     ('nene_counter', 'walk', COUNTER_WALK,
      {'map': endor.TOWN, 'bytes': {'GOLD0': 0xE8, 'GOLD1': 0x03, 'NENE_SALES0': 0, 'NENE_SALES1': 0,
                                    'NENE_STOCK0': endor.STEEL_SWORD + 1}}),
+    # 0374 「예」: 가게 물건 창을 열고 닫아도 가게 칸·소지품·장비가 그대로
+    ('nene_view_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
+     {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(_items(endor.STEEL_SWORD), STOCK_SET, sales_set(0)))}),
+    ('nene_view', 'walk', VIEW_WALK,
+     {'map': endor.TOWN, 'items': [0x42, parts.BENTO, endor.STEEL_SWORD],
+      'bytes': {'NENE_STOCK0': endor.STEEL_SWORD + 1, 'EQUIP0': 0x01}}),
+    ('nene_empty_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
+     {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(NO_ITEMS, NO_STOCK, sales_set(0)))}),
+    ('nene_empty', 'walk', EMPTY_WALK, {'map': endor.TOWN, 'bytes': {'NENE_STOCK0': 0}}),
     # 잠으로 날이 바뀌면 가게 칸마다 rand < C0 이면 값 × (96 + ⌊r × 33/256⌋)/64 가 매상으로. 난수를 고정하면 셋 다 팔려
-    # 8043(4000 + 4000 + 200 이하, 1.5배 6150 이상)
+    # 8043(값 합 4050 의 2배 8100 이하, 1.5배 6075 이상)
     ('nene_day_side', 'warp', f'{endor.TOWN},{endor.NENE_SIDE[1][0]},{endor.NENE_SIDE[1][1] - 1}',
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(STOCK_SET, sales_set(0))),
       'poke': RNG_PIN}),
@@ -208,6 +226,8 @@ MESSAGES = {
     'son_night': ['son_home'], 'nene_night': ['nene_late', 'nene_night', 'nene_morning', 'nene_bento'],
     'nene_no': ['nene_rest', 'nene_shopkeep'], 'nene_lie': ['news', 'news_no', 'news_farewell'], 'nene_nonews': ['no_news'],
     'nene_day': ['nene_rest', 'nene_night'],
+    'nene_view': ['nene_counter_ask', 'nene_pick', 'nene_done', 'nene_cheer'],
+    'nene_empty': ['nene_counter_ask', 'nene_nothing', 'nene_done', 'nene_empty'],
     'nene_unsold': ['nene_rest', 'nene_night'],
     'nene_counter': ['nene_counter_ask', 'nene_sales', 'nene_pick', 'nene_item', 'nene_offer', 'nene_put', 'nene_more',
                      'nene_done', 'nene_cheer'],
