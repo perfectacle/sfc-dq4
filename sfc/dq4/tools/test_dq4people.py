@@ -61,6 +61,39 @@ class HookTests(unittest.TestCase):
             cpu.jsl(at)
             self.assertEqual(cpu.a & 0xFF, want)
 
+    def test_basket_wins_over_alena_while_the_altar_flag_is_on(self):
+        # 텐페 제단 flag 가 켜진 동안(일행이 바구니 안) 주인공 그림은 2장 깃발이 켜져 있어도 바구니 세트
+        (flag, basket, _, _), = P.LEADER_STANDINS
+        self.assertEqual((flag, basket), (P.TEMPE_ALTAR, 0x3F))
+        entries = [(g, None, flag, basket) for g in P.LEADER_PICTURES + (P.ALENA_PICTURE,)]
+        entries += [(g, None, P.CHAPTER2, 0x83) for g in P.LEADER_PICTURES] + ENTRIES
+        rom = bytearray(0x400000)
+        at = P.cpu(P.HOOK_AT)
+        code = P.hook(entries)
+        rom[lorom(at):lorom(at) + len(code)] = code
+        for g in range(0x100):
+            rom[lorom(TABLE + g)] = g ^ 0x80
+        for picture in P.LEADER_PICTURES + (P.ALENA_PICTURE,):
+            for flags, want in ((P.CHAPTER2[1] | flag[1], basket), (P.CHAPTER2[1], 0x83 if picture != P.ALENA_PICTURE
+                                                                    else P.ALENA_PICTURE ^ 0x80)):
+                cpu = Cpu(bytes(rom), bytearray(0x20000))
+                cpu.wram[0xBC], cpu.wram[0x2190 + flag[0]] = 0x3D, flags
+                cpu.x, cpu.p = picture, 0x30
+                cpu.jsl(at)
+                self.assertEqual(cpu.a & 0xFF, want, f'{picture:02X} {flags:02X}')
+
+    def test_standin_colors_are_the_set_s_own_dq5_line(self):
+        lines = [[k * 16 + i for i in range(16)] for k in range(4)]
+        with unittest.mock.patch.object(P.S, 'obj_palettes', return_value=lines), \
+                unittest.mock.patch.object(P.S, 'set_record', return_value={'palette': 2}):
+            (row,) = P.standin_palettes(None)
+        flag, _, where, line = P.LEADER_STANDINS[0]
+        self.assertEqual(row, {'map': where, 'line': f'{8 + line:02X}', 'flag': f'{flag[0]:02X}',
+                               'mask': f'{flag[1]:02X}', 'colors': lines[2][1:]})
+        # 대역 줄은 장 주인공(아리나)의 전용 줄이라 바구니인 동안 비어 있다
+        alena = next(p for p in P.PEOPLE if p.role == '아리나')
+        self.assertEqual(line, alena.palette)
+
     def test_register_widths_come_back(self):
         # 03:D202 는 X 16비트(상위 0)로 부를 수 있다. PLP 가 폭을 되돌리고 X 는 그대로여야 한다
         cpu = run(0x9B, 0x36, p=0x20)
@@ -638,6 +671,11 @@ class HookEntryTests(unittest.TestCase):
         fake = lambda person, rom: (0x40 + P.PEOPLE.index(person), 'simple', 10)  # noqa: E731
         with unittest.mock.patch.object(P, 'target', fake):
             entries = P.hook_entries(None)
+        # 맨 앞은 일행 0번 대역 줄(주인공이 쓰는 그림 셋 모두)
+        pictures = P.LEADER_PICTURES + (P.ALENA_PICTURE,)
+        standins = [(g, None, flag, s) for flag, s, _, _ in P.LEADER_STANDINS for g in pictures]
+        self.assertEqual(entries[:len(standins)], standins)
+        entries = entries[len(standins):]
         leaders = [p for p in P.PEOPLE if p.flag is not None and p.leader]
         self.assertEqual([p.flag for p in leaders], [P.CHAPTER2, P.CHAPTER3])
         n = 2 * len(leaders)
@@ -1401,6 +1439,8 @@ class BuildFlowTests(unittest.TestCase):
     BOARD = {(0x36, 1): [(0, 0, 0), None], (0x36, 2): [None, None], (0x37, 1): [(0, 0, 0), (8, 8, 8)],
              (0x37, 2): [(16, 16, 16), None]}
 
+    STANDIN = {'map': '3D/03', 'line': '0F', 'flag': '78', 'mask': '04', 'colors': [1] * 15}
+
     def run_build(self, rows):
         calls = {'applied': [], 'palette_docs': []}
 
@@ -1425,6 +1465,7 @@ class BuildFlowTests(unittest.TestCase):
                                               split_patches=lambda rom, doc, w, areas: [{'n': 0}, {'n': 1}],
                                               tile_areas=lambda data: (('3F:8000', 16),),
                                               hook_patch=lambda rom: {'hook': 1}, swap_patch=lambda rom: {'swap': 1},
+                                              standin_palettes=lambda rom: [dict(self.STANDIN)],
                                               apply_writes=apply_writes), \
                     unittest.mock.patch.object(P.subprocess, 'run', run), \
                     unittest.mock.patch.object(P.dq5objpalette, 'patch', objpalette):
@@ -1488,7 +1529,12 @@ class BuildFlowTests(unittest.TestCase):
         self.assertEqual(lines[3][0], 31 << 10 | 2 << 5 | 1)
         self.assertTrue(all(len(c) == 15 for c in lines.values()))
         self.assertEqual(pal['sets'][0], {'set': '90', 'palette': 1})
+        # 대역 세트는 그 줄을 쓰고, 그 줄을 덮는 대역 색 항목은 표 끝(장 주인공 항목보다 나중에 적용)
+        self.assertEqual(pal['sets'][-len(P.LEADER_STANDINS):],
+                         [{'set': f'{s:02X}', 'palette': line} for _, s, _, line in P.LEADER_STANDINS])
         maps = docs[P.MAP_PALETTES_AT]['new_map_palettes']
+        self.assertEqual(maps[-1], self.STANDIN)
+        maps = maps[:-1]
         plain = [m for m in maps if m['flag'] == 'FF']
         self.assertEqual([(m['map'], m['line']) for m in plain], [('36/FF', '09'), ('36/FF', '0A'), ('37/FF', '09'),
                                                                    ('37/FF', '0A')])

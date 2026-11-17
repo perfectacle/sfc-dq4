@@ -1027,13 +1027,17 @@ def native(data=None):
 def _followers(origin):
     """02:C634 끝에서 M·X 8 로 부른다. 프레아(따라옴, 재회 전, 감옥 안이 아님)와 구한 아이들(따라옴), 3장 개 토마스(따라옴)의
     그림을 걷는 그림 7E:196F~ 끝에 더하고 7E:1967 을 늘린다. 1978 은 0(보이는 그림, 02:C6F2 가 bit7 을 관 그림 35 로 보냄).
-    일행 기록이 아니라 그림만 더하므로 전투에는 들지 않는다."""
+    일행 기록이 아니라 그림만 더하므로 전투에는 들지 않는다. 일행이 바구니 안인 동안(2장 텐페 제단 flag)은 걷는
+    그림을 주인공(바구니 그림) 하나로 줄인다."""
     import dq4environmentrom
+    from dq4ch2event import TEMPE_ALTAR
     from dq4npcport import PICTURES
     jail_bc, jail_bd = (int(v, 16) for v in JAIL.split('/'))
     flag = lambda f: 0x7E2190 + f[0]  # noqa: E731
     a = dq4environmentrom._Asm(origin)
-    a.b(0x08, 0xE2, 0x30).long(0xAF, 'flare').b(0x29, FLARE_FOLLOWS[1]).rel(0xF0, 'kids')
+    a.b(0x08, 0xE2, 0x30).long(0xAF, 'basket').b(0x29, TEMPE_ALTAR[1]).rel(0xF0, 'flare_check')
+    a.b(0xA9, 0x01, 0x8F, 0x67, 0x19, 0x7E).rel(0x80, 'done')
+    a.label('flare_check').long(0xAF, 'flare').b(0x29, FLARE_FOLLOWS[1]).rel(0xF0, 'kids')
     a.long(0xAF, 'reunited').b(0x29, REUNITED[1]).rel(0xD0, 'kids')
     # 필드에서도 $BC·$BD 가 들어갔던 맵 번호로 남아 있었다(실측). 실내일 때만 감옥으로 본다
     a.b(0xAF, 0xBE, 0x00, 0x7E).rel(0x10, 'add_flare')
@@ -1055,7 +1059,8 @@ def _followers(origin):
     a.label('add').b(0x48, 0xAF, 0x67, 0x19, 0x7E, 0xAA, 0x68, 0x9F, 0x6F, 0x19, 0x7E, 0xA9, 0x00, 0x9F, 0x78, 0x19, 0x7E,
                      0xE8, 0x8A, 0x8F, 0x67, 0x19, 0x7E, 0x60)
     code, _ = a.assemble({'flare': flag(FLARE_FOLLOWS), 'reunited': flag(REUNITED), 'kids_flag': flag(KIDS_FOLLOW),
-                          'dog_flag': flag(DOG), 'away': flag(DOG_AWAY)})
+                          'dog_flag': flag(DOG), 'away': flag(DOG_AWAY),
+                          'basket': flag(TEMPE_ALTAR)})
     return code
 
 
