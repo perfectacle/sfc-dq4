@@ -21,7 +21,23 @@ def _out(name):
     return mp, W.cell(*fc)
 
 
+FLAGS = {'TOWNS_SCOLDED': wc.flag(W.NANNY_SCOLDED)}
+# 본몰 왕자 낮 자리(FC (01,0B))의 오른쪽 셀과 유모(FC (06,07)) 아래 셀. 왕자 방은 FC 열 06 의 줄 09 가 벽이라 열 04 로 오른다
+PRINCE_RIGHT = W.cell(0x02, 0x0B)
+NANNY_BELOW = W.cell(0x06, 0x08)
+
 SEGMENTS = [
+    # 본몰 왕자를 낮에 처음 만나 쫓겨난 그 방문에 유모에게 말을 걸면 03B1(본몰 NANNY_SCOLDED). 다시 든 방문의 0836 은
+    # npccheck 상태 towns_prince
+    ('towns_prince_side', 'warp', f'{W.BONMALMO},{PRINCE_RIGHT[0]},{PRINCE_RIGHT[1] - 1}',
+     # 앞 묶음들이 켠 편지·왕자 flag 를 끈다(왕자가 첫 만남 갈래로 가게)
+     {'map': W.BONMALMO, 'poke': f'{wc.DAY};{HOLD}',
+      'set': f'{0x2190 + W.PRINCE_MET[0]:04X}&{~(W.PRINCE_MET[1] | W.LETTER1[1] | 0x20) & 0xFF:02X}'}),
+    ('towns_nanny_scolded', 'walk',
+     f'{wc.talk("left", 10)};wait:200;{W.cell(0x04, 0x0B)[0]},{PRINCE_RIGHT[1]};{W.cell(0x04, 0x08)[0]},{NANNY_BELOW[1]};'
+     f'{NANNY_BELOW[0]},{NANNY_BELOW[1]};{wc.talk("up", 4)}',
+     {'map': W.BONMALMO, 'cell': NANNY_BELOW, 'want': ['TOWNS_SCOLDED'], 'poke': f'{wc.DAY};{HOLD}'}),
+
     # 본몰 감옥 병사(FC 05/00 (0A,0E), 대화 066): 말한 뒤 성 05/01 (19,02)로
     ('towns_jail_side', 'warp', _below(W.PRISON, (0x0A, 0x0E)),
      {'map': W.PRISON, 'poke': f'{wc.DAY};{HOLD}'}),
