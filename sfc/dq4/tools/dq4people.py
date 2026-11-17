@@ -111,8 +111,11 @@ DEGRADE = (
 class Person:
     def __init__(self, pictures, group, sheet, role, anim='legs', main=False, palette=None, new_set=None, spare=None,
                  allow=None, outline=False, flag=None, leader=False, seen=None, face=False, weight=None, glasses=False, brows=False, copy=None, touch=None, whites=(),
-                 line=None, recolor=None):
+                 line=None, recolor=None, follows=None):
         self.pictures, self.group, self.sheet, self.role = pictures, group, sheet, role
+        # follows: 그 장 일행 뒤를 따라 걷는 그림(dq4ch1event 따라 걷는 그림)이면 그 장. 일행이 서는 그룹 모두(party_groups)의
+        # 줄 색에 넣는다(인물 목록에는 우리 안 자리만 있어 그 그룹만 잡혔다)
+        self.follows = follows
         # recolor: {줄인 그림의 색: 바꿀 색}. 공용 줄에서 살색 칸에 합쳐져 버리는 옷 색을 그 인물이 이미 쓰는 다른
         # 색으로 옮긴다(NDS 색을 따르지 않는 대신 옷이 몸과 갈린다)
         self.recolor = recolor or {}
@@ -218,7 +221,7 @@ PEOPLE = (
            touch={'down': [(4, 8, (3, 8)), (5, 7, (3, 8)), (10, 7, (3, 8)), (11, 9, (11, 8))],
                   'right': [(8, 8, (7, 8)), (9, 7, (6, 7)), (8, 7, (6, 7))]}),
     Person((0x1F,), None, 'h033', '학자', glasses=True),
-    Person((0x20,), None, 'h044', '개', anim='frames', spare=0x75),
+    Person((0x20,), None, 'h044', '개', anim='frames', spare=0x75, follows=3),
     Person((0x19,), None, 'h003', '아주머니'),
     Person((0x07,), None, 'h011', '거친 남자'),
     Person((0x82,), None, 'h029', '하녀', spare=0x5D),
@@ -1264,6 +1267,9 @@ def where(people, used):
     목록에서 찾지 못한 그림(이벤트로만 바꾸는 그림 등)은 모든 그룹으로 본다."""
     out = {}
     for p in people:
+        if p.follows is not None:
+            out[p] = {*(used.get(p.pictures[0], set()) & DQ4_GROUPS), *party_groups(p.follows)}
+            continue
         if p.seen is not None:
             out[p] = set(p.seen)
             continue
