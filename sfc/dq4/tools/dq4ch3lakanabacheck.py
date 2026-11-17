@@ -201,25 +201,14 @@ CASES = {
 
 
 def message_ids(messages_path):
-    """{메시지 이름: 번호}: 같은 빌드의 messages.json 에서 이 모듈 메시지의 글(끝 코드를 뺀 코드)로 찾는다. 다른 모듈에
-    같은 글(FC 의 같은 메시지)이 있을 수 있어, 이 모듈 차례대로 이어지는 번호를 고른다."""
-    doc = json.loads(Path(messages_path).read_text(encoding='utf-8'))['messages']
-    body = {}
-    for k, codes in doc.items():
-        body.setdefault(tuple(json.dumps(c) for c in codes[:-1]), set()).add(int(k, 16))
-    names = list(L.MESSAGES)
-    found = []
-    for name in names:
-        key = tuple(json.dumps(c) for c in L.MESSAGES[name][:-1])
-        if key not in body:
-            raise SystemExit(f'{messages_path}: 메시지 {name} 이 없음(롬과 같은 빌드인지)')
-        found.append(body[key])
-    firsts = [m for m in sorted(found[0]) if all(m + i in ids for i, ids in enumerate(found))]
-    if not firsts:
-        raise SystemExit('메시지 번호가 이 모듈 차례대로 이어지지 않음')
-    out = {name: firsts[0] + i for i, name in enumerate(names)}
-    return out
-
+    """{메시지 이름: 번호}: 같은 빌드의 messages.json 에서 이 모듈(SLOTS 키 L) 메시지가 놓인 번호(dq4msglabels.named: 사건
+    메시지 자리를 정하고 그 자리에 모듈 메시지가 놓였는지 본다). 다른 모듈에 같은 글이 있어도 이름으로 갈린다."""
+    import dq4msglabels
+    names = dq4msglabels.named(dq4msglabels.load(messages_path))
+    out = {label.split('.', 2)[2]: i for i, label in names.items() if label.startswith('ch3.L.')}
+    if set(out) != set(L.MESSAGES):
+        raise SystemExit(f'{messages_path}: 이 모듈 메시지 이름이 맞지 않음(롬과 같은 빌드인지)')
+    return {name: out[name] for name in L.MESSAGES}
 
 def context(ids):
     first = ids[next(iter(L.MESSAGES))] - len(ch3.MESSAGES)

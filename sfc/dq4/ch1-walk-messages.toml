@@ -1,4 +1,5 @@
-# 1장 걷기 검사(dq4ch1walkcheck.py)가 구간마다 견주는 메시지 번호(24:8BAF 가 받은 A)의 처음 나온 차례.
+# 1장 걷기 검사(dq4ch1walkcheck.py)가 구간마다 견주는 메시지(24:8BAF 가 받은 A)의 처음 나온 차례. 번호가 아니라
+# 이름표(dq4msglabels: 사건 메시지는 「장.이름@글」, 그 밖은 「@글」)라 번호가 밀려도 같고 글이 바뀌면 다르다.
 # 손으로 고치지 않는다. dq4ch1walkcheck.py --units --write-messages "까닭" 으로 다시 만든다. 차례가 바뀐 구간에만
 # 그 까닭이 reason 으로 남는다. check 는 실수로 손댄 것을 알아채는 표지일 뿐 공개된 셈이라 고의 위조는 막지 않는다.
 
@@ -6,9 +7,9 @@
 variant = "chapter1"
 seed = 0
 name = "prologue"
-messages = ["CA8", "CA9", "CAA", "CAB", "CAD", "129", "186", "CAE", "CAF", "CB0", "CB1", "CB2", "CB3", "CB4", "CB5", "CB7", "CB8", "CB9", "CBA", "CBB", "CBC", "CBD", "C80", "C81", "C82"]
+messages = ["@7b4d7d5c", "@a8f8cc01", "@30b1f5b1", "@8d718d2b", "@ea36219f", "@3b1915bc", "@f00ad0f5", "@8c71b963", "@7e1d9a8f", "@c6b94395", "@9952d96a", "@3392f75c", "@31219118", "@76108c8a", "@c46f94f7", "@367127a2", "@66bf3c90", "@715984de", "@b2763061", "@99b45c4c", "@23e1835a", "@da477fcf", "@3056403f", "@8870536f", "@1ff81888"]
 reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
-check = "9663d6d1b4d8"
+check = "5e905a4c5174"
 
 [[segment]]
 variant = "chapter1"
@@ -30,9 +31,9 @@ check = "2dc514f83c6a"
 variant = "chapter1"
 seed = 0
 name = "night_child"
-messages = ["E71"]
+messages = ["ch1.child@8fa8b505"]
 reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
-check = "319244523c51"
+check = "86f2e418ae3f"
 
 [[segment]]
 variant = "chapter1"
@@ -46,9 +47,9 @@ check = "d41d0e98b825"
 variant = "chapter1"
 seed = 0
 name = "flare"
-messages = ["E75", "129"]
+messages = ["ch1.flare_ask@e88ed0cc", "@3b1915bc"]
 reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
-check = "b04e61cbb8e6"
+check = "df2b0ab2a45f"
 
 [[segment]]
 variant = "chapter1"
@@ -70,9 +71,9 @@ check = "d8324ef89aae"
 variant = "chapter1"
 seed = 0
 name = "reunion"
-messages = ["E76", "E77", "129"]
+messages = ["ch1.reunion@9c34358d", "ch1.hint@45c7df56", "@3b1915bc"]
 reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
-check = "f30b096cf658"
+check = "b518a6a10a01"
 
 [[segment]]
 variant = "chapter1"
@@ -94,9 +95,9 @@ check = "129cd6c7bffc"
 variant = "chapter1"
 seed = 0
 name = "hoimin"
-messages = ["E7B", "E7C", "129"]
+messages = ["ch1.hoimin_ask@443e3220", "ch1.hoimin_yes@574ab507", "@3b1915bc"]
 reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
-check = "2815351016b1"
+check = "abcdabd36813"
 
 [[segment]]
 variant = "chapter1"
@@ -118,9 +119,9 @@ check = "e188103d9277"
 variant = "chapter1"
 seed = 0
 name = "shoes"
-messages = ["131", "12E", "132"]
+messages = ["@018392c6", "@d0032162", "@66144e6f"]
 reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
-check = "e35d91768649"
+check = "e27608836d0e"
 
 [[segment]]
 variant = "chapter1"
@@ -142,17 +143,17 @@ check = "3c228be8c0be"
 variant = "chapter1"
 seed = 0
 name = "fly"
-messages = ["1C6"]
+messages = ["@3efb9f6c"]
 reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
-check = "1c2fe002a11a"
+check = "3da1d5dd7c32"
 
 [[segment]]
 variant = "chapter1"
 seed = 0
 name = "kidnap"
-messages = ["129", "E7E"]
+messages = ["@3b1915bc", "ch1.kidnap@7dfee428"]
 reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
-check = "1fc35d7ba34e"
+check = "961615e88602"
 
 [[segment]]
 variant = "chapter1"
@@ -166,9 +167,9 @@ check = "c0be38b95488"
 variant = "chapter1"
 seed = 0
 name = "boss"
-messages = ["E91", "E7F", "E80", "129", "E81"]
+messages = ["ch1.cry@038eb78c", "ch1.boss_taunt@2b3e2e3e", "ch1.boss_dies@999aca72", "@3b1915bc", "ch1.kids_thanks@4414d72d"]
 reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
-check = "d25799c00373"
+check = "aa7a844fbf9c"
 
 [[segment]]
 variant = "chapter1"
@@ -182,9 +183,9 @@ check = "fc1f7e6095c1"
 variant = "chapter1"
 seed = 0
 name = "soldier"
-messages = ["E82"]
+messages = ["ch1.soldier_report@24066ffd"]
 reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
-check = "db0d2415279b"
+check = "4fe45cb25532"
 
 [[segment]]
 variant = "chapter1"
@@ -198,17 +199,17 @@ check = "c96a3b061ffc"
 variant = "chapter1"
 seed = 0
 name = "imuru"
-messages = ["E83"]
+messages = ["ch1.kids_home@935a0fd4"]
 reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
-check = "ac361b014ca8"
+check = "3c35599ae7e8"
 
 [[segment]]
 variant = "chapter1"
 seed = 0
 name = "homecoming"
-messages = ["129"]
+messages = ["@3b1915bc"]
 reason = "처음 만듦(표지 check 와 함께): 구간마다 걸으며, 순간이동은 도착 뒤에 뜬 메시지의 처음 나온 차례"
-check = "134253d7c5d1"
+check = "e52bcac4faff"
 
 [[segment]]
 variant = "chapter1"
@@ -222,6 +223,6 @@ check = "990bb6f41a1b"
 variant = "chapter1"
 seed = 0
 name = "king"
-messages = ["E85", "E89", "EA0", "E8A", "E8B", "E8C", "E8E", "E8F", "E8D", "E86"]
+messages = ["ch1.king_praise@db5184da", "ch1.level_up@1ad18eaf", "ch1.line_pause@cbdd84e9", "ch1.stat_2@1c8a73d0", "ch1.stat_3@560c0dd1", "ch1.stat_6@07f12d4b", "ch1.stat_5@778a0436", "ch1.stat_0@373e9ac9", "ch1.stat_4@18a8f580", "ch1.king_farewell@087c4b56"]
 reason = "3장 터널·여우 마을 인물 대사가 그룹 메시지에 들어 1장 사건 메시지 번호가 12 씩 밀림"
-check = "9f7f4ef6e890"
+check = "ac4eb1a141cc"
