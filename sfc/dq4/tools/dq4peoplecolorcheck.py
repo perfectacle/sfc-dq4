@@ -78,8 +78,10 @@ def main(argv=None):
     ap.add_argument('--json', type=Path)
     args = ap.parse_args(argv)
     cells = {p: P.rgb_frames(p, args.assets) for p in P.PEOPLE}
-    where = P.where(P.PEOPLE, P.usage(Rom(args.base.read_bytes())))
-    placed, board = P.place(P.PEOPLE, P.histograms(cells), where)
+    # 빌드와 같은 배치를 재야 하므로 배치 표를 따른다(dq4people.prepare 와 같은 길)
+    pins = P.read_pins()
+    where = P.pinned_where(P.PEOPLE, P.usage(Rom(args.base.read_bytes())), pins)
+    placed, board = P.place(P.PEOPLE, P.histograms(cells), where, pins)
     problems, worst = check(cells, placed, board, where)
     report = {'status': 'failed' if problems else 'passed', 'problems': problems,
               'worst': {k: round(v, 1) for k, v in sorted(worst.items(), key=lambda kv: -kv[1])}}
