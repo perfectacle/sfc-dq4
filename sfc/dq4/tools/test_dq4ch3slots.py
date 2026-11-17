@@ -61,7 +61,7 @@ class SlotTest(unittest.TestCase):
         self.assertEqual(len({ev.RESULT, ev.DOG, ev.SCOTT, ev.LAWRENCE}), 4)
 
     def test_vars_stay_in_the_free_monster_slot(self):
-        spans = [('common', slots.COMMON_VARS), ('spare', slots.SPARE['vars'])]
+        spans = [('common', slots.COMMON_VARS)] + ([('spare', slots.SPARE['vars'])] if slots.SPARE['vars'] else [])
         spans += [(k, s.vars) for k, s in SLOTS.items() if s.vars]
         used = set()
         for k, (lo, hi) in spans:

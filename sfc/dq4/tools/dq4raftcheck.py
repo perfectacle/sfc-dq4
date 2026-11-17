@@ -13,6 +13,13 @@
   shown    단추 전: 배 칸 (44,11)에 그림 A1 슬롯, 주인공 오른쪽 아래 16점 자리에 우선순위 3 OAM 6칸(물 BG 위)
   removed  단추 뒤(FC 1C:$A55B 처럼 배를 치움): 그 슬롯·OAM 이 없음
 
+탄 동안 주인공이 보이는지(dq4raft 가 탄 동안 주인공 OBJ 속성 바탕 33A0 을 B0 으로 둠). 48/02 배를 타고 물로 두 칸
+나아간 뒤, 화면 가운데 주인공 자리 OAM 가운데 색인이 가장 앞선 것이 우선순위 3 이고(앞선 화소가 우선순위를 정하므로)
+우선순위 3 칸이 주인공·배 합쳐 12 칸 이상:
+  ride0    일행 없음
+  ride1    로렌스(따라 걷는 용병 하나)
+  ride2    스콧·로렌스(둘)
+
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4raftcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/raftcheck
 """
 import argparse
@@ -79,6 +86,56 @@ def view(mesence, rom, state, out, name):
     return name, {"ok": (slots, oams) == want, "slots": slots, "oam": oams, "want": want}
 
 
+RIDES = {"ride0": (), "ride1": ("lawrence",), "ride2": ("scott", "lawrence")}
+RIDE_WALK = "42,11;44,11;48,11;wait:30"
+
+
+def party_set(data, whos):
+    """용병들을 일행 기록 1~ 에 두고 걷는 일행으로(dq4ch3walkcheck.effects 와 같은 꼴)."""
+    import dq4mercenary as merc
+    out = []
+    for k, who in enumerate(whos, 1):
+        base = ch3.PARTY_ITEMS - 0x16 + k * ch3.RECORD
+        out += [f"{base + i & 0xFFFF:04X}={b:02X}" for i, b in enumerate(merc.record(data, who))]
+        out += [f"{merc.ORDERS[0] + k & 0xFFFF:04X}={k:02X}", f"{merc.ORDERS[1] + k & 0xFFFF:04X}={k:02X}"]
+    n = len(whos) + 1
+    out += [f"{a & 0xFFFF:04X}={n:02X}" for a in (merc.COUNT, merc.WALKERS, merc.COUNT_COPY)]
+    return ";".join(out)
+
+
+def hero_view(text):
+    """view.txt → (화면 가운데 주인공 자리 OAM 가운데 색인이 가장 앞선 칸의 우선순위, 그 자리 우선순위 3 칸 수)."""
+    x0, y0 = HERO_OAM
+    first, front = None, 0
+    for line in text.splitlines():
+        f = line.split()
+        if f[0] != "oam":
+            continue
+        x, y, attr, hi = int(f[2], 16), int(f[3], 16), int(f[5], 16), int(f[6])
+        if hi & 1 or not (x0 <= x < x0 + 16 and y0 <= y < y0 + 24):
+            continue
+        if first is None:
+            first = attr >> 4 & 3
+        front += attr & 0x30 == 0x30
+    return first, front
+
+
+def ride(mesence, rom, data, state, out, name):
+    dest = out / name
+    segs = ((f"{name}_warp", "warp", VIEW_TO, {"map": endor.CAVE_ENTRY}),
+            (f"{name}_board", "walk", RIDE_WALK, {"map": endor.CAVE_ENTRY, "cell": (48, 11)}))
+    for seg in segs:
+        extra = ";".join(v for v in (START, party_set(data, RIDES[name])) if v) if seg[1] == "warp" else ""
+        r = wc.segment(mesence, rom, state, dest / seg[0], seg, wc.NO_ENCOUNTERS, extra)
+        if r["status"] != "passed":
+            return name, {"ok": False, "error": f"{seg[0]}: {r['problems']}"}
+        state = dest / seg[0] / "end.mss"
+    wc.run(mesence, rom, VIEW, dest / "view", {"STATE": str(state), "WAIT": "30"}, 120)
+    log = dest / "view" / "view.txt"
+    first, front = hero_view(log.read_text(encoding="utf-8")) if log.exists() else (None, None)
+    return name, {"ok": first == 3 and front >= 12, "first": first, "front": front}
+
+
 def fc_cell(cell):
     x, y = map(int, cell.split(","))
     return x // 2, (y - 1) // 2
@@ -128,6 +185,7 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         jobs = [pool.submit(run, mesence, rom, data, state, out, n) for n in SCENES]
         jobs += [pool.submit(view, mesence, rom, state, out, n) for n in VIEWS]
+        jobs += [pool.submit(ride, mesence, rom, data, state, out, n) for n in RIDES]
         results = dict(f.result() for f in jobs)
     ok = all(r["ok"] for r in results.values())
     result = {"status": "passed" if ok else "failed", "scenes": results}
