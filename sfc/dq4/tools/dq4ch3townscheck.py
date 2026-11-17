@@ -217,21 +217,59 @@ def check(keep, texts, dq4):
     return {'people': people, 'party_talk': len(party), 'japanese': japanese, 'window': window, 'kept': kept}
 
 
+ARENA_MESSAGES = range(0x112, 0x11F)
+
+
+def arena_problems(rom_path, texts):
+    """빌드 롬의 격투장(dq4shopport.arena_writes): 고를 수 있는 시합(문턱 0)마다 몬스터가 모두 전투 화면에 놓이고
+    (dq5monlimits.Pictures.place, 한도도), 격투장 메시지가 한글로 덮였는지."""
+    import dq4shopport
+    import dq5monlimits as limits
+    from dq5map import Rom
+    rom = Rom(rom_path.read_bytes())
+    pictures, out, matches = limits.Pictures(rom), [], []
+    for k in range(dq4shopport.ARENA_SIZE):
+        if rom.u8(dq4shopport.ARENA_LEVELS + k):
+            break
+        row = [rom.u8(dq4shopport.ARENA_MATCHES + 8 * k + i) for i in range(8)]
+        matches.append(tuple((row[2 * i], 1, 0) for i in range(4) if row[2 * i] != 0xFF))
+    if not matches:
+        out.append('격투장 시합이 없음')
+    found = {g: k for k, g in enumerate(matches)}
+    reserve = pictures.reserve(found)
+    for k, groups in enumerate(matches):
+        placed = [x[1] for x in pictures.place(groups)[0]]
+        if placed != [1] * len(groups):
+            out.append(f'시합 {k} {[f"{m:02X}" for m, _, _ in groups]}: 놓인 수 {placed}')
+        elif pictures.listed(groups) > limits.PIECE_LIST_LIMIT or \
+                pictures.reach_slots(groups) + reserve > limits.SLOT_LIMIT or \
+                pictures.band_rows(groups) > limits.ROW_LIMIT:
+            out.append(f'시합 {k}: 그림 한도를 넘음')
+    messages = json.loads(texts.read_text())['messages']
+    out += [f'격투장 메시지 {m:03X} 가 한글이 아님' for m in ARENA_MESSAGES if f'{m:03X}' not in messages]
+    return out, len(matches)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--keep', required=True, type=Path, help='dq4chapter1.py build --keep 폴더(npc.json, groups/)')
     ap.add_argument('--texts', required=True, type=Path, help='같은 빌드의 messages.json')
     ap.add_argument('--dq4', default=HERE.parents[2] / 'rom' / 'dq4.nes', type=Path)
+    ap.add_argument('--rom', type=Path, help='같은 빌드의 롬(dq4-ch1-full.sfc): 격투장 시합·메시지를 본다')
     args = ap.parse_args()
     r = check(args.keep, args.texts, args.dq4)
+    arena, matches = arena_problems(args.rom, args.texts) if args.rom else ([], None)
+    for p in arena:
+        print(f'격투장: {p}')
     for who, name, mid, bad in r['japanese']:
         print(f'일본어: {who[0]} {who[1]} 셀 {who[2]} 목록 {name} 메시지 {mid:03X} 글자 {bad}')
     for who, mid, page, line, cols, room in r['window']:
         print(f'창 넘침: {who[0]} {who[1]} 셀 {who[2]} 메시지 {mid:03X} 쪽 {page} 줄 {line} {cols}칸 > {room}')
     for who, mid, why in r['kept']:
         print(f'남겨 둠: {who[0]} {who[1]} 셀 {who[2]} 메시지 {mid:03X} — {why}')
-    ok = not r['japanese'] and not r['window']
+    ok = not r['japanese'] and not r['window'] and not arena
     print(json.dumps({'status': 'passed' if ok else 'failed', 'people': r['people'], 'party_talk': r['party_talk'],
+                      'arena_matches': matches, 'arena': len(arena),
                       'japanese': len(r['japanese']),
                       'window': len(r['window']), 'kept': len(r['kept'])}, ensure_ascii=False))
     raise SystemExit(0 if ok else 1)

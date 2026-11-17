@@ -38,6 +38,7 @@ COINS = 0x7E203C
 FLAGS.update({'TOWNS_COIN0': (COINS, 0xFF), 'TOWNS_COIN1': (COINS + 1, 0xFF)})
 SELLER = W.cell(0x18, 0x02)
 EXCHANGE = W.cell(0x1C, 0x08)
+ARENA = W.cell(0x08, 0x0A)
 MAGIC_WATER = 0xA9              # DQ5 まほうのせいすい(FC 경품 첫 줄 5A)
 
 
@@ -59,6 +60,15 @@ PRINCE_RIGHT = W.cell(0x02, 0x0B)
 NANNY_BELOW = W.cell(0x06, 0x08)
 
 SEGMENTS = [
+    # 격투장 맞은편에서 코인 100
+    ('towns_arena_side', 'warp', f'{W.CASINO},{ARENA[0]},{ARENA[1] + 1}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
+    # 격투장(DQ5 대화 0E, 시합은 FC 3장 표): 첫 몬스터에 한 장 걸면 시합 전에 코인이 준다. 이기고 지는 것은 시합과
+    # 코어(MesenCE·snes9x·bsnes)의 난수에 따라 달라 코인은 건 뒤에만 본다
+    ('towns_arena', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 7)}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'bytes': {'TOWNS_COIN0': 99, 'TOWNS_COIN1': 0}}),
+    # 시합 뒤에는 B 로 글을 넘기고 「다시 도전」 에 아니오(시합 길이가 표에 따라 달라 A 수로 맞추지 않음)
+    ('towns_arena_end', 'walk', f'{";".join(["b:8;wait:90"] * 40)}', {'map': W.CASINO}),
     # 코인 판매(DQ5 대화 0B): 금화 1000 에서 한 장(3장 한 장 200)
     ('towns_coin_side', 'warp', f'{W.CASINO},{SELLER[0]},{SELLER[1] + 3}',
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _gold(1000), _coins(0)))}),

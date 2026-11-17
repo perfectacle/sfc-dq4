@@ -180,6 +180,11 @@ why = "물건 값 바탕(23:B081)·배수(23:B159) 표에서 옮긴 가게가 �
 
 [[original]]
 stage = "chapter1"
+at = "23:DA97~23:DC58"
+why = "격투장 시합 표(23:DA97, 8바이트씩)의 앞 시합을 FC 3장 시합으로, 레벨 문턱(23:DC27)을 옮긴 시합만 고르게(dq4shopport.arena_writes, dq4-chapter3-towns-format.md)"
+
+[[original]]
+stage = "chapter1"
 at = "23:B819~23:C013"
 why = "주문 습득 표(23:B819·B979)·필드/전투 목록 포인터(23:BD53·BDBD)·목록 본문(23:BE27~C013)을 DQ4 로(dq5learnwrite learn, dq4party.learn_doc). 2장 크리프트·브라이 목록이 들어 목록 본문까지 다시 채운다(dq5-data-format.md 「주문 습득·인물별 주문 목록 쓰기」)"
 
