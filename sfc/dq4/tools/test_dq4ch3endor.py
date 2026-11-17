@@ -121,6 +121,34 @@ class HookTest(unittest.TestCase):
         self.assertLessEqual(start + len(code), end)
 
 
+class MercAiTest(unittest.TestCase):
+    """로렌스 행동 가중치 = FC AI 레코드 C7 의 칸(ホイミ·ホイミ·ギラ·ラリホー·공격·ホイミ)에 고르는 법 1 의 칸 가중치
+    (fc/dq4/docs/dq4-data-format.md 「행동 고르기」)를 같은 행동끼리 합친 것. 고르는 법 2 로 잘못 넣었던 것이 되돌아오지 않게."""
+    METHOD1 = (67, 57, 47, 37, 28, 19)
+    C7 = ('heal', 'heal', 'gira', 'rariho', 'attack', 'heal')
+    # FC 실측(guestai.lua HOOK=10:B165, 로렌스 + 라이안 HP 10/100, 슬라임 HP 고정, 씨앗 여덟)
+    FC_HURT = {'heal': 251, 'gira': 80, 'rariho': 43, 'attack': 58}
+
+    def merged(self):
+        out = {}
+        for act, w in zip(self.C7, self.METHOD1):
+            out[act] = out.get(act, 0) + w
+        return out
+
+    def test_weights_are_method_one_merged(self):
+        m = endor.merc
+        got = {'heal': m.HEAL_WEIGHT, **{{m.GIRA: 'gira', m.RARIHO: 'rariho', m.ATTACK: 'attack'}[a]: w
+                                         for a, w in m.OTHER_WEIGHTS}}
+        self.assertEqual(got, self.merged())
+        self.assertEqual(sum(got.values()), 255)
+
+    def test_weights_match_the_fc_sample(self):
+        # ラリホー 는 FC 가 잠든 상대에게 칸을 지워 실측이 낮다. 나머지는 4 점 안
+        total, want = sum(self.FC_HURT.values()), self.merged()
+        for act in ('heal', 'gira', 'attack'):
+            self.assertLess(abs(self.FC_HURT[act] / total - want[act] / 255), 0.04, act)
+
+
 class RunTest(unittest.TestCase):
     """네이티브를 w65816 로 돌린다."""
 

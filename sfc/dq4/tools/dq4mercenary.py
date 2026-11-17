@@ -40,9 +40,11 @@ DAY_VARS = {'scott': ch3.SCOTT_DAYS, 'lawrence': ch3.LAWRENCE_DAYS}
 
 ATTACK, HEAL, GIRA, RARIHO = 0x73, 0x27, 0x04, 0x17                 # DQ5 행동: たたかう·ホイミ·ギラ·ラリホー
 SPELL_MP = {HEAL: 3, GIRA: 4, RARIHO: 3}
-# 로렌스: FC 고르는 법 2 의 칸 가중치(209 29 10 4 2 1)를 칸의 행동으로 합친 것. ホイミ 는 같은 편이 HP 절반 미만일 때만
-HEAL_WEIGHT = 209 + 29 + 1
-OTHER_WEIGHTS = ((GIRA, 10), (RARIHO, 4), (ATTACK, 2))
+# 로렌스(FC AI 레코드 C7, 칸 ホイミ·ホイミ·ギラ·ラリホー·공격·ホイミ): 고르는 법 1 의 칸 가중치(67 57 47 37 28 19)를 칸의
+# 행동으로 합친 것(FC 18:$9A72 가 같은 행동을 첫 칸에 합침). ホイミ 는 같은 편이 HP 절반 미만일 때만. FC 실측(로렌스 + 라이안,
+# 슬라임 HP 고정, 씨앗 여덟): 라이안이 다쳤을 때 ホイミ 251·ギラ 80·ラリホー 43·공격 58(432번, 식으로 56·18·15·11%)
+HEAL_WEIGHT = 67 + 57 + 19
+OTHER_WEIGHTS = ((GIRA, 47), (RARIHO, 37), (ATTACK, 28))
 
 STEP_HOOK_AT = ch2.STEP_HOOK_AT            # 00:82CB(2장 걸음 훅이 JSL 로 바꿔 둔 자리)
 TIME_AT = ch2.TIME_AT                      # 필드 시간 7E:075E(걸음마다 + 1, 01FF 다음 0)
@@ -184,7 +186,7 @@ SCRATCH_HURT, SCRATCH_MP = ch1e.SCRATCH + 0x0E, ch1e.SCRATCH + 0x0F     # 1장 �
 def _ai(ch1_entry):
     """21:AF1B 의 JML 대상(1장 손님 AI 앞): 행동자 $7B 의 일행 기록 +0 이 몬스터 손님(C0)이고 용병 종류면 행동을 골라
     21:AF3B 로, 아니면 1장 손님 AI(그다음 원래 고르기)로. 스콧은 늘 공격. 로렌스는 같은 편이 HP 절반 미만이고 MP 가 되면
-    239/255 로 ホイミ(그 사람에게, 1장 대상 훅이 읽음), 아니면 ギラ 10·ラリホー 4·공격 2 에서(MP 가 모자라면 공격)."""
+    143/255 로 ホイミ(그 사람에게, 1장 대상 훅이 읽음), 아니면 ギラ 47·ラリホー 37·공격 28 에서(MP 가 모자라면 공격)."""
     from dq4ch2endor import BCC, BCS, BEQ, BNE, BRA, lda, sta
     a = _asm()(0x08, 0xE2, 0x30, 0xA5, 0x7B, 0x00, 0x8B, 0x80, 0x2A, 0xA5, 0x46, 0x29, 0xC0, 0xC9, GUEST)
     a.br(BEQ, 'guest').label('other')(0x28, 0x5C, *_al(ch1_entry))
