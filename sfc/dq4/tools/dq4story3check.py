@@ -44,11 +44,6 @@ LUA = HERE / 'lua' / 'dq4storywalk.lua'
 WATCH_MORE = ';GOLD=7E2019:3;TIME=7E075E:2'
 
 
-def rng_hold(seed):
-    """구간 내내 난수 세 바이트를 시드 값으로 묶는 POKE."""
-    return ';'.join(f'7E{v}' for v in wc.rng_for(seed).split(';'))
-
-
 def problems_of(text, opt, flags):
     """walk.txt 와 구간 선택으로 판정한다."""
     seen = {k: int(v, 16) for k, v in re.findall(r'^(\w+)=([0-9A-F]+)$', text, re.M)}
@@ -92,9 +87,15 @@ def segment(mesence, rom, state, dest, seg, seed, flags):
     name, toks, opt = seg
     if toks.startswith('ending:'):
         return {**wc.ending(mesence, rom, state, dest, seed, toks.split(':', 1)[1]), 'name': name}
-    start = ';'.join(v for v in (wc.rng_for(seed), story.writes_set(opt)) if v)
-    poke = rng_hold(seed) if opt.get('rng') else ''
-    patch = wc.NO_ENCOUNTERS + (';' + tw.battle_patch(data_of(rom), opt['battle']) if 'battle' in opt else '')
+    rng = wc.rng_for(seed)
+    if 'rng_fixed' in opt:
+        # 시드와 상관없이 정한 난수(떠돌이 상인을 만나는 값)를 구간 내내 묶는다
+        rng = ';'.join(f'{a:04X}={v:02X}' for a, v in zip((0x075B, 0x075C, 0x075D), opt['rng_fixed']))
+    start = ';'.join(v for v in (rng, story.writes_set(opt)) if v)
+    poke = ';'.join(f'7E{v}' for v in rng.split(';')) if opt.get('rng') or 'rng_fixed' in opt else ''
+    patch = '' if opt.get('encounters') else wc.NO_ENCOUNTERS
+    if 'battle' in opt:
+        patch += ';' + tw.battle_patch(data_of(rom), opt['battle'])
     after = ''
     if 'fight' in opt:
         # 이 구간의 첫 걸음 조우를 정한 무리(HP 1)로 붙이고, 전투가 끝나면 조우를 다시 끈다

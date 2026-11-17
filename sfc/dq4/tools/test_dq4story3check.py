@@ -5,12 +5,12 @@ import unittest
 import dq4story3 as story
 import dq4story3check as check
 
-TOKEN = re.compile(r'^(\d+,\d+|(up|down|left|right|wait):\d+|face:(up|down|left|right)|talk|free|yes\*?|no|await|fight|close|field|'
-                   r'cmd:[a-z,]+|msg:[0-9A-F]+|win:[0-9A-F/]+|map:[0-9A-F]{2}/[0-9A-F]{2}|near:[0-9A-F]{2}|'
+TOKEN = re.compile(r'^(\d+,\d+!?|(up|down|left|right|wait):\d+|face:(up|down|left|right)|talk|free|yes\*?|no|await|fight|close|field|'
+                   r'cmd:[a-z,]+|rest:[0-9A-F]{4},\d+|push:[0-9A-F]{2},\d+,\d+|meet:[a-z]+,[a-z]+|msg:[0-9A-F]+|win:[0-9A-F/]+|map:[0-9A-F]{2}/[0-9A-F]{2}|near:[0-9A-F]{2}|'
                    r'pick:[0-9A-F]{4}=[0-9A-F]{2}|see:[0-9A-F]{4}=[0-9A-F]{2}|serve:[0-9A-F]{4}>=[0-9A-F]{4}|'
-                   r'until:[0-9A-F]{4}>=[0-9A-F]{4},[a-z]+,[a-z]+)$')
+                   r'pace:[0-9A-F]{4}>=[0-9A-F]{4},[a-z]+,[a-z]+)$')
 OPTIONS = {'part', 'map', 'cell', 'field', 'want', 'off', 'items', 'no_items', 'bytes', 'gold_min', 'rng', 'battle', 'fight',
-           'maxf', 'tokmax', 'gold', 'give', 'why', 'side'}
+           'maxf', 'tokmax', 'gold', 'give', 'why', 'side', 'rng_fixed', 'encounters', 'level'}
 
 
 class StoryTable(unittest.TestCase):
@@ -39,9 +39,11 @@ class StoryTable(unittest.TestCase):
                 addr = int(tok.split('=')[0], 16)
                 gold = range(story.ch3.GOLD_AT & 0xFFFF, (story.ch3.GOLD_AT & 0xFFFF) + 3)
                 slots = range(story.ITEM_SLOT, story.ITEM_SLOT + 12)
-                self.assertTrue(addr in gold or addr in slots, f'{name}: {tok}')
+                self.assertTrue(addr in gold or addr in slots or addr == story.LEVEL_AT & 0xFFFF, f'{name}: {tok}')
+            if 'level' in opt:
+                self.assertTrue(opt.get('side'), f'{name}: 레벨 써 넣기는 곁가지에서만')
         self.assertEqual({w['segment'] for w in story.writes()},
-                         {n for n, _, o in story.SEGMENTS if 'gold' in o or 'give' in o})
+                         {n for n, _, o in story.SEGMENTS if 'gold' in o or 'give' in o or 'level' in o})
         with self.assertRaises(ValueError):
             story.writes_set({'give': [(4, 0xBC)], 'why': 'x'})
         with self.assertRaises(ValueError):
@@ -60,6 +62,22 @@ class StoryTable(unittest.TestCase):
         for name, toks, opt in story.SEGMENTS:
             self.assertNotIn('set', opt, name)
             self.assertNotIn('warp', toks, name)
+
+
+class Tokens(unittest.TestCase):
+    def test_python_runner_knows_every_lua_token(self):
+        """코어 판(dq4storytokens)이 Lua 토막을 빠짐없이 안다(실행 주소 훅이 필요한 것은 HOOKED 로 거절)."""
+        from pathlib import Path
+        import dq4storytokens
+        lua = (Path(__file__).parent / 'lua' / 'dq4storywalk.lua').read_text(encoding='utf-8')
+        kinds = set(re.findall(r'kind == "([a-z*]+)"', lua)) | {'cell', 'dir'}
+        self.assertEqual(kinds, set(dq4storytokens.KINDS))
+
+    def test_compat_skips_only_hooked_and_side(self):
+        import dq4story3compat
+        skipped = [n for n, t, o in story.SEGMENTS if dq4story3compat.skip_reason((n, t, o))]
+        self.assertEqual(set(skipped), {n for n, _, o in story.SEGMENTS
+                                        if o.get('side') or 'fight' in o or o.get('encounters')})
 
 
 class Judge(unittest.TestCase):
