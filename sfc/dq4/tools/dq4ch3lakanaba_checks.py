@@ -85,6 +85,8 @@ PASS_NO_DEVICE = {
     lakanaba.SCRIPTS['master'][2]: '레이크나바 카운터 주인: 가게를 닫을 때만 걷고, 그때 주인공은 손님이 막은 채 카운터 안 '
     '(4,53)에 서 있다. 주인은 계단 칸 (2,55)→(4,55) 한 걸음(dq4ch3lakanabacheck closing 사례)',
     **{lakanaba.SCRIPTS[name][2]: '레이크나바 우리의 개: 아들에게 빌리고 돌려줄 때만 조작을 막고 걷는다. 주인공은 아들 아래 '
-       '(46,9)에서 말을 건 채이고 개는 Y 7 줄((54,7)→(48,7))과 X 48 열((46,11)→(48,11)→(48,7))만 지난다'
-       '(dq4ch3lakanabacheck son·son_return 사례)' for name in ('dog_home', 'dog_home_night')},
+       '(46,9)에서 말을 건 채이고, 빌릴 때 개는 Y 7 줄((54,7)→(46,7))만, 돌려줄 때는 FC 처럼 줄 끝 자리 (46,11)에서 주인공 '
+       '칸을 지나 (46,7)→(54,7)로 간다(dq4ch3lakanabacheck son·son_return 사례)' for name in ('dog_home', 'dog_home_night')},
+    **{lakanaba.SCRIPTS[name][2]: '레이크나바 톰 아들: 개를 빌리고 돌려줄 때 제자리 (46,7)과 위 칸 (46,5) 사이만 걷는다. '
+       '주인공은 아래 (46,9)에서 말을 건 채다(dq4ch3lakanabacheck son·son_return 사례)' for name in ('son', 'son_night')},
 }
