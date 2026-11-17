@@ -18,6 +18,8 @@ paths = [
   "sfc/dq4/tools/dq4ch2endor.py",
   "sfc/dq4/tools/dq4ch1event.py",
   "sfc/dq4/tools/dq4menumsg.py",
+  "sfc/dq4/tools/dq4shopport.py",
+  "sfc/dq4/tools/dq4sysmsg.py",
   "sfc/dq4/tools/dq4wrap.py",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4freshstate.py",

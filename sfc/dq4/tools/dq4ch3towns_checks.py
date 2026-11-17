@@ -33,6 +33,25 @@ BUY_SET = ';'.join([f'{(ch3.PARTY_ITEMS & 0xFFFF) + k:04X}={v:02X}' for k, v in 
                    [f'{(ch3.EQUIP & 0xFFFF) + k:04X}=00' for k in range(2)] +
                    [f'{(ch3.GOLD_AT & 0xFFFF) + k:04X}=00' for k in range(3)])
 BUYER = W.cell(0x04, 0x15)
+# 엔돌 카지노(열린 목록: 굴 공사 재개 RESUMED). 코인 수는 DQ5 7E:203C(16비트)
+COINS = 0x7E203C
+FLAGS.update({'TOWNS_COIN0': (COINS, 0xFF), 'TOWNS_COIN1': (COINS + 1, 0xFF)})
+SELLER = W.cell(0x18, 0x02)
+EXCHANGE = W.cell(0x1C, 0x08)
+MAGIC_WATER = 0xA9              # DQ5 まほうのせいすい(FC 경품 첫 줄 5A)
+
+
+def _resumed():
+    import dq4ch3tunnel as tunnel
+    return f'{0x2190 + tunnel.RESUMED[0]:04X}|{tunnel.RESUMED[1]:02X}'
+
+
+def _gold(n):
+    return ';'.join(f'{(ch3.GOLD_AT & 0xFFFF) + k:04X}={n >> 8 * k & 0xFF:02X}' for k in range(3))
+
+
+def _coins(n):
+    return ';'.join(f'{(COINS & 0xFFFF) + k:04X}={n >> 8 * k & 0xFF:02X}' for k in range(2))
 YES_A = 'a:8;wait:60'
 NO = 'wait:60;down:8;wait:40;a:8;wait:60'
 # 본몰 왕자 낮 자리(FC (01,0B))의 오른쪽 셀과 유모(FC (06,07)) 아래 셀. 왕자 방은 FC 열 06 의 줄 09 가 벽이라 열 04 로 오른다
@@ -40,6 +59,18 @@ PRINCE_RIGHT = W.cell(0x02, 0x0B)
 NANNY_BELOW = W.cell(0x06, 0x08)
 
 SEGMENTS = [
+    # 코인 판매(DQ5 대화 0B): 금화 1000 에서 한 장(3장 한 장 200)
+    ('towns_coin_side', 'warp', f'{W.CASINO},{SELLER[0]},{SELLER[1] + 3}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _gold(1000), _coins(0)))}),
+    # 코인 교환(DQ5 대화 0C, 경품은 FC 04/01 목록): 코인 30 으로 첫 경품 まほうのせいすい(30)
+    ('towns_prize_side', 'warp', f'{W.CASINO},{EXCHANGE[0] - 4},{EXCHANGE[1] - 1}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(30)))}),
+    ('towns_prize', 'walk', f'right:8;wait:30;a:8;wait:60;a:8;wait:120;{";".join(["a:8;wait:90"] * 8)};{wc.pc.CLOSE}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'bytes': {'TOWNS_COIN0': 0, 'TOWNS_COIN1': 0},
+      'items': [MAGIC_WATER]}),
+    ('towns_coin_buy', 'walk', f'up:8;wait:30;a:8;wait:60;a:8;wait:120;a:8;wait:90;a:8;wait:120;up:8;wait:40;'
+     f'{";".join(["a:8;wait:90"] * 6)};{wc.pc.CLOSE}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}'}),
     # 본몰 방어구 매입(FC 대화 060): 「예」 → 첫 물건 かわのよろい 를 골라 「예」(금화 + 값, 칸이 빔) → 「또」 「예」 →
     # 둘째로 당겨진 こんぼう 를 고르면 082D → 「또」 「아니오」 로 0833
     ('towns_buyer_side', 'warp', f'{W.BONMALMO},{BUYER[0]},{BUYER[1] + 1}',
