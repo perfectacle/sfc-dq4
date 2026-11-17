@@ -9,8 +9,8 @@ sys.path[:0] = [str(HERE), str(ROOT / 'sfc' / 'dq5' / 'tools'), str(ROOT / 'fc' 
 import dq4monport  # noqa: E402
 
 DQ4, DQ5 = ROOT / 'rom' / 'dq4.nes', ROOT / 'rom' / 'dq5.sfc'
-# DQ5 몬스터 행동 번호: 39~65 몬스터용 주문, 66~AA 특기(dq5-data-format 「주문과 행동」)
-MONSTER_ACTIONS = range(0x39, 0xAB)
+# DQ5 몬스터 행동 번호: 39~65 몬스터용 주문, 66~AA 특기(dq5-data-format 「주문과 행동」), AE~B5 부르기(20:D9D6)
+MONSTER_ACTIONS = (*range(0x39, 0xAB), *range(0xAE, 0xB6))
 
 
 class ActionTableTests(unittest.TestCase):
@@ -118,8 +118,8 @@ class RecordTests(unittest.TestCase):
         e = self.entry(dq4monport.PORT[0x04])
         self.assertEqual((e['HP'], e['MP'], e['공격'], e['수비'], e['민첩'], e['경험치'], e['금화']),
                          (40, 0, 0, 30, 15, 3, 1))
-        # なかまをよぶ·がったい 는 메시지만 나오는 ようすをみる
-        self.assertEqual([e[f'행동{k}'] for k in range(1, 7)], ['66'] * 6)
+        # なかまをよぶ 둘은 같은 몬스터 부르기(B5), がったい 넷은 메시지만 나오는 ようすをみる
+        self.assertEqual([e[f'행동{k}'] for k in range(1, 7)], ['B5'] * 2 + ['66'] * 4)
         self.assertEqual(e['내성'][:15], '111121100200000')
 
     def test_drops_follow_fc(self):
@@ -140,6 +140,40 @@ class RecordTests(unittest.TestCase):
 
     def test_metal_defence_is_capped(self):
         self.assertEqual(self.entry(dq4monport.PORT[0x5C])['수비'], 0x1FF)
+
+    def test_summons_follow_fc(self):
+        # FC 행동 ID 5C(레코드 4B)는 14:$8646[ID − 5C] 를 14:$B2D5 에서 찾은 몬스터를 부른다: 첫 칸 0F → 14 ホイミスライム.
+        # 59(레코드 48)는 부른 몬스터의 무리 몬스터 $6E45,X(11:$A11B)
+        def rd(bank, addr, n=1):
+            o = bank * 0x4000 + (addr & 0x3FFF)
+            return bytes(self.prg[o:o + n])
+        table = rd(0x14, 0xB2D5, 0x100)
+        self.assertEqual(table.index(rd(0x14, 0x8646)[0]), dq4monport.SUMMON_FIXED_FC)
+        self.assertEqual(rd(0x11, 0xA11B, 3), bytes((0xBD, 0x45, 0x6E)))
+        self.assertEqual(dq4monport.fc_actions()[0x48], f'{dq4monport.SUMMON_SAME:02X}')
+        self.assertEqual(dq4monport.fc_actions()[0x4B], f'{dq4monport.SUMMON_FIXED:02X}')
+
+    def test_summon_slots_are_unused_by_this_hack(self):
+        # 고쳐 쓰는 DQ5 부르기 칸은 이 해킹이 쓰는 DQ5 몬스터(대역 포함)의 원래 레코드가 쓰지 않는다
+        import dq5monlimits
+        from dq5map import Rom
+        rom = Rom(self.dq5)
+        for m in dq4monport.used_numbers():
+            acts = [rom.u8(dq5monlimits.MONSTER_RECORDS + m * dq5monlimits.MONSTER_SIZE + 0x11 + i) for i in range(6)]
+            if m not in dq4monport.field_numbers().values():
+                self.assertFalse({dq4monport.SUMMON_SAME, dq4monport.SUMMON_FIXED} & set(acts), hex(m))
+
+    def test_summon_writes_patch_the_handlers(self):
+        import dq4fieldencounter
+        writes = dq4monport.summon_writes(self.dq5)
+        code = bytes.fromhex(writes[0]['hex'])
+        self.assertLess(dq4monport.SUMMON_CODE_AT >> 16, 0x40)    # BRK 88 을 쓰므로
+        self.assertEqual(code[-4:], bytes((0x5C, *dq4monport.SUMMON_COMMON.to_bytes(3, 'little'))))
+        fixed, same = (bytes.fromhex(w['hex']) for w in writes[1:])
+        self.assertEqual(fixed[:2], bytes((0xA9, dq4fieldencounter.MONSTERS[dq4monport.SUMMON_FIXED_FC])))
+        self.assertEqual(same, bytes((0x5C, *dq4monport.SUMMON_CODE_AT.to_bytes(3, 'little'))))
+        o = (dq4monport.SUMMON_CODE_AT >> 16) * 0x8000 + (dq4monport.SUMMON_CODE_AT & 0x7FFF)
+        self.assertEqual(set(self.dq5[o:o + len(code)]), {0})
 
 
 @unittest.skipUnless(DQ4.exists() and DQ5.exists(), 'rom/dq4.nes and rom/dq5.sfc')

@@ -8,7 +8,8 @@ HP 999 로 매 차례 방어하고(회복 행동 HEALS 는 첫 차례에 몬스�
 판정: 행동하는 쪽 7E:10F5 가 몬스터(bit7)이고 행동 7E:10F7 이 그 행동인 프레임이 나온 뒤(쓴 것), 다음 차례 창·맵 명령 창
 (도망 등으로 끝남)·그 행동의 다음 사용(주인공이 잠들어 차례 창이 오지 않을 때) 가운데 하나가 PROGRESS 프레임 안에 와야
 한다. 쓰지 않은 채 USE_LIMIT 를 넘기면 「안 씀」 으로 실패, 쓴 뒤 멈추면 「멈춤」 으로 실패다. 몬스터가 행동을 거르는
-조건(MP, 필드 68 의 조건 표)에 걸려 쓰지 못하는 행동은 ALLOWED_UNUSED 에 까닭과 함께 둔다.
+조건(MP, 필드 68 의 조건 표)에 걸려 쓰지 못하는 행동은 ALLOWED_UNUSED 에 까닭과 함께 둔다. 부르기(SUMMONS)는 쓴 뒤 무리에
+부른 몬스터가 있어야 한다(같은 몬스터 부르기는 그 무리가 둘 이상, ホイミスライム 부르기는 그 번호의 무리).
 
 MP 를 쓰는 주문은 FC 에서 외우던 횟수, 곧 레코드 MP // FC 주문 MP(dq4monport.spell_entries, FC 롬에서 읽음)만큼
 외워야 한다(casts, CAST_LIMIT 까지). 쓸 때마다 몬스터 칸 MP(7E:07C0 + 4)를 다음 진행 때와 견줘, MP 가 FC 주문 MP
@@ -55,6 +56,9 @@ HEALS = range(0x5A, 0x62)         # ホイミ ~ ベホマズン(몬스터용)
 HURT = 100
 # 쓰지 못해도 되는 (DQ5 번호, 행동): 까닭
 ALLOWED_UNUSED = {}
+# 부르기(dq4monport.summon_writes): 쓴 뒤 무리(7E:1001~ 몬스터 넷, 7E:1005~ 마릿수 넷)에 부른 몬스터가 있어야 한다.
+# B5 는 부른 몬스터와 같은 몬스터가 한 마리 더(한 마리 무리로 붙였으므로 2 이상), B4 는 ホイミスライム 의 DQ5 번호 무리
+SUMMONS = {dq4monport.SUMMON_SAME: None, dq4monport.SUMMON_FIXED: dq4monport.SUMMON_FIXED_FC}
 
 
 def spell_costs(prg):
@@ -113,6 +117,16 @@ def judge(events, expect=None, cost=None):
     if done != want:
         return ('short' if done < want else 'extra'), first
     return 'ok', first
+
+
+def summon_result(m, action, groups):
+    """부르기를 쓴 뒤 무리(groups: 몬스터 넷 + 마릿수 넷)가 맞으면 'ok', 아니면 'summon'."""
+    import dq4fieldencounter
+    monsters, counts = groups[:4], groups[4:]
+    fc = SUMMONS[action]
+    if fc is None:
+        return 'ok' if monsters[0] == m and counts[0] >= 2 else 'summon'
+    return 'ok' if dq4fieldencounter.MONSTERS[fc] in monsters else 'summon'
 
 
 class Battles:
@@ -214,10 +228,13 @@ class Battles:
                 break
         end = c.n - start
         result, used = judge(events, expect, cost)
+        groups = [c.rd(B.GROUP + i) for i in range(8)]
+        if result == 'ok' and action in SUMMONS:
+            result = summon_result(m, action, groups)
         if result != 'ok':
             c.shot(self.out / f'{m:02X}-{action:02X}.png')
         return {'result': result, 'used': used, 'spent': None if cost is None else spent(events, cost), 'frames': end,
-                'events': events[:40],
+                'events': events[:40], 'groups': bytes(groups).hex(' '),
                 **({'log': log[:200]} if probe else {})}
 
 
