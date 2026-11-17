@@ -40,6 +40,10 @@ PORT = {
 # 사건 전투의 FC 몬스터 → DQ5 번호. 능력치·이름은 사건 모듈(dq4ch2tempe·dq4ch2endor)이 쓰고 dq4ch2slots 가 예약한다.
 # 필드의 あばれこまいぬ(PORT 18)와 텐페 석상은 번호가 달라(예약 번호는 필드에 나오지 않음) 같은 그림을 두 자리에 둔다
 EVENT = {0x12: 0x53, 0x18: 0xA3, 0xAF: 0xAA, 0xB0: 0xA4, 0xB1: 0x8E, 0xB2: 0x68, 0xBA: 0x72}
+# 3장 구역(dq4fieldencounter.CH3_ZONES)에 처음 FC 능력치로 나오는 FC 몬스터 → (DQ5 번호, NDS 그림 번호). 번호는 2장 예비
+# (dq4ch2slots)에서 왔다. 그림은 아직 옮기지 않아 대역(dq4fieldencounter.PLACEHOLDERS)의 그림 레코드를 가리키게 하고
+# (picture_writes), 레코드는 PORT 처럼 대역 바탕에 FC 값을 덮는다(record_writes). NDS 번호는 이름(adopt.tsv)과 뒤에 넣을 그림
+CH3 = {0x0A: (0xC5, 9), 0x13: (0xB6, 15), 0x17: (0x9D, 110), 0x19: (0xA5, 6), 0x1E: (0xE3, 7), 0x21: (0x3D, 32)}
 # 1·2장 조우·사건 무리에 아직 나오지 않아 빌드가 그림을 넣지 않는 번호(dq4monport.build 의 appear). 그 장을 옮기면
 # 여기서 빼고, dq4monartcheck 는 이 밖의 번호가 원래 DQ5 그림이면 실패로 본다
 LATER = {0x0C}     # メタルスライム(FC 5C)
@@ -90,9 +94,11 @@ def doc(rom, out_dir, only=None):
         pictures.append({'picture': f'{g:02X}', 'image': name,
                          'header': {'float': False, 'raise': 0, 'hit_x': w // 2, 'hit_y': h // 2}})
         monsters.append({'monster': f'{m:02X}', 'colors': colors})
-        # 같은 그림을 쓰는 다른 DQ5 몬스터는 이 롬에 나오지 않지만, 색 수가 그림보다 적으면 dq5monwrite 가 거부해 같은 색을 준다
+        # 같은 그림을 쓰는 다른 DQ5 몬스터는 이 롬에 나오지 않지만, 색 수가 그림보다 적으면 dq5monwrite 가 거부해 같은 색을 준다.
+        # CH3 번호는 빌드 롬에서 대역의 그림 레코드를 가리켜(picture_writes) 원래 그림을 쓰지 않는다
+        taken = {*PORT.values(), *EVENT.values(), *(m for m, _ in CH3.values())}
         for other in range(dq5mongfx.COUNT):
-            if other not in PORT.values() and other not in EVENT.values() and dq5mongfx.monster(rom, other)[0] == g:
+            if other not in taken and dq5mongfx.monster(rom, other)[0] == g:
                 monsters.append({'monster': f'{other:02X}', 'colors': colors})
     d = {'format': 'dq5monster/1', 'pictures': pictures, 'monsters': monsters}
     (out_dir / 'monsters.json').write_text(json.dumps(d, indent=1))
@@ -104,10 +110,11 @@ def doc(rom, out_dir, only=None):
 # 멈춘다. 사건 모듈의 표(dq4ch1event·dq4ch2tempe·dq4ch2endor .FC_ACTIONS)에 없는 것만 둔다.
 # 47 にげだす 는 DQ5 슬라임의 98(필드 68 이 0 이 아니면 주인공 레벨이 구역 레벨 + 4 를 넘을 때만 고름). 48·4B なかまをよぶ
 # 는 DQ5 의 부르기(AE~B5)가 정해진 DQ5 몬스터(dq5monlimits.SUMMONED)를 불러 그 그림이 들어오므로, 메시지만 나오는 66 으로.
-# 55(행동 ID 66, 11:$A292 가 무리를 몬스터 30 キングスライム 으로 바꿈: 코드 읽기)도 부르기를 옮기지 않아 무리가 모이지 않으므로 66
-FC_ACTIONS = {0x0A: '45', 0x10: '4B', 0x11: '4C', 0x12: '4D', 0x13: '4E', 0x17: '54', 0x19: '59', 0x1A: '52',
-              0x25: '5B', 0x33: '74', 0x36: '77', 0x38: '8B', 0x43: '96', 0x45: 'A3', 0x47: '98', 0x48: '66',
-              0x49: '71', 0x4B: '66', 0x5D: 'AA', 0x55: '66'}
+# 55(행동 ID 66, 11:$A292 가 무리를 몬스터 30 キングスライム 으로 바꿈: 코드 읽기)도 부르기를 옮기지 않아 무리가 모이지 않으므로 66.
+# DQ5 몬스터 スカラ 는 55·56 둘이 주문 표(범위·대상 루틴·MP)가 같아 앞의 것
+FC_ACTIONS = {0x0A: '45', 0x10: '4B', 0x11: '4C', 0x12: '4D', 0x13: '4E', 0x16: '53', 0x17: '54', 0x19: '59',
+              0x1A: '52', 0x1C: '55', 0x25: '5B', 0x33: '74', 0x36: '77', 0x38: '8B', 0x43: '96', 0x45: 'A3',
+              0x47: '98', 0x48: '66', 0x49: '71', 0x4B: '66', 0x5D: 'AA', 0x55: '66'}
 # FC 내성 칸 0~E(fc dq4data.RESIST_NAMES 차례: イオ ギラ メラ デイン バギ ヒャド マヌーサ ラリホー ザキ ニフラム マホトラ
 # マホトーン メダパニ ルカニ メガンテ) → DQ5 내성 종류(50~61, dq5-data-format 「동료가 되는 몬스터」 앞 내성 표). DQ5 에만 있는
 # 5F(쓰는 곳 없음)·60 どくのいき·61 なめまわし 등은 FC 에 짝이 없어 바탕 값을 둔다
@@ -191,15 +198,20 @@ def drop_items(prg, dq5):
     return of
 
 
+def field_numbers():
+    """FC 능력치를 넣는 필드 번호: {FC 몬스터: DQ5 번호}(PORT 와 CH3)."""
+    return {**PORT, **{fc: m for fc, (m, _) in CH3.items()}}
+
+
 def record_writes(original, dq5_of, prg):
-    """필드 번호(PORT)마다 지금 대역(dq5_of: FC → 대역 DQ5 번호, dq4fieldencounter.PLACEHOLDERS)의 레코드 25바이트에
-    FC 능력치·행동·내성·드롭(fc_entry)을 덮은 dq5patch/1 쓰기. DQ5 에만 있는 내성 칸은 대역 것."""
+    """필드 번호(field_numbers)마다 지금 대역(dq5_of: FC → 대역 DQ5 번호, dq4fieldencounter.PLACEHOLDERS)의 레코드
+    25바이트에 FC 능력치·행동·내성·드롭(fc_entry)을 덮은 dq5patch/1 쓰기. DQ5 에만 있는 내성 칸은 대역 것."""
     import dq5tables
     from dq5map import lorom
     table = dq5tables.TABLES['monsters']
     drop_item = drop_items(prg, original)
     out = []
-    for fc, m in PORT.items():
+    for fc, m in field_numbers().items():
         b = bytearray(original[lorom(RECORD + dq5_of[fc] * RECORD_SIZE):][:RECORD_SIZE])
         base = ''.join(str(dq5tables.get(b, [dq5tables.resist_piece(i)])) for i in range(dq5tables.RESISTS))
         for k, v in fc_entry(prg, fc, drop_item, base).items():
@@ -273,11 +285,27 @@ def build(dq5, rom, work, zone_report, event_groups):
     return out
 
 
+def picture_writes(original, dq5_of):
+    """CH3 번호마다 그림 레코드 포인터(dq5mongfx.record_table 의 2바이트)를 대역(dq5_of)의 것으로: 그림·색이 지금
+    대역과 같아 무리 조합 한도(dq5monlimits)도 대역과 같다."""
+    import dq5mongfx
+    from dq5map import Rom, lorom
+    table, bank = dq5mongfx.record_table(Rom(original))
+    out = []
+    for fc, (m, _) in CH3.items():
+        at, src = table + m * 2, table + dq5_of[fc] * 2
+        new, orig = original[lorom(src):lorom(src) + 2], original[lorom(at):lorom(at) + 2]
+        out.append({'at': f'{at >> 16:02X}:{at & 0xFFFF:04X}', 'hex': new.hex(' '), 'orig': orig.hex(' '),
+                    'note': f'FC {fc:02X} 몬스터 그림을 대역 {dq5_of[fc]:02X} 의 것으로'})
+    return out
+
+
 def records_patch(original, prg, path):
-    """record_writes 를 dq5patch/1 파일로. prg 는 FC 롬 PRG."""
+    """record_writes 와 picture_writes 를 dq5patch/1 파일로. prg 는 FC 롬 PRG."""
     import dq4fieldencounter
-    path.write_text(json.dumps({'format': 'dq5patch/1', 'name': 'dq4-monster-records',
-                                'writes': record_writes(original, dq4fieldencounter.PLACEHOLDERS, prg)},
+    writes = record_writes(original, dq4fieldencounter.PLACEHOLDERS, prg)
+    writes += picture_writes(original, dq4fieldencounter.PLACEHOLDERS)
+    path.write_text(json.dumps({'format': 'dq5patch/1', 'name': 'dq4-monster-records', 'writes': writes},
                                ensure_ascii=False))
     return path
 
@@ -287,10 +315,12 @@ SHORT = {0x02: '장난두더지', 0x40: '드래곤나비'}
 
 
 def korean_names(window=False):
-    """필드 번호 → NDS 한글 이름(adopt.tsv 몬스터 표). window 면 SHORT 로 줄인 이름. 사건 몬스터의 이름은 그 모듈의
-    MONSTER_NAMES."""
+    """필드 번호(PORT·CH3) → NDS 한글 이름(adopt.tsv 몬스터 표). window 면 SHORT 로 줄인 이름. 사건 몬스터의 이름은
+    그 모듈의 MONSTER_NAMES."""
     names = dq4monart.korean_names()
-    return {m: SHORT.get(fc) if window and fc in SHORT else names[nds_of(fc)][1] for fc, m in PORT.items()}
+    out = {m: SHORT.get(fc) if window and fc in SHORT else names[nds_of(fc)][1] for fc, m in PORT.items()}
+    out.update({m: names[nds][1] for m, nds in CH3.values()})
+    return out
 
 
 def main(argv=None):

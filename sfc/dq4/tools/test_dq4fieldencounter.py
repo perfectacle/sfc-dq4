@@ -419,6 +419,42 @@ class RomTest(unittest.TestCase):
         ch3 = grids["field_grids"][enc.CH3_GRID]["rows"]
         self.assertEqual(ch3[5][5:10], [78, 78, 35, 35, 35])      # 3장 지도 줄 5: 16 16 17 17 17
 
+    def test_chapter3_species_and_field_formation(self):
+        # 3장 구역은 3장에만 FC 값을 넣은 번호(dq4monport.CH3)를, 같은 종이 나오는 1장 구역은 대역을 쓴다. FC 17 의 필드
+        # 편성 0B(ひとくいそう·ダックスビル)는 던전 편성 뒤의 고정 무리로 붙어 던전 무리 번호가 그대로다.
+        import dq4groupbuild
+        import dq4monport
+        fc = dq4groupbuild.dungeon_zones(self.prg).values()
+        _, grids, report = enc.docs(self.prg, self.dq5, self.orig, fc)
+        ch3 = {m for m, _ in dq4monport.CH3.values()}
+        self.assertEqual(enc.field_formations(self.prg), [0x17])
+        self.assertTrue(ch3 & set(report["16"]["monsters"]))
+        self.assertTrue(ch3 & set(report["4A"]["monsters"]))
+        self.assertFalse(ch3 & set(report["42"]["monsters"]) | ch3 & set(report["04"]["monsters"]))
+        self.assertIn(enc.PLACEHOLDERS[0x13], report["42"]["monsters"])
+        dungeon_only = enc.dungeon_fixed(self.prg, fc)
+        fixed = enc.dungeon_fixed(self.prg, fc, [0x17])
+        self.assertEqual({k: v for k, v in fixed.items() if k in dungeon_only}, dungeon_only)
+        self.assertEqual(fixed[0x0B], len(dungeon_only))
+        self.assertEqual(report["17"]["fixed"]["group"], fixed[0x0B])
+        self.assertTrue(report["17"]["fixed"]["weight"])
+        groups = {g["index"]: [m["monster"] for m in g["members"]] for g in grids["fixed_groups"]}
+        self.assertEqual(groups[fixed[0x0B]], [enc.CHAPTER3_MONSTERS[0x1A], dq4monport.CH3[0x19][0]])
+        self.assertEqual(groups[0], [enc.PLACEHOLDERS[0x13], enc.PLACEHOLDERS[0x19], enc.PLACEHOLDERS[0x1E]])
+        for z in ("14", "15", "16", "04", "42"):
+            self.assertEqual(report[z]["fixed"]["weight"] > 0, z == "42")
+
+    def test_placed_origins_match_the_record(self):
+        # placed 가 내는 DQ5 칸 → FC 칸 짝은 record 의 칸 몬스터와 같다(3장 밤·낮 마스크가 이것으로 칸을 고름)
+        import dq4encounter
+        for z in enc.CH3_FIELD:
+            slots, fixed, origin, _ = enc.placed(self.prg, z)
+            fc = dq4encounter.zone(self.prg, z)["slots"]
+            for k, i in origin.items():
+                if k < 10:
+                    self.assertEqual(slots[k]["monster"], enc.CHAPTER3_MONSTERS[fc[i]], (z, k))
+            self.assertEqual({k for k in range(10) if slots[k]["weight"]}, {k for k in origin if k < 10})
+
     def test_every_monster_has_a_placeholder(self):
         import dq4encounter
         for z in (*enc.fc_zones(self.prg), *self.dungeon, *enc.chapter3_zones(self.prg), 0x48, 0x49, 0x4A, 0x4B):

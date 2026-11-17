@@ -45,8 +45,8 @@ class RecordTests(unittest.TestCase):
         return dq5tables.decode(dq5tables.TABLES['monsters'], None, data, m)
 
     def test_every_field_monster_has_a_record_and_every_action_maps(self):
-        self.assertEqual(len(self.writes), len(dq4monport.PORT))
-        for fc in [*dq4monport.PORT, *dq4monport.EVENT]:
+        self.assertEqual(len(self.writes), len(dq4monport.field_numbers()))
+        for fc in [*dq4monport.field_numbers(), *dq4monport.EVENT]:
             dq4monport.fc_entry(self.prg, fc)
 
     def test_every_action_is_one_a_dq5_monster_uses(self):
@@ -54,6 +54,31 @@ class RecordTests(unittest.TestCase):
         used = {b for n in range(236) for b in self.dq5[wc.MONSTERS + n * 25 + 17:wc.MONSTERS + n * 25 + 23]}
         for fc, a in dq4monport.fc_actions().items():
             self.assertIn(int(a, 16), used, f'FC {fc:02X} → {a}')
+
+    def test_chapter3_numbers_take_fc_values_and_the_placeholder_picture(self):
+        # 3장 새 종: 2장 예비였던 번호에 FC 능력치, 그림 레코드 포인터는 대역 것(그림·색·무리 한도가 지금 대역과 같음)
+        import dq4ch2slots
+        import dq4fieldencounter
+        import dq5mongfx
+        from dq5map import Rom
+        numbers = [m for m, _ in dq4monport.CH3.values()]
+        self.assertEqual(len(set(numbers)), len(numbers))
+        self.assertFalse(set(numbers) & {*dq4monport.PORT.values(), *dq4monport.EVENT.values()})
+        self.assertFalse(set(numbers) & set(dq4ch2slots.SPARE['monsters']))
+        for fc, (m, _) in dq4monport.CH3.items():
+            self.assertEqual(self.entry(m)['HP'], dq4monport.fc_entry(self.prg, fc)['HP'])
+        data = bytearray(self.dq5)
+        for w in dq4monport.picture_writes(self.dq5, dq4fieldencounter.PLACEHOLDERS):
+            bank, addr = (int(v, 16) for v in w['at'].split(':'))
+            o = (bank & 0x7F) * 0x8000 + (addr & 0x7FFF)
+            data[o:o + 2] = bytes.fromhex(w['hex'])
+        rom = Rom(bytes(data))
+        for fc, (m, _) in dq4monport.CH3.items():
+            self.assertEqual(dq5mongfx.monster(rom, m), dq5mongfx.monster(Rom(self.dq5),
+                                                                       dq4fieldencounter.PLACEHOLDERS[fc]))
+        names = dq4monport.korean_names()
+        self.assertEqual(names[dq4monport.CH3[0x13][0]], '킬러 스콥')
+        self.assertEqual(names[dq4monport.CH3[0x1E][0]], '릴리펏')
 
     def test_monster_mp_is_fc(self):
         # べビーマジシャン: FC MP 2. 주문 MP 를 FC 값(ヒャド 2)으로 두므로 MP 를 올리지 않는다
@@ -132,7 +157,7 @@ class SpellMpTests(unittest.TestCase):
         # ヒャド 3 → 2, ラリホーマ 5 → 3, マヌーサ 5 → 4. 나머지 1·2장 몬스터 주문은 FC·DQ5 가 같다
         self.assertEqual({(n, self.mp(self.dq5, n), self.mp(self.patched, n))
                           for n in range(0x39, 0x66) if self.mp(self.dq5, n) != self.mp(self.patched, n)},
-                         {(0x42, 3, 2), (0x4C, 5, 3), (0x4E, 5, 4)})
+                         {(0x42, 3, 2), (0x4C, 5, 3), (0x4E, 5, 4), (0x55, 2, 3)})
 
     def test_party_spell_mp_unchanged(self):
         import dq5tables

@@ -71,10 +71,10 @@ def casts(rom, m, cost):
 
 
 def plan(rom):
-    """[(DQ5 번호, 행동)]: PORT·EVENT 번호(dq4monport.LATER 밖)마다 롬 레코드의 서로 다른 행동."""
+    """[(DQ5 번호, 행동)]: 필드 번호(dq4monport.field_numbers)·EVENT 번호(LATER 밖)마다 롬 레코드의 서로 다른 행동."""
     import dq4ch1walkcheck as wc
     out = []
-    for m in [*dq4monport.PORT.values(), *dq4monport.EVENT.values()]:
+    for m in [*dq4monport.field_numbers().values(), *dq4monport.EVENT.values()]:
         if m in dq4monport.LATER:
             continue
         base = wc.MONSTERS + m * 25 + ACTIONS_AT
