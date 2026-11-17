@@ -64,6 +64,14 @@ REGISTRIES = {
     'sfc/dq4/tools/dq4ch3checks.py': ('sfc/dq4/tools/dq4ch3*_checks.py',),
     'sfc/dq4/tools/dq4ch2checks.py': ('sfc/dq4/tools/dq4ch2*_checks.py',),
 }
+# 3장 모듈이 기본 인물 목록·대화 번호·메시지 번호·그림 배치·공용 훅을 바꿔 깨뜨릴 수 있는 1·2장 검사(dq4-ch3-* 와
+# CH3_CONTENT_CHECKS 밖). 3장 모듈 PR 이 이것들을 돌리지 않아 머지 뒤에야 1·2장이 깨진 일이 있어 paths 에
+# "@ch3-modules" 로 건다
+CH3_CROSS_CHECKS = ('dq4-screen-baseline', 'dq4-ch2-partytalk', 'dq4-ch2-npc', 'dq4-ch2-walk', 'dq4-ch2-heroblock',
+                    'dq4-ch2-compat-walk', 'dq4-ch1-save', 'dq4-compat-walk', 'dq4-npc-walk')
+# 2장 모듈이 바뀌면 걸어야 하는 검사(dq4-ch2-* 와 함께): 1장 내용 검사. paths 에 "@ch2-modules"
+CH2_CROSS_CHECKS = ('dq4-people-match', 'dq4-people-event-lines', 'dq4-wrap-routine', 'dq4-msg-banks', 'dq4-rom-ledger',
+                    'dq4-screen-baseline', 'dq4-ch1-save', 'dq4-compat-walk', 'dq4-npc-walk', 'dq4-door-open-ch2')
 # 3장 맵(그룹)과 옮긴 인물 목록을 만드는 파일
 CH3_SCENE_FILES = ('sfc/dq4/tools/dq4npcport.py', 'sfc/dq4/tools/dq4groupbuild.py')
 FILE_NAME = re.compile(r'[\w./-]+\.(?:py|lua|asm)')

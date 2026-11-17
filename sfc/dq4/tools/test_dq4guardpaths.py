@@ -59,6 +59,29 @@ class GuardPathsTest(unittest.TestCase):
                                 (c['name'], f))
         self.assertGreater(reach, 10)
 
+    def test_module_changes_reach_the_chapters_they_can_break(self):
+        """3장 모듈 파일(새 모듈 포함)은 dq4-ch3-*·CH3_CONTENT_CHECKS 에 더해 CH3_CROSS_CHECKS(1·2장 검사)를, 2장 모듈
+        파일은 dq4-ch2-* 와 CH2_CROSS_CHECKS(1장 내용 검사)를 PR 에서 건다(paths 로, groups 키 아님). 3장 모듈이 기본
+        인물 목록·대화 번호를 바꿔 2장 동료 대화·1장 화면이 머지 뒤에야 깨진 일이 있다."""
+        import dq4ch2event
+        checks, groups = gp.load()
+        raw = gp.raw_paths()
+        names = {c['name'] for c in checks}
+
+        def catches(name, f):
+            return any(guards.group_match(groups[p[1:]], f) if p.startswith('@') else guards.matches(f, p)
+                       for p in raw[name])
+        self.assertLessEqual(set(gp.CH3_CROSS_CHECKS) | set(gp.CH2_CROSS_CHECKS), names)
+        ch3 = {n for n in names if n.startswith('dq4-ch3-')} | set(gp.CH3_CONTENT_CHECKS) | set(gp.CH3_CROSS_CHECKS)
+        for f in ['sfc/dq4/tools/dq4ch3newmod.py', *gp.ch3_module_files()]:
+            self.assertEqual(sorted(n for n in ch3 if not catches(n, f)), [], f)
+        ch2 = {n for n in names if n.startswith('dq4-ch2-')} | set(gp.CH2_CROSS_CHECKS)
+        mods = [f'sfc/dq4/tools/{m}.py' for m in dq4ch2event.EVENTS]
+        for f in ['sfc/dq4/tools/dq4ch2newmod.py', 'sfc/dq4/tools/dq4ch2event.py', 'sfc/dq4/tools/dq4ch2slots.py', *mods]:
+            self.assertEqual(sorted(n for n in ch2 if not catches(n, f)), [], f)
+        for f in ('dq4ch2newmodcheck.py', 'dq4ch2newmod_checks.py', 'dq4ch2walkcheck.py', 'dq4ch2checks.py'):
+            self.assertFalse(guards.group_match(groups['ch2-modules'], f'sfc/dq4/tools/{f}'), f)
+
     def test_closure_follows_every_kind_of_reach(self):
         """뿌리에서 닿는 길: 함수 안 import(dq4ch1walkcheck → dq4readset), 저장소 tools/ 모듈(headless_slots),
         띄우는 Lua(dq4walkstate.lua, 머리말 dq4readset.lua), asar 에 넣는 asm(dq4titlelayers.asm·dq4windowname.asm),

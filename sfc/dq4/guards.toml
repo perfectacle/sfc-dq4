@@ -264,6 +264,8 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출�
 name = "dq4-compat-walk"
 why = "MesenCE 에서만 우연히 도는 코드를 잡는다: libretro bsnes·snes9x 에서 서장부터 1장 끝 리셋까지 이어 걷기(#904 의 snes9x 멈춤)"
 paths = [
+  "@ch2-modules",
+  "@ch3-modules",
   "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4*event.py",
   "sfc/dq4/tools/dq4prologue.py",
@@ -397,6 +399,8 @@ groups = ["ch1-build", "ch1-walk", "ch3-modules"]
 name = "dq4-npc-walk"
 why = "FC 가 세워 두는 인물(블록이 이벤트를 기다리거나 서 있기만, 레코드 간격은 1)을 걷는 인물로 옮겨 DQ5 간격 1 로 몇 프레임마다 한 칸씩 쉬지 않고 돌아다녔다(왕좌의 방 병사 1800프레임에 153번). 2장 출발 상태 3D/01 에서 그 인물이 서 있고, 걷는 인물은 DQ5 마을 사람 간격(8~15)으로 천천히 걷는지 시드 0·5·9 를 두 번씩 본다"
 paths = [
+  "@ch2-modules",
+  "@ch3-modules",
   "sfc/dq4/tools/dq4ch2checks.py",
   "sfc/dq4/tools/dq4ch2walkparts.py",
   "sfc/dq4/tools/dq4ch2*_checks.py",
@@ -1224,6 +1228,7 @@ groups = ["ch1-build", "ch1-walk", "ch3-modules"]
 name = "dq4-wrap-routine"
 why = "환경 훅 wrap 이 $BE bit7(실내)로 바꾼 맵을 가려 매 프레임 루틴 7E:1AA6 을 두는 것이 다시 깨지지 않게. 필드로 나갈 때(01:9FD6)는 필드 루틴 02:AB33(시각 색)이 남고(남은 $BC/$BD 로 물 루틴이 덮어 필드가 늘 낮 색이었음), 필드에서 걸어 들어갈 때와 바꾼 맵마다 필드 입구로 들어갈 때(01:8F84)·맵을 그 자리에서 다시 풀 때(01:98FC)는 bit7 이 켜진 채 돌아 물·분수·뚜껑 루틴이 들어가야 한다. 문턱을 좁히거나 옮기면 깨진다(단위 테스트 test_wrap_keeps_the_field_routine 은 바이트만 본다)"
 paths = [
+  "@ch2-modules",
   "sfc/dq4/tools/dq4ch2checks.py",
   "sfc/dq4/tools/dq4ch2walkparts.py",
   "sfc/dq4/tools/dq4ch2*_checks.py",
@@ -1434,6 +1439,7 @@ groups = ["ch1-build"]
 name = "dq4-people-match"
 why = "원작 FC 인물 그림과 다른 갈래의 그림이 실리는 일(1장 바트랜드의 프레아·이무르의 엄마들이 노인 그림, FC 그림 13 → DQ5 09)을 에뮬레이터 없이 잡는다. 원작 그림 종류·DQ5 세트 종류는 sfc/dq4/people-kinds.toml"
 paths = [
+  "@ch2-modules",
   "@ch3-modules",
   "sfc/dq4/tools/dq4growth.py",
   "sfc/dq4/tools/dq4npcport.py",
@@ -1566,6 +1572,7 @@ groups = ["ch1-build", "ch1-walk"]
 name = "dq4-msg-banks"
 why = "보행 메시지 색인 훅(24:9E07)이 표 꼴로 색인 뱅크 1E·1F 를 빈 뱅크 55·56 으로 돌려야 넷째 메시지 자리를 읽는다. 1장 롬의 묶음 셋을 넷째 자리에 이미 놓인 메시지 뒤 빈 곳(뱅크 55 안·55→56 걸침·뱅크 56 안)으로 옮긴 시험 롬에서, 성 앞 「はなす」 와 탑 위 보스에게 거는 말의 메시지를 그 번호로 바꿔 끼워 훅 뒤 스트림 뱅크와 디코더가 돌려준 코드가 원래 메시지와 같아야 한다(OR 60 훅이면 7E:8000 을 읽어 실패)"
 paths = [
+  "@ch2-modules",
   "@ch3-modules",
   "sfc/dq4/tools/dq4msgbankcheck.py",
   "sfc/dq4/tools/lua/dq4msgbank.lua",
@@ -2208,6 +2215,8 @@ groups = ["ch1-build", "ch1-walk"]
 name = "dq4-ch1-save"
 why = "1장 출하 롬(dq4-ch1-full)에서 교회 저장 → 리셋 → 이어 하기, 우물 아래 전멸 → 교회 귀환이 끝까지 가야 한다(서장 끝·이무르 밤·호이민·보스·보고 다섯 자리). 교회 순간이동은 「arrived map」 이 36/00 이고 MAXF 에 닿지 않아야(timeout phase 없음) 도착으로 본다. 출발 상태는 같은 명령 안의 1장 걷기(--units, 전 구간)로 만든다. 그 걷기는 구간마다(순간이동은 도착 뒤) 뜬 메시지 번호의 처음 나온 차례가 기준 sfc/dq4/ch1-walk-messages.toml 과 같아야 하고(기준이 없거나 손으로 고쳐 check 표지가 맞지 않거나 기록이 400개를 넘어 잘려도 실패)(대사가 빠지거나 바뀌거나 늘면 실패, 기준은 --write-messages 「까닭」 으로만 고침), 이무르 감옥(37/00 → 37/02)과 이무르(37/01 → 37/00)는 순간이동 대신 실제 계단으로 걸어 들어가 끝 맵이 맞아야 한다"
 paths = [
+  "@ch2-modules",
+  "@ch3-modules",
   "sfc/dq4/tools/dq4ch1savecheck.py",
   "sfc/dq4/tools/dq4ch1walkcheck.py",
   "sfc/dq4/tools/dq4dungeonencountercheck.py",
@@ -2974,6 +2983,8 @@ groups = ["ch1-build", "ch1-walk"]
 name = "dq4-screen-baseline"
 why = "장면 화면이 기준과 달라지지 않게: 타이틀·1장 시작 방·상태 창·이무르 방어구점 사기 목록(MesenCE, emu.getScreenBuffer 와 영상 설정 고정)과 타이틀(bsnes·snes9x)의 8×8 칸 해시가 sfc/dq4/screens.toml 과 모두 같다. VERIFY_ARGS 12개는 그 설정을 바꾸면 타이틀이 바뀌는지로 이름이 먹는지 본다(SCREEN_ARGS 의 나머지 9개는 타이틀에 닿지 않아 이름을 확인하지 못함). 기준은 --write-screens 까닭으로만 고친다. 표지는 실수로 손댄 것만 잡는다(공개된 SHA-1)"
 paths = [
+  "@ch3-modules",
+  "@ch2-modules",
   "sfc/dq4/screens.toml",
   "sfc/dq4/tools/dq4screencheck.py",
   "sfc/dq4/tools/dq4screens.py",
@@ -3062,6 +3073,7 @@ name = "dq4-people-event-lines"
 why = "사건 연출이 도는 동안 인물의 공용 OBJ 팔레트 줄(0~4)이 덮이거나 인물 밖 OBJ 가 그 줄을 쓰는 일: 1장·2장·3장 걷기 구간마다 4프레임 표본으로 줄 색을 롬의 맵 팔레트 표와 견주고, 120프레임 표본으로 인물 밖 OAM 을 센다(전투 표본은 빼고 끝난 뒤 되돌아오는지 봄). 사건 스크립트의 화면 효과, 줄 배정, 맵 팔레트 표가 바뀌면 깨진다. 표본이 하나도 없는 구간도 실패"
 groups = ["ch1-build", "ch1-walk"]
 paths = [
+  "@ch2-modules",
   "sfc/dq4/tools/dq4peopleeventcheck.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
   "sfc/dq4/tools/lua/dq4peoplesample.lua",
