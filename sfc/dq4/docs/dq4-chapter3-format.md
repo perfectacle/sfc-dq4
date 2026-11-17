@@ -84,6 +84,7 @@
 | E | `dq4ch3endor` | 편지·여신상·가게 사기·납품·용병 | `5C:F000`~`FBFF` | `2205`·`2206` | `+10`~`+13` | `10:8E0D`(01/09 대체): 1~7, `05:A8AE`(17/01): 0~4·6·7 | `ch3_endor_` |
 | T | `dq4ch3tunnel` | 굴 공사·개통·장 끝 | `5C:FC00`~`FFFF` | `2207` | | `05:996C`(04/03): 0~5·7·14 | `ch3_tunnel_` |
 | W | `dq4ch3towns` | 마을 사람 진행별 대사 | `5F:F800`~`FFFF` | `2209` | | `10:B135`(17/01 대체): 3·4·6~10, `10:CFF4`(21/00 대체): 2·5·7·10~12 | `ch3_towns_` |
+| P | `dq4ch3partytalk` | 동료 대화(「はなす」) 3장 줄 | 없음(2장 동료 대화 표에 합침) | 없음 | | | `ch3_party_` |
 | 공용 | `dq4ch3event` | 넘김·첫머리·대화 호출·공용 장치 | `5C:C000`~`CBFF`, 표 `5C:CC00`~`CFFF`, 입구 `06:FE00`~`FE0E` | `21FF`, `2208` bit3·5 | `+0`~`+3` | `05:CC73`(2B/00): 0 | `ch3_opening` |
 | 예비 | | | | `220B`·`220C` | | | |
 
@@ -175,6 +176,8 @@ FC 3장에는 대화로 시작하는 전투가 없습니다(용병은 동행, �
 - [굴과 장 끝](dq4-chapter3-tunnel-format.md): `dq4ch3tunnel`
 
 - [마을 사람](dq4-chapter3-towns-format.md): `dq4ch3towns`
+
+- [동료 대화](dq4-chapter3-partytalk-format.md): `dq4ch3partytalk`
 
 ### 사건 모듈 PR 이 고치는 파일
 
