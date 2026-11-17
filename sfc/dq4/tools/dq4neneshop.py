@@ -8,8 +8,9 @@ FC(fc/dq4/docs/dq4-chapter3-format.md 「무기점 일」 끝, 15:$9E99·$9F79, 
           뺀다. どうのつるぎ(100) 넷: 세 번 재어 셋 514·넷 700·둘 360(한 개 150~200).
 
 FC 3장에는 맡기는 곳이 없어 맡긴 물건 목록이 곧 네네의 가게 물건이다. 이 롬은 DQ5 ふくろ(7E:2250)를 메뉴에서 늘 쓰므로
-가게 물건은 둘째 변수 칸(dq4ch3slots.VARS2)의 16칸에 따로 둔다. 물건 고르기는 DQ5 팔기의 물건 창(06:DEC1)을 같은 BRK 로
-열고, 안내·되묻기는 네네 메시지로 바꾼 루프(nene_stock)가 한다. FC 0374 뒤 「가게 물건 보기」 창은 옮기지 않았다.
+가게 물건은 둘째 변수 칸(dq4ch3slots.VARS2)의 12칸에 따로 둔다. 물건 고르기는 DQ5 팔기의 물건 창(06:DEC1)을 같은 BRK 로
+열고, 안내·되묻기는 네네 메시지로 바꾼 루프(nene_stock)가 한다. FC 0374 「예」 의 가게 물건 창(이름만, 15:$9F5C)은 DQ5 필드
+도구 창에 가게 칸을 잠시 맞바꿔 넣어 보인다(nene_view).
 """
 from pathlib import Path
 import sys
@@ -26,7 +27,9 @@ from dq4chapterbox import ENTER, LEAVE  # noqa: E402
 narrate = ch1.narrate
 pages = ch2._speaker_pages
 
-SALES, STOCK, STOCK_SLOTS = 0, 3, 16          # 둘째 변수 칸 +0~+2 매상(3바이트), +3~+18 가게 물건(물건 번호 + 1, 0 은 빈 칸)
+# 둘째 변수 칸 +0~+2 매상(3바이트), +3~+14 가게 물건(물건 번호 + 1, 0 은 빈 칸). 칸 수는 톨네코 물건 칸 수와 같아야
+# 「보기」(nene_view)가 한 번에 맞바꿔 보여 줄 수 있다
+SALES, STOCK, STOCK_SLOTS = 0, 3, 12
 # FC 15:$9F9E 의 r < C0. DQ5 00:953A 는 (r × A) >> 8 이라 A = 4 로 받아 3 보다 작으면 같은 갈래가 된다
 SELL_QUARTERS = 3
 SELL_BASE, SELL_SPAN = 96, 33                  # 값 × (96 + ⌊r × 33/256⌋)/64
@@ -40,7 +43,7 @@ SHOP_ENTER = 0x04D977
 BRKS = {
     'window': (0x95, 0x34), 'close': (0x95, 0x00), 'pick': (0x95, 0x37), 'ask': (0x95, 0x32),
     'count': (0x89, 0x80, 0x2F), 'item': (0x89, 0x80, 0x2E), 'drop': (0x89, 0x80, 0x32), 'sellable': (0x94, 0x06),
-    'price': (0x94, 0x02),
+    'price': (0x94, 0x02), 'items': (0x95, 0x0F),
 }
 PICKER_RESET = 0x06DFB6                        # JSR DFBA / RTL: 창을 고르기 전에 DQ5 가게가 부르는 것
 GOLD_AT = ch2.GOLD_AT
@@ -159,7 +162,9 @@ def _stock(vars2, m, brk):
     a.label('scan')(0xBF, *_al(vars2 + STOCK)).br(BEQ, 'free')(0xE8, 0xE0, STOCK_SLOTS).br(BCC, 'scan')
     a(lda(r), 0x09, ch3.RESULT[1], sta(r)).brl('end')
     a.label('free')(0x8E, *(PICK & 0xFFFF).to_bytes(2, 'little'))
-    a(0x64, 0x42, j('count'), 0xA5, 0x46).br(BNE, 'has').brl('end')
+    a(0x64, 0x42, j('count'), 0xA5, 0x46).br(BNE, 'has')
+    _show(a, m['nene_nothing'])
+    a.brl('end')
     a.label('has')
     _show(a, m['nene_pick'])
     a(0x22, *_al(PICKER_RESET), 0x64, 0xE4, j('pick'), 0xA5, 0xE8).br(0x10, 'picked').brl('quit').label('picked')
@@ -198,6 +203,38 @@ def hooks(ctx):
     return [(LOW_STUBS[0], bytes(len(code)), code)]
 
 
+def _view(vars2, brk):
+    """대화 호출(FC 0374 「예」, 15:$9F55): 가게 칸이 비었으면 결과 flag 끔. 아니면 켜고, 가게 칸과 톨네코 물건 칸을 맞바꾸고
+    (가게 칸 = 물건 + 1 이라 ±1 로 바꾸면 빈 칸 FF ↔ 0 도 그대로 오간다) 장비 비트를 잠시 0 으로 둔 채 DQ5 필드 도구 창
+    (BRK 95 0F, $E4 = 사람 0)을 연다. 창은 이름만 보이고 A·B 어느 쪽으로든 닫는다. 닫은 뒤 다시 맞바꿔 되돌린다."""
+    from dq4ch2endor import BCC, BNE, lda, sta
+
+    def j(name):
+        return bytes((0x22, *_al(brk[name])))
+    r = 0x7E2190 + ch3.RESULT[0]
+    items, equip = ch3.PARTY_ITEMS, ch3.PARTY_ITEMS - 2
+    saved = TEMP & 0xFFFF
+
+    def swap(a):
+        a(0xA2, 0x00).label(f'swap{len(a.items)}')
+        top = a.items[-1][1]
+        a(0xBF, *_al(items), 0x1A, 0x48, 0xBF, *_al(vars2 + STOCK), 0x3A, 0x9F, *_al(items), 0x68, 0x9F, *_al(vars2 + STOCK))
+        a(0xE8, 0xE0, STOCK_SLOTS).br(BCC, top)
+
+    a = _asm()(ENTER, 0xF4, 0x7E, 0x7E, 0xAB, 0xAB, 0xE2, 0x30, lda(r), 0x29, ~ch3.RESULT[1] & 0xFF, sta(r), 0xA2, 0x00)
+    a.label('scan')(0xBF, *_al(vars2 + STOCK)).br(BNE, 'some')(0xE8, 0xE0, STOCK_SLOTS).br(BCC, 'scan').brl('end')
+    a.label('some')(lda(r), 0x09, ch3.RESULT[1], sta(r))
+    a(0x22, *_al(SHOP_ENTER), 0xE2, 0x30, j('window'), j('close'))
+    swap(a)
+    a(lda(equip), 0x8D, *saved.to_bytes(2, 'little'), lda(equip + 1), 0x8D, *(saved + 1).to_bytes(2, 'little'))
+    a(0xA9, 0x00, sta(equip), sta(equip + 1))
+    a(0x22, *_al(PICKER_RESET), 0x64, 0xE4, j('items'), j('close'))
+    a(0xAD, *saved.to_bytes(2, 'little'), sta(equip), 0xAD, *(saved + 1).to_bytes(2, 'little'), sta(equip + 1))
+    swap(a)
+    a.label('end')
+    return a.bytes() + LEAVE
+
+
 def far_natives(ctx, put):
     """dq4ch3endor.far_native 에서 부른다. 날 바뀜 루틴을 맨 앞에 둔다(dq4ch3event.next_day 가 몫 첫 주소를 JSL)."""
     v = ctx.vars2_at
@@ -207,11 +244,12 @@ def far_natives(ctx, put):
     put('nene_room', _room(v))
     put('nene_counter', _counter(COUNTER_Y))
     put('nene_stock', _stock(v, m, low_stubs(LOW_STUBS[0])[1]))
+    put('nene_view', _view(v, low_stubs(LOW_STUBS[0])[1]))
 
 
 COUNTER_Y = 56                 # 40/00 네네(셀 (12,57)) 카운터 바깥 위쪽 줄은 셀 Y 53~54. 카운터 안쪽(네네 옆)은 57
 CALLS = {'nene_pay': ('nene_pay', 0), 'nene_room': ('nene_room', 0), 'nene_counter': ('nene_counter', 0),
-         'nene_stock': ('nene_stock', 0)}
+         'nene_stock': ('nene_stock', 0), 'nene_view': ('nene_view', 0)}
 
 
 def _mark(codes):
@@ -239,9 +277,12 @@ MESSAGES = {
     'nene_more': pages('네네', '그 밖에 또/내놓을 거 있어요?'),                                                    # 0371
     'nene_keep': pages('네네', '어머, 팔기 싫어요?/그럼 당신이/갖고 있어요.'),                                     # 0372
     'nene_precious': pages('네네', '어머, 그건/팔아 버리기엔/아까운 것 같아요./당신이 갖고 있어요.'),              # 0373
-    'nene_done': pages('네네', '사들이기는/이걸로 끝이네요.'),                                                     # 0374
+    'nene_nothing': pages('네네', '어머? 오늘은/아무것도 안 가져온/것 같네.'),                                    # 0334
+    'nene_done': pages('네네', '사들이기는 이걸로/끝이네요. 지금/가게에 있는 물건/볼래요?'),                         # 0374
     'nene_cheer': pages('네네', '그럼 나 열심히/팔아 볼게요./당신도 힘내요. 쪽.'),                                # 0375
-    'nene_full': pages('네네', '여보, 미안해요…….', '모처럼 사들여 왔는데/가게가 이미/가득 찼어요!'),             # 0377
+    'nene_full': pages('네네', '여보, 미안해요…….', '모처럼 사들여 왔는데/가게가 이미/가득 찼어요!',
+                       '지금 가게에 있는/물건 볼래요?'),                                                              # 0377
+    'nene_empty': pages('네네', '어머? 가게에/팔 물건이 없었어요!/빨리 사들여 와요.'),                               # 0376
 }
 
 
@@ -249,9 +290,12 @@ def counter_talk(ctx, otherwise):
     """네네 낮 대화: 카운터 너머면 가게, 아니면 otherwise."""
     say_, call, when = ctx.say, ctx.call, ctx.when
     yes = {"code": "05"}
+    # FC 15:$9F4B: 0374·0377 물음에 「예」 면 가게 물건이 있을 때 창 뒤 0375, 없으면 0376 만. 「아니요」 면 0375
+    view = [when(yes, [call('nene_view'), when(ctx.paid(), [say_('nene_cheer')], [say_('nene_empty')])],
+                 [say_('nene_cheer')])]
     stock = [call('nene_room'), when(ctx.paid(), [call('nene_stock'), when(ctx.paid(), [say_('nene_full')],
-                                                                         [say_('nene_done'), say_('nene_cheer')])],
-                                     [say_('nene_full')])]
+                                                                         [say_('nene_done')]), *view],
+                                     [say_('nene_full'), *view])]
     shop = [say_('nene_counter_ask'), when(yes, [call('nene_pay'), when(ctx.paid(), [say_('nene_sales')]), *stock],
                                            [say_('nene_lonely')])]
     return [call('nene_counter'), when(ctx.paid(), shop, otherwise)]
