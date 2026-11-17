@@ -275,6 +275,8 @@ class Walker:
         want, after = opt.get('changes', 99), opt.get('after', 120)
         pi = wi = stuck = changes = n = 0
         left = press = cur = last = last_change = since = None
+        tick = held = None
+        tick_age = 0
         maps, buttons = [], set()
         while True:
             self.step(buttons)
@@ -312,6 +314,31 @@ class Walker:
                         press, wi = None, wi + 1
                     elif press % 12 >= 6:
                         buttons = {'down' if p[0] == 'pick' or c < p[1] else 'up'}
+                elif p[0] == 'done':
+                    w, c, t = self.rd(wc.WINDOW), self.rd(wc.CURSOR), self.rd(wc.FIELD_TICK)
+                    tick, tick_age = (t, 0) if t != tick else (tick, tick_age + 1)
+                    closed = w in (wc.NO_WINDOW, wc.STATUS_WINDOW) and self.rd(wc.LOCK) & 1 == 0
+                    calm = closed and tick_age < 4
+                    press, since = (p[1], 0) if press is None else (press, since)
+                    press -= 1
+                    since = since + 1 if calm else 0
+                    if since >= wc.DONE_CALM or press <= 0:
+                        press, since, wi = None, None, wi + 1
+                    elif not closed:
+                        if w == wc.ASK_WINDOW and c != 0:
+                            buttons = {'up'} if n % 12 < 6 else set()
+                        elif w == wc.COMMAND_WINDOW:
+                            buttons = {'b'} if n % 16 < 8 else set()
+                        else:
+                            buttons = {'a'} if n % 16 < 8 else set()
+                elif p[0] == 'settle':
+                    c = self.rd(wc.CURSOR)
+                    if press is None:
+                        press, since, held = wc.SETTLE_MAX, 0, c
+                    press -= 1
+                    since, held = (since + 1, held) if c == held else (0, c)
+                    if since >= p[1] or press <= 0:
+                        press, since, wi = None, None, wi + 1
                 elif p[0] in ('ask', 'open'):
                     w = self.rd(wc.WINDOW)
                     want = wc.ASK_WINDOW if p[0] == 'ask' else p[1]

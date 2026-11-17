@@ -63,12 +63,16 @@ WALK = ROOT / 'tools' / 'lua' / 'walk.lua'
 WALK_STATE = HERE / 'lua' / 'dq4walkstate.lua'
 # 창 상태를 보고 넘기는 경유점 토큰(until:N·cursor:K·ask:N·pick:K)이 든 걷기는 dq4 판 걷기(walk.lua 에 그 둘을 더한 것)로 돈다
 DQ4_WALK = HERE / 'lua' / 'dq4walk.lua'
-WINDOW_TOKEN = re.compile(r'(^|;)(until|cursor|ask|pick|open):\d+(;|$)')
+WINDOW_TOKEN = re.compile(r'(^|;)(until|cursor|ask|pick|open|done|settle):\d+(;|$)')
 # 창 상태 토큰이 보는 칸(lua/dq4walk.lua 와 dq4compatcheck.Walker 가 같은 값을 씀): 창 번호, 고르기 커서, 물음 창 번호,
 # DQ5 가게 사기 목록에서 고른 물건
 WINDOW, CURSOR, ASK_WINDOW, PICK = 0x7E0A00, 0x7E0AD7, 0x32, 0x7E0F22
 # open:W 가 창을 기다리는 상한(프레임)
 OPEN_MAX = 1200
+# done:N·settle:N 이 보는 칸과 상한: 창 없음·상태 창·명령 창 번호, 조작 막힘(bit0), 필드 루프 카운터, done 이 끝날
+# 조용한 프레임 수, settle 이 기다릴 상한(lua/dq4walk.lua 와 같은 값)
+NO_WINDOW, STATUS_WINDOW, COMMAND_WINDOW, LOCK, FIELD_TICK = 0xFF, 0x02, 0x01, 0x7E19AE, 0x7E007F
+DONE_CALM, SETTLE_MAX = 30, 300
 
 
 def walk_driver(waypoints):
@@ -327,6 +331,12 @@ def taps(n, gap=50):
 def talk(face, n=8):
     """그 쪽을 보고 명령 창 → 「이야기하기」, 그 뒤 A 로 대사를 넘긴다. 남은 A 가 연 명령 창은 B 로 닫는다."""
     return f'{face}:8;wait:30;a:8;wait:60;a:8;wait:60;{taps(n)};{pc.CLOSE}'
+
+
+def talk_yes(face, n=8):
+    """talk 와 같이 말을 걸되, 대사를 넘기는 A 를 세지 않고 말이 끝나 조작이 돌아올 때까지 넘기며 물음마다 「예」
+    (dq4walk.lua done). n 은 talk 의 A 수로 기다릴 프레임 상한만 정한다(글이 길어져도 남은 B 가 「아니요」 로 답하지 않게)."""
+    return f'{face}:8;wait:30;a:8;wait:60;a:8;wait:60;done:{58 * n + 376}'
 
 
 # (이름, 방법, 인자, 선택). 방법 warp 는 TO(맵,x,y), walk 는 웨이포인트(walk.lua).
