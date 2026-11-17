@@ -183,7 +183,7 @@ def chapter2_cases():
                      'want': [('KICKED', ch2.KICKED)], 'maxf': 3000}
     # 아니요(아래 → A)면 그 칸을 떠났다 돌아올 때까지 다시 묻지 않는다
     out['wall-no'] = {'warp': f'{ch2.BEDROOM},22,9', 'set': ready,
-                      'walk': f'22,10;26,10;{WALL_ASK};down:8;wait:30;a:8;wait:120;{close};24,10;26,10;{WALL_YES}',
+                      'walk': f'22,10;26,10;right:8;ask:400;cursor:1;a:8;wait:120;{close};24,10;26,10;{WALL_YES}',
                       'free': '78,151', 'want': [('KICKED', ch2.KICKED)], 'maxf': 4500}
     for name, step in JOIN:
         out[name] = {'warp': f'{ch2.BEDROOM},22,9', 'set': ready,

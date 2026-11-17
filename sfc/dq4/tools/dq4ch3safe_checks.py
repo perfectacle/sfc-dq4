@@ -38,7 +38,7 @@ SEGMENT_BLOCKS = {
     # 북쪽 동굴(dq4ch3safe). 수문 앞 칸에 서면 묻고, 「아니요」 면 그대로, 칸을 떠났다 다시 서서 「예」 면 물살에 계단으로
     'gates': [
         ('safe_gates', 'warp', f'{safe.GATES},{SAFE_RIGHT[0]},{SAFE_RIGHT[1] + 2}', {'map': safe.GATES}),
-        ('safe_no', 'walk', f'up:40;wait:200;{SAFE_ASK};down:4;wait:30;a:8;wait:200;{CLOSE}',
+        ('safe_no', 'walk', f'{SAFE_RIGHT[0]},{SAFE_RIGHT[1]};ask:400;cursor:1;a:8;wait:200;{CLOSE}',
          {'map': safe.GATES, 'cell': SAFE_RIGHT, 'off': SAFE_OFF}),
         ('safe_right', 'walk', f'down:20;wait:60;up:30;wait:200;{SAFE_ASK};a:8;wait:60;a:8;wait:1300',
          {'map': safe.ENTRY, 'cell': safe.RIGHT['to'][1], 'off': SAFE_OFF, 'changes': 1, 'after': 60}),

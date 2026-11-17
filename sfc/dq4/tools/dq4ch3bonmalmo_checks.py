@@ -21,7 +21,10 @@ FLAGS = {
 BM_SLOT2 = '2058'
 BM_FOX_OFF = ['BM_FOX_SCENE']
 # 예·아니요 창에서 「아니요」 를 고르는 누름(창이 없을 때의 아래는 대사 창에 먹히지 않음)
-BM_NO = 'wait:60;down:8;wait:40;a:8;wait:60'
+# 물음 창이 뜰 때까지 글을 넘기고 「아니요」/「예」 를 고른다(dq4walk.lua ask·cursor). 「아니요」 면 같은 물음을 다시 하므로
+# 고를 차례를 물음마다 적는다
+BM_NO = 'ask:800;cursor:1;a:8'
+BM_YES = 'ask:800;cursor:0'
 # 톨네코 물건 칸 2~11 을 こんぼう(02)로 채운다(칸 0 옷, 칸 1 도시락)
 # 낮 왕자(3F/01 낮 목록 첫 사람, 인물 칸 4)는 오가는 사람이라 이동 간격(7E:3300 + 2 × 칸)을 0 으로 붙든다. 붙들지 않으면
 # snes9x 에서 왕자가 비켜 말이 걸리지 않았다
@@ -39,7 +42,7 @@ SEGMENTS = [
     # 「예」 면 날개가 빠지고 아들이 사라진다
     ('bm_prison_no', 'warp', f'{bm.PRISON},{bm.SON[0] - 4},{bm.SON[1] - 1}',
      {'map': bm.PRISON, 'set': f'{BM_SLOT2}={bm.WINGS:02X}', 'poke': wc.DAY}),
-    ('bm_son_no', 'walk', f'right:8;wait:30;a:8;wait:60;a:8;wait:60;{";".join([BM_NO] * 5)};{taps(8)};{CLOSE}',
+    ('bm_son_no', 'walk', f'right:8;wait:30;{BM_NO};{BM_NO};{BM_YES};{taps(8)};{CLOSE}',
      {'want': ['BM_SON_FREED'], 'bytes': {'BM_SLOT2': 0xFF}, 'poke': wc.DAY}),
     # 여우 마을 촌장: 개가 없으면 「예」·「예」 로 묵고 숲에서 아침에 깬다
     ('bm_inn_town', 'warp', f'{bm.FOX_TOWN},{bm.CHIEF[0] - 2},{bm.CHIEF[1] - 1}', {'map': bm.FOX_TOWN, 'poke': wc.NIGHT}),
@@ -62,7 +65,7 @@ SEGMENTS = [
     ('bm_fox_town', 'warp', f'{bm.FOX_TOWN},{bm.CHIEF[0] - 2},{bm.CHIEF[1] - 1}',
      {'map': bm.FOX_TOWN, 'set': '21FF|02', 'poke': wc.DAY}),
     # 여우가 처음 빌 때 「아니요」(084E) 면 다시 빌고, 「예」 에 갑옷
-    ('bm_fox', 'walk', f'{talk("right", 2)};wait:200;{";".join([BM_NO] * 3)};{taps(16, 80)};wait:600;{CLOSE}',
+    ('bm_fox', 'walk', f'{talk("right", 2)};{BM_NO};{BM_YES};{taps(16, 80)};wait:600;{CLOSE}',
      {'map': bm.FOREST, 'want': ['BM_FOXED'], 'off': BM_FOX_OFF, 'items': [bm.STEEL_ARMOR], 'maxf': 6000,
       'poke': wc.DAY}),
     # 여우를 쫓은 뒤: 숲 어귀에서 필드로 나가 위의 입구로 들면 마을 대신 숲 어귀에 선다
