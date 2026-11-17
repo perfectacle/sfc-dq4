@@ -1141,6 +1141,25 @@ class ShardTest(unittest.TestCase):
         self.assertEqual(w['c'], 20.0)
         self.assertEqual(set(guards.shard_weights(self.CHECKS, times={}, cached={}).values()), {1.0})
 
+    def test_shards_split_the_same_way_whatever_each_runner_cached(self):
+        """CI 조각 잡마다 같은 목록을 따로 나눈다. 러너마다 되살린 결과 캐시가 달라도 나눔이 같아야, 조각을 모두 모았을 때
+        모든 검사가 한 번씩만 든다(시간 파일에 없는 검사가 캐시 시간으로 무게가 달라져 두 조각에서 돈 일이 있다)."""
+        checks = [{'name': f'g{i}', 'parts': 3 if i == 2 else 1} for i in range(12)]
+        times = {'g0': 300.0, 'g1': 50.0, 'g2': 900.0}
+        n = 4
+        splits = []
+        for cached in ({}, {f'g{i}': 10.0 * i for i in range(12)}, {f'g{i}': 1000.0 - 70 * i for i in range(12)}):
+            with mock.patch.object(guards, 'load_shard_times', return_value=times), \
+                    mock.patch.object(guards, 'cached_seconds', return_value=cached):
+                w = guards.split_weights(checks)
+                splits.append([[guards.unit_name(c) for c in guards.shard_part(guards.expand_parts(checks), k, n, w)]
+                               for k in range(1, n + 1)])
+        self.assertEqual(splits[0], splits[1])
+        self.assertEqual(splits[0], splits[2])
+        every = [u for part in splits[0] for u in part]
+        self.assertEqual(sorted(every), sorted(guards.unit_name(c) for c in guards.expand_parts(checks)))
+        self.assertEqual(len(every), len(set(every)))
+
     def test_cached_seconds_reads_latest_pass(self):
         import json
         import os
