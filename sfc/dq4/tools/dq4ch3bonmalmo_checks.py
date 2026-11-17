@@ -7,6 +7,7 @@ from dq4ch3walkparts import CLOSE, talk, taps
 FLAGS = {
     'BM_FOXED': wc.flag(bm.FOXED),
     'BM_PRINCE_MET': wc.flag(bm.PRINCE_MET),
+    'BM_NANNY_SCOLDED': wc.flag(bm.NANNY_SCOLDED),
     'BM_SON_FREED': wc.flag(bm.SON_FREED),
     'BM_BRIDGE': wc.flag(bm.BRIDGE),
     'BM_LETTER1': wc.flag(bm.LETTER1),
@@ -47,7 +48,8 @@ SEGMENTS = [
     ('bm_prince_side', 'warp', f'{bm.CASTLE},{bm.PRINCE["day"][0] + 2},{bm.PRINCE["day"][1] - 1}',
      {'map': bm.CASTLE, 'poke': BM_PRINCE_HOLD}),
     ('bm_prince', 'walk', f'{talk("left", 10)};wait:300',
-     {'map': bm.CASTLE, 'cell': (bm.PRINCE['day'][0] + 2, bm.PRINCE['day'][1]), 'want': ['BM_PRINCE_MET'],
+     {'map': bm.CASTLE, 'cell': (bm.PRINCE['day'][0] + 2, bm.PRINCE['day'][1]),
+      'want': ['BM_PRINCE_MET', 'BM_NANNY_SCOLDED'],
       'poke': BM_PRINCE_HOLD}),
     ('bm_prince_night_side', 'warp', f'{bm.CASTLE},{bm.PRINCE["night"][0]},{bm.PRINCE["night"][1] + 1}',
      {'map': bm.CASTLE, 'poke': wc.NIGHT}),
