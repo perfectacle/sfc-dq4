@@ -1,8 +1,9 @@
 -- STATE 세이브스테이트에서 WAYPOINTS 의 토막을 차례로 하는 걷기(dq4walkstate.lua 의 WALK 로 띄운다). walk.lua 와 같은
 -- 꼴로 walk.txt 를 쓰고(맵 바뀜, 끝 맵·셀, WATCH), 입력은 프레임을 세지 않고 창·맵 상태를 보고 준다.
 --   x,y       그 셀까지 한 축씩 걷는다. 60프레임 막히면 옆으로 한 걸음 비켜 막힌 축부터 다시 걷고, STUCK 프레임
---             (기본 900, 조작이 막힌 7E:19AE bit0 동안은 세지 않음) 동안 목표에 가까워지지 않으면 fail. 꺾는 셀에 사람이
---             서 있으면 옆까지 와서 다음 셀로 넘어간다. 필드는 16비트 자리(7E:00B6·00B8). 걷다 메시지가 뜨면 넘기고
+--             (기본 900, 조작이 막힌 7E:19AE bit0 동안은 세지 않음) 동안 목표에 가까워지지 않으면 fail. 목표 셀에 사람이
+--             서 있으면 옆에서 비킬 때까지 기다리고, 꺾는 셀이면 300프레임 뒤 다음 셀로 넘어간다. x,y! 는 사람(배 등)이 선
+--             셀로 그대로 걸어 들어간다. 필드는 16비트 자리(7E:00B6·00B8). 걷다 메시지가 뜨면 넘기고
 --             계속 걷는다. 묻는 창이 서거나 맵이 바뀌거나 필드로 나가면 그 자리에서 이 토막을 끝낸다
 --   dir:n     n 프레임 누른다(맵 가장자리 밖으로 나갈 때). wait:n 은 n 프레임 쉰다
 --   face:dir  그 쪽을 짧게 눌러 돌아선다(앞이 사람·벽이면 걷지 않음)
@@ -13,18 +14,21 @@
 --   yes / no  메시지를 넘기다 예·아니요 창이 STABLE 프레임 그대로면 A(no 는 아래로 커서를 옮긴 뒤 A)
 --   yes*      free 와 같되 예·아니요 창마다 「예」
 --   fight     걸음 전투가 끝날 때까지 A(AFTERPATCH 가 끝난 뒤 롬을 덮음), 맵에서 조작이 풀리면 끝
+--   meet:d1,d2  필드에서 d1·d2 를 32프레임씩 번갈아 걸어 걸음 전투나 창(떠돌이 상인)이 걸릴 때까지
 --   await     누르지 않고 창이 뜨거나 조작이 막힐 때까지 기다린다(사람이 다가와 말을 걸 때)
 --   msg:HHH   메시지 HHH(24:8BAF 가 받은 번호)가 뜰 때까지 메시지를 넘긴다
 --   win:HH/HH 창 HH(여럿이면 그 가운데 하나)가 STABLE 프레임 그대로일 때까지 A
 --   near:NN   인물 칸 NN 옆에 서서 그 쪽을 본다(걸어 다니는 사람, 다음 토막 talk)
+--   push:SS,x,y  밀리는 인물(인물 칸 SS)을 셀 (x,y)까지 민다(옆 모서리를 거쳐 미는 쪽 반대편에 서서 걸음)
 --   pick:AAAA=VV  목록에서 아래를 눌러 WRAM 7E:AAAA 가 VV 가 되게(가게 사기 목록의 물건 7E:0F22)
+--   rest:AAAA,N  WRAM 7E:AAAA·AAAA+1 이 N 프레임 그대로일 때까지 기다린다(구르는 바위가 멈출 때까지)
 --   see:AAAA=VV  메시지를 넘기며 WRAM 7E:AAAA 가 VV 가 될 때까지
 --   close     B 로 창을 닫아 조작이 풀릴 때까지
 --   map:GG/MM 맵이 그것이 되고 free 가 될 때까지 누르지 않고 기다린다(메시지 창이면 넘김)
 --   serve:AAAA>=VVVV  누르지 않고 서서 다가오는 사람의 말을 넘기고 묻는 창마다 「예」, WRAM 7E:AAAA(16비트)가 VVVV 이상이고
 --             조작이 풀리면 끝(무기점 손님을 가게를 닫을 때까지 받기)
 --   field     필드(7E:00BE bit7 꺼짐)에 서고 조작이 풀릴 때까지 기다린다
---   until:AAAA>=VVVV,dir1,dir2  WRAM 7E:AAAA(16비트)가 VVVV 이상이 될 때까지 dir1·dir2 를 32프레임씩 번갈아 누른다
+--   pace:AAAA>=VVVV,dir1,dir2  WRAM 7E:AAAA(16비트)가 VVVV 이상이 될 때까지 dir1·dir2 를 32프레임씩 번갈아 누른다
 --             (필드를 걸어 밤 7E:075E ≥ 00F0 을 기다릴 때)
 -- 토막마다 TOKMAX 프레임(기본 6000)을 넘기면 fail. fail 이면 그 줄을 남기고 곧 끝낸다. 다 하면 AFTER 프레임 뒤 끝.
 -- POKE·ROMPATCH·WATCH·MAXF·PRE 는 walk.lua 와 같다. AFTERPATCH 는 fight 참고.
@@ -78,6 +82,9 @@ emu.addMemoryCallback(function()
     end
   end
 end, emu.callbackType.exec, 0x0082BE, 0x0082BE)
+-- 걸음 전투가 걸림(01:860D, dq4battlecheck 와 같은 자리)
+local fights = 0
+emu.addMemoryCallback(function() fights = fights + 1 end, emu.callbackType.exec, 0x01860D, 0x01860D)
 
 local n, pi, left = 0, 1, nil
 local ti, st = 1, nil           -- 지금 토막, 토막 상태(토막을 시작할 때 새로)
@@ -93,10 +100,12 @@ local function tap(b) if st.t % 17 < 2 then hold(b) end end
 local function stable(w) return win == w and winSince >= STABLE end
 local function locked() return rd(0x7E19AE) & 1 ~= 0 end
 -- 인물 표(칸 1 부터 7E:1982 앞까지)에 그 셀(또는 한 셀 위아래, 걸음 도중)에 선 사람이 있는지
+-- 주인공과 겹쳐 함께 움직이는 것(탄 배)은 빼고 본다
 local function personAt(cx, cy)
+  local hx, hy = rd(0x7E3020), rd(0x7E3080)
   for k = 1, rd(0x7E1982) - 1 do
     local px, py = rd(0x7E3020 + k), rd(0x7E3080 + k)
-    if px == cx and math.abs(py - cy) <= 1 then return true end
+    if px == cx and math.abs(py - cy) <= 1 and (math.abs(px - hx) > 1 or math.abs(py - hy) > 1) then return true end
   end
   return false
 end
@@ -111,7 +120,7 @@ local function advance()
   if winSince >= 2 and (win == W_MESSAGE or (PASS[win] and locked())) then tap("a") end
 end
 
-local function parseUntil(arg)
+local function parsePace(arg)
   local a, v, d1, d2 = arg:match("^(%x+)>=(%x+),(%a+),(%a+)$")
   return tonumber(a, 16), tonumber(v, 16), d1, d2
 end
@@ -121,7 +130,7 @@ local function step(tok)
   st.t = st.t + 1
   if st.t > TOKMAX then fail("timeout %s", tok); return true end
   local x, y = heroAt()
-  local cx, cy = tok:match("^(%d+),(%d+)$")
+  local cx, cy, into = tok:match("^(%d+),(%d+)(!?)$")
   if cx then
     cx, cy = tonumber(cx), tonumber(cy)
     if x == cx and y == cy then note("reached %d,%d", x, y); return true end
@@ -133,9 +142,13 @@ local function step(tok)
     local dist = math.abs(cx - x) + math.abs(cy - y)
     if not st.best or dist < st.best then st.best, st.since = dist, st.t end
     -- 꺾는 자리 셀에 사람이 서 있어 닿지 못하면, 바로 옆까지 왔고 다음 토막도 셀이면 그 셀을 건너뛴다
-    if st.t - st.since > 300 and dist <= 2 and personAt(cx, cy) and (toks[ti + 1] or ""):match("^%d+,%d+$") then
+    if (st.waited or 0) > 300 and dist <= 2 and personAt(cx, cy) and (toks[ti + 1] or ""):match("^%d+,%d+!?$") then
       note("skip %d,%d (person) at %d,%d", cx, cy, x, y); return true
     end
+    -- 목표 셀(말을 걸 자리 등)에 사람이 서 있으면 비킬 때까지 그 옆에서 기다린다(옆걸음을 하지 않음)
+    local waiting = into == "" and dist <= 2 and personAt(cx, cy)
+    if waiting then st.waited = (st.waited or 0) + 1; st.since = st.t; st.stuck = 0 end
+    if (st.waited or 0) > 3 * STUCK then fail("person stays at %d,%d", cx, cy); return true end
     if st.t - st.since > STUCK and not locked() then fail("stuck at %d,%d heading %d,%d", x, y, cx, cy); return true end
     -- 걷다 메시지가 뜨면(용병이 떠나는 말 등) 넘기고 같은 셀로 계속 걷는다. 묻는 창이 서면 이 토막을 끝내고 다음
     -- 토막(yes·no)이 답한다
@@ -152,6 +165,7 @@ local function step(tok)
     if here ~= st.map then note("left map at %d,%d", x, y); return true end
     -- 길에 선 사람(난수로 서는 자리가 달라짐)에 60프레임 막히면 옆으로 한 걸음 비켜(번갈아 양쪽) 막힌 축을 먼저 걷는다
     if st.side and st.side > 0 then st.side = st.side - 1; hold(st.sideDir); return false end
+    if waiting then return false end
     if st.stuck > 60 and quiet() and not locked() then
       st.tries = (st.tries or 0) + 1
       local horiz = x ~= cx and (st.prefer ~= "y" or y == cy)
@@ -235,6 +249,15 @@ local function step(tok)
     if battles == 0 or not quiet() then tap("a") end
     return false
   end
+  if kind == "meet" then
+    -- 필드에서 dir1·dir2 를 32프레임씩 번갈아 걸어 무언가 걸릴 때까지(전투가 걸리거나 창이 뜸). 걸린 것을 남긴다
+    if fights > (st.f0 or fights) then note("met battle"); return true end
+    st.f0 = st.f0 or fights
+    if not quiet() then note("met window %02X", win); return true end
+    local d1, d2 = arg:match("^(%a+),(%a+)$")
+    hold((st.t // 32) % 2 == 0 and d1 or d2)
+    return false
+  end
   if kind == "await" then
     return not quiet() or locked()
   end
@@ -279,6 +302,41 @@ local function step(tok)
     end
     return false
   end
+  if kind == "push" then
+    -- 밀리는 인물(칸 SS)을 셀 (gx,gy)까지 민다: 인물이 그 셀이 아니면 x 를 먼저, 그다음 y 를 맞추도록 미는 쪽 반대편 셀 P 에
+    -- 서서 그 쪽으로 걷는다. P 로 갈 때는 인물 옆 모서리 셀 C 를 거쳐 인물을 앞에서 밀지 않게 한다. 막히면 모서리 쪽을 바꾼다
+    local slot, gx, gy = arg:match("^(%x+),(%d+),(%d+)$")
+    slot, gx, gy = tonumber(slot, 16), tonumber(gx), tonumber(gy)
+    local tx, ty = rd(0x7E3020 + slot), rd(0x7E3080 + slot)
+    if tx == gx and ty == gy then st.ok = (st.ok or 0) + 1; return st.ok > 30 end
+    st.ok = 0
+    if not quiet() then advance(); return false end
+    local horiz = tx ~= gx
+    local dx = horiz and ((gx < tx) and -1 or 1) or 0
+    local dy = horiz and 0 or ((gy < ty) and -1 or 1)
+    local px, py = tx - 2 * dx, ty - 2 * dy
+    local key = x * 256 + y
+    if key == st.last then st.stuck = st.stuck + 1 else st.stuck = 0 end
+    st.last = key
+    local tkey = tx * 256 + ty
+    if tkey ~= st.tlast then st.tlast, st.since = tkey, st.t end
+    if st.t - st.since > STUCK then fail("push %02X stuck: person %d,%d hero %d,%d goal %d,%d", slot, tx, ty, x, y, gx, gy); return true end
+    if st.stuck > 60 then st.flip = not st.flip; st.stuck = 0; note("push flip at %d,%d person %d,%d", x, y, tx, ty) end
+    if x == px and y == py then
+      hold((dx > 0 and "right") or (dx < 0 and "left") or (dy > 0 and "down") or "up")
+      return false
+    end
+    local side = st.flip and -2 or 2
+    local cx, cy
+    if horiz then cx, cy = px, py + side else cx, cy = px + side, py end
+    -- P 와 같은 줄(위아래로 밀 때)·열(옆으로 밀 때)에 오면 P 로, 아니면 모서리로. 모서리로 갈 때는 인물과 겹치지 않는 축을
+    -- 먼저(위아래로 밀 때는 옆으로 먼저, 옆으로 밀 때는 위아래로 먼저)
+    if not horiz and y == py then hold(x < px and "right" or "left")
+    elseif horiz and x == px then hold(y < py and "down" or "up")
+    elseif not horiz then hold((x < cx and "right") or (x > cx and "left") or (y < cy and "down") or "up")
+    else hold((y < cy and "down") or (y > cy and "up") or (x < cx and "right") or "left") end
+    return false
+  end
   if kind == "pick" then
     -- 목록 커서가 고르는 값(WRAM 바이트)이 VV 가 될 때까지 아래를 톡톡(2프레임 누르고 15 쉼, 가게 장면 검사와 같은 주기)
     local a, v = arg:match("^(%x+)=(%x+)$")
@@ -288,6 +346,16 @@ local function step(tok)
     if rd(a) ~= st.cur then st.cur = rd(a); st.mark = st.t; note("pick %02X", st.cur) end
     if st.t - st.mark > 200 then fail("pick stuck %02X", rd(a)); return true end
     tap("down")
+    return false
+  end
+  if kind == "rest" then
+    -- WRAM 7E:AAAA·AAAA+1(구르는 바위 X·Y 등)이 N 프레임 그대로일 때까지 누르지 않고 기다린다(움직이는 물체가 멈출 때까지)
+    local a, nn = arg:match("^(%x+),(%d+)$")
+    a, nn = 0x7E0000 + tonumber(a, 16), tonumber(nn)
+    local v = rd(a) * 256 + rd(a + 1)
+    if v ~= st.v then st.v, st.vt = v, st.t end
+    advance()
+    if st.t - st.vt >= nn then note("rest %04X", v); return true end
     return false
   end
   if kind == "see" then
@@ -313,8 +381,8 @@ local function step(tok)
     advance()
     return rd(0x7E00BE) & 0x80 == 0 and isFree()
   end
-  if kind == "until" then
-    local a, v, d1, d2 = parseUntil(arg)
+  if kind == "pace" then
+    local a, v, d1, d2 = parsePace(arg)
     if rd(0x7E0000 + a) + 256 * rd(0x7E0001 + a) >= v then return true end
     advance()
     if quiet() then hold((st.t // 32) % 2 == 0 and d1 or d2) end

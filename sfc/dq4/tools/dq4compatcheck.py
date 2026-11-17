@@ -545,40 +545,9 @@ class Walker:
             if self.chapter > 1:
                 raise SystemExit(f'--chapter{self.chapter} 는 --jobs 2 이상(사건 구간은 장 출발 상태에서 묶음마다 시작)')
             return self.finish({self.seed: self.segments(range(len(wc.SEGMENTS)))}, None, t0)
-        groups = self.groups
-        # 키: 롬 SHA-1(캐시 폴더) + 코어 SHA-256 + 서장 입력 상수(부팅 입력 START_AT·TAP_UNTIL 포함) + 검사 코드
-        key = wc.fingerprint(Path(__file__), Path(dq4libretro.__file__), Path(wc.__file__), Path(pc.__file__),
-                             Path(sys.modules[warp_exit.__module__].__file__),
-                             ROOT / 'uv.lock', dq4cores.sha256(core_path), wc.prologue_inputs(),
-                             repr((pc.START_AT, pc.TAP_UNTIL))) if cache else None
-        hit = cache.get(kind, key, '.state', self.out / 'prologue.state') if cache else None
-        if hit:
-            base, pro = hit[0], {**hit[1], 'cached': cache.path(kind, key, '.state').name}
-            print(json.dumps(pro, ensure_ascii=False), flush=True)
-        else:
-            self.seed = 0
-            self.boot()
-            pro = self.segments(groups[0])[0]
-            base = self.out / 'prologue.state'
-            if pro['status'] != 'passed':
-                return self.finish({s: [] for s in seeds}, pro, t0, 'off' if cache is None else 'miss')
-            raw, n = self.c.save()
-            base.write_bytes(n.to_bytes(8, 'little') + raw)
-            if cache:
-                cache.put(kind, key, '.state', base, pro)
-        runs_head = []
-        if self.chapter > 1:
-            base, head, cached = self.chapter2_base(base, groups[1], cache, kind, key)
-            if any(r['status'] != 'passed' for r in head) or len(head) != len(groups[1]):
-                return self.finish({s: head for s in seeds}, pro, t0, 'off' if cache is None else 'miss')
-            groups = [groups[0], *groups[2:]]
-            runs_head = head
-        if self.chapter == 3:
-            base, head, cached = self.chapter3_base(base, groups[1], cache, kind, key)
-            runs_head = runs_head + head
-            if any(r['status'] != 'passed' for r in head) or len(head) != len(groups[1]):
-                return self.finish({s: runs_head for s in seeds}, pro, t0, 'off' if cache is None else 'miss')
-            groups = [groups[0], *groups[2:]]
+        base, pro, runs_head, groups, hit, stop = self.bases(seeds, core_path, cache, kind, t0)
+        if stop:
+            return stop
         # 묶음 프로세스마다 코어가 자리를 잡는다. 이 코어는 그동안 쉬므로 자리를 내놓아야 자리가 적을 때 막히지 않는다
         self.c.close()
 
@@ -605,6 +574,46 @@ class Walker:
                 runs[seed] += part
         return self.finish(runs, pro, t0, 'off' if cache is None else 'hit' if hit else 'miss')
 
+
+    def bases(self, seeds, core_path, cache, kind, t0):
+        """서장 끝 상태(캐시)에서 장 출발 상태까지: (출발 상태, 서장 결과, 머리 결과, 남은 묶음, 서장 캐시 적중, 멈춘 보고 또는
+        None). 2장·3장은 머리 묶음을 걸어 장 출발 상태를 만든다."""
+        groups = self.groups
+        state = 'off' if cache is None else 'miss'
+        # 키: 롬 SHA-1(캐시 폴더) + 코어 SHA-256 + 서장 입력 상수(부팅 입력 START_AT·TAP_UNTIL 포함) + 검사 코드
+        key = wc.fingerprint(Path(__file__), Path(dq4libretro.__file__), Path(wc.__file__), Path(pc.__file__),
+                             Path(sys.modules[warp_exit.__module__].__file__),
+                             ROOT / 'uv.lock', dq4cores.sha256(core_path), wc.prologue_inputs(),
+                             repr((pc.START_AT, pc.TAP_UNTIL))) if cache else None
+        hit = cache.get(kind, key, '.state', self.out / 'prologue.state') if cache else None
+        if hit:
+            base, pro = hit[0], {**hit[1], 'cached': cache.path(kind, key, '.state').name}
+            print(json.dumps(pro, ensure_ascii=False), flush=True)
+        else:
+            self.seed = 0
+            self.boot()
+            pro = self.segments(groups[0])[0]
+            base = self.out / 'prologue.state'
+            if pro['status'] != 'passed':
+                return base, pro, [], groups, hit, self.finish({s: [] for s in seeds}, pro, t0, state)
+            raw, n = self.c.save()
+            base.write_bytes(n.to_bytes(8, 'little') + raw)
+            if cache:
+                cache.put(kind, key, '.state', base, pro)
+        runs_head = []
+        if self.chapter > 1:
+            base, head, cached = self.chapter2_base(base, groups[1], cache, kind, key)
+            if any(r['status'] != 'passed' for r in head) or len(head) != len(groups[1]):
+                return base, pro, head, groups, hit, self.finish({s: head for s in seeds}, pro, t0, state)
+            groups = [groups[0], *groups[2:]]
+            runs_head = head
+        if self.chapter == 3:
+            base, head, cached = self.chapter3_base(base, groups[1], cache, kind, key)
+            runs_head = runs_head + head
+            if any(r['status'] != 'passed' for r in head) or len(head) != len(groups[1]):
+                return base, pro, runs_head, groups, hit, self.finish({s: runs_head for s in seeds}, pro, t0, state)
+            groups = [groups[0], *groups[2:]]
+        return base, pro, runs_head, groups, hit, None
 
     def chapter3_base(self, chapter2_state, head, cache, kind, key):
         """2장 출발 상태에서 3장 머리(빈 성 → 2장 끝 → 3장 첫머리)를 시드 0 으로 걸어 3장 출발 상태를 만든다. 2장
