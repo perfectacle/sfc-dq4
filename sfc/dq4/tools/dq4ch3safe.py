@@ -13,6 +13,7 @@ FC 그룹 3D(きたのどうくつ)는 SFC 그룹 3E 의 3E/03~09(FC 3D/00~06)�
 DQ5 의 しらべる 는 인물 대화를 부르지 않아, 금고 되돌리기는 연 상자 칸을 밟으면 묻는다(보이지 않는 인물). 물살은
 그림 없이 주인공을 아래로 걷게 한 뒤 순간이동으로 옮긴다. 형식은 sfc/dq4/docs/dq4-chapter3-format.md 「북쪽 동굴과 금고」.
 """
+import functools
 from pathlib import Path
 import sys
 
@@ -24,13 +25,15 @@ import dq4ch2event as ch2  # noqa: E402
 from dq4chapterbox import ENTER, LEAVE  # noqa: E402
 from dq4itemport import IRON_SAFE  # noqa: E402
 import dq4boulder as boulder  # noqa: E402
-from dq4ch3slots import SLOTS as _SLOTS, VARS_AT  # noqa: E402
+import dq4raft as raft  # noqa: E402
+from dq4ch3slots import RAFT_CODE, SLOTS as _SLOTS, VARS_AT  # noqa: E402
 
 IDX = 0x72                     # 7E:2202
 DRAINED = (IDX, 0x01)          # 수문을 열어 구덩이로 떨어짐(FC $62AA&80). 3E/04 로 가는 출구가 3E/05 로
 ANSWERED = (IDX, 0x02)         # 보이지 않는 인물의 물음에 대답함(대화가 켜고 인물 스크립트가 끔)
 YES = (IDX, 0x04)              # 그 대답이 「예」(단추). 인물 스크립트가 보고 끔
-FLAGS = (DRAINED, ANSWERED, YES)
+RIDING = (0x7A, 0x01)          # 7E:220A bit0  여신상 동굴에서 배에 탄 채(FC $0515 = 1). 맵에 들 때 dq4raft.reset 이 정함
+FLAGS = (DRAINED, ANSWERED, YES, RIDING)
 
 GROUP = 0x3E
 # FC 3D/0k 는 SFC 3E/(03+k). test_dq4ch3safe 가 dq4groupbuild.placement 와 견준다
@@ -59,9 +62,13 @@ DOWN = 0x04                                                 # 이벤트 걸음 �
 
 # 빌린 인물 스크립트(DQ5 20/04 대체 목록 10:C8FF, dq4ch3slots S 칸 0·1·4). 칸마다 스크립트 길이 바이트 주소
 SCRIPT_LIST = '10:C8FF'
-SCRIPTS = {'right': ('10:C906', 0), 'left': ('10:C922', 1), 'chest': ('10:C946', 4), 'boulder': ('10:C96E', 6)}
+SCRIPTS = {'right': ('10:C906', 0), 'left': ('10:C922', 1), 'chest': ('10:C946', 4), 'boulder': ('10:C96E', 6),
+           'raft': ('10:C977', 7)}
 # 바위 변수(dq4ch3slots S 의 변수 칸)
 BOULDER_VARS = boulder.Vars(VARS_AT + _SLOTS['S'].vars[0])
+# 배 변수(S 변수 칸 +21~+23: 배 FC X·Y, 배 인물 슬롯)
+RAFT_VARS = VARS_AT + 21
+RAFT_MAPS = ('48/02', '48/05', '48/06')     # FC 40/00·40/03·40/04
 
 # DQ5 출구 목적지 표의 종류 40(같은 그룹, 도착 맵의 출구 번호) 갈래 2A:F7AB: LDA $01 / STA $BD / INY / BRA $F7D6.
 # F7D6 이 LDA ($84),Y 로 도착 출구 번호를 읽고 PLB/PLP/RTS 한다. 출구 표를 옮긴 롬(dq5exitreloc)은 F7D6 을 [$84],Y 로
@@ -203,8 +210,37 @@ def hooks(ctx):
     exit_new = bytes((0x22, *_al(at['exit']), 0x80, EXIT_DONE - (EXIT_SITE + 6), 0xEA))
     skip = len(WIPE_ORIG) - 6
     wipe_new = bytes((0x22, *_al(at['wipe']), 0x80, skip)) + bytes((0xEA,)) * skip
+    raft = b''.join(code for _, code in raft_natives()[0])
     return [(EXIT_SITE, EXIT_ORIG, exit_new), (WIPE_SITE, WIPE_ORIG, wipe_new),
-            (boulder.AREA_SITE, boulder.AREA_ORIG, boulder.area_hook(at))]
+            (boulder.AREA_SITE, boulder.AREA_ORIG, boulder.area_hook(at)), (RAFT_CODE[0], bytes(len(raft)), raft)]
+
+
+
+def absent(ctx):
+    """{(맵, DQ5 셀 x, y, 밤)}: 말 걸기 검사가 건너뛸 탈 수 있는 배. 배 칸은 주인공이 걸어 들어가 타는 칸이라(FC 와 같음)
+    말을 걸려고 다가서면 탄다. 배를 보고 말 걸면 DQ5 의 「아무도 없다」(129)가 뜬다(FC 는 같은 뜻의 CD7)."""
+    out = set()
+    for k, (_, start) in raft.MAPS.items():
+        if start:
+            out |= {(f'{raft.GROUP:02X}/{k:02X}', 2 * start[0], 2 * start[1] + 1, night) for night in (False, True)}
+    return out
+
+
+@functools.cache
+def raft_natives():
+    """여신상 동굴 배 네이티브([(이름, 바이트)], {이름: 주소}). RAFT_CODE 에 hooks 로 둔다(빈 자리 확인). 물 표는 FC 롬에서
+    만들고, 롬이 없으면(단위 테스트) 빈 표로 둔다. 표가 맨 끝이라 코드 주소는 같다."""
+    import dq4ch3endor
+    import dq4growth
+    from kr_patch.fc import ines
+    rom = Path(dq4growth.DQ4)
+    tbls = (raft.tables(ines.prg(rom.read_bytes())) if rom.exists()
+            else {k: b'\xFF' for k in raft.MAPS})
+    code = raft.Code(RAFT_VARS, RIDING, dq4ch3endor.BUTTON)
+    out, at = raft.natives(code, RAFT_CODE[0], tbls)
+    if RAFT_CODE[0] + sum(len(b) for _, b in out) > RAFT_CODE[1]:
+        raise SystemExit(f'배 코드가 {RAFT_CODE[1]:06X} 를 넘음')
+    return out, at
 
 
 # FC 03B3·0296·037B 를 옮겼다. 바닥 글은 FC 처럼 인용, 앞뒤는 서술
@@ -254,6 +290,10 @@ def scripts(ctx):
     # 바위: 맵에 들 때 처음 자리로 두고, 매 프레임 ctl(늘 1 을 돌려 그 명령에 머묾)
     out['boulder'] = [_cmd('28'), _cmd('52'), call(at['reset']),
                        _cmd('05', *_al(at['ctl']), label='tick'), _cmd('03', target='tick')]
+    # 배: 맵에 들 때 reset, 매 차례 ctl
+    rat = raft_natives()[1]
+    out['raft'] = [_cmd('28'), _cmd('52'), call(rat['reset']), _cmd('05', *_al(rat['ctl']), label='tick'),
+                   _cmd('03', target='tick')]
     out['chest'] = [_cmd('28'), _cmd('52'), _cmd('05', *_al(at['away_chest']), label='wait'),
                     _cmd('05', *_al(at['on_chest'])), *wait_answer, _cmd('03', target='wait')]
     return [{"address": SCRIPTS[k][0], "commands": v} for k, v in out.items()]
@@ -279,4 +319,7 @@ def npc_lists(lists, ctx):
     for time in ('day', 'night'):
         lists[ROLL]["entries"] += [e for e in ch2._invisible(_src('boulder'), t['button']) if e["time"] == time]
         lists[ROLL]["entries"] += [{"from": dq4npcport.STAND, "time": time, "fields": dict(r)} for r in rocks]
+    for mp in RAFT_MAPS:
+        if mp in lists:
+            lists[mp]["entries"] += ch2._invisible(_src('raft'), t['button'])
     return [], []

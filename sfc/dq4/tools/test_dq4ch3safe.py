@@ -73,7 +73,7 @@ class PlaceTest(unittest.TestCase):
 class HookTest(unittest.TestCase):
     def test_hooks_replace_the_whole_sites_and_jump_back(self):
         ctx = _ctx()
-        (ea, eo, en), (wa, wo, wn), _ = safe.hooks(ctx)
+        (ea, eo, en), (wa, wo, wn), *_ = safe.hooks(ctx)
         self.assertEqual((ea, eo), (safe.EXIT_SITE, safe.EXIT_ORIG))
         self.assertEqual(len(en), len(eo))
         self.assertEqual(en[:4], bytes((0x22, *safe._al(ctx.at['exit']))))
@@ -86,6 +86,8 @@ class HookTest(unittest.TestCase):
     def test_sites_hold_the_original_bytes(self):
         data = DQ5.read_bytes()
         for addr, orig, _ in safe.hooks(_ctx()):
+            if addr == safe.RAFT_CODE[0]:
+                continue        # 늘린 롬의 빈 자리(dq4ch3event 가 0 인지 봄)
             self.assertEqual(data[lorom(addr):lorom(addr) + len(orig)], orig, f'{addr:06X}')
         # 출구 번호를 읽는 명령과 상자 표 즉값 자리
         self.assertEqual(data[lorom(safe.EXIT_READ):lorom(safe.EXIT_READ) + 2], bytes((0xB1, 0x84)))
@@ -220,7 +222,7 @@ class ScriptTest(unittest.TestCase):
 
     def test_flags_are_in_the_slot(self):
         self.assertTrue(all(f[0] in ev.SLOTS['S'].flags for f in safe.FLAGS))
-        self.assertEqual(len({f[1] for f in safe.FLAGS}), len(safe.FLAGS))
+        self.assertEqual(len(set(safe.FLAGS)), len(safe.FLAGS))
 
     def test_messages_fit_the_window(self):
         import dq4ch1event

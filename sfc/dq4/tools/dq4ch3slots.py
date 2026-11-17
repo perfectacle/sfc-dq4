@@ -32,8 +32,8 @@ SLOTS = {
     'L': Slot('레이크나바: 무기점 일·도시락·네네·톰 노인·톰 아들', 'dq4ch3lakanaba', (0x5CD000, 0x5CE000),
               flags=(0x70, 0x71), scripts=(('10:9B81', (0, 1, *range(8, 14))), ('10:A031', tuple(range(6)))), lists='ch3_lakanaba_',
               vars=(4, 10)),
-    'S': Slot('북쪽 동굴과 금고', 'dq4ch3safe', (0x5CE000, 0x5CE800), flags=(0x72,),
-              scripts=(('10:C8FF', (0, 1, 4, 6, 7, 8, 9)),), lists='ch3_safe_', vars=(14, 21)),
+    'S': Slot('북쪽 동굴과 금고, 여신상 동굴의 배', 'dq4ch3safe', (0x5CE000, 0x5CE800), flags=(0x72, 0x7A),
+              scripts=(('10:C8FF', (0, 1, 4, 6, 7, 8, 9)),), lists='ch3_safe_', vars=(14, 24)),
     'B': Slot('본몰 왕자·감옥·여우 마을·다리·개 토마스', 'dq4ch3bonmalmo', (0x5CE800, 0x5CF000), flags=(0x73, 0x74),
               scripts=(('10:BEE5', (2, *range(4, 10))),), lists='ch3_bonmalmo_'),
     'E': Slot('엔돌: 편지·여신상 동굴·여신상 팔기·가게 사기·납품·용병', 'dq4ch3endor', (0x5CF000, 0x5CFC00),
@@ -50,10 +50,12 @@ COMMON_VARS = (0, 4)
 # 아직 아무에게도 주지 않은 몫. 쓰려면 이 표를 고친다. 이벤트 무리·DQ5 몬스터는 FC 3장에 사건 전투가 없어(fc/dq4/docs/
 # dq4-chapter3-format.md 「사건 차례」) 나누지 않고 2장 예비(dq4ch2slots.SPARE)에 둔다
 SPARE = {
-    'flags': (0x7A, 0x7B, 0x7C),
-    'vars': (21, 25),
+    'flags': (0x7B, 0x7C),
+    'vars': (24, 25),
     'code': (),
 }
+# 여신상 동굴의 배(dq4raft, S 가 hooks 로 둠). S 몫 코드 자리가 차서 따로 둔다. 5D:8000~ 은 dq4windowtext 몬스터 자료
+RAFT_CODE = (0x5DF000, 0x5DF800)
 # 3장 넘김·공용 장치 코드(dq4ch3event.CODE_AT~TABLE_AT)와 대화 호출 표(TABLE_AT~CODE_END)
 BASE_CODE = (0x5CC000, 0x5CD000)
 

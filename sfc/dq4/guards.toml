@@ -116,6 +116,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -245,6 +246,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -275,6 +277,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -365,6 +368,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -406,6 +410,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4boulder.py",
   "sfc/dq4/tools/dq4groupbuild.py",
+  "sfc/dq4/tools/dq4raft.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3open && uv run --locked python sfc/dq4/tools/dq4ch3opencheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3open --repeat 2"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -418,6 +423,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
   "sfc/dq4/tools/dq4ch2walkcheck.py",
   "sfc/dq4/tools/dq4ch2event.py",
@@ -456,6 +462,7 @@ paths = [
   "sfc/dq5/tools/dq5npcrecordcheck.py",
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4chapter1.py build --rom work/ch3/menu.sfc --keep work/ch3/keep --chapter3 --out work/ch3/npc.sfc && rm -rf work/ch3npc && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter3 --rom work/ch3/npc.sfc --build work/ch3/keep/groups --layout work/ch3/keep/npc-layout.json --texts work/ch3/messages.json --out work/ch3npc --jobs 4"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태·3장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -469,6 +476,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
   "sfc/dq4/tools/dq4ch2walkcheck.py",
   "sfc/dq4/tools/dq4ch1walkcheck.py",
@@ -510,6 +518,7 @@ paths = [
   "sfc/dq5/tools/dq5npcrecordcheck.py",
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4chapter1.py build --rom work/ch3/menu.sfc --keep work/ch3/keep --chapter3 --out work/ch3/npc.sfc && uv run --locked python sfc/dq4/tools/dq4ch3townscheck.py --keep work/ch3/keep --texts work/ch3/messages.json && rm -rf work/ch3towns && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter3 --rom work/ch3/npc.sfc --build work/ch3/keep/groups --layout work/ch3/keep/npc-layout.json --texts work/ch3/messages.json --out work/ch3towns --states towns_son_freed,towns_foxed,towns_letter,towns_shop --jobs 4"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태·3장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -520,6 +529,7 @@ name = "dq4-ch3-lakanaba"
 why = "3장 레이크나바 사건(dq4ch3lakanaba): 네네(오늘 도시락 전이면 잠 → HP·MP 채움·아침·날수 + 1 → 도시락, 받은 뒤엔 한마디), 무기점 첫 출근(문 앞 꾸지람 → 카운터 안으로)·둘째 날(카운터 안 주인에게 「예」)·카운터 너머, 손님 갈래를 문턱을 바꾼 롬 사본으로(파는 손님 はじゃのつるぎ 재고 + 1, 사는 손님 돈 모자람·소지품 가득·장비 못 함·팜, 값 물음 「아니오」 뒤 깎음·웃돈·흥정 없음의 일삯), 일삯 100 이상이면 가게를 닫고 밤(0341), 아래층에서 그만두기, 톰 노인 밀기·교회 도착 골드, 톰 아들의 개(DOG)·우리의 개 숨기, 필드에서 돌아오면 오늘 도시락·출근 flag 지움. 메시지 차례·flag·금화·일삯·재고를 보고 두 번 돌려 같아야 한다"
 paths = [
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4itemport.py",
@@ -553,6 +563,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch2walkcheck.py",
   "sfc/dq4/tools/dq4ch2ending.py",
   "sfc/dq4/tools/dq4libretro.py",
@@ -575,6 +586,7 @@ why = "3장 북쪽 동굴 금고: 전멸하면 3장에서 일행 소지품에 �
 paths = [
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4ch3safecheck.py",
@@ -604,6 +616,35 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출�
 groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
+name = "dq4-ch3-raft"
+why = "3장 여신상 동굴 배(dq4raft): 탄 채 걸음 전투를 하고 돌아와도 배에 탄 채 물 칸을 지나간다(48/02·48/06). 단추 전 48/02 의 쉬는 배가 물 BG 위(OAM 우선순위 3)에 보이고 단추 뒤에는 치워진다. 배 인물의 33A0 우선순위 고정이 빠지면 배가 물 뒤에 숨는다. 전투 뒤 맵을 다시 그리는 길에서 탐 flag·물 칸 표시(셀 +1 bit1)·배 자리가 지워지면 깨진다. 타기·넘어가기·내리기·여신상은 dq4-ch3-walk 의 raft_* 구간, 배 칸 밖 물로 못 걷는 것은 dq4-ch3-heroblock 의 raft-* 사례가 본다"
+paths = [
+  "sfc/dq4/tools/dq4raft.py",
+  "sfc/dq4/tools/dq4raftcheck.py",
+  "sfc/dq4/tools/lua/dq4raftview.lua",
+  "sfc/dq4/tools/dq4ch3safe.py",
+  "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4windowcheck.py",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq4/tools/dq4ch3slots.py",
+  "sfc/dq4/tools/dq4ch3endor.py",
+  "sfc/dq4/tools/dq4ch3event.py",
+  "sfc/dq4/tools/dq4battlecheck.py",
+  "sfc/dq4/tools/lua/dq4battle.lua",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4ch3lakanaba.py",
+  "sfc/dq4/tools/dq4ch3towns.py",
+  "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3raft && uv run --locked python sfc/dq4/tools/dq4raftcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3raft"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
 name = "dq4-ch3-endor"
 why = "3장 엔돌 사건의 대화 갈래: 왕(첫 알현 「아니요」·편지 기다림·납품 뒤), 가게 주인 「아니요」(금화 그대로), 밤의 아들·네네(잠 뒤 아침 마을), 네네 「아니요」·개통 거짓말 갈래, 납품(주문 전·「아니요」·다 채운 뒤)과 안내인, 수집가(여신상 없음·「아니요」·판 뒤), 여신상 동굴 단추 「아니요」 를 3장 출발 상태에서 걸어 메시지 차례와 flag 를 본다. 대화 스크립트 갈래·메시지 차례(dq4ch3endor.MESSAGES)·3장 엔돌 대체 목록을 바꾸면 깨진다. 큰 길은 dq4-ch3-walk 의 endor_* 구간이 본다. 두 번 걸어 기록이 같아야 한다"
 paths = [
@@ -612,6 +653,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3endorcheck.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3walkcheck.py",
   "sfc/dq4/tools/dq4ch3event.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
@@ -728,6 +770,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -754,6 +797,7 @@ paths = [
   "sfc/dq4/tools/dq4brkscan.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -800,6 +844,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -832,6 +877,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -946,6 +992,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -1037,6 +1084,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -1099,6 +1147,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -1342,6 +1391,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -1376,6 +1426,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -1484,6 +1535,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -1527,6 +1579,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -1624,6 +1677,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4mercenary.py",
@@ -1661,6 +1715,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -1797,6 +1852,7 @@ paths = [
   "fc/dq4/tools/dq4talk.py",
   "sfc/dq4/tools/dq4boulder.py",
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4raft.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4peoplematchcheck.py --rom work/ch1/dq4-ch1-full.sfc --json work/peoplematch/match.json"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
@@ -1924,6 +1980,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
   "sfc/dq4/tools/dq4boulder.py",
   "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4raft.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4msgbankcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-msgbank"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -2137,6 +2194,7 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -3107,6 +3165,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -3199,6 +3258,7 @@ paths = [
   "sfc/dq4/tools/lua/dq4openbus.lua",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -3393,6 +3453,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4mercenary.py",
@@ -3438,6 +3499,7 @@ paths = [
   "sfc/dq5/tools/dq5monlimits.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
@@ -3471,6 +3533,7 @@ paths = [
   "sfc/dq5/tools/dq5sram.py",
   "sfc/dq4/tools/dq4ch3safe.py",
   "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
   "sfc/dq4/tools/dq4ch3endor.py",
   "sfc/dq4/tools/dq4mercenary.py",
 ]
