@@ -41,6 +41,7 @@ paths = [
   "sfc/dq4/tools/dq4eventchecks.py",
   "@ch3-modules",
   "sfc/dq4/tools/dq4chapterwalk.py",
+  "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4ch2walkcheck.py",
   "sfc/dq4/tools/dq4ch2event.py",
   "sfc/dq4/tools/dq4ch2ending.py",

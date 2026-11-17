@@ -13,9 +13,10 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 from dq5map import lorom  # noqa: E402
 
-# 이름 표 5 물건, 3 주문(dq4windowtext.KINDS 의 adopt 표). 몬스터(4)는 {100F} 가 이름 뒤에 Ａ·Ｂ 를 붙이는데 훅이
-# 그 뒤를 건너뛰므로 넣지 않는다
-KINDS = (5, 3)
+# 이름 표 5 물건, 3 주문, 4 몬스터(dq4windowtext.KINDS 의 adopt 표). 몬스터({100F}, 격투장 116 의 건 몬스터)는 원래
+# 이름 뒤에 Ａ·Ｂ 를 붙이는데 훅이 그 뒤를 건너뛰어 빠진다(격투장 거는 창의 이름과 같음)
+MONSTER = 4
+KINDS = (5, 3, MONSTER)
 HOOK_AT = 0x2489BB
 HOOK_ORIG = bytes.fromhex('85 43 20 9f 88')     # STA $43 / JSR $889F(이름 번호를 $F5 에서 꺼냄)
 # 한글이 없을 때 돌아갈 곳: 원래 JSR $889F 다음(STA $42 / BRK 88 2B). 89BB~89BF 는 훅의 JML·NOP 이라 JSR 은 훅이 대신한다
@@ -36,6 +37,11 @@ def korean_names(data):
     known = set(dq4menumsg.CHARS) | {' '}
     out = {}
     for kind in KINDS:
+        if kind == MONSTER:
+            # 몬스터 이름 표는 DQ5 가나 그대로이고(전투 글·창이 번호로 한글을 찾음) 옮긴 번호의 한글은 dq4monport 에 있다
+            import dq4monport
+            out[kind] = {n: ko for n, ko in dq4monport.korean_names(window=True).items() if set(ko) <= known}
+            continue
         ko = dq4windowtext.adopted(dq4windowtext.KINDS[kind][0])
         names = dq4windowtext.rom_names(data, kind)
         out[kind] = {n: ko[dq4windowtext.kana_key(x)] for n, x in enumerate(names)
@@ -84,6 +90,11 @@ class Layout:
             0xAB,                                                         # PLB
             0xE2, 0x20, 0xA5, 0xF6, 0x85, 0xF5, 0xA5, 0xF7, 0x85, 0xF6,   # $F5 ← $F6 ← $F7 ← $F8 ← 0
             0xA5, 0xF8, 0x85, 0xF7, 0x64, 0xF8,
+            # 몬스터({100F}, 24:8506)는 PHX / PHY / PHP 뒤 JSR $89B6 으로 와서 그 셋도 꺼내야 한다
+            0xA5, 0x43, 0xC9, MONSTER, 0xD0, 0x0E,                        # LDA $43 / CMP #4 / BNE 물건·주문
+            0x68, 0x68, 0xC2, 0x20, 0x68,             # PLA(훅의 PHP) / PLA(89B6 의 PHP) / REP #$20 / PLA(복귀)
+            0x28, 0x7A, 0xFA, 0xC2, 0x30,             # PLP(8508, 들어올 때 폭) / PLY / PLX / REP #$30
+            0x5C, *le(QUEUE_RUN, 3),                                      # JML 24:8275
             0x68, 0x68, 0xC2, 0x20, 0x68,             # PLA(훅의 PHP) / PLA(89A8 의 PHP) / REP #$20 / PLA(복귀)
             0x5C, *le(QUEUE_RUN, 3)))                                     # JML 24:8275
         out = bytearray((0x85, 0x43, 0x08,                                 # STA $43(원래) / PHP(원래 폭으로 돌아가려고)
