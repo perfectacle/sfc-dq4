@@ -120,6 +120,36 @@ class GroupTests(unittest.TestCase):
                               and q.flag is not None and P.FLAG_CHAPTERS.get(q.flag) == chapter]
                     self.assertFalse(rivals, f'{where}: {rivals}')
 
+    def test_chapter3_followers_keep_their_colors_in_every_party_group(self):
+        # 3장에서 일행 뒤를 따라 걷는 그림(개·용병)은 전용 줄이 없어 PARTIES 에 넣지 않는다. 그 장 모든 그룹에서 제 색이
+        # 나오려면 그림이 NDS 인물이고, 공용 줄이면 배치 표의 그룹이 그 장 그룹을 덮고, 전용 줄이면 그 장 줄이어야 한다.
+        # KNOWN 은 지금 main 에서 어긋난 것(3장 쪽에서 고칠 것). 고치면 이 시험이 그 줄을 지우라고 실패한다
+        import dq4ch1event
+        import dq4mercenary
+        from dq4npcport import PICTURES
+        followers = {'개': PICTURES[dq4ch1event.FC_DOG_PICTURE], '스콧': dq4mercenary.PICTURES['scott'],
+                     '로렌스': dq4mercenary.PICTURES['lawrence']}
+        pins = tomllib.loads(P.PINS.read_text())['person']
+        groups = set(P.party_groups(3))
+        found = {}
+        for name, picture in followers.items():
+            people = [p for p in P.PEOPLE if picture in p.pictures and p.group in (None, *groups)]
+            if not people:
+                found[name] = 'NDS 인물이 아님(DQ5 세트 그대로 공용 줄)'
+            elif people[0].palette is not None:
+                if P.FLAG_CHAPTERS.get(people[0].flag) != 3:
+                    found[name] = f'{people[0].role} 의 다른 장 전용 줄 {people[0].palette}'
+            else:
+                missing = groups - {int(g, 16) for g in pins[people[0].role]['groups']}
+                if missing:
+                    found[name] = '배치 표 그룹에 없음 ' + ','.join(f'{g:02X}' for g in sorted(missing))
+        known = {
+            '개': '배치 표 그룹에 없음 3F,40,47,48',
+            '스콧': 'NDS 인물이 아님(DQ5 세트 그대로 공용 줄)',
+            '로렌스': '브라이 의 다른 장 전용 줄 5',
+        }
+        self.assertEqual(found, known)
+
     def test_flag_maps_cover_endor_in_chapter2(self):
         self.assertIn('40/FF', P.flag_maps(P.CHAPTER2))
         self.assertIn('40/FF', P.flag_maps(P.CHAPTER3))
