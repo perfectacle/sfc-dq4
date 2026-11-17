@@ -47,6 +47,9 @@ ANSWERED = ch2.ANSWERED        # 7E:21A3 bit0 대화가 끝남(talk_here 를 되
 # 7E:21A3 bit4(맵을 옮기면 지워짐): 이번 방문에 유모에게 꾸지람을 들음(FC $6289&40, FC 는 필드로 나갈 때 지움). 마을 사람
 # 모듈의 유모(대화 05F)가 보고 03B1 을 고른다. 3F/01 에서 이 비트를 쓰는 도구는 없다
 NANNY_SCOLDED = (0x13, 0x10)
+# 7E:21A3 bit7(맵을 옮기면 지워짐): 왕자가 처음 말을 마침, 유모가 걸어온다. NANNY_SCOLDED 와 따로 두어 그 비트만 켠
+# 상태(마을 사람 모듈의 검사)에서는 유모가 제자리에 있다
+NANNY_GO = (0x13, 0x80)
 # 예·아니요를 「예」 까지 되묻는 깊이(대화 스크립트에는 되돌아가는 명령이 없어 갈래를 겹쳐 쌓는다)
 ASK_DEPTH = 8
 
@@ -77,15 +80,34 @@ FOREST_ENTRY = cell(0x00, 0x0F)
 # 걷기 13 은 X 를 먼저 맞춘다. 두 길 모두 주인공 칸((04,0C))을 지나지 않는다(겹침은 dq4heroblockcheck bm-fox-right)
 FOX_LEAVE = (cell(0x05, 0x0D), cell(0x05, 0x04))
 GAADE_IN, GAADE_TALK, GAADE_OUT = cell(0x07, 0x0D), cell(0x04, 0x0D), cell(0x00, 0x0D)
-FACE_LEFT = 0x20               # 인물 명령 2F(7E:31E0 위 니블, dq4ch2frenol.FACE_LEFT)
-HELPER_CELL = (0, 1)           # 보이지 않는 도우미 인물: 맵 왼쪽 위 구석
-# FC 18/00 (00,00) 의 개(대화 2C4, 개가 따라올 때 촌장 장면에서 움직이는 인물). 이 롬은 그 연출 없이 빼 둔다
+FACE_LEFT, FACE_DOWN = 0x20, 0x40   # 인물 명령 2F(7E:31E0 위 니블: 88 위, 11 오른쪽, 44 아래, 22 왼쪽)
+NANNY = cell(0x06, 0x06)                                          # FC 05/01 슬롯 07 유모(대화 05F)
+# FC 유모 블록 05:$8EFE 의 길(실측): (06,06) → (06,08) → (04,08) 에서 아래를 보고, (04,09) 로 한 걸음 와서 03B0·03B1
+NANNY_PATH = (cell(0x06, 0x08), cell(0x04, 0x08), cell(0x04, 0x09))
+# 여우를 쫓은 뒤 들어오기: 입구별 도착 훅(dq4entrancehook, 2A:F28D 의 JML)보다 먼저 그룹 48 의 여우 마을 입구 블록
+# (FC 필드 (7C,34), DQ5 필드 칸 x 248~249·y 104~105)이면 FC 08:$AF52 처럼 처음부터 숲 어귀로 부른다. 그 밖은 원래 훅으로
+ENTER_SITE = 0x2AF28D
+ENTER_BACK = 0x2AF291          # 훅이 끝에 원래 두 명령(LDA $BC / CMP #$16)을 하고 돌아가는 곳
+FOX_GATE = (0x7C * 2, 0x34 * 2)
+FOX_GROUP = 0x48
+# FC 18/00 슬롯 06 마을의 개(대화 2C4, 맵 구석 (00,00)에 숨어 있음). 개 토마스가 따라올 때 주인공이 (14,13)에 서면
+# 02F1 뒤 따라 걷던 개 자리 (14,14)에 나타나 (14,0C)→(19,0C)→(19,02)→(0F,02)로 달린 뒤 촌장 옆 (0D,01)에 선다(실측)
 CORNER_DOG = cell(0x00, 0x00)
+DOG_TRIGGER = (0x14 * 2, 0x13 * 2 + 1, 0x14 * 2 + 1, 0x13 * 2 + 2)
+DOG_FROM = cell(0x14, 0x14)
+DOG_RUN = (cell(0x14, 0x0C), cell(0x19, 0x0C), cell(0x19, 0x02), cell(0x0F, 0x02))
+DOG_STAND = cell(0x0D, 0x01)
+DOG_SPEED = 0x02               # 인물 명령 1E(7E:3360). 빌린 레코드의 속도로는 걷기가 끝나지 않을 수 있다(dq4ch3lakanaba)
+# 3장 레이크나바 우리의 개(dq4ch3lakanaba.DOG) 그림을 쓴다
+KENNEL_DOG = ('3E/00', cell(0x1B, 0x04))
+# 둘째 유모(FC 05/01 레코드 15 (06,07), 대화 05F). FC 는 그 맵에 인물 슬롯 06~0C 일곱만 실어 이 사람은 나타나지 않는다(실측).
+# 이 롬은 다 실어 유모가 걷는 길을 막아 뺀다
+SECOND_NANNY = cell(0x06, 0x07)
 
 # 빌릴 인물 스크립트(dq4ch3slots B: 10:BEE5 칸 2·4~9). 칸마다 한 시간대에만 놓인다
 LIST = '10:BEE5'
 SCRIPTS = {'fox': (LIST, 2, '10:BEFA'), 'gaade': (LIST, 4, '10:BF14'), 'son': (LIST, 5, '10:BF27'),
-           'arrive': (LIST, 6, '10:BF45'), 'arrive_night': (LIST, 7, '10:BF63')}
+           'nanny': (LIST, 6, '10:BF45'), 'village_dog': (LIST, 7, '10:BF63'), 'village_dog_night': (LIST, 8, '10:BF81')}
 
 # 다리: FC 필드 0 의 블록 16(다리). FC 는 3장에서 $6286 bit4 가 꺼져 있으면 그 블록 정의를 00 17(속성 80, 막힘)로
 # 올린다(08:$808E, fc/dq4/docs/dq4-block-format.md). 이 롬은 그 칸들을 같은 512 갈래의 막힌 블록(암초: 물 위 바위)으로
@@ -212,15 +234,17 @@ MESSAGES = {
     'monica_trust': pages('모니카', '아버님께는 분명/좋은 생각이/있으실 거예요./아버님을 믿어요.'),                     # 0884
     'monica_thanks': pages('모니카', '사랑하는 릭과의/결혼을 허락받다니/마치 꿈만 같아요!',                             # 0885
                            '톨네코라고 했죠./진심으로/감사드려요.'),
+    # 여우 마을의 개(FC 18/00 슬롯 06): 달려가기 전 02F1, 말을 걸면 0663(같은 글)
+    'woof': say('멍멍멍!'),
 }
-TALKS = ('prince', 'king', 'son', 'chief', 'fox', 'monica')
+TALKS = ('prince', 'king', 'son', 'chief', 'fox', 'monica', 'dog')
 CALLS = {'give_prince_letter': ('give', PRINCE_LETTER), 'take_prince_letter': ('take', PRINCE_LETTER),
          'give_king_letter': ('give', KING_LETTER), 'take_king_letter': ('take', KING_LETTER),
          'take_wings': ('take', WINGS), 'give_armor': ('give', STEEL_ARMOR),
          'room': ('room', 0), 'fox_go': ('fox_go', 0), 'inn': ('inn', 0), 'jingle': ('jingle', 0)}
 ITEM_SONG = 0x2F               # 물건을 받는 징글(dq4ch2frenol.ITEM_SONG, 끝을 기다리는 곡)
 # 네이티브 가운데 코드가 아닌 이벤트 스크립트(dq4brkscan)
-DATA_ENTRIES = ('fox_event', 'inn_event', 'arrive_event')
+DATA_ENTRIES = ('fox_event', 'inn_event')
 # PHP 없이 JSL 로 시작하는 훅(원래 대상을 먼저 부름)
 CODE_ENTRIES = ('bridge_hook',)
 
@@ -277,18 +301,39 @@ def native(ctx):
     put('room', _room())
     put('fox_event', bytes((0xA0, *_al(at['fox_scene']))) + _warp(FOREST, FOREST_WAKE) + b'\xff')
     put('inn_event', bytes((0xA0, *_al(at['rest']))) + _warp(FOREST, FOREST_WAKE) + b'\xff')
-    put('arrive_event', _warp(FOREST, FOREST_ENTRY) + b'\xff')
     put('fox_go', dq4prologue._event_start(at['fox_event']))
     put('inn', dq4prologue._event_start(at['inn_event']))
-    put('arrive', dq4prologue._event_start(at['arrive_event']))
     put('jingle', ENTER + _fanfare(ITEM_SONG) + LEAVE)
     put('bridge_hook', _bridge_hook(SEA_FRAMES, BRIDGE_CELLS))
+    put('enter_hook', _enter_hook())
+    put('dog_trigger', dq4prologue._inside(*DOG_TRIGGER))
     return bytes(out), at
 
 
+def _entrance_hook_at():
+    import dq4groupbuild
+    return dq4groupbuild.ENTRANCE_HOOK_AT       # 그 루틴의 첫 이름표 enter(dq4entrancehook.code)
+
+
+def _enter_hook():
+    """2A:F28D 의 JML 이 오는 곳(어떤 M·X 폭이든). FOXED 이고 그룹 48 의 여우 마을 입구 블록에서 들면 $BD·$C1·$C2·$C3·
+    $198E 를 숲 어귀로 두고 원래 두 명령 뒤 2A:F291 로, 아니면 입구별 도착 훅으로."""
+    x, y = FOREST_ENTRY
+    g, n = (int(v, 16) for v in FOREST.split('/'))
+    a = Asm()(0x08, 0xE2, 0x20, lda(0x7E2190 + FOXED[0]), 0x29, FOXED[1]).br(BEQ, 'off')
+    a(0xA5, 0xBC, 0xC9, g).br(BNE, 'off')
+    a(0xC2, 0x20, 0xA5, 0xB6, 0x29, 0xFE, 0xFF, 0xC9, *FOX_GATE[0].to_bytes(2, 'little')).br(BNE, 'off8')
+    a(0xA5, 0xB8, 0x29, 0xFE, 0xFF, 0xC9, *FOX_GATE[1].to_bytes(2, 'little')).br(BNE, 'off8')
+    a(0xE2, 0x20, 0xA9, n, 0x85, 0xBD, 0xA9, x, 0x85, 0xC1, 0xA9, y, 0x85, 0xC2, 0xA9, 0x01, 0x85, 0xC3)
+    a(0xA9, 0x00, sta(0x7E198E), 0x28, 0xA5, 0xBC, 0xC9, 0x16, 0x5C, *_al(ENTER_BACK))
+    a.label('off8')(0xE2, 0x20).label('off')(0x28, 0x5C, *_al(_entrance_hook_at()))
+    return a.bytes()
+
+
 def hooks(ctx):
-    """필드를 불러올 때 FIELD_CALL 을 다리 훅으로(훅이 원래 대상을 먼저 부름)."""
-    return [(FIELD_CALL, bytes((0x22,)) + _al(SEA_FRAMES), bytes((0x22,)) + _al(ctx.at['bridge_hook']))]
+    """필드를 불러올 때 FIELD_CALL 을 다리 훅으로(훅이 원래 대상을 먼저 부름), 입구별 도착 훅 앞에 여우 마을 갈래."""
+    return [(FIELD_CALL, bytes((0x22,)) + _al(SEA_FRAMES), bytes((0x22,)) + _al(ctx.at['bridge_hook'])),
+            (ENTER_SITE, bytes((0x5C,)) + _al(_entrance_hook_at()), bytes((0x5C,)) + _al(ctx.at['enter_hook']))]
 
 
 # ---- 대화 ----
@@ -313,8 +358,7 @@ def talk_scripts(ctx):
                    [when(flag(LETTER1), [say_('prince_wait')],
                          [when(has(PRINCE_LETTER), [say_('prince_wait')],
                                [when(DAY, [when(flag(PRINCE_MET), [say_('prince_tip')],
-                                                [say_('prince_hello'), say_('nanny_stop'), say_('nanny_out'),
-                                                 on(PRINCE_MET), on(NANNY_SCOLDED)])],
+                                                [say_('prince_hello'), on(PRINCE_MET), on(NANNY_SCOLDED), on(NANNY_GO)])],
                                      [say_('prince_night'), *letter])])])])]
     king = [when(flag(LETTER2), [say_('king_after')],
                  [when(has(KING_LETTER), [call('take_king_letter'), say_('king_letter'), on(LETTER2)],
@@ -337,7 +381,8 @@ def talk_scripts(ctx):
     monica = [when(flag(LETTER2), [say_('monica_thanks')],
                    [when(flag(LETTER1), [say_('monica_trust')],
                          [when(has(PRINCE_LETTER), letter, [say_('monica_hello')])])])]
-    bodies = {'prince': prince, 'king': king, 'son': son, 'chief': chief, 'fox': fox, 'monica': monica}
+    bodies = {'prince': prince, 'king': king, 'son': son, 'chief': chief, 'fox': fox, 'monica': monica,
+              'dog': [say_('woof')]}
     return [bodies[name] for name in TALKS]
 
 
@@ -374,6 +419,7 @@ def scripts(ctx):
     at = ctx.at
     talk_here = ch2.native()[1]['talk_here']
     call = lambda a, **kw: _cmd('37', *_al(a), **kw)  # noqa: E731
+    poll = lambda a, **kw: _cmd('05', *_al(a), **kw)  # noqa: E731
     msg = lambda k: _cmd('21', *(ctx.msg[k].to_bytes(2, 'little') if ctx.msg else (0, 0)))  # noqa: E731
     gone = [_cmd('28', label='gone'), _cmd('52'), _cmd('16')]
     walk = lambda cells: [c for at in cells for c in (_cmd('13', *at), _cmd('14'))]  # noqa: E731
@@ -387,9 +433,17 @@ def scripts(ctx):
              _cmd('16'), *gone]
     # 감옥의 톰 아들: 날개를 받으면 깜박이며 사라진다(FC 는 그림이 위로 떠오른 뒤 빠짐, 1C 이벤트 06)
     son = [_if_on(SON_FREED, 'gone'), _wait_on(SON_FREED), _cmd('51'), _cmd('4F'), _cmd('52'), _cmd('16'), *gone]
-    # 여우를 쫓은 뒤에는 마을이 없다: 여우 마을에 들면(필드·ルーラ 모두 도착 칸) 곧바로 숲 어귀로
-    arrive = [_if_off(FOXED, 'end'), _cmd('3F'), call(at['arrive']), _cmd('16', label='end')]
-    bodies = {'fox': fox, 'gaade': gaade, 'son': son, 'arrive': arrive, 'arrive_night': list(arrive)}
+    # 유모(FC 15:$A509 가 깨우는 슬롯 07 블록): 왕자가 처음 말을 마치면 조작을 막고 걸어와 03B0, 한 걸음 더 와서 03B1 뒤
+    # 그 자리에 남는다(맵을 다시 부르면 제자리)
+    nanny = [_wait_on(NANNY_GO), _cmd('3F'), _cmd('1C'), *walk(NANNY_PATH[:-1]), _cmd('2F', FACE_DOWN),
+             *walk(NANNY_PATH[-1:]), msg('nanny_stop'), msg('nanny_out'), _cmd('40'), _cmd('16')]
+    # 마을의 개: 개가 따라오면 주인공이 (14,13)에 설 때 짖고 촌장 옆으로 달려간다(주인공 칸도 지나감). 따라 걷는 개를
+    # 숨기는 것은 개 따라 걷기 장치 몫
+    village_dog = [_cmd('28'), _cmd('52'), _cmd('1E', DOG_SPEED), _if_off(ch3.DOG, 'stay'), _if_on(FOXED, 'stay'),
+                   poll(at['dog_trigger']), _cmd('3F'),
+                   msg('woof'), _cmd('50', *DOG_FROM), _cmd('53'), _cmd('4F'), _cmd('1C'), *walk(DOG_RUN), _cmd('51'),
+                   _cmd('4F'), _cmd('50', *DOG_STAND), _cmd('53'), _cmd('4F'), _cmd('40'), _cmd('16', label='stay')]
+    bodies = {'nanny': nanny, 'village_dog': village_dog, 'village_dog_night': list(village_dog), 'fox': fox, 'gaade': gaade, 'son': son}
     return [{"address": SCRIPTS[name][2], "commands": bodies[name]} for name in SCRIPTS]
 
 
@@ -434,6 +488,7 @@ def npc_lists(lists, ctx):
         return [], []           # 인물 없이 옮긴 목록(dq4npcport.port 의 with_people=False)
     for time, c in PRINCE.items():
         ctx.retalk(lists, CASTLE, c, t['prince'], time=time)
+    _replace(lists[CASTLE]["entries"], 'day', NANNY, lambda e: _scripted(e, 'nanny'))
     ctx.retalk(lists, CASTLE, KING, t['king'])
     ctx.retalk(lists, FOX_TOWN, CHIEF, t['chief'])
     _replace(lists[PRISON]["entries"], 'day', SON, lambda e: _scripted(e, 'son', t['son']))
@@ -442,11 +497,21 @@ def npc_lists(lists, ctx):
     _replace(forest, 'day', GAADE, lambda e: _scripted(e, 'gaade'))
     town = lists[FOX_TOWN]["entries"]
     before = len(town)
-    town[:] = [e for e in town if _at(e) != CORNER_DOG]
-    if before - len(town) != 2:
-        raise SystemExit(f'{FOX_TOWN} {CORNER_DOG}: 뺄 개(낮·밤)가 {before - len(town)}명')
-    town[:0] = [_person('arrive', 'day', HELPER_CELL, 'down', t['chief'], 0),
-                _person('arrive_night', 'night', HELPER_CELL, 'down', t['chief'], 0)]
+    gfx = next((e["fields"]["gfx"] for e in lists.get(KENNEL_DOG[0], {"entries": []})["entries"]
+                if _at(e) == KENNEL_DOG[1]), None)
+    for k, e in enumerate(town):
+        if _at(e) == CORNER_DOG:
+            e = _scripted(e, 'village_dog' if e["time"] == 'day' else 'village_dog_night', t['dog'])
+            if gfx is not None:
+                e["fields"]["gfx"] = gfx
+            town[k] = e
+    if sum(_at(e) == CORNER_DOG for e in town) != 2 or before != len(town):
+        raise SystemExit(f'{FOX_TOWN} {CORNER_DOG}: 마을의 개(낮·밤)가 둘이 아님')
+    castle = lists[CASTLE]["entries"]
+    n = len(castle)
+    castle[:] = [e for e in castle if not (e["time"] == 'day' and _at(e) == SECOND_NANNY)]
+    if n - len(castle) != 1:
+        raise SystemExit(f'{CASTLE} {SECOND_NANNY}: 뺄 둘째 유모가 {n - len(castle)}명')
     return [], []
 
 
@@ -456,8 +521,9 @@ def monica_talk(first_talk=None):
 
 
 def absent(ctx=None):
-    """{(맵, DQ5 셀 x, y, 밤)}: 처음 상태 목록에서 뺀 인물과 장면 밖에서 숨는 여우."""
-    return {(FOX_TOWN, *CORNER_DOG, night) for night in (False, True)} | {(FOREST, *FOX, False)}
+    """{(맵, DQ5 셀 x, y, 밤)}: 처음 상태 목록에서 뺀 둘째 유모와 숨어 있는 마을의 개·여우."""
+    return ({(FOX_TOWN, *CORNER_DOG, night) for night in (False, True)} | {(FOREST, *FOX, False)} |
+            {(CASTLE, *SECOND_NANNY, False)})
 
 
 FC_PRINCE, FC_KING, FC_SON, FC_CHIEF, FC_MONICA = 0x061, 0x06B, 0x065, 0x05E, 0x03A

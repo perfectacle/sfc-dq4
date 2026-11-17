@@ -111,8 +111,18 @@ class BridgeTest(unittest.TestCase):
     def test_cells_are_the_fc_bridges(self):
         self.assertEqual(bm.bridge_cells(DQ4), self.CELLS)
 
+    def test_enter_hook_goes_before_the_entrance_hook(self):
+        (site, orig, new), = [h for h in bm.hooks(_ctx()) if h[0] == bm.ENTER_SITE]
+        import dq4groupbuild
+        self.assertEqual(orig, bytes((0x5C, *dq4groupbuild.ENTRANCE_HOOK_AT.to_bytes(3, 'little'))))
+        code = bm._enter_hook()
+        self.assertEqual(code[0], 0x08)
+        self.assertEqual(code[-4:], orig)                     # 아니면 원래 훅으로
+        back = bytes((0xA5, 0xBC, 0xC9, 0x16, 0x5C, *bm.ENTER_BACK.to_bytes(3, 'little')))
+        self.assertIn(back, code)                              # 여우 마을이면 훅이 하던 끝맺음
+
     def test_hook_replaces_the_sea_call(self):
-        (site, orig, new), = bm.hooks(_ctx())
+        (site, orig, new), = [h for h in bm.hooks(_ctx()) if h[0] == bm.FIELD_CALL]
         self.assertEqual(site, bm.FIELD_CALL)
         self.assertEqual(orig, bytes((0x22, *bm.SEA_FRAMES.to_bytes(3, 'little'))))
         self.assertEqual(new, bytes((0x22, *_ctx().at['bridge_hook'].to_bytes(3, 'little'))))
@@ -216,7 +226,8 @@ def _lists():
                 "fields": {"x": x, "y": y, "facing": "down", "talk": talk, "gfx": 1, "layer": 0, "interval": 0}}
     return {
         bm.CASTLE: {"map": bm.CASTLE, "entries": [person(*bm.PRINCE['day']), person(*bm.PRINCE['night'], 'night'),
-                                                   person(*bm.KING), person(*bm.KING, 'night')]},
+                                                   person(*bm.KING), person(*bm.KING, 'night'), person(*bm.NANNY),
+                                                   person(*bm.SECOND_NANNY)]},
         bm.PRISON: {"map": bm.PRISON, "entries": [person(*bm.SON)]},
         bm.FOX_TOWN: {"map": bm.FOX_TOWN, "entries": [person(*bm.CORNER_DOG), person(*bm.CORNER_DOG, 'night'),
                                                        person(*bm.CHIEF), person(*bm.CHIEF, 'night')]},
@@ -232,14 +243,15 @@ class ListTest(unittest.TestCase):
         new, over = bm.npc_lists(lists, ctx)
         t = ctx.talk
         castle = lists[bm.CASTLE]["entries"]
-        self.assertEqual([e["fields"]["talk"] for e in castle], [t['prince'], t['prince'], t['king'], t['king']])
+        self.assertEqual([e["fields"]["talk"] for e in castle], [t['prince'], t['prince'], t['king'], t['king'], 1])
+        self.assertEqual(castle[-1]["from"], bm._src('nanny'))
+        self.assertNotIn(bm.SECOND_NANNY, [bm._at(e) for e in castle])
         son = lists[bm.PRISON]["entries"][0]
         self.assertEqual(son["from"], bm._src('son'))
         town = lists[bm.FOX_TOWN]["entries"]
-        # 구석의 개(옮긴 인물) 둘이 빠지고, 같은 구석에 보이지 않는 도우미 둘(빌린 스크립트)이 든다
-        self.assertEqual([e["from"] for e in town if bm._at(e) == bm.CORNER_DOG],
-                         [bm._src('arrive'), bm._src('arrive_night')])
-        self.assertEqual([e["from"] for e in town[:2]], [bm._src('arrive'), bm._src('arrive_night')])
+        dogs = [e for e in town if bm._at(e) == bm.CORNER_DOG]
+        self.assertEqual([(e["from"], e["fields"]["talk"]) for e in dogs],
+                         [(bm._src('village_dog'), t['dog']), (bm._src('village_dog_night'), t['dog'])])
         forest = lists[bm.FOREST]["entries"]
         self.assertEqual([e["from"] for e in forest], [bm._src('fox'), bm._src('gaade')])
         self.assertEqual((new, over), ([], []))
@@ -253,9 +265,9 @@ class ListTest(unittest.TestCase):
     def test_lists_without_people_are_left_alone(self):
         self.assertEqual(bm.npc_lists({}, _ctx()), ([], []))
 
-    def test_absent_are_the_removed_dog_and_the_hidden_fox(self):
+    def test_absent_are_the_second_nanny_and_the_hidden_dog_and_fox(self):
         self.assertEqual(bm.absent(), {(bm.FOX_TOWN, *bm.CORNER_DOG, False), (bm.FOX_TOWN, *bm.CORNER_DOG, True),
-                                       (bm.FOREST, *bm.FOX, False)})
+                                       (bm.FOREST, *bm.FOX, False), (bm.CASTLE, *bm.SECOND_NANNY, False)})
         self.assertLessEqual(bm.absent(), ev.absent())
 
     def test_start_messages_are_module_messages(self):
@@ -288,6 +300,12 @@ class BuiltRomTest(unittest.TestCase):
         w = lorom(0x019FD6)
         self.assertEqual(self.rom[w], 0x22)
         self.assertNotEqual(int.from_bytes(self.rom[w + 1:w + 4], 'little'), hook)
+
+    def test_entrance_goes_through_the_fox_forest_hook(self):
+        o = lorom(bm.ENTER_SITE)
+        self.assertEqual(self.rom[o:o + 4], bytes((0x5C, *self.ctx.at['enter_hook'].to_bytes(3, 'little'))))
+        code = bm._enter_hook()
+        self.assertEqual(code[-4:], bytes((0x5C, *bm._entrance_hook_at().to_bytes(3, 'little'))))
 
     def test_native_is_in_place(self):
         code, _ = bm.native(self.ctx)

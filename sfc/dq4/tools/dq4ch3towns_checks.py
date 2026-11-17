@@ -57,7 +57,9 @@ YES_A = 'a:8;wait:60'
 NO = 'wait:60;down:8;wait:40;a:8;wait:60'
 # 본몰 왕자 낮 자리(FC (01,0B))의 오른쪽 셀과 유모(FC (06,07)) 아래 셀. 왕자 방은 FC 열 06 의 줄 09 가 벽이라 열 04 로 오른다
 PRINCE_RIGHT = W.cell(0x02, 0x0B)
-NANNY_BELOW = W.cell(0x06, 0x08)
+# 쫓겨난 방문의 유모는 FC (04,09)까지 걸어와 선다(본몰 모듈)
+NANNY_BELOW = W.cell(0x04, 0x0A)
+PRINCE_HOLD = '7E3308=00'
 
 SEGMENTS = [
     # 격투장 맞은편에서 코인 100
@@ -95,12 +97,13 @@ SEGMENTS = [
     # npccheck 상태 towns_prince
     ('towns_prince_side', 'warp', f'{W.BONMALMO},{PRINCE_RIGHT[0]},{PRINCE_RIGHT[1] - 1}',
      # 앞 묶음들이 켠 편지·왕자 flag 를 끈다(왕자가 첫 만남 갈래로 가게)
-     {'map': W.BONMALMO, 'poke': f'{wc.DAY};{HOLD}',
+     # 붙든 이동 간격은 상태에 남는다. 유모가 걸어와야 해서 낮 왕자(인물 칸 4)만 붙든다
+     {'map': W.BONMALMO, 'poke': f'{wc.DAY};{PRINCE_HOLD}',
       'set': f'{0x2190 + W.PRINCE_MET[0]:04X}&{~(W.PRINCE_MET[1] | W.LETTER1[1] | 0x20) & 0xFF:02X}'}),
     ('towns_nanny_scolded', 'walk',
-     f'{wc.talk("left", 10)};wait:200;{W.cell(0x04, 0x0B)[0]},{PRINCE_RIGHT[1]};{W.cell(0x04, 0x08)[0]},{NANNY_BELOW[1]};'
-     f'{NANNY_BELOW[0]},{NANNY_BELOW[1]};{wc.talk("up", 4)}',
-     {'map': W.BONMALMO, 'cell': NANNY_BELOW, 'want': ['TOWNS_SCOLDED'], 'poke': f'{wc.DAY};{HOLD}'}),
+     f'{wc.talk("left", 10)};wait:200;{NANNY_BELOW[0]},{PRINCE_RIGHT[1]};{NANNY_BELOW[0]},{NANNY_BELOW[1]};'
+     f'{wc.talk("up", 4)}',
+     {'map': W.BONMALMO, 'cell': NANNY_BELOW, 'want': ['TOWNS_SCOLDED'], 'poke': f'{wc.DAY};{PRINCE_HOLD}'}),
 
     # 본몰 감옥 병사(FC 05/00 (0A,0E), 대화 066): 말한 뒤 성 05/01 (19,02)로
     ('towns_jail_side', 'warp', _below(W.PRISON, (0x0A, 0x0E)),
