@@ -412,14 +412,17 @@ def run(mesence, rom, script, dest, env, timeout, readset=False):
         try:
             p = mesen.run(mesence, rom, script, cwd=dest, env=full, stdout=log, stderr=subprocess.STDOUT,
                           timeout=timeout, check=False)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as e:
             # 캐시 없는 실행은 출력으로 판정해 왔다(시간 제한이 장면의 끝인 스크립트가 있을 수 있음)
-            return RunFailure(f'{timeout}초 안에 끝나지 않음')
+            why = RunFailure(f'시간 초과: {timeout}초 안에 끝나지 않음({mesen.timeout_detail(e, dest / "mesen.log")})')
+            why.timed_out = True
+            return why
     return RunFailure(f'종료 코드 {p.returncode}') if p.returncode else None
 
 
 class RunFailure(str):
-    """실행이 끝까지 가지 못한 까닭. timed_out 이면 읽은 바이트 캐시로 돈 실행이 시간 제한에 걸렸다."""
+    """실행이 끝까지 가지 못한 까닭. timed_out 이면 시간 제한에 걸린 실행이고, 글은 「시간 초과:」 로 시작해 결과가 틀린
+    실패와 로그에서 갈린다."""
     timed_out = False
 
 
@@ -429,7 +432,7 @@ def run_failure(info, timeout):
     if info.get('cached'):
         return None
     if info.get('timed_out'):
-        why = RunFailure(f'{timeout}초 안에 끝나지 않음')
+        why = RunFailure(f'시간 초과: {timeout}초 안에 끝나지 않음({info.get("timeout_detail") or "까닭 기록 없음"})')
         why.timed_out = True
         return why
     rc = info.get('returncode')
