@@ -138,7 +138,9 @@ class ListTest(unittest.TestCase):
         for m in W.ENDOR_MAPS:
             self.assertEqual(lists[m], base[m])
         m, t_, fc = W.EMPTY_SHOP
-        self.assertNotIn((t_, W.cell(*fc)), {(e["time"], (e["fields"]["x"], e["fields"]["y"])) for e in lists[m]["entries"]})
+        # 빼지 않고 말만 바꾼다(그림 배치가 바뀌지 않게)
+        shop = [e for e in lists[m]["entries"] if (e["time"], (e["fields"]["x"], e["fields"]["y"])) == (t_, W.cell(*fc))]
+        self.assertEqual([e["fields"]["talk"] for e in shop], [t['empty_shop']])
         ryan = names['ch3_towns_4001']["entries"]
         self.assertEqual({e["time"] for e in ryan}, {'day', 'night'})
         self.assertTrue(all(e["fields"]["talk"] == t['ryan'] for e in ryan))
@@ -159,7 +161,7 @@ class ListTest(unittest.TestCase):
     def test_absent_and_start_tables_cover_the_changed_people(self):
         c = ctx()
         gone = W.absent(c)
-        self.assertEqual(len(gone), 2 * len(W.CASINO_PEOPLE) + 3 + 1)
+        self.assertEqual(len(gone), 2 * len(W.CASINO_PEOPLE) + 3)
         start = W.start_messages(c)
         for (m, time, fc) in (*W.RETALK, *W.ENDOR):
             key = (m, W.cell(*fc), None if time is None else time == 'night')

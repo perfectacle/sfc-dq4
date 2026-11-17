@@ -230,6 +230,8 @@ MESSAGES = {
     'sky_sword': say('그 옛날 천공의 검이라는 것이 있었다더군.',                             # 067E
                      '그 검을 손에 넣은 자는 하늘에 오를 수 있었다지.'),
     'king_meets_all': say('우리 임금님께서는 신분을 가리지 않고 누구든 만나 주신다. 실례가 없도록 하라.'),  # 067D
+    # 레이크나바 집 맨 윗줄의 빈 가게 사람: 그 앞 칸 (10,01)의 FC 빈 사람(대화 008, 02F0)과 같은 말
+    'empty_shop': say('그 방향에는 아무도 없다.'),
     'statue_ask': say('오, 당신도 상인이군요? 그럼 당신도 은의 여신상을 손에 넣으려고?'),     # 0858
     'statue_me_too': say('실은 저도 그렇답니다. 분명 비싸게 팔리겠지요.'),                    # 0859
     'statue_oops': say('아이고, 그러셨군요…… 방금 한 말은 못 들은 걸로 해 주세요. 와하하핫.'),  # 085A
@@ -243,7 +245,7 @@ def _not(cond):
 # 메시지 하나만 띄우는 대화(엔돌 3장 목록의 사람). 이름이 곧 MESSAGES 의 이름
 SIMPLE = ('profit', 'clouds', 'monsters_back', 'tournament_over', 'shop_permit', 'emperor_rumor', 'ryan', 'keep_out',
           'arena_closed', 'pizarro_gone', 'emperor_rumor2', 'hero_rumor', 'kitchen', 'gaade_bridges', 'pizarro_fan',
-          'sky_sword', 'king_meets_all')
+          'sky_sword', 'king_meets_all', 'empty_shop')
 TALKS = ('safe_man', 'nun', 'warrior', 'neighbor', 'prisoner', 'castle_man', 'bridge', 'jail',
          'armor_buyer', 'gate', 'drunk', 'statue_merchant') + SIMPLE
 
@@ -289,7 +291,8 @@ RETALK = {
 }
 
 # FC 16/01 맨 윗줄 (10,00)의 서비스 3 인물(대화 003). 16/01 에는 가게 목록이 없어 옮기면 「＜なにもない＞」 만 낸다.
-# 사건과 상관없는 사람이라 목록에서 뺀다
+# 사건과 상관없는 사람이라 앞 칸의 빈 사람과 같은 말로 바꾼다. 목록에서 빼면 안 된다: 3E 그룹에서 그림 36 을 쓰는 유일한
+# 사람이라, 빼면 dq4people 이 그림마다 나오는 그룹으로 푸는 줄·색 칸 배치가 달라져 1장 화면의 인물 그림까지 바뀌었다
 EMPTY_SHOP = (HOUSE, 'day', (0x10, 0x00))
 
 ENDOR_TOWN, CASINO, ENDOR_HALL, KITCHEN, THRONE, ARENA, INN = '40/00', '40/01', '40/02', '40/05', '40/06', '40/07', '40/0B'
@@ -387,15 +390,16 @@ def npc_lists(lists, ctx):
     t = ctx.talk
     for (m, time, fc), name in RETALK.items():
         ctx.retalk(lists, m, cell(*fc), t[name], time=time)
-    # 첫머리 목록(dq4ch3event 가 기본 목록을 베낀 ch3_opening)에서도 뺀다. 제자리에서 고친다: dq4ch3event 가 이 뒤에
-    # 그 목록 객체의 첫머리 네네 대화를 바꾼다
+    # 첫머리 목록(dq4ch3event 가 기본 목록을 베낀 ch3_opening)의 같은 사람도
     m, time, fc = EMPTY_SHOP
     for lst in (lists[m], *_ch3_lists(m, ctx)):
-        entries = lst["entries"]
-        kept = [e for e in entries if (e["time"], _at(e)) != (time, cell(*fc))]
-        if len(kept) != len(entries) - 1:
-            raise SystemExit(f'마을 사람: {m} {fc} 의 빈 가게 사람이 {len(entries) - len(kept)}명')
-        entries[:] = kept
+        hit = 0
+        for e in lst["entries"]:
+            if (e["time"], _at(e)) == (time, cell(*fc)):
+                e["fields"] = {**e["fields"], "talk": t['empty_shop']}
+                hit += 1
+        if hit != 1:
+            raise SystemExit(f'마을 사람: {m} {fc} 의 빈 가게 사람이 {hit}명')
     new, over = [], []
 
     def on(m, name):
@@ -415,9 +419,8 @@ def npc_lists(lists, ctx):
 
 
 def absent(ctx=None):
-    """{(맵, DQ5 셀 x, y, 밤)}: 3장 동안 목록에 없는 기본 목록의 사람(닫힌 카지노, 성 1층의 셋, 레이크나바 집의 빈 가게)."""
+    """{(맵, DQ5 셀 x, y, 밤)}: 3장 동안 목록에 없는 기본 목록의 사람(닫힌 카지노, 성 1층의 셋)."""
     out = {(CASINO, *cell(*fc), night) for fc in CASINO_PEOPLE for night in (False, True)}
-    out.add((EMPTY_SHOP[0], *cell(*EMPTY_SHOP[2]), False))
     out |= {(m, *cell(*fc), t == 'night') for m, gone in ENDOR_GONE.items() for t, fc in gone}
     return out
 
@@ -430,7 +433,7 @@ def start_messages(ctx):
              'jail': 'jail_hint', 'armor_buyer': 'armor_ask', 'gate': 'gate_ask', 'drunk': 'drunk_ask',
              'statue_merchant': 'statue_ask', **{n: n for n in SIMPLE}}
     out = {}
-    for (mp, time, fc), name in (*RETALK.items(), *ENDOR.items()):
+    for (mp, time, fc), name in (*RETALK.items(), *ENDOR.items(), (EMPTY_SHOP, 'empty_shop')):
         if name == 'safe_man':
             out[(mp, cell(*fc), False)] = m['safe_ask']
             out[(mp, cell(*fc), True)] = m['safe_night']

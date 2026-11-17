@@ -3373,6 +3373,8 @@ paths = [
   "sfc/dq4/tools/dq4environmentmap.py",
   "sfc/dq4/tools/dq4environmentrom.py",
   "sfc/dq4/tools/dq4people.py",
+  # 3장 사건·마을 사람 모듈이 인물을 더하고 빼면 dq4people 의 그림 배치가 바뀌어 1장 화면 인물이 달라질 수 있다
+  "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4windowtext.py",
   "sfc/dq4/tools/dq4titleanimation.py",
   "sfc/dq4/tools/dq4titleassets.py",
