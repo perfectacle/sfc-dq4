@@ -1,0 +1,54 @@
+# 3장 북쪽 동굴·금고·여신상 동굴 배(dq4ch3safe) 사건 모듈의 검사. 형식은 tools/guards.py(트랙 sfc/dq4 의 조각), 규칙은 guards 스킬
+
+[[check]]
+name = "dq4-ch3-safe"
+why = "3장 북쪽 동굴 금고: 전멸하면 3장에서 일행 소지품에 철 금고가 있을 때만 금화를 잃지 않는다(FC 12:$ADC2, 맡긴 물건은 보지 않음). 20:8162 의 반 나누기 훅(dq4ch3safe)이 빠지거나 다른 장·맡긴 물건에서도 걸리면 깨진다. 단추·물살·물 빠진 층 계단·금고 상자·되돌리기는 dq4-ch3-walk·dq4-ch3-heroblock 이 본다"
+paths = [
+  "@ch3-modules",
+  "sfc/dq4/tools/dq4ch3safecheck.py",
+  "sfc/dq4/tools/dq4itemport.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4wellresetcheck.py",
+  "sfc/dq4/tools/dq4dungeonencountercheck.py",
+  "sfc/dq4/tools/dq4groupcheck.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4readset.py",
+  "sfc/dq4/tools/lua/dq4readset.lua",
+  "sfc/dq5/tools/lua/dq5warptrace.lua",
+  "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/dq5progresscheck.py",
+  "sfc/dq5/tools/lua/dq5battle.lua",
+  "sfc/dq5/tools/lua/dq5cdldump.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
+  "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3safe && uv run --locked python sfc/dq4/tools/dq4ch3safecheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3safe"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
+name = "dq4-ch3-raft"
+why = "3장 여신상 동굴 배(dq4raft): 탄 채 걸음 전투를 하고 돌아와도 배에 탄 채 물 칸을 지나간다(48/02·48/06). 단추 전 48/02 의 쉬는 배가 물 BG 위(OAM 우선순위 3)에 보이고 단추 뒤에는 치워진다. 배 인물의 33A0 우선순위 고정이 빠지면 배가 물 뒤에 숨는다. 전투 뒤 맵을 다시 그리는 길에서 탐 flag·물 칸 표시(셀 +1 bit1)·배 자리가 지워지면 깨진다. 타기·넘어가기·내리기·여신상은 dq4-ch3-walk 의 raft_* 구간, 배 칸 밖 물로 못 걷는 것은 dq4-ch3-heroblock 의 raft-* 사례가 본다"
+paths = [
+  "@ch3-modules",
+  "sfc/dq4/tools/dq4raftcheck.py",
+  "sfc/dq4/tools/lua/dq4raftview.lua",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4windowcheck.py",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq4/tools/dq4battlecheck.py",
+  "sfc/dq4/tools/lua/dq4battle.lua",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3raft && uv run --locked python sfc/dq4/tools/dq4raftcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3raft"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]

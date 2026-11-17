@@ -2,6 +2,7 @@ import unittest
 
 import dq4build
 import dq4guardpaths as gp
+from dq4guardpaths import guards
 
 
 class GuardPathsTest(unittest.TestCase):
@@ -10,23 +11,53 @@ class GuardPathsTest(unittest.TestCase):
         Lua, asar 에 넣는 asm, dq4build 단계)로 닿는 저장소 파일을 덮고, 묶음은 그 뿌리에서 닿는 파일을 덮는다.
         빠진 것은 `uv run --locked python sfc/dq4/tools/dq4guardpaths.py` 가 찍는다."""
         checks, groups = gp.load()
-        self.assertEqual(set(groups), set(gp.GROUP_ROOTS), '[groups] 의 묶음마다 dq4guardpaths.GROUP_ROOTS 에 뿌리를 적는다')
+        used = {g for c in checks for g in c.get('groups', [])}
+        self.assertEqual(used - set(gp.LISTED_GROUPS), set(gp.GROUP_ROOTS),
+                         'groups 키로 쓰는 묶음마다 dq4guardpaths.GROUP_ROOTS 에 뿌리를 적는다')
         by_check, by_group = gp.missing(checks, groups)
         self.assertEqual(by_group, {})
         self.assertEqual(by_check, {})
 
-    def test_ch3_content_checks_list_module_files(self):
+    def test_ch3_modules_are_caught_without_touching_guards(self):
         """3장 사건 모듈은 빌드가 importlib 로 들여 묶음(ch1-build)으로만 덮이고, 묶음은 PR 에서 검사를 걸지 않는다. 그래서
-        dq4-ch3-* 와 CH3_CONTENT_CHECKS 는 모듈 파일(모듈만 닿는 dq4boulder 등 포함)을, dq4-ch3-* 는 3장 맵·인물 목록
+        모듈이 싣는 롬 내용을 보는 검사(dq4-ch3-* 와 CH3_CONTENT_CHECKS)는 paths 에 "@ch3-modules" 를, 모듈 _checks 표를
+        거쳐 import 로만 닿는 검사는 groups 키에 적고, 그 묶음은 ch3_module_files 와 같다. 새 모듈 파일은 glob 에 들어
+        가드 목록을 고치지 않아도 걸리고, 검사 도구·검사 표는 들지 않는다. dq4-ch3-* 는 3장 맵·인물 목록
         파일도 paths 에 직접 적는다. 빠진 것은 `dq4guardpaths.py` 가 찍는다."""
         mods = gp.ch3_module_files()
         self.assertIn('sfc/dq4/tools/dq4ch3safe.py', mods)
         self.assertIn('sfc/dq4/tools/dq4boulder.py', mods)
         self.assertNotIn('sfc/dq4/tools/dq4chapter1.py', mods)
+        _, groups = gp.load()
+        self.assertEqual(guards.group_paths(groups['ch3-modules'], sorted(gp.tracked())), mods)
+        for f in ('dq4ch3newmod.py',):
+            self.assertTrue(guards.group_match(groups['ch3-modules'], f'sfc/dq4/tools/{f}'), f)
+        for f in ('dq4ch3newmodcheck.py', 'dq4ch3newmod_checks.py', 'dq4ch3walkcheck.py', 'dq4ch3checks.py'):
+            self.assertFalse(guards.group_match(groups['ch3-modules'], f'sfc/dq4/tools/{f}'), f)
         checks, _ = gp.load()
         names = {c['name'] for c in checks}
         self.assertLessEqual(set(gp.CH3_CONTENT_CHECKS), names)
+        raw = gp.raw_paths()
+
+        def catches(name, f):
+            return any(guards.group_match(groups[p[1:]], f) if p.startswith('@') else guards.matches(f, p)
+                       for p in raw[name])
+        for c in checks:
+            if c['name'].startswith('dq4-ch3-') or c['name'] in gp.CH3_CONTENT_CHECKS:
+                self.assertTrue(catches(c['name'], 'sfc/dq4/tools/dq4ch3newmod.py'), c['name'])
         self.assertEqual(gp.ch3_missing(checks), {})
+        # 모듈 _checks 표를 모으는 dq4ch3checks 에 닿는 검사는 새 모듈의 표와 모듈도 paths 나 groups 키 묶음으로 덮는다
+        self.assertIn('sfc/dq4/tools/dq4ch3safe_checks.py', gp.closure(['sfc/dq4/tools/dq4ch3walkcheck.py']))
+        reach = 0
+        for c in checks:
+            if 'sfc/dq4/tools/dq4ch3checks.py' not in gp.closure(gp.entries(c['run'])):
+                continue
+            reach += 1
+            for f in ('dq4ch3newmod.py', 'dq4ch3newmod_checks.py'):
+                f = f'sfc/dq4/tools/{f}'
+                self.assertTrue(catches(c['name'], f) or any(guards.group_match(groups[g], f) for g in c.get('groups', [])),
+                                (c['name'], f))
+        self.assertGreater(reach, 10)
 
     def test_closure_follows_every_kind_of_reach(self):
         """뿌리에서 닿는 길: 함수 안 import(dq4ch1walkcheck → dq4readset), 저장소 tools/ 모듈(headless_slots),
