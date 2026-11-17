@@ -73,7 +73,7 @@ class MessageTests(unittest.TestCase):
     def test_speech_has_no_narration_and_pages_restart_narration(self):
         # 대사는 엔진이 ＊「 를 붙이게 {1006} 없이, 서술은 쪽마다 {1006} 으로 연다
         self.assertNotIn(sysmsg.NARR, sysmsg.TEXTS[0x002])
-        self.assertEqual(sysmsg.TEXTS[0x07E].count(sysmsg.PAGE), 1)
+        self.assertEqual(sysmsg.TEXTS[0x082].count(sysmsg.PAGE), 1)
         narr = sysmsg.message('가|나')
         self.assertEqual(narr[:2], [sysmsg.NARR, '가'])
         self.assertEqual(narr[2:5], [sysmsg.PAGE, sysmsg.NARR, '나'])
