@@ -761,6 +761,8 @@ paths = [
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
   "tools/mesence_settings.py",
+  # 3장 사건 모듈은 기본 인물 목록(2장에도 쓰임)의 대화 번호를 바꿀 수 있다
+  "sfc/dq4/tools/dq4ch3*.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/ch2talk && uv run --locked python sfc/dq4/tools/dq4ch2partytalkcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/ch2talk"
 parts = 6
