@@ -19,6 +19,8 @@ NDS 시트(자원 저장소 nds/dq4/chr/field/hNNN.png)는 방향마다 24x32 �
 
   python sfc/dq4/tools/dq4people.py --base work/ch1/dq4-ch1-sound.sfc --assets "$DQ4_ASSETS" --out work/ch1/dq4-ch1-full.sfc
   python sfc/dq4/tools/dq4people.py --plan --assets "$DQ4_ASSETS"     인물마다 타일 수·한도·팔레트 줄
+  python sfc/dq4/tools/dq4people.py --pin --base work/ch1/dq4-ch1-sound.sfc --assets "$DQ4_ASSETS"
+                                                                       배치 표(people-pin.toml)에 새 인물을 더함
 """
 import argparse
 import json
@@ -26,8 +28,10 @@ import math
 import subprocess
 import sys
 import tempfile
+import tomllib
 from collections import Counter, defaultdict
 from pathlib import Path
+from typing import NamedTuple
 
 from PIL import Image
 
@@ -99,11 +103,8 @@ DEGRADE = (
 class Person:
     def __init__(self, pictures, group, sheet, role, anim='legs', main=False, palette=None, new_set=None, spare=None,
                  allow=None, outline=False, flag=None, leader=False, seen=None, face=False, weight=None, glasses=False, brows=False, copy=None, touch=None, whites=(),
-                 line=None, wave=0, recolor=None):
+                 line=None, recolor=None):
         self.pictures, self.group, self.sheet, self.role = pictures, group, sheet, role
-        # wave: 줄·칸을 정하는 차례. 앞 차례 인물의 줄과 색 칸을 못박은 뒤에 배치한다(뒤에 더한 인물이 이미 정한
-        # 인물의 색을 흔들지 않게)
-        self.wave = wave
         # recolor: {줄인 그림의 색: 바꿀 색}. 공용 줄에서 살색 칸에 합쳐져 버리는 옷 색을 그 인물이 이미 쓰는 다른
         # 색으로 옮긴다(NDS 색을 따르지 않는 대신 옷이 몸과 갈린다)
         self.recolor = recolor or {}
@@ -248,28 +249,28 @@ PEOPLE = (
     Person((0x26,), None, 'h048', '말', anim='frames', spare=0x5E),
     # 3·4장 그룹(3E~44)과 5장 첫 지역(46·47)의 인물. 그림 21 은 FC 그림 3B(몬바바라의 파논), 36 은 FC 4D(토르네코),
     # 6E 는 FC 46(킹 레오 성 왕좌의 발자크)
-    Person((0x0A,), None, 'h027', '바니걸', wave=1),
+    Person((0x0A,), None, 'h027', '바니걸'),
     # 옆모습에서 세워 든 검: NDS 는 흰 날 두 칸 폭인데 줄이면 날이 빠지고 윤곽만 남아 검은 막대가 된다. 윤곽
     # 안쪽 한 줄을 흰 날로 둔다
-    Person((0x0D,), None, 'h020', '여전사', wave=1,
+    Person((0x0D,), None, 'h020', '여전사',
            touch={'left': [(1, y, 'white') for y in range(5, 13)], 'right': [(13, y, 'white') for y in range(4, 12)] + [(13, 12, (1, 10))]}),   # 날 아래 칸은 코등이(방패의 노랑)
     # 무희·파논은 가볍게 세면 빨간 옷이 마을 사람의 갈색 칸에 합쳐진다(색 거리 18.6·23.3). 줄 3: 줄마다 넣어
     # 본 결과 둘 다 가장 덜 벗어나고, 같은 맵의 앞 차례 인물도 덜 민다
-    Person((0x28,), None, 'h026', '무희', wave=1, weight=KEY_WEIGHT, line=3),
-    Person((0x21,), None, 'h134', '파논', wave=1, weight=KEY_WEIGHT, line=3),
-    Person((0x36,), None, 'h118', '토르네코', main=True, wave=1),
+    Person((0x28,), None, 'h026', '무희', weight=KEY_WEIGHT, line=3),
+    Person((0x21,), None, 'h134', '파논', weight=KEY_WEIGHT, line=3),
+    Person((0x36,), None, 'h118', '토르네코', main=True),
     # 46타일인데 세트 38 은 32타일이고 그만큼 큰 빈 세트가 없다. 왕좌에 서 있기만 하므로 걸음을 줄여 맞춘다
     # 줄 0: 줄 4 가 몸의 보라에 가장 가깝지만 같은 성의 대신·노인 색을 민다(줄마다 넣어 본 결과)
-    Person((0x6E,), None, 'h156', '발자크', anim='frames', main=True, wave=1, line=0,
+    Person((0x6E,), None, 'h156', '발자크', anim='frames', main=True, line=0,
            allow=tuple(n for n, _ in DEGRADE)),
     # 이름 있는 인물(dq4npcport.NDS_LOOKS 가 맵과 대사로 고른 그림). 쓰지 않는 그림 번호의 세트에 싣는다
     # 네네·포포로·마냐는 가볍게 세면 옷 색이 마을 사람 칸에 합쳐진다(색 거리 22.6·15.7·21.7). 줄은 줄마다 넣어 본
     # 결과 서로와 앞 차례 인물을 가장 덜 미는 조합이다
-    Person((0x22,), None, 'h139', '네네', wave=1, weight=KEY_WEIGHT, line=2),
-    Person((0x95,), None, 'h140', '포포로', wave=1, weight=KEY_WEIGHT, line=2),
+    Person((0x22,), None, 'h139', '네네', weight=KEY_WEIGHT, line=2),
+    Person((0x95,), None, 'h140', '포포로', weight=KEY_WEIGHT, line=2),
     # 앞모습의 눈이 흰자 한 칸씩만 남고 눈동자가 빠진다(NDS 는 흰자 안에 한 칸 눈동자). 흰자 자리에 눈을 두 칸
     # 높이로 찍고 흰자를 바깥 옆으로 옮긴다
-    Person((0x8B,), None, 'h142', '좌장', wave=1, whites=('down',),
+    Person((0x8B,), None, 'h142', '좌장', whites=('down',),
            touch={'down': [(6, 8, 'ink'), (6, 9, 'ink'), (9, 8, 'ink'), (9, 9, 'ink'),
                            (5, 8, 'white'), (5, 9, 'white'), (10, 8, 'white'), (10, 9, 'white')]}),
     # 얼굴이 다섯 칸이라 규칙은 눈 사이를 한 칸만 띄우고, 오른쪽 눈 옆의 머리 그늘이 셋째 눈동자처럼 보인다.
@@ -277,7 +278,7 @@ PEOPLE = (
     # 폭(여섯 칸)인데, 줄이면 눈 아래 줄에 눈의 어두운 칸이 남고 왼쪽 볼 한 칸이 머리 그늘이 되어 왼쪽 흰자가
     # 얼굴 밖으로 나온다. 눈 아래 줄과 왼쪽 볼 한 줄을 살색으로 채우고, 턱 줄은 양쪽을 한 칸씩 좁힌다(볼 두 줄을
     # 모두 여섯 칸으로 두면 얼굴이 네모나게 부푼다)
-    Person((0x66,), None, 'h074', '린다', wave=1, whites=('down',),
+    Person((0x66,), None, 'h074', '린다', whites=('down',),
            touch={'down': [(7, 6, (6, 6)), (7, 7, (6, 7)), (8, 6, 'ink'), (8, 7, 'ink'), (9, 6, 'white'), (9, 7, 'white'),
                            (4, 6, 'white'), (4, 7, 'white'), (4, 9, (5, 9)), (9, 10, (10, 10)),
                            *((x, 8, (x, 9)) for x in range(4, 10))]}),
@@ -287,7 +288,7 @@ PEOPLE = (
     # 치마의 빨강·주황은 공용 줄에서 살색 칸에 합쳐져 옷이 몸과 갈리지 않는다. 그 줄에 실리는 노랑으로 옮긴다
     # (머리의 보라로 옮기면 머리와 치마가 한 덩어리가 된다). 머리의 가장 밝은 분홍은 흰색 칸에 합쳐져 머리에 흰
     # 점으로 흩어지므로 가운데 보라로 둔다
-    Person((0x69,), None, 'h124', '마냐', wave=1, weight=KEY_WEIGHT, line=4,
+    Person((0x69,), None, 'h124', '마냐', weight=KEY_WEIGHT, line=4,
            recolor={(132, 24, 0): (247, 206, 24), (214, 90, 8): (247, 206, 24), (247, 156, 16): (247, 206, 24),
                     (247, 173, 222): (198, 115, 198)},
            touch={'down': [(7, 6, (8, 6)),
@@ -320,6 +321,14 @@ FIRST_GROUPS = frozenset(range(0x36, 0x46))          # 첫 차례 인물(서장�
 # 3D:EB60~ 은 세트 팔레트 표 뒤부터 그 뱅크의 다음 자료(3D:FD97) 앞까지
 TILE_AREAS = (('3E:D700', 0xFC00 - 0xD700), ('3F:EB80', 0x10000 - 0xEB80), ('3C:F040', 0xFE00 - 0xF040),
               ('39:F000', 0x10000 - 0xF000), ('3D:EB60', 0xFD80 - 0xEB60))
+# 인물 배치 표: 인물마다 줄·칸을 정한 차례, 나오는 맵 그룹, 공용 줄, 색 → 칸. 빌드는 표를 따르고 표에 없는 인물만
+# 계산한다. 계산은 롬의 인물 목록(usage)과 모든 인물을 함께 재므로, 표가 없으면 한 장의 인물을 더하고 빼기만 해도
+# 다른 장 맵의 줄 색이 바뀐다
+PINS = HERE.parent / 'people-pin.toml'
+PIN_HEAD = (
+    '# 인물 그림 배치 표. dq4people.py 가 읽고 --pin 이 쓴다(손으로 고치지 않는다). 형식과 고치는 법은\n'
+    '# sfc/dq4/docs/dq4-sprite-format.md 「배치 표」.\n'
+    '# wave: 줄·칸을 정한 차례, groups: 나오는 맵 그룹, line: 공용 OBJ 팔레트 줄, slots: 줄인 그림의 색(RGB) = 칸')
 PALETTES_AT, HOOK_AT = '3D:EA00', '3E:FC00'
 # 맵 팔레트 줄 루틴·표를 옮길 곳. 항목이 맵 그룹 × 줄만큼 늘어 3D 의 빈 자리(4.5KB)를 넘으므로 레코드 자리의
 # 마지막 뱅크 뒤쪽에 둔다(타일 자리 39:F000 앞까지 12KB)
@@ -866,10 +875,10 @@ def cost(hist, pal):
     return sum(w * min(math.dist(lab(c), q) for q in lp) for c, w in hist.items())
 
 
-def lines(people, hists, where=None, fixed=None):
+def lines(people, hists, where=None, fixed=None, lock=None):
     """공용 줄 배정: 주요 인물부터 넣을 때 늘어나는 색 거리 합이 가장 작은 줄로. fixed {인물: 줄} 의 인물은 그 줄에
-    먼저 넣는다."""
-    fixed = fixed or {}
+    먼저 넣는다. lock {인물: 줄} 의 인물은 넣는 차례는 그대로 두고 줄만 그것으로 한다(배치 표의 줄)."""
+    fixed, lock = fixed or {}, lock or {}
     groups = defaultdict(Counter)
     seen = defaultdict(set)
 
@@ -895,6 +904,8 @@ def lines(people, hists, where=None, fixed=None):
         mine = {c for c in hists[p] if c not in COMMON}
         if p in fixed:
             best = fixed[p]
+        elif p in lock:
+            best = lock[p]
         elif p.line is not None:
             if where and p.line not in open_lines(p):
                 raise SystemExit(f'{p.role}: 못박은 줄 {p.line} 은 이 인물이 나오는 맵 그룹에서 쓸 수 없는 줄')
@@ -926,26 +937,45 @@ def lines(people, hists, where=None, fixed=None):
 ROUNDS = 6
 
 
-def place(people, hists, where):
+def place(people, hists, where, pins=None):
     """맵 그룹마다 줄 색을 따로 싣는다. 줄은 공용 배정(lines)을 따르고, 인물 색 → 칸 번호는 모든 그룹에서 같아야
     하므로 인물마다 하나로 둔다. 「그룹마다 칸 색 = 그 그룹에서 그 칸에 모인 색의 가중 평균」과 「인물 색마다 그
     인물이 나오는 그룹들의 칸 색과의 거리 합이 가장 작은 칸」을 번갈아 고친다(공용 줄 색에서 시작).
     끝에는 칸 색을 그 칸에 모인 NDS 원래 색 가운데 평균에 가장 가까운 것으로 둔다.
-    차례(wave)가 여럿이면 앞 차례부터 배치하고, 정한 줄과 칸은 뒤 차례에서 그대로 둔다. 첫 차례는 FIRST_GROUPS
+    차례(waves)가 여럿이면 앞 차례부터 배치하고, 정한 줄과 칸은 뒤 차례에서 그대로 둔다. 첫 차례는 FIRST_GROUPS
     안에서만 재어, 뒤에 더한 그룹과 인물이 없던 때와 같은 배치가 된다.
+    pins(배치 표 {역할: Pin})에 있는 인물은 줄과 칸을 표대로 두고 계산하지 않는다. 마지막 칸 색은 칸에 모인 색으로만
+    정해지므로, 표가 계산과 같으면 계산했을 때와 같은 줄 색이 나온다.
     반환: ({인물: (줄, {색: 칸})}, {(그룹, 줄): 15색})."""
     who = [p for p in people if p.palette is None]
+    pins = pins or {}
+    order = waves(who, pins)
+    lock = {p: pins[p.role].line for p in who if p.role in pins}
+    kept = {p: dict(pins[p.role].slots) for p in who if p.role in pins}
     assign, mapping, shared, acc, centers = {}, {}, {}, {}, {}
-    for wave in sorted({p.wave for p in who}):
-        now = [p for p in who if p.wave <= wave]
+    for wave in sorted(set(order.values())):
+        now = [p for p in who if order[p] <= wave]
         at = {p: (where[p] & FIRST_GROUPS or where[p]) if wave == 0 else where[p] for p in now}
-        assign, pal = lines(now, hists, at, fixed=assign)
+        assign, pal = lines(now, hists, at, fixed=assign, lock=lock)
         shared = {**pal, **shared}
         keys = {(g, assign[p]) for p in now for g in at[p]}
+        # 표의 칸이 줄 색 수보다 뒤에 있으면(같은 줄을 쓰던 인물을 빼 줄 색이 줄었다) 그 칸까지 늘린다. 늘린 칸은
+        # 그 칸을 쓰는 표의 색에서 시작한다
+        extra = defaultdict(dict)
+        for p in now:
+            for c, k in kept.get(p, {}).items():
+                if k >= len(shared[assign[p]]):
+                    extra[assign[p]].setdefault(k, lab(c))
         centers = {key: [lab(c) for c in shared[key[1]]] for key in keys}
+        for (g, line), row in centers.items():
+            more = extra.get(line, {})
+            row += [more.get(k, lab((0, 0, 0))) for k in range(len(row), max(more, default=-1) + 1)]
         fresh = [p for p in now if p not in mapping]
         for _ in range(ROUNDS):
             for p in fresh:
+                if p in kept:
+                    mapping[p] = kept[p]
+                    continue
                 rows = [centers[(g, assign[p])] for g in at[p]]
                 mapping[p] = {c: min(range(len(rows[0])), key=lambda k: sum(math.dist(lab(c), r[k]) for r in rows))
                               for c in hists[p]}
@@ -962,9 +992,71 @@ def place(people, hists, where):
         row = []
         for k, center in enumerate(centers[(g, line)]):
             cs = acc.get((g, line, k))
-            row.append(min(cs, key=lambda c: math.dist(lab(c), center)) if cs else shared[line][k])
+            row.append(min(cs, key=lambda c: math.dist(lab(c), center)) if cs else
+                       shared[line][k] if k < len(shared[line]) else None)
         board[(g, line)] = row
     return {p: (assign[p], mapping[p]) for p in who}, board
+
+
+class Pin(NamedTuple):
+    wave: int
+    groups: tuple
+    line: int
+    slots: tuple                                   # ((색, 칸), …)
+
+
+def waves(people, pins):
+    """{인물: 줄·칸을 정하는 차례}. 표에 있는 인물은 표의 차례, 없는 인물은 표의 모든 차례 뒤에 둔다(새 인물이 이미
+    정한 인물의 줄과 칸을 흔들지 않게)."""
+    last = max((pin.wave for pin in pins.values()), default=-1)
+    return {p: pins[p.role].wave if p.role in pins else last + 1 for p in people}
+
+
+def read_pins(path=PINS):
+    """배치 표 {역할: Pin}. 표가 없으면 빈 표(모두 계산)."""
+    if not path.is_file():
+        return {}
+    doc = tomllib.loads(path.read_text())
+    return {role: Pin(row['wave'], tuple(int(g, 16) for g in row['groups']), row['line'],
+                      tuple((tuple(bytes.fromhex(c)), int(k)) for c, k in (s.split('=') for s in row['slots'])))
+            for role, row in doc.get('person', {}).items()}
+
+
+def pin_text(people, placed, spots, order):
+    """배치를 표 글로. 인물은 PEOPLE 차례, 칸은 색 차례라 다시 떠도 바뀐 줄만 diff 에 남는다."""
+    out = [PIN_HEAD]
+    for p in people:
+        if p not in placed:
+            continue
+        line, mapping = placed[p]
+        slots = ', '.join(f'"{bytes(c).hex()}={k}"' for c, k in sorted(mapping.items()))
+        out += ['', f'[person."{p.role}"]', f'wave = {order[p]}',
+                'groups = [' + ', '.join(f'"{g:02X}"' for g in sorted(spots[p])) + ']',
+                f'line = {line}', f'slots = [{slots}]']
+    return '\n'.join(out) + '\n'
+
+
+def pinned_where(people, used, pins):
+    """where 와 같되, 표에 있는 인물은 표의 맵 그룹. 롬의 인물 목록이 바뀌어도(장 모듈이 인물을 더하고 뺌) 이미 정한
+    인물의 그룹이 그대로라 줄·칸이 움직이지 않는다."""
+    return {p: set(pins[p.role].groups) if p.role in pins else g for p, g in where(people, used).items()}
+
+
+def pin_problems(people, pins, hists):
+    """배치 표와 인물 정의가 어긋난 것. 표를 손보지 않고 고치면 이미 정한 인물의 색이 조용히 바뀌므로 빌드를 멈춘다."""
+    who = {p.role: p for p in people if p.palette is None}
+    out = [f'{role}: 표에만 있는 인물(PEOPLE 에서 뺐으면 --pin 으로 표를 다시 뜬다)' for role in pins if role not in who]
+    for role, pin in pins.items():
+        p = who.get(role)
+        if p is None:
+            continue
+        colors = {c for c, _ in pin.slots}
+        if colors != set(hists[p]):
+            out.append(f'{role}: 그림 색이 표와 다름(더함 {len(set(hists[p]) - colors)}, 빠짐 {len(colors - set(hists[p]))}). '
+                       f'그림을 고쳤으면 --pin --free {role} 로 다시 뜬다')
+        if p.line is not None and p.line != pin.line:
+            out.append(f'{role}: 못박은 줄 {p.line} 이 표의 줄 {pin.line} 과 다름')
+    return out
 
 
 def index_image(cells, pal, layout):
@@ -1160,12 +1252,15 @@ def line0_problems(rows):
             for p, s, _, _, _, _, line, _ in rows if s in LINE0_SETS and line != 0]
 
 
-def prepare(rom, assets, work, base=None, squeeze=False):
+def prepare(rom, assets, work, base=None, squeeze=False, pins=None):
     """인물마다 시트를 만들어 타일 한도에 맞춘다. [(인물, 세트, 배치, 한도, 타일, 낮춘 단계, 줄, 줄 색)]."""
     cells = {p: rgb_frames(p, assets) for p in PEOPLE}
     hists = histograms(cells)
     used = usage(base) if base is not None else {}
-    placed, board = place(PEOPLE, hists, where(PEOPLE, used))
+    pins = read_pins() if pins is None else pins
+    if problems := pin_problems(PEOPLE, pins, hists):
+        raise SystemExit('\n'.join(problems))
+    placed, board = place(PEOPLE, hists, pinned_where(PEOPLE, used, pins), pins)
     sets = [target(p, rom)[0] for p in PEOPLE]
     if len(set(sets)) != len(sets):
         raise SystemExit(f'두 인물이 같은 세트를 바꿈: {sorted(f"{s:02X}" for s in sets if sets.count(s) > 1)}')
@@ -1187,6 +1282,19 @@ def prepare(rom, assets, work, base=None, squeeze=False):
     if line0_problems(rows):
         raise SystemExit('\n'.join(line0_problems(rows)))
     return rows, board
+
+
+def repin(assets, base, free=(), path=PINS):
+    """배치 표를 다시 뜬다. 표에 있는 인물은 그대로, 표에 없는 인물과 free 의 인물만 계산해 더한다."""
+    pins = {role: pin for role, pin in read_pins(path).items()
+            if role not in free and any(p.role == role and p.palette is None for p in PEOPLE)}
+    hists = histograms({p: rgb_frames(p, assets) for p in PEOPLE})
+    if problems := pin_problems(PEOPLE, pins, hists):
+        raise SystemExit('\n'.join(problems))
+    spots = pinned_where(PEOPLE, usage(base), pins)
+    placed, _ = place(PEOPLE, hists, spots, pins)
+    path.write_text(pin_text(PEOPLE, placed, spots, waves(PEOPLE, pins)))
+    return [p.role for p in PEOPLE if p in placed and p.role not in pins]
 
 
 def tile_areas(base):
@@ -1350,7 +1458,16 @@ def main():
     ap.add_argument('--out', type=Path)
     ap.add_argument('--work', type=Path, help='중간 시트·패치를 둘 폴더(기본 임시 폴더)')
     ap.add_argument('--plan', action='store_true', help='롬을 만들지 않고 인물마다 세트·타일·팔레트 줄만 찍음')
+    ap.add_argument('--pin', action='store_true',
+                    help=f'배치 표({PINS.name})에 없는 인물을 계산해 더하고 표에만 있는 인물을 뺀다(--base 의 곡 롬 필요)')
+    ap.add_argument('--free', default='', help='--pin 과 함께: 표에서 풀어 다시 계산할 역할(쉼표로)')
     args = ap.parse_args()
+    if args.pin:
+        if not args.base:
+            ap.error('--pin 은 --base(인물 목록을 읽을 곡 롬)가 필요함')
+        added = repin(args.assets, Rom(args.base.read_bytes()), tuple(filter(None, args.free.split(','))))
+        print(f'{PINS.name}: 새로 정한 인물 {", ".join(added) or "없음"}')
+        return
     if not args.plan and not (args.base and args.out):
         ap.error('--base 와 --out 이 필요함(--plan 이 아니면)')
     with tempfile.TemporaryDirectory() as tmp:
