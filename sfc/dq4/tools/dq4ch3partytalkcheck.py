@@ -10,7 +10,7 @@
          동행 flag 를 쓴다. 일행이 없는 단계는 모두 129 여야 한다(3장 동료 대화는 용병·개만 말함).
   단계   맵 자리마다 3장 진행 단계(dq4ch3partytalk.STAGES) × 낮·밤을 둘이 함께, 마지막 단계에서 하나씩·없음. 필드는
          용병 하나씩 날수 0~4. 은의 여신상을 가진 단계(여신상 동굴·수집가 집)와 개가 따라오는 단계(레이크나바·여우 마을).
-  말 건 뒤  PEOPLE 의 사람 바로 아래에 순간이동해 위를 보고 말을 걸고(대화 시작 훅이 「말 건 사람」 값 pt.TALKED_TO 에 적음) 아래로 돌아서서
+  말 건 뒤  PEOPLE 의 사람 옆(대개 바로 아래)에 순간이동해 그쪽을 보고 말을 걸고(대화 시작 훅이 「말 건 사람」 값 pt.TALKED_TO 에 적음) 돌아서서
          「はなす」 를 고른다. 말 상대 칸이 그 사람이고, 그 값이 그 대화 번호의 번호 표 차례 + 1 이고, 동료 대사가 그 값으로
          고른 「말 건 뒤」 줄이어야 한다.
 
@@ -52,12 +52,32 @@ EXTRA = {'48/02': ('statue',), '48/04': ('statue',), '48/07': ('statue',), '40/0
          '3E/00': ('dog',), '48/00': ('dog',), '3F/01': ('dog',)}
 # 필드: 레이크나바 왼쪽 도착 칸 둘 오른쪽에서 왼쪽으로 걸어 나가 필드에 선다
 FIELD_SPOT = (pt.FIELD, '3E/00,4,26', 'left', 'left:90,wait:240')
-# 「말 건 뒤」: (이름, 맵, 말 상대 FC 칸, 단계 이름, 밤인지, 일행, 더 볼 것). 말 상대 바로 아래 칸에서 위를 보고 말을 건다
+# 「말 건 뒤」: (이름, 맵, 말 상대 FC 칸, 선 쪽, 단계 이름, 더 켤 flag, 밤인지, 말 걸 때 일행, 「はなす」 때 일행, 더 볼 것).
+# 선 쪽 'below' 는 말 상대 바로 아래에서 위를, 'left' 는 왼쪽에서 오른쪽을 보고 말을 건다. 말을 걸면 묻는 사람(용병·
+# 가게 주인·노인·네네)은 B 로 「아니오」 를 고른다. 용병은 고용하지 않은 채 말을 걸고 「はなす」 때 일행에 넣는다
+# (NDS 는 고용 대사 뒤의 최근 이벤트 값)
 PEOPLE = [
-    ('king', '40/06', (0x0B, 0x0A), '허락', False, 'both', ()),                 # 엔돌 왕: 장사를 허락받은 뒤
-    ('collector', '40/0A', (0x06, 0x03), '허락', False, 'both', ('statue',)),   # 수집가: 여신상을 가진 채
-    ('ryan', '40/01', (0x13, 0x06), '가게', False, 'both', ()),                 # 닫힌 카지노의 라이안
+    ('king', '40/06', (0x0B, 0x0A), 'below', '허락', (), False, 'both', 'both', ()),      # 엔돌 왕: 장사를 허락받은 뒤
+    ('collector', '40/0A', (0x06, 0x03), 'below', '허락', (), False, 'both', 'both', ('statue',)),   # 여신상을 가진 채
+    ('ryan', '40/01', (0x13, 0x06), 'below', '가게', (), False, 'both', 'both', ()),      # 닫힌 카지노의 라이안
+    ('deliver', '40/02', (0x11, 0x12), 'below', '납품', (), False, 'both', 'both', ()),   # 병사장: 납품을 다 채운 뒤
+    ('pizarro_gone', '40/02', (0x12, 0x19), 'below', '여우', (), False, 'both', 'both', ()),
+    ('maid', '40/05', (0x05, 0x02), 'below', '여우', (), True, 'both', 'both', ()),      # 성 지하 하녀(밤)
+    ('pizarro_fan', '40/05', (0x02, 0x02), 'below', '여우', (), True, 'both', 'both', ()),
+    ('warrior', '40/0B', (0x0B, 0x03), 'below', '여우', (), True, 'both', 'both', ()),   # 여관 2층 전사(밤)
+    ('seller', '40/08', (0x03, 0x03), 'below', '허락', (), False, 'both', 'both', ()),   # 가게를 사기 전 가게 주인
+    ('nene_shop', '40/00', (0x06, 0x1C), 'left', '가게', (), False, 'both', 'both', ()),  # 가게를 산 뒤 네네
+    ('scott', '40/00', (0x05, 0x13), 'below', '여우', (), False, 'none', 'scott', ()),   # 고용 대사 뒤
+    ('lawrence', '40/0B', (0x07, 0x08), 'below', '여우', (), False, 'none', 'lawrence', ()),
+    ('bonmalmo_king', '3F/01', (0x11, 0x07), 'below', '여우', (), False, 'both', 'both', ()),
+    ('nanny', '3F/01', (0x06, 0x07), 'below', '여우', (), False, 'both', 'both', ()),    # 왕자 방의 유모
+    ('scholar', '3F/01', (0x06, 0x1C), 'below', '톰 아들', ('DOG',), False, 'none', 'none', ()),   # 개 토마스
+    ('nun', '3E/00', (0x0D, 0x07), 'below', '톰 아들', ('DOG',), False, 'none', 'none', ()),       # 개 토마스
+    ('tom_son', '3E/00', (0x17, 0x03), 'below', '톰 아들', ('DOG',), False, 'none', 'none', ()),   # 개 토마스
+    ('nene_home', '3E/01', (0x1B, 0x04), 'below', '여우', (), False, 'both', 'both', ()),
+    ('old_man', '47/00', (0x12, 0x0A), 'below', '가게', (), False, 'both', 'both', ()),  # 굴 노인: 공사비 내기 전
 ]
+SIDES = {'below': ((0, 1), 'up', 'down'), 'left': ((-1, 0), 'right', 'left')}
 
 
 def _cell(x, y):
@@ -108,13 +128,17 @@ class Step:
                    f'{(pt.BAG & 0xFFFF) + c3.ITEMS["STATUE"]:04X}=00']
         return ','.join(writes)
 
-    def expect(self, rows, talked=0, sets=None):
-        """(메시지, 고른 줄 또는 None)."""
+    def expect(self, table, key, talked=0, sets=None):
+        """(메시지, 고른 줄 또는 None): 맵 key 의 줄에서, 맞는 줄이 없으면 맵 무관 줄(pt.ANY_KEY)에서."""
         values = {a: v for a, (v, _) in flag_bytes(self.flags()).items()}
         party = {c3.TORNEKO} | {c3.SPEAKERS['SCOTT' if w == 'scott' else 'LAWRENCE'] for w in self.party}
         var = {c3.VARS['SCOTT_DAYS']: self.days[0], c3.VARS['LAWRENCE_DAYS']: self.days[1]}
         items = {c3.ITEMS['STATUE']} if self.statue else set()
-        return base.pick(rows, values, party, c3.TORNEKO, self.night, talked, sets, items, var)
+        for k in (key, pt.ANY_KEY):
+            got = base.pick(table.get(k, []), values, party, c3.TORNEKO, self.night, talked, sets, items, var)
+            if got[1] is not None:
+                return got
+        return got
 
 
 def spot_steps(mp):
@@ -122,7 +146,9 @@ def spot_steps(mp):
     if mp == pt.FIELD:
         return ([Step(f's{d}', c3.STAGES[-1][1], False, ('scott',), days=(d, 0)) for d in range(5)] +
                 [Step(f'l{d}', c3.STAGES[-1][1], False, ('lawrence',), days=(0, d)) for d in range(5)] +
-                [Step('none', c3.STAGES[-1][1], False, ())])
+                [Step('none', c3.STAGES[-1][1], False, ()),
+                 Step('dog', c3.STAGES[0][1] | {'DOG'}, False, ()),
+                 Step('dog_away', c3.STAGES[0][1] | {'DOG', 'DOG_AWAY'}, False, ())])
     out = [Step(f'{k:02d}{"n" if night else "d"}', names, night, ('scott', 'lawrence'))
            for k, (_, names) in enumerate(c3.STAGES) for night in (False, True)]
     last = c3.STAGES[-1][1]
@@ -146,7 +172,7 @@ def spots(dq5, dq4):
     from kr_patch.fc import ines
     prg = ines.prg(Path(dq4).read_bytes())
     _lists, _messages, report = dq4npcport.port(str(dq5), str(dq4))
-    maps = sorted({ln.map for ln in c3.LINES if ln.map != pt.FIELD})
+    maps = sorted({ln.map for ln in c3.LINES if ln.map not in (pt.FIELD, pt.ANY)})
     out = []
     for m in maps:
         g, n = (int(v, 16) for v in m.split('/'))
@@ -201,7 +227,7 @@ def run_spot(mesence, rom, data, start, out, spot, seed, shots=False):
     results.append(r)
     if r['status'] != 'passed':
         return results
-    rows = base.table_of(data).get(pt._key(mp), [])
+    table = base.table_of(data)
     plan = spot_steps(mp)
     env = {'STATE': str(out / 'warp' / 'end.mss'), 'PRE': ','.join(v for v in (f'{face}:8,wait:30', pre) if v),
            'TALK': _talk_input(), 'ROMPATCH': wc.NO_ENCOUNTERS, 'POKE': HOLD, **({'SHOTS': '1'} if shots else {}),
@@ -212,7 +238,7 @@ def run_spot(mesence, rom, data, start, out, spot, seed, shots=False):
     problems = [str(why)] if why and not (dest / 'talk.txt').exists() else []
     shown = {}
     for s in plan:
-        msg, row = s.expect(rows)
+        msg, row = s.expect(table, pt._key(mp))
         want = f'{msg:03X}'
         if got.get(s.name) != [want]:
             problems.append(f'{s.name}: 메시지 {got.get(s.name)}, 기대 [{want}]')
@@ -227,22 +253,33 @@ def run_spot(mesence, rom, data, start, out, spot, seed, shots=False):
 
 def run_person(mesence, rom, data, start, out, case, seed):
     """말을 건 뒤 「はなす」 사례 하나. 결과 dict."""
-    name, mp, fc, stage, night, party, extra = case
-    step = Step('after', dict(c3.STAGES)[stage], night, PARTIES[party], statue='statue' in extra)
+    name, mp, fc, side, stage, more, night, person_party, party, extra = case
+    names = dict(c3.STAGES)[stage] | set(more)
+    step = Step('after', names, night, PARTIES[party], statue='statue' in extra)
+    meet = Step('person', names, night, PARTIES[person_party], statue='statue' in extra)
     t = NIGHT if night else DAY
     clock = f'7E075E={t & 0xFF:02X};7E075F={t >> 8:02X}'
-    sets = ';'.join(f'{a:04X}={v:02X}' for a, (v, _k) in sorted(flag_bytes(step.flags()).items()))
-    x, y = _cell(fc[0], fc[1] + 1)
+    sets = ';'.join(f'{a:04X}={v:02X}' for a, (v, _k) in sorted(flag_bytes(meet.flags()).items()))
+    (dx, dy), face, away = SIDES[side]
+    x, y = _cell(fc[0] + dx, fc[1] + dy)
+    results = {'name': name, 'status': 'failed'}
+    if mp in cw3.HOPS:
+        hop = cw3.HOPS[mp]
+        r = wc.segment(mesence, rom, start, out / 'hop', ('hop', 'warp', hop, {'map': hop[:5], 'poke': HOLD}),
+                       wc.NO_ENCOUNTERS, '', '', seed, flags=cw3.FLAGS)
+        if r['status'] != 'passed':
+            return {**results, 'problems': [f"hop: {r.get('problems') or r['status']}"]}
+        start = out / 'hop' / 'end.mss'
     r = wc.segment(mesence, rom, start, out / 'warp',
                    ('warp', 'warp', f'{mp},{x},{y - 1}', {'map': mp, 'poke': HOLD + ';' + clock}),
                    wc.NO_ENCOUNTERS, sets, '', seed, flags=cw3.FLAGS)
     if r['status'] != 'passed':
-        return {'name': name, 'status': 'failed', 'problems': [f"warp: {r.get('problems') or r['status']}"]}
-    rows = base.table_of(data).get(pt._key(mp), [])
+        return {**results, 'problems': [f"warp: {r.get('problems') or r['status']}"]}
+    table = base.table_of(data)
     ids, talk_sets = base.talk_sets(data)
-    plan = [f'person|{step.env(data)}|{base.PERSON_TALK}', 'turn||down:8,wait:40',
+    plan = [f'person|{meet.env(data)}|{base.PERSON_TALK}', f'turn||{away}:8,wait:40',
             f'after|{step.env(data, reset_talked=False)}']
-    env = {'STATE': str(out / 'warp' / 'end.mss'), 'PRE': 'up:8,wait:30', 'TALK': _talk_input(),
+    env = {'STATE': str(out / 'warp' / 'end.mss'), 'PRE': f'{face}:8,wait:30', 'TALK': _talk_input(),
            'ROMPATCH': wc.NO_ENCOUNTERS, 'POKE': HOLD + ';' + clock, 'STEPS': ';'.join(plan)}
     dest = out / 'talk'
     why = wc.run(mesence, rom, LUA, dest, env, 900)
@@ -253,9 +290,10 @@ def run_person(mesence, rom, data, start, out, case, seed):
     want_id = ids.index(talk) + 1 if talk in ids else 0
     if (seen.get('3020', 0) & 0x7F, seen.get('3080', 0) & 0x7F) != _cell(*fc):
         problems.append(f"말 상대 칸 {(seen.get('3020', 0) & 0x7F, seen.get('3080', 0) & 0x7F)}, 기대 {_cell(*fc)}")
-    if not want_id or seen.get('21FD') != want_id:
-        problems.append(f'대화 번호 {talk:03X} → 21FD {seen.get("21FD")}, 기대 {want_id}')
-    msg, row = step.expect(rows, seen.get('21FD', 0), talk_sets)
+    talked = peek.get('turn', seen).get('21FD', 0)
+    if not want_id or talked != want_id:
+        problems.append(f'대화 번호 {talk:03X} → 말 건 사람 값 {talked}, 기대 {want_id}')
+    msg, row = step.expect(table, pt._key(mp), talked, talk_sets)
     if got.get('after') != [f'{msg:03X}']:
         problems.append(f'after: 메시지 {got.get("after")}, 기대 [{msg:03X}]')
     if row is None or not any(c[0] == pt.TALKED for c in row[4]):
@@ -271,6 +309,7 @@ def main():
     ap.add_argument('--jobs', type=int, default=4, help='함께 띄울 MesenCE 수')
     ap.add_argument('--base', type=Path, help='같은 롬으로 만든 3장 출발 상태. 주면 머리를 건너뜀')
     ap.add_argument('--only', help='이 맵만(쉼표로 여럿, 필드는 field)')
+    ap.add_argument('--people', help='이 「말 건 뒤」 사례만(PEOPLE 이름, 쉼표로 여럿). --only 가 없으면 맵 자리는 돌지 않음')
     ap.add_argument('--shots', action='store_true', help='단계마다 대사 첫 쪽 화면을 talk/<단계>.png 로 남김')
     ap.add_argument('--dq5', type=Path, default=HERE.parents[2] / 'rom' / 'dq5.sfc')
     ap.add_argument('--dq4', type=Path, default=HERE.parents[2] / 'rom' / 'dq4.nes')
@@ -302,6 +341,14 @@ def main():
         print(json.dumps({'status': 'failed', 'head': head}, ensure_ascii=False))
         return 1
     cases = [c for c in PEOPLE if not args.only or c[1] in wanted]
+    if args.people:
+        picked = set(args.people.split(','))
+        unknown = picked - {c[0] for c in PEOPLE}
+        if unknown:
+            raise SystemExit(f'없는 사례: {", ".join(sorted(unknown))}')
+        cases = [c for c in PEOPLE if c[0] in picked]
+        if not args.only:
+            places = []
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         jobs = {(s, p[0]): pool.submit(run_spot, mesence, rom, data, start,
                                        wc.seed_dir(out, s, seeds) / p[0].replace('/', ''), p, s, args.shots)

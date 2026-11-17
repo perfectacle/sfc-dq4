@@ -535,6 +535,7 @@ def convert3(f, msgs):
         return None, '일행 칸 조건(걷는 줄 밖·쓰러짐)'
     if 'THOMAS' in speakers:
         on.append('DOG')
+        off.append('DOG_AWAY')
     who = ['TORNEKO' if s == 'THOMAS' else s for s in speakers]
     with_ = sorted(set(who[1:]) - {who[0], 'TORNEKO'})
     rank = {n: i for i, n in enumerate(ORDER3)}
@@ -548,12 +549,23 @@ def convert3(f, msgs):
             'messages': ids, 'speakers': speakers}, None
 
 
+# 표 밖의 줄: NDS 는 맞는 줄이 하나도 없으면 일행에 따라 정한 문장을 띄운다(param-format.md 「고르기」). 3장은 개 토마스가
+# 따라올 때의 512102「ワンワンワン」. 맵을 가리지 않는 줄(map any)이라 지금 맵에서 맞는 줄이 없을 때만 고른다
+FALLBACK3 = ({'nds': -1, 'maps': ('any',), 'speaker': 'TORNEKO', 'priority': 13, 'time': 'any',
+              'on': ['CHAPTER3', 'DOG'], 'off': ['DOG_AWAY'], 'with': [], 'talked': [], 'have': [], 'lack': [], 'days': [],
+              'messages': [512102], 'speakers': ['THOMAS']},)
+
+
 def lines3(jp):
-    """([줄], [(레코드, 뺀 까닭)]). 줄은 SFC 맵마다 하나(maps 를 펼침)이고, 같은 맵에 겹친 같은 줄은 하나만."""
+    """([줄], [(레코드, 뺀 까닭)]). 줄은 SFC 맵마다 하나(maps 를 펼침)이고, 같은 맵에 겹친 같은 줄은 하나만. 끝에 표 밖의
+    줄(FALLBACK3)."""
     _, ndstext = _nds()
     msgs = ndstext.messages(jp)
     kept, dropped, seen = [], [], set()
-    for f in records(jp, 3):
+    for f in [*records(jp, 3), *FALLBACK3]:
+        if f in FALLBACK3:
+            kept.append({**f, 'map': 'any'})
+            continue
         line, why = convert3(f, msgs)
         if line is None:
             dropped.append((f, why))

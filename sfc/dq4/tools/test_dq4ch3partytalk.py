@@ -35,6 +35,20 @@ class TableTest(unittest.TestCase):
                 # 톨네코 줄은 개 토마스의 말뿐이다(톨네코 혼자일 때 동료 대화가 없음)
                 self.assertIn(ch3.DOG, ln.on, ln)
 
+    def test_dog_lines_are_off_while_the_dog_is_away(self):
+        import dq4ch3bonmalmo as bonmalmo
+        if hasattr(bonmalmo, 'DOG_AWAY'):
+            self.assertEqual(c3.DOG_AWAY, bonmalmo.DOG_AWAY)
+        for ln in c3.LINES:
+            if ch3.DOG in ln.on:
+                self.assertIn(c3.DOG_AWAY, ln.off, ln)
+
+    def test_one_map_free_line_for_the_dog(self):
+        anywhere = [ln for ln in c3.LINES if ln.map == pt.ANY]
+        self.assertEqual(len(anywhere), 1)
+        self.assertEqual((anywhere[0].speaker, anywhere[0].message), (c3.TORNEKO, 'n512102'))
+        self.assertIn(ch3.DOG, anywhere[0].on)
+
     def test_mercenaries_are_monster_guest_records(self):
         import dq4mercenary as merc
         self.assertEqual(c3.SPEAKERS['SCOTT'], 0xE8)
@@ -233,6 +247,17 @@ class EngineTest(unittest.TestCase):
             seen.add(want)
         self.assertEqual(len(seen), 5)
         self.assertNotIn(pt.NOBODY, seen)
+
+    def test_dog_barks_only_where_no_map_line_matches(self):
+        alone = [(c3.TORNEKO, ())]
+        dog = (ch3.CHAPTER3, c3.CONDITIONS['SON_FREED'], ch3.DOG)
+        bark = self.msg['n512102']
+        self.assertEqual(self.run_talk(pt.FIELD_KEY, alone, dog), [bark])
+        self.assertEqual(self.run_talk((0x47, 0x01), alone, dog), [bark])            # 줄이 있는 맵에서도 맞는 줄이 없으면
+        self.assertEqual(self.run_talk(pt.FIELD_KEY, alone, dog + (c3.DOG_AWAY,)), [pt.NOBODY])
+        village = self.run_talk((0x48, 0x00), alone, dog)                              # 여우 마을: 그 맵의 개 줄이 먼저
+        self.assertEqual(village, [self.want((0x48, 0x00), alone, dog)])
+        self.assertNotEqual(village, [bark])
 
     def test_torneko_alone_gets_nobody(self):
         flags = (ch3.CHAPTER3, ch3.SCOTT)
