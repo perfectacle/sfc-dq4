@@ -207,19 +207,28 @@ CASES = {
             'check': lambda s: ([] if L.TOM_GOLD[0] <= s.get('GOLD0', 0) < sum(L.TOM_GOLD) else
                                 [f"금화 {s.get('GOLD0')}"]) +
                                ([] if s.get('L0', 0) & 0x60 == L.TOM_DONE[1] else [f"톰 flag {s.get('L0')}"])},
+    # 아들이 돌아온 뒤(SON_FREED) 톰의 첫마디는 0844(FC 15:$860D)
+    'tom_back': {'steps': [('tom', 'warp', f'{L.TOWN},48,24',
+                            {'set': f'{0x2190 + L.SON_FREED[0]:04X}={L.SON_FREED[1]:02X}'}),
+                           ('ask', 'walk', f'{wc.talk("up", 5)}', {'maxf': 1200})],
+                 'msgs': ['tom_glad', 'tom_ask', 'tom_go'], 'check': lambda s: []},
     # 톰 아들(본몰 감옥에서 풀려난 뒤에만 섬): 개를 빌려줌(DOG). 마을을 다시 불러오면 우리의 개가 없다(아래 dog_gone)
     'son': {'steps': [('son', 'warp', f'{L.TOWN},46,8', {'set': f'{0x2190 + L.SON_FREED[0]:04X}={L.SON_FREED[1]:02X}'}),
-                      ('ask', 'walk', f'{wc.talk("up", 5)}', {'maxf': 1200}),
+                      # 빌리면 개가 우리에서 아들 옆까지 걸어와 짖고(02F1) 아들이 03AD. 개가 닿아야 조작이 풀린다
+                      ('ask', 'walk', f'{wc.talk("up", 5)};{taps(4)};{CLOSE}', {'maxf': 2000}),
+                      ('leave', 'walk', '46,13', {'maxf': 600, 'cell': (46, 13)}),
                       ('house', 'warp', f'{L.HOUSE},60,16', {}), ('town', 'warp', f'{L.TOWN},46,8', {})],
             # 개는 걷는 줄 끝(톨네코 뒤)에 붙고 일행 기록에는 들지 않는다(FC: 걷는 줄 칸, 전투 목록에 없음)
-            'msgs': ['son_lend'], 'check': lambda s: ([] if s.get('COMMON', 0) & ch3.DOG[1] else ['DOG 꺼짐']) +
+            'msgs': ['son_lend', 'dog_bark', 'son_dog'], 'check': lambda s: ([] if s.get('COMMON', 0) & ch3.DOG[1] else ['DOG 꺼짐']) +
                                                   same(WALKERS=2, WALKER1=DOG_PICTURE, PARTY_N=1)(s),
             'dog_gone': True},
     # 여우를 쫓은 뒤(본몰 FOXED) 개를 데리고 아들에게: 「예」 면 돌려줌(DOG 끔, DOG_BACK)
     'son_return': {'steps': [('son', 'warp', f'{L.TOWN},46,8',
                               {'set': f'{0x2190 + L.FOXED[0]:04X}={L.FOXED[1] | L.SON_FREED[1]:02X};'
                                       f'{_a(FLAGS["COMMON"][0]):04X}={ch3.DOG[1]:02X}'}),
-                             ('ask', 'walk', f'{wc.talk("up", 6)}', {'maxf': 1400})],
+                             ('ask', 'walk', f'{wc.talk("up", 6)};{CLOSE}', {'maxf': 1400}),
+                             # 돌려준 개가 줄 끝 자리에서 우리로 걸어가 닿아야 조작이 풀린다
+                             ('leave', 'walk', '44,9;44,13', {'maxf': 900, 'cell': (44, 13)})],
                    'msgs': ['son_return', 'son_thanks', 'son_luck'],
                    'check': same(COMMON=0, L0=L0(L.DOG_BACK), WALKERS=1)},
     # 필드에서 마을로 들면 오늘 도시락·출근 flag 가 꺼진다(FC 는 필드로 나갈 때 $6285 를 지움)

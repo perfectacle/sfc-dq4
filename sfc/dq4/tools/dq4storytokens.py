@@ -54,7 +54,8 @@ class Runner:
 
     def person_at(self, cx, cy):
         hx, hy = self.rd(0x7E3020), self.rd(0x7E3080)
-        for k in range(1, self.rd(0x7E1982)):
+        # 걷는 줄(칸 0 ~ 7E:1967 - 1: 일행·따라 걷는 개)은 길을 막지 않는다(lua/dq4storywalk.lua personAt 과 같음)
+        for k in range(max(1, self.rd(0x7E1967)), self.rd(0x7E1982)):
             px, py = self.rd(0x7E3020 + k), self.rd(0x7E3080 + k)
             if px == cx and abs(py - cy) <= 1 and (abs(px - hx) > 1 or abs(py - hy) > 1):
                 return True

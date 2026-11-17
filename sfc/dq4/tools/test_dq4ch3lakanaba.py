@@ -190,7 +190,7 @@ class MessageTest(unittest.TestCase):
             self.assertEqual(codes.index(0x101D) + 1, codes.index(0x1004), name)
 
     def test_message_count_fits_the_estimate(self):
-        self.assertLessEqual(len(L.MESSAGES), 60)
+        self.assertLessEqual(len(L.MESSAGES), 64)
 
 
 class ListTest(unittest.TestCase):
@@ -229,7 +229,8 @@ class PortedListTest(unittest.TestCase):
         nenes = [e for e in house if e['time'] == 'day' and e['fields']['talk'] == c.talk['nene']]
         self.assertEqual([(e['fields']['x'], e['fields']['y']) for e in nenes], [L.NENE['day']])
         # 낮 네네는 돌아다니는 틀(FC 슬롯 07 의 걸음 간격)
-        self.assertEqual((nenes[0]['from'], nenes[0]['fields']['interval']), (dq4npcport.WALK, 15))
+        # 범위 없이 돌아다니는 빌린 스크립트(18)
+        self.assertEqual((nenes[0]['from'], nenes[0]['fields']['interval']), (L._src('nene_walk'), 15))
         # 첫머리 목록에도 둘째 네네가 없다(첫머리 뒤 집을 다시 불러오기 전까지 걸리는 목록)
         lists2, _, _ = dq4npcport.port(DQ5, ROOT / 'rom' / 'dq4.nes')
         new, _ = ev.npc_lists(lists2)

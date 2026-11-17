@@ -84,4 +84,7 @@ PASS_NO_DEVICE = {
     '이하((12,53)→(10,53)→(10,49))로만 비킴(heroblock shop-right·shop-above·shop-below)',
     lakanaba.SCRIPTS['master'][2]: '레이크나바 카운터 주인: 가게를 닫을 때만 걷고, 그때 주인공은 손님이 막은 채 카운터 안 '
     '(4,53)에 서 있다. 주인은 계단 칸 (2,55)→(4,55) 한 걸음(dq4ch3lakanabacheck closing 사례)',
+    **{lakanaba.SCRIPTS[name][2]: '레이크나바 우리의 개: 아들에게 빌리고 돌려줄 때만 조작을 막고 걷는다. 주인공은 아들 아래 '
+       '(46,9)에서 말을 건 채이고 개는 Y 7 줄((54,7)→(48,7))과 X 48 열((46,11)→(48,11)→(48,7))만 지난다'
+       '(dq4ch3lakanabacheck son·son_return 사례)' for name in ('dog_home', 'dog_home_night')},
 }
