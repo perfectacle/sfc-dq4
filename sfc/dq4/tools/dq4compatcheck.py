@@ -274,7 +274,7 @@ class Walker:
         maxf = opt.get('maxf', wc.frames(arg))
         want, after = opt.get('changes', 99), opt.get('after', 120)
         pi = wi = stuck = changes = n = 0
-        left = press = cur = last = last_change = None
+        left = press = cur = last = last_change = since = None
         maps, buttons = [], set()
         while True:
             self.step(buttons)
@@ -297,7 +297,31 @@ class Walker:
                 pass
             elif wi < len(pts):
                 p = pts[wi]
-                if isinstance(p[0], str):
+                # 창 상태 토큰은 lua/dq4walk.lua 와 같은 뜻·같은 프레임 차례(다음 프레임 누름을 정하고 프레임 뒤에 읽음)
+                if p[0] == 'until':
+                    w = self.rd(wc.WINDOW)
+                    press, since = (p[1], w) if press is None else (press, since)
+                    press -= 1
+                    if w != since or press <= 0:
+                        press, wi = None, wi + 1
+                elif p[0] == 'cursor':
+                    c = self.rd(wc.CURSOR)
+                    press = 120 if press is None else press
+                    press -= 1
+                    if c == p[1] or press <= 0:
+                        press, wi = None, wi + 1
+                    elif press % 12 >= 6:
+                        buttons = {'down' if c < p[1] else 'up'}
+                elif p[0] == 'ask':
+                    w = self.rd(wc.WINDOW)
+                    press, since = (p[1], 0) if press is None else (press, since)
+                    press -= 1
+                    if w == wc.ASK_WINDOW or press <= 0:
+                        press, wi = None, wi + 1
+                    else:
+                        buttons = {'a'} if since % 16 < 8 else set()
+                        since += 1
+                elif isinstance(p[0], str):
                     press = p[1] if press is None else press
                     buttons = set() if p[0] == 'wait' else {p[0]}
                     press -= 1

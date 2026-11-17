@@ -344,3 +344,14 @@ class WalkDriverTests(unittest.TestCase):
         changed = {'local n, pi, left, wi, stuck, last, press = 0, 1, nil, 1, 0, nil, nil',
                    '    pts[#pts + 1] = {b, tonumber(f)}', '    if type(p[1]) == "string" then'}
         self.assertEqual([line for line in shared if line not in mine and line not in changed], [])
+
+
+class WindowTokenParityTests(unittest.TestCase):
+    """창 상태 토큰은 MesenCE 걷기(lua/dq4walk.lua)와 libretro 호환성 걷기(dq4compatcheck.Walker) 두 곳에서 같은 칸을 본다."""
+    def test_lua_and_walker_read_the_same_cells(self):
+        lua = wc.DQ4_WALK.read_text(encoding='utf-8')
+        for value in (f'0x{wc.WINDOW:06X}', f'0x{wc.CURSOR:06X}', f'0x{wc.ASK_WINDOW:02X}'):
+            self.assertIn(value, lua)
+        walker = (wc.HERE / 'dq4compatcheck.py').read_text(encoding='utf-8')
+        for name in re.findall(r'\w+', wc.WINDOW_TOKEN.pattern.split('(')[2].split(')')[0]):
+            self.assertIn(f"p[0] == '{name}'", walker, name)
