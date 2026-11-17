@@ -49,6 +49,9 @@ ENDOR_CASINO, ENDOR_STAND, ENDOR_ROOM = 0x07, 0x22, 0x1E
 TEMPE_GONE = "{:04X}|{:02X}".format(CHAPTER_FLAGS + dq4ch2event.TEMPE_GONE[0],
                                     dq4ch2event.CHAPTER2[1] | dq4ch2event.TEMPE_HEARD[1] | dq4ch2event.TEMPE_GONE[1])
 BASKET_TEST = ",".join(["a:8,wait:40"] * 16)
+# 끝 시각이 밤(7E:075E ≥ 00F0)이어야 하는 장면. 바구니 이벤트가 맵 이동 앞에 밤으로 두어 제단이 밤 색으로 그려진다
+# (밤 색 자체는 dq4environmentnightcheck 가 3D/03 에서 봄). 시각은 이긴 뒤 아침까지 그대로다
+NIGHT_AFTER = frozenset({"tempe-basket"})
 
 # 엔돌 투기장: 대회 중(IN, 일행 하나)으로 링 아래 길 (28,27)에 내려 위로 링에 들면 링 인물이 이긴 수 번째 상대와
 # 싸운다(dq4ch2endor). 우승 장면은 다섯째와 싸우는 판(이긴 수 4)에서 그 몬스터를 약하게 덮고(dq4ch2walkcheck.battle_patch
@@ -139,7 +142,8 @@ def run_scene(mesence, rom, state, out, name, start):
     return {"want": f"{want:02X}", "song": f"{song:02X}", "where": got,
             "time": f"{wram[TIME] | wram[TIME + 1] << 8:04X}",
             "chapter2": bool(wram[CHAPTER_FLAGS + dq4ch2event.CHAPTER2[0]] & dq4ch2event.CHAPTER2[1]),
-            "passed": song == want and ("field" in got if where == "field" else got.get("map") == where[:5])}
+            "passed": song == want and ("field" in got if where == "field" else got.get("map") == where[:5])
+            and (name not in NIGHT_AFTER or (wram[TIME] | wram[TIME + 1] << 8) >= 0x00F0)}
 
 
 def main():
