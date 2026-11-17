@@ -125,6 +125,10 @@ class SlotTest(unittest.TestCase):
         # BRK 받침은 WRAM 거울이 있는 낮은 뱅크에
         self.assertLess(slots.LOW_STUBS[0] >> 16, 0x40)
         self.assertEqual(slots.LOW_STUBS[0] >> 16, (slots.LOW_STUBS[1] - 1) >> 16)
+        lo, hi = slots.BONMALMO_STUBS
+        self.assertLess(lo >> 16, 0x40)
+        self.assertEqual(lo >> 16, (hi - 1) >> 16)
+        self.assertTrue(hi <= slots.LOW_STUBS[0] or slots.LOW_STUBS[1] <= lo, '두 받침이 겹침')
 
     def test_no_tool_names_a_reserved_flag_byte_or_the_vars(self):
         # 이 표와 사건 모듈만 이 자리를 쓴다. 다른 도구가 롱 주소로 직접 읽고 쓰면 예약이 깨진다
