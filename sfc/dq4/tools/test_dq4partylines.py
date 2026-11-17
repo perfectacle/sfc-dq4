@@ -124,11 +124,8 @@ class GroupTests(unittest.TestCase):
         # 3장에서 일행 뒤를 따라 걷는 그림(개·용병)은 전용 줄이 없어 PARTIES 에 넣지 않는다. 그 장 모든 그룹에서 제 색이
         # 나오려면 그림이 NDS 인물이고, 공용 줄이면 배치 표의 그룹이 그 장 그룹을 덮고, 전용 줄이면 그 장 줄이어야 한다.
         # KNOWN 은 지금 main 에서 어긋난 것(3장 쪽에서 고칠 것). 고치면 이 시험이 그 줄을 지우라고 실패한다
-        import dq4ch1event
-        import dq4mercenary
-        from dq4npcport import PICTURES
-        followers = {'개': PICTURES[dq4ch1event.FC_DOG_PICTURE], '스콧': dq4mercenary.PICTURES['scott'],
-                     '로렌스': dq4mercenary.PICTURES['lawrence']}
+        import dq4partypalcheck
+        followers = {name: picture() for name, (picture, _) in dq4partypalcheck.JOINS[3].items()}
         pins = tomllib.loads(P.PINS.read_text())['person']
         groups = set(P.party_groups(3))
         found = {}
@@ -146,6 +143,31 @@ class GroupTests(unittest.TestCase):
         known = {
         }
         self.assertEqual(found, known)
+
+    def test_every_member_and_follower_has_a_headless_scene(self):
+        # 실행 가드 dq4-party-palette 는 선두 밖 일행과 따라 걷는 그림을 JOINS 의 기록·깃발로 세운다. 새 동료·따라 걷는
+        # 그림이 생겼는데 JOINS 에 없으면 그 그림의 색은 아무도 재지 않는다
+        import dq4partypalcheck as pp
+        for chapter in pp.flagged_chapters():
+            leader = pp.party(chapter)[0][0]
+            names = {r for r in P.PARTIES[chapter] if r != leader} | set(pp.FOLLOWERS.get(chapter, {}))
+            for name in sorted(names - set(pp.JOINS.get(chapter, {}))):
+                self.fail(f'{chapter}장 {name} — dq4partypalcheck.JOINS 에 그 그림과 세우는 기록을 넣으라')
+            for name in pp.FOLLOWERS.get(chapter, {}):
+                self.assertNotIn(name, P.PARTIES[chapter], f'{name}: 전용 줄 일행이면 FOLLOWERS 가 아니라 PARTIES')
+
+    def test_lines_shared_by_two_chapters_use_different_chapter_flags(self):
+        # 3장 용병(줄 6·5)은 2장 크리프트·브라이 줄을 다시 쓴다. 엔돌 40 처럼 두 장이 함께 덮는 그룹에서는 장 깃발이 서로
+        # 달라야 하고(다음 장 시작에서 앞 장 깃발을 끔), 깃발 없는 줄과 겹치면 안 된다
+        owners = {}
+        for p in P.PEOPLE:
+            if p.main and p.palette is not None:
+                for m in (P.flag_maps(p.flag) if p.flag is not None else []):
+                    owners.setdefault((m, p.palette), []).append(p)
+        for (m, line), people in sorted(owners.items()):
+            chapters = [P.FLAG_CHAPTERS[p.flag] for p in people]
+            self.assertEqual(len(chapters), len(set(chapters)), f'{m} 줄 {line}: {[p.role for p in people]}')
+            self.assertEqual(len({p.flag for p in people}), len(people), f'{m} 줄 {line}: 같은 깃발')
 
     def test_flag_maps_cover_endor_in_chapter2(self):
         self.assertIn('40/FF', P.flag_maps(P.CHAPTER2))
