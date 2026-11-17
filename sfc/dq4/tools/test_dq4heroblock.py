@@ -17,8 +17,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4ch1event as ev  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
-import dq4ch2frenol as fr  # noqa: E402
-import dq4ch2king as king  # noqa: E402
+import dq4ch2checks  # noqa: E402
 import dq4ch3checks  # noqa: E402
 import dq4chapter1 as ch  # noqa: E402
 import dq4prologue as pro  # noqa: E402
@@ -29,7 +28,7 @@ WALK_EXEMPT = {
     ch.WALK_OUT_LEFT: '1장 첫머리 전사: 왕이 조작을 푼 뒤 걷는다. 1C 를 켜자 주인공 옆 전사가 반 칸 어긋나 멈췄다',
     ch.WALK_OUT_RIGHT: '1장 첫머리 전사: 위와 같음',
     ev.OLD_MAN_SCRIPT: '성 앞 노인: 조작을 막지 않고 주인공 쪽으로 2셀 앞까지만 따라온다(_old_man_step)',
-    fr.SCRIPTS[fr.USE['trio']]: '프레놀 납치범 셋: 조작을 막지 않고 서쪽 길로 나간다. 주인공이 길에 서면 비킬 때까지 기다린다',
+    **dq4ch2checks.merged('WALK_EXEMPT'),
     **dq4ch3checks.merged('WALK_EXEMPT'),
 }
 # 주인공 걸음이 있어도 되는 이벤트: (모듈, at 이름) → 시작 칸을 못 박는 판정
@@ -172,17 +171,11 @@ PASS_NO_DEVICE = {
     ev.RESCUED_SCRIPT: '구한 아이: 보스 아래 칸 뒤 일행 열 밖에서 멈춤(test_rescued_kids_stop_off_the_party)',
     ev.RESCUED2_SCRIPT: '구한 아이: 위와 같음',
     ev.THANKS_SCRIPT: '구한 아이: 위와 같음',
-    **{fr.SCRIPTS[fr.USE[k]]: '프레놀 여관 2층 납치범: 주인공이 방 줄(FC Y 05)에 오면 조작을 막고 계단 줄(Y 01·02)로만 걸음'
-       '(kidnap 구간)' for k in ('inn_cloak_a', 'inn_cloak_b', 'inn_princess')},
-    fr.SCRIPTS[fr.USE['mei']]: '메이: 주인공을 묘지 (03,0B)에 묶은 채 (06,0B)→(04,0B) 만 걷고, 떠날 때는 깜박이며 사라짐(grave 구간)',
-    **{fr.SCRIPTS[fr.USE[k]]: '프레놀 마중 둘: 서쪽 어귀 줄(FC Y 06)만 걸음. 주인공은 묘지 (03,0B)에 묶여 있음(grave 구간)'
-       for k in ('brey', 'kiryl')},
     **{script: '엄마 곁의 아이: 판정 줄 앞에서 나타나 위로 걸음(test_home_kids_walk_ahead_of_the_party, kids-home 사례)'
        for (_, script) in ev.HOME_KID_SRCS},
     **{script: '왕의 귀환 병사: 주인공이 줄(셀 50~53)에서 기다리는 동안 셀 48 위로만 걸음(king 사례 겹침 0)'
        for (_, script), (_, path, _) in ev._distinct(zip(ev.SOLDIER_SRCS, ev.THRONE_SOLDIERS)) if path},
-    **{king.SCRIPTS[king.USE[name]]: '탑 꼭대기 엘프: 주인공이 줄 0C(셀 Y 26) 아래에서 들어설 때 걸리고, 엘프는 그보다 위 '
-       '셀 Y 17·19 에서 위로만 걸음(elves-up·elves-right 사례 겹침 0)' for name in ('elf_a', 'elf_b')},
+    **dq4ch2checks.merged('PASS_NO_DEVICE'),
     **dq4ch3checks.merged('PASS_NO_DEVICE'),
 }
 

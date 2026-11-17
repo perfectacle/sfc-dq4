@@ -12,6 +12,7 @@ HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4ch1walkcheck as wc  # noqa: E402
+import dq4ch2checks  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 import dq4ch2walkcheck as cw  # noqa: E402
 import dq4compatcheck as compat  # noqa: E402
@@ -19,6 +20,25 @@ import dq4heroblockcheck as hb  # noqa: E402
 import dq4npccheck as npc  # noqa: E402
 
 TOKEN = re.compile(r'^(\d+,\d+|[a-z]+:\d+)$')
+
+
+class ModuleTableTests(unittest.TestCase):
+    """사건 모듈 _checks 의 표를 모을 때 이름이 겹쳐 덮이거나, 고정한 차례가 없는 묶음을 가리키지 않는다."""
+    def test_order_names_exist(self):
+        flags = {n for n, _ in dq4ch2checks.blocks('FLAGS', 'FLAG_BLOCKS')} | set(cw.COMMON_FLAGS)
+        self.assertLessEqual(set(cw.FLAG_ORDER), flags)
+
+    def test_flag_names_do_not_overwrite(self):
+        pieces = list(cw.COMMON_FLAGS.values()) + [f for _, f in dq4ch2checks.blocks('FLAGS', 'FLAG_BLOCKS')]
+        names = [k for f in pieces for k in f]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual(set(names) & set(wc.FLAGS), set())
+        # dq4ch3opencheck 가 3장 flag 를 이 표에 더하므로(그 모듈을 들인 뒤) 같음 대신 포함으로 본다
+        self.assertLessEqual(set(wc.FLAGS) | set(names), set(cw.FLAGS))
+
+    def test_hero_cases_do_not_overwrite(self):
+        self.assertEqual(len(dq4ch2checks.merged('hero_cases')),
+                         sum(len(m.hero_cases()) for _, m in dq4ch2checks.tables() if hasattr(m, 'hero_cases')))
 
 
 class SegmentTableTests(unittest.TestCase):
