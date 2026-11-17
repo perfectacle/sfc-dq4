@@ -29,11 +29,14 @@ CLEAR_CELLS = 0x00DEB5                 # Y = 슬롯: 지금 자리의 셀 차지
 SET_CELLS = 0x00DF37                   # Y = 슬롯: 켬
 SLOT_X, SLOT_X2, SLOT_Y, SLOT_Y2, SLOT_GFX = 0x7E3020, 0x7E30E0, 0x7E3080, 0x7E3140, 0x7E3220
 HERO_MASK = 0x7E31A0
+# 주인공 OBJ 속성 바탕. bit7 이면 bit4-5 를 OAM 우선순위로 그대로 쓴다(00:EE9E). 맵에 들면 엔진이 다시 둔다(실측)
+HERO_ATTR = 0x7E33A0
+FRONT = 0xB0
 SLOTS = 0x20                           # 인물 표 한 칸의 슬롯 수(dq5npclists.SLOT_END)
 WATER_BIT = 0x02                       # 탄 동안 물 칸(층 2)
 RAFT_BIT = 0x01                        # 내린 동안 배 칸(층 1)
-# 변수(var_at 부터): 배 FC X·Y, 배 인물 슬롯(FF 없음)
-RX, RY, RS = range(3)
+# 변수(var_at 부터): 배 FC X·Y, 배 인물 슬롯(FF 없음), 탄 동안 맡긴 주인공 OBJ 속성 바탕
+RX, RY, RS, RA = range(4)
 
 
 def _al(a):
@@ -139,6 +142,12 @@ class Code:
         a(0xA0, 0x00, 0x22, _al(CLEAR_CELLS), 0xE2, 0x30, 0xA9, mask, 0x8F, _al(HERO_MASK))
         a(0xA0, 0x00, 0x22, _al(SET_CELLS), 0xE2, 0x30)
 
+    def hero_front(self, a):
+        """M8: 탄 동안 주인공 OBJ 를 우선순위 3 으로(물 칸에서는 셀 갈래가 0 을 주어 물 뒤로 가라앉고, OAM 색인이 앞선
+        주인공 화소가 배 OBJ 까지 가린다). 원래 값은 RA 에 맡겨 내릴 때 되돌린다."""
+        from dq4ch2endor import lda, sta
+        a(lda(HERO_ATTR), sta(self.v(RA)), 0xA9, FRONT, sta(HERO_ATTR))
+
     def riding_test(self, a, branch, label):
         from dq4ch2endor import lda
         a(lda(self.flag_addr(self.riding)), 0x29, self.riding[1]).br(branch, label)
@@ -221,6 +230,7 @@ def natives(code, base, tbls):
         a(0xA5, 0x0C, sta(code.v(RX)), 0xA5, 0x0D, sta(code.v(RY)))
         code.move_raft(a, 'mv1')
         code.set_mask(a, 0x03)
+        code.hero_front(a)
         code.all_cells(a, True)
         a.brl('r_out')
         a.label('r_walk')
@@ -264,6 +274,7 @@ def natives(code, base, tbls):
         code.set_riding(a, True)
         code.raft_cell(a, False, 'rc_b')
         code.set_mask(a, 0x03)
+        code.hero_front(a)
         code.all_cells(a, True)
         a.label('c_out1').brl('c_out')
         # 탄 채: 주인공 셀(X, Y)의 +1 bit1 이 없으면 땅
@@ -272,6 +283,7 @@ def natives(code, base, tbls):
         # 땅: 내림. 마스크 01, 물 표시를 다 끄고 배 칸에 bit0
         code.set_riding(a, False)
         code.set_mask(a, 0x01)
+        a(lda(code.v(RA)), sta(HERO_ATTR))
         code.all_cells(a, False)
         code.raft_cell(a, True, 'rc_l')
         a.brl('c_out')

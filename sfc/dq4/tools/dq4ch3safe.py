@@ -66,7 +66,7 @@ SCRIPTS = {'right': ('10:C906', 0), 'left': ('10:C922', 1), 'chest': ('10:C946',
            'raft': ('10:C977', 7)}
 # 바위 변수(dq4ch3slots S 의 변수 칸)
 BOULDER_VARS = boulder.Vars(VARS_AT + _SLOTS['S'].vars[0])
-# 배 변수(S 변수 칸 +21~+23: 배 FC X·Y, 배 인물 슬롯)
+# 배 변수(S 변수 칸 +21~+24: 배 FC X·Y, 배 인물 슬롯, 탄 동안 맡긴 주인공 OBJ 속성)
 RAFT_VARS = VARS_AT + 21
 RAFT_MAPS = ('48/02', '48/05', '48/06')     # FC 40/00·40/03·40/04
 

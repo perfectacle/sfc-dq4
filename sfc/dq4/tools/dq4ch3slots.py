@@ -33,7 +33,7 @@ SLOTS = {
               flags=(0x70, 0x71), scripts=(('10:9B81', (0, 1, *range(8, 14))), ('10:A031', tuple(range(6)))), lists='ch3_lakanaba_',
               vars=(4, 10)),
     'S': Slot('북쪽 동굴과 금고, 여신상 동굴의 배', 'dq4ch3safe', (0x5CE000, 0x5CE800), flags=(0x72, 0x7A),
-              scripts=(('10:C8FF', (0, 1, 4, 6, 7, 8, 9)),), lists='ch3_safe_', vars=(14, 24)),
+              scripts=(('10:C8FF', (0, 1, 4, 6, 7, 8, 9)),), lists='ch3_safe_', vars=(14, 25)),
     'B': Slot('본몰 왕자·감옥·여우 마을·다리·개 토마스', 'dq4ch3bonmalmo', (0x5CE800, 0x5CF000), flags=(0x73, 0x74),
               scripts=(('10:BEE5', (2, *range(4, 10))),), lists='ch3_bonmalmo_'),
     'E': Slot('엔돌: 편지·여신상 동굴·여신상 팔기·가게 사기·납품·용병', 'dq4ch3endor', (0x5CF000, 0x5CFC00),
@@ -51,7 +51,7 @@ COMMON_VARS = (0, 4)
 # dq4-chapter3-format.md 「사건 차례」) 나누지 않고 2장 예비(dq4ch2slots.SPARE)에 둔다
 SPARE = {
     'flags': (0x7B, 0x7C),
-    'vars': (24, 25),
+    'vars': (),
     'code': (),
 }
 # 여신상 동굴의 배(dq4raft, S 가 hooks 로 둠). S 몫 코드 자리가 차서 따로 둔다. 5D:8000~ 은 dq4windowtext 몬스터 자료

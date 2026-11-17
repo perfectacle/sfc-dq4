@@ -161,6 +161,7 @@ class NativeTest(unittest.TestCase):
         self.assertEqual((self.var(w, raft.RX), self.var(w, raft.RY)), (0x07, 0x1F))
         self.assertEqual(self.mask(w), 0x03)
         self.assertEqual(self.marked(w), self.water[0x05])
+        self.assertEqual(w[raft.HERO_ATTR & 0xFFFF], raft.FRONT)
 
     def test_walking_into_the_raft_boards_and_marks_all_water(self):
         w, _ = self.call(self.wram(0x02, (0x22, 0x09), (0x2C, 0x0B)), 'reset')
@@ -172,8 +173,12 @@ class NativeTest(unittest.TestCase):
         self.assertEqual(self.marked(w, raft.RAFT_BIT), set())
 
     def test_raft_follows_and_stays_where_the_hero_lands(self):
-        w, _ = self.call(self.wram(0x02, (0x2C, 0x0B), (0x2C, 0x0B)), 'reset')
+        w = self.wram(0x02, (0x2C, 0x0B), (0x2C, 0x0B))
+        w[raft.HERO_ATTR & 0xFFFF] = 0x30
+        w, _ = self.call(w, 'reset')
         w, _ = self.call(w, 'ctl')
+        # 탄 동안 주인공 OBJ 를 물 위(우선순위 3)로, 내리면 원래 값
+        self.assertEqual((w[raft.HERO_ATTR & 0xFFFF], self.var(w, raft.RA)), (raft.FRONT, 0x30))
         w[raft.SLOT_X & 0xFFFF] = 0x2E
         w, _ = self.call(w, 'ctl')
         self.assertEqual((w[(raft.SLOT_X & 0xFFFF) + RAFT_SLOT], self.var(w, raft.RX)), (0x2E, 0x17))
@@ -181,6 +186,7 @@ class NativeTest(unittest.TestCase):
         w, _ = self.call(w, 'ctl')
         self.assertFalse(self.riding(w))
         self.assertEqual(self.mask(w), 0x01)
+        self.assertEqual(w[raft.HERO_ATTR & 0xFFFF], 0x30)
         self.assertEqual(self.marked(w), set())
         self.assertEqual(self.marked(w, raft.RAFT_BIT), {(0x17, 0x05)})
 
