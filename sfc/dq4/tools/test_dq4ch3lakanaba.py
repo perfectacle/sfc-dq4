@@ -200,7 +200,7 @@ class ListTest(unittest.TestCase):
         self.assertEqual(table[(L.HOUSE, L.FC_NENE, False)], c.msg['home'])
         gone = L.absent(c)
         self.assertIn((L.TOWN, *L.COUNTER_IN, False), gone)
-        self.assertEqual(len(gone), 5 + len(L.STRAYS))
+        self.assertEqual(len(gone), 7 + len(L.STRAYS))
         self.assertIn((L.HOUSE, *L.NENE_WALKER[2], False), gone)
         # 아래층 주인은 출근 전, 톰 아들은 감옥에서 풀려나기 전(낮·밤)에 숨는다
         self.assertIn((L.CELLAR, *L.QUIT_MASTER[2], False), gone)
@@ -221,7 +221,7 @@ class PortedListTest(unittest.TestCase):
         town = by[L.TOWN]['entries']
         froms = [e.get('from') for e in town]
         for name in ('customer', 'first_master', 'master', 'tom', 'helper', 'dog', 'helper_night', 'dog_night', 'son',
-                     'son_night'):
+                     'son_night', 'dog_home', 'dog_home_night'):
             self.assertIn(L._src(name), froms, name)
         self.assertFalse([e for e in town if (e['time'], (e['fields']['x'], e['fields']['y'])) in
                           {(t, c_) for _, t, c_ in L.STRAYS}])

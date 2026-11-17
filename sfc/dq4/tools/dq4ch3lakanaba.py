@@ -138,7 +138,10 @@ MASTER = (TOWN, 'day', COUNTER_IN)                      # FC 16/00 슬롯 13, �
 STRAYS = ((TOWN, 'day', cell(0x07, 0x1A)), (TOWN, 'day', cell(0x00, 0x25)), (TOWN, 'day', cell(0x01, 0x25)))
 TOM = {'day': cell(0x18, 0x0B), 'night': cell(0x16, 0x0B)}   # FC 16/00 대화 058
 SON = cell(0x17, 0x03)                                  # FC 16/00 슬롯 2, 대화 055
-DOG = cell(0x1B, 0x04)                                  # FC 16/00 우리 안의 개(대화 0663)
+# FC 16/00 우리 안의 개 둘(1C:$A29A·$A2ED, 실측): 슬롯 06 (1B,04)는 아들이 풀려나기 전에만, 슬롯 09 (1B,03)은 풀려난 뒤
+# 빌려주지 않았을 때만 선다. 빌려주면 슬롯 09 가 아들에게 걸어가 줄에 붙는다
+DOG = cell(0x1B, 0x04)
+DOG_HOME = cell(0x1B, 0x03)
 NENE = {'day': ch3.NENE_CELL, 'night': cell(0x1D, 0x03)}     # FC 16/01 대화 057
 NENE_FC_STEP = 8                                         # FC 슬롯 07 의 걸음 간격(차례, 머리 바이트 80 = 128프레임)
 # FC 16/01 낮 목록의 둘째 네네(슬롯 07, 돌아다님). FC 는 첫머리 뒤 이쪽만 두지만, 첫머리 자리 (1B,04) 의 네네를 남기고 이쪽을
@@ -166,7 +169,8 @@ SCRIPTS = {'customer': (DAY_LIST, 0, '10:9B88'), 'first_master': (DAY_LIST, 1, '
            'helper': (DAY_LIST, 10, '10:9D34'), 'dog': (DAY_LIST, 11, '10:9D83'),
            'helper_night': (NIGHT_LIST, 0, '10:A038'), 'dog_night': (NIGHT_LIST, 1, '10:A04F'),
            'son': (DAY_LIST, 12, '10:9DD2'), 'cellar': (DAY_LIST, 13, '10:9E21'),
-           'son_night': (NIGHT_LIST, 2, '10:A07B')}
+           'son_night': (NIGHT_LIST, 2, '10:A07B'), 'dog_home': (NIGHT_LIST, 3, '10:A08A'),
+           'dog_home_night': (NIGHT_LIST, 4, '10:A099')}
 
 
 def _mark(*pieces):
@@ -600,6 +604,8 @@ def native(ctx):
     put('look', _look(at))
     put('shop_key', _shop_key())
     put('pace', _pace())
+    import dq4ch1event
+    put('refresh', ENTER + dq4ch1event.REFRESH + LEAVE)
     put('hero_across', _hero_across())
     put('arrive', _arrive())
     put('set_talk', _set_talk(talk))
@@ -807,12 +813,24 @@ def scripts(ctx):
               call(at['tom_pay']), msg('tom_church'), _cmd('40'), _cmd('16', label='end')]
     helper_night = [_cmd('07', *FIELD_ARRIVAL, target='field'), _cmd('16'),
                     _and_off(BENTO_TODAY, SHIFT, label='field'), _cmd('16')]
-    dog = [_if_off(ch3.DOG, 'stay'), _if_on(DOG_BACK, 'stay'), _cmd('28'), _cmd('52'), _cmd('16', label='stay')]
+    # 우리의 개: 빌려준 동안은 숨고 걷는 줄 끝에 선다(dq4ch1event 따라 걷는 그림). 맵 안에서 DOG 가 바뀌면 줄을 다시
+    # 그린다(맵을 불러올 때는 저절로). 돌려준 뒤(DOG_BACK)는 우리에 선다
+    # 아들이 풀려나기 전의 개(FC 슬롯 06)
+    dog = [_if_on(SON_FREED, 'hide'), _cmd('16'), *hide]
+    # 풀려난 뒤의 개(FC 슬롯 09): 빌려준 동안은 줄 끝에 선다(dq4ch1event 따라 걷는 그림). 맵 안에서 빌려주면 줄을 다시
+    # 그리고(02:C7E4) 맵 구석으로 옮긴다. 다시 그리기가 숨긴 인물(28·52)을 되살려 우리 안에 개가 남았다(실측). 돌려주면
+    # 다시 그리기만 한다. 돌려준 뒤(DOG_BACK)는 우리에 선다
+    dog_home = [_if_off(SON_FREED, 'hide'), _if_on(DOG_BACK, 'stay'), _if_on(ch3.DOG, 'gone'), _wait_on(ch3.DOG),
+                call(at['refresh']), _cmd('2B', *PARK),
+                _cmd('09', ch3.DOG[0], ch3.DOG[1], label='back'), call(at['refresh']), _cmd('16'),
+                _cmd('28', label='gone'), _cmd('52'), _cmd('03', target='back'),
+                _cmd('16', label='stay'), *hide]
     # 아들은 본몰 감옥에서 풀려난 뒤에만(FC 1C:$A29A 가 $6280&04 로 목록을 고침), 아래층 주인은 출근 중에만(1C:$A326)
     son = [_if_off(SON_FREED, 'hide'), _cmd('16'), *hide]
     cellar = [_if_off(SHIFT, 'hide'), _if_on(DONE, 'hide'), _cmd('16'), *hide]
     bodies = {'customer': customer, 'first_master': first, 'master': master, 'tom': tom, 'helper': helper,
               'dog': dog, 'helper_night': helper_night, 'dog_night': list(dog), 'son': son, 'son_night': list(son),
+              'dog_home': dog_home, 'dog_home_night': list(dog_home),
               'cellar': cellar}
     return [{"address": SCRIPTS[name][2], "commands": bodies[name]} for name in SCRIPTS]
 
@@ -864,8 +882,12 @@ def npc_lists(lists, ctx):
             town[k] = _person('dog' if e["time"] == 'day' else 'dog_night', e["time"], DOG, e["fields"]["facing"],
                               e["fields"]["talk"], e["fields"]["gfx"])
             hit += 1
-    if hit != 7:
-        raise SystemExit(f'{TOWN}: 바꿀 인물(주인·톰 낮밤·아들 낮밤·개 낮밤)이 {hit}명')
+        elif _at(e) == DOG_HOME:
+            town[k] = _person('dog_home' if e["time"] == 'day' else 'dog_home_night', e["time"], DOG_HOME,
+                              e["fields"]["facing"], e["fields"]["talk"], e["fields"]["gfx"])
+            hit += 1
+    if hit != 9:
+        raise SystemExit(f'{TOWN}: 바꿀 인물(주인·톰 낮밤·아들 낮밤·개 둘 낮밤)이 {hit}명')
     # 손님·첫 출근 주인·도우미는 목록 앞(낮 물체 슬롯 앞자리)에 둔다
     town[:0] = [_person('customer', 'day', CUSTOMER_IN, 'left', t['buyer_intro'], CUSTOMER_PIC),
                 _person('first_master', 'day', FIRST_MASTER, 'right', t['late'], MASTER_PIC),
@@ -916,9 +938,10 @@ def start_messages(ctx):
 def absent(ctx):
     """{(맵, DQ5 셀 x, y, 밤)}: 처음 상태에서 없는 FC 인물. 카운터 주인은 첫 출근(꾸지람) 전에는 숨고, 문·밖에 세운 FC 슬롯
     11·14·15 와 집의 둘째 네네는 목록에서 뺐다(첫 출근 주인·손님·가게를 닫는 이벤트, 첫머리 자리 네네가 맡음). 아래층 주인은
-    출근 전, 톰 아들은 본몰 감옥에서 풀려나기 전에 숨는다."""
+    출근 전, 톰 아들과 우리 안 (1B,03) 의 개는 본몰 감옥에서 아들이 풀려나기 전에 숨는다."""
     return {(m, *c, time == 'night') for m, time, c in (MASTER, *STRAYS, NENE_WALKER, QUIT_MASTER,
-                                                         (TOWN, 'day', SON), (TOWN, 'night', SON))}
+                                                         (TOWN, 'day', SON), (TOWN, 'night', SON),
+                                                         (TOWN, 'day', DOG_HOME), (TOWN, 'night', DOG_HOME))}
 
 
 FC_NENE, FC_TOM, FC_SON, FC_MASTER, FC_QUIT = 0x057, 0x058, 0x055, 0x054, 0x052

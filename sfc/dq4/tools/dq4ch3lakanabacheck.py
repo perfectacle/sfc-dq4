@@ -29,6 +29,8 @@ import dq4ch1walkcheck as wc  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 import dq4ch3event as ch3  # noqa: E402
 import dq4ch3lakanaba as L  # noqa: E402
+from dq4ch1event import FC_DOG_PICTURE  # noqa: E402
+from dq4npcport import PICTURES  # noqa: E402
 from dq4ch3slots import VARS_AT  # noqa: E402
 
 
@@ -44,7 +46,10 @@ FLAGS = {
     'WAGE0': (L.WAGE_AT, 0xFF), 'WAGE1': (L.WAGE_AT + 1, 0xFF), 'ITEM': (L.ITEM_AT, 0xFF),
     'GOLD0': (ch2.GOLD_AT, 0xFF), 'GOLD1': (ch2.GOLD_AT + 1, 0xFF), 'TIME0': (ch2.TIME_AT, 0xFF),
     'HP0': (ch2.PARTY_AT + 2, 0xFF), 'ITEM1': (ch2.PARTY_AT + 0x17, 0xFF),
+    # 걷는 그림 수·둘째 그림(dq4ch1event 따라 걷는 그림)과 일행 기록 수(전투에 드는 수)
+    'WALKERS': (0x7E1967, 0xFF), 'WALKER1': (0x7E1970, 0xFF), 'PARTY_N': (0x7E201D, 0xFF),
 }
+DOG_PICTURE = PICTURES[FC_DOG_PICTURE]
 TALK = 'a:8;wait:60'
 CLOSE = wc.pc.CLOSE
 
@@ -206,7 +211,9 @@ CASES = {
     'son': {'steps': [('son', 'warp', f'{L.TOWN},46,8', {'set': f'{0x2190 + L.SON_FREED[0]:04X}={L.SON_FREED[1]:02X}'}),
                       ('ask', 'walk', f'{wc.talk("up", 5)}', {'maxf': 1200}),
                       ('house', 'warp', f'{L.HOUSE},60,16', {}), ('town', 'warp', f'{L.TOWN},46,8', {})],
-            'msgs': ['son_lend'], 'check': lambda s: [] if s.get('COMMON', 0) & ch3.DOG[1] else ['DOG 꺼짐'],
+            # 개는 걷는 줄 끝(톨네코 뒤)에 붙고 일행 기록에는 들지 않는다(FC: 걷는 줄 칸, 전투 목록에 없음)
+            'msgs': ['son_lend'], 'check': lambda s: ([] if s.get('COMMON', 0) & ch3.DOG[1] else ['DOG 꺼짐']) +
+                                                  same(WALKERS=2, WALKER1=DOG_PICTURE, PARTY_N=1)(s),
             'dog_gone': True},
     # 여우를 쫓은 뒤(본몰 FOXED) 개를 데리고 아들에게: 「예」 면 돌려줌(DOG 끔, DOG_BACK)
     'son_return': {'steps': [('son', 'warp', f'{L.TOWN},46,8',
@@ -214,7 +221,7 @@ CASES = {
                                       f'{_a(FLAGS["COMMON"][0]):04X}={ch3.DOG[1]:02X}'}),
                              ('ask', 'walk', f'{wc.talk("up", 6)}', {'maxf': 1400})],
                    'msgs': ['son_return', 'son_thanks', 'son_luck'],
-                   'check': same(COMMON=0, L0=L0(L.DOG_BACK))},
+                   'check': same(COMMON=0, L0=L0(L.DOG_BACK), WALKERS=1)},
     # 필드에서 마을로 들면 오늘 도시락·출근 flag 가 꺼진다(FC 는 필드로 나갈 때 $6285 를 지움)
     'field': {'steps': [('side', 'warp', f'{L.TOWN},4,26', {'set': _set(L0=L0(L.BENTO_TODAY, L.SHIFT, L.SEEN))}),
                         ('out', 'walk', 'left:64', {'field': True, 'poke': wc.DAY}),
@@ -333,7 +340,8 @@ def run_case(mesence, data, base, ctx, ids, name, dest, seed):
     if case.get('dog_gone'):
         wram = dest / case['steps'][-1][0] / 'final.wram'
         w = wram.read_bytes() if wram.exists() else b''
-        there = [s for s in range(8, 0x20) if w and (w[0x3020 + s], w[0x3080 + s]) == L.DOG and not w[0x3380 + s] & 0x80]
+        there = [s for s in range(8, 0x20) if w and (w[0x3020 + s], w[0x3080 + s]) in (L.DOG, L.DOG_HOME)
+                 and not w[0x3380 + s] & 0x80]
         if there:
             problems.append(f'개가 우리에 남음(슬롯 {there})')
     return {'name': name, 'status': 'failed' if problems else 'passed', 'problems': problems, 'messages': got,
