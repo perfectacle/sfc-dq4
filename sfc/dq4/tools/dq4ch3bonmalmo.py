@@ -44,6 +44,9 @@ FOX_LET = (0x74, 0x02)         # 여우를 놓아줌(갑옷을 받음)
 FOX_GONE = (0x74, 0x04)        # 여우가 사라짐: 돈 가아데가 말을 건다
 FLAGS = (FOXED, PRINCE_MET, SON_FREED, BRIDGE, LETTER1, LETTER2, FOX_SCENE, FOX_LET, FOX_GONE)
 ANSWERED = ch2.ANSWERED        # 7E:21A3 bit0 대화가 끝남(talk_here 를 되풀이하는 인물 스크립트가 기다림)
+# 7E:21A3 bit4(맵을 옮기면 지워짐): 이번 방문에 유모에게 꾸지람을 들음(FC $6289&40, FC 는 필드로 나갈 때 지움). 마을 사람
+# 모듈의 유모(대화 05F)가 보고 03B1 을 고른다. 3F/01 에서 이 비트를 쓰는 도구는 없다
+NANNY_SCOLDED = (0x13, 0x10)
 # 예·아니요를 「예」 까지 되묻는 깊이(대화 스크립트에는 되돌아가는 명령이 없어 갈래를 겹쳐 쌓는다)
 ASK_DEPTH = 8
 
@@ -311,7 +314,7 @@ def talk_scripts(ctx):
                          [when(has(PRINCE_LETTER), [say_('prince_wait')],
                                [when(DAY, [when(flag(PRINCE_MET), [say_('prince_tip')],
                                                 [say_('prince_hello'), say_('nanny_stop'), say_('nanny_out'),
-                                                 on(PRINCE_MET)])],
+                                                 on(PRINCE_MET), on(NANNY_SCOLDED)])],
                                      [say_('prince_night'), *letter])])])])]
     king = [when(flag(LETTER2), [say_('king_after')],
                  [when(has(KING_LETTER), [call('take_king_letter'), say_('king_letter'), on(LETTER2)],

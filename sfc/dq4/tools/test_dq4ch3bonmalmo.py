@@ -164,6 +164,11 @@ class TalkTest(unittest.TestCase):
         used |= {c['args'][0] | c['args'][1] << 8 for s in bm.scripts(self.ctx) for c in s['commands'] if c['op'] == '21'}
         self.assertEqual(set(self.ctx.msg.values()) - used, set())
 
+    def test_first_day_meeting_marks_the_scolding(self):
+        ops = [op for _, op in _walk(self.bodies['prince'])]
+        self.assertIn(self.ctx.flag_on(bm.NANNY_SCOLDED), ops)
+        self.assertEqual(bm.NANNY_SCOLDED[0], 0x13)          # 7E:21A3: 맵을 옮기면 지워지는 자리
+
     def test_letter_branch_comes_before_the_bridge(self):
         king = self.bodies['king'][0]
         self.assertEqual(king['cond'], self.ctx.flag(bm.LETTER2))
