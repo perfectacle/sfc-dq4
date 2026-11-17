@@ -597,11 +597,12 @@ def zone_monsters(prg, zones):
 # $111A 가 처음 FF).
 #
 #   25:8966  LDA $1116 / CMP #$FF / BNE → JSL drop / BNE:  3장 flag 가 아니면 원래 판정(Z = 후보 없음). 3장이면 위 표를 굴려
-#            못 얻으면 Z = 1(떨어뜨림 없음), 얻으면 $46 = 물건, $42 = 마지막으로 쓰러뜨린 종류($111C)의 칸으로 두고 돌아갈
+#            못 얻으면 Z = 1(떨어뜨림 없음), 얻으면 $46 = 물건, $42 = 0(메시지 이름은 칸 0 의 몬스터)으로 두고 돌아갈
 #            곳을 25:89AA(떨어뜨릴 물건을 $46 에서 읽는 곳)로 바꾼다. 메시지는 DQ5 의 떨어뜨림 그대로(FC 3장은 「もっていた」)
 
 # 코드와 표. 뱅크 4E 는 다른 도구가 쓰지 않는다
 CH3_CODE_AT = 0x4E8000
+CH3_CODE_END = 0x4EC000     # 몬스터·상인 몫의 끝. 4E:C000~ 은 3장 엔돌 몫(dq4ch3slots)
 # 23:E8EE 에서 정한 이번 조우의 칸 마스크(16비트, bit k = DQ5 칸 k 를 뺌). 7E:1A86~1A97 은 전원부터 배·필드·전투까지
 # 아무도 읽지 않는 자리이고(dq4dungeonrate.RAM), 1A86~1A91 은 던전 걸음 훅, 1A94~1A97 은 소리 패치가 쓴다
 MASK = 0x7E1A92
@@ -615,11 +616,8 @@ FC_FIXED_SLOT = 12
 DROP_SITE, DROP_ORIG = 0x258966, bytes((0xAD, 0x16, 0x11, 0xC9, 0xFF, 0xD0, 0x03))
 DROP_ITEM = 0x2589AA        # LDA $46 / CMP #$FF: 떨어뜨릴 물건
 RANDOM = 0x00953E           # A(16비트) = n → 0~n-1
-CANDIDATE, KILLS, LAST_KIND = 0x7E1116, 0x7E111A, 0x7E111C
+CANDIDATE, KILLS = 0x7E1116, 0x7E111A
 TORNEKO_LEVEL = 0x7E2052    # 일행 기록 0(7E:2040) + 12. 3장 일행 기록 0 은 톨네코
-BATTLE_FIELD = 0x88         # BRK 88 n: 칸 $42 의 전투 필드 n → $46
-KIND_FIELD = 0x78
-MONSTER_SLOTS = 0x10
 
 # 떠돌이 상인(FC 18:$9D12): 3장 필드 조우의 1/10 은 싸우지 않고 여관(rand(256) < 16)이나 도구점
 MERCHANT_RATE = 10
@@ -774,12 +772,8 @@ def ch3_code(rows, items, at=CH3_CODE_AT):
     a.label('rolled').b(0xE2, 0x20, 0x7A, 0xC5, 0x46).rel(0x90, 'hit')       # SEP / PLY / CMP $46 / BCC
     a.b(0xE8, 0x8A, 0x29, DROP_SLOTS - 1, 0xAA, 0x88).rel(0xD0, 'slot')           # INX TXA AND TAX DEY BNE
     a.rel(0x80, 'none')
-    a.label('hit').long(0xBF, 'items').b(0x48, 0x64, 0x42)                   # LDA items,X / PHA / STZ $42
-    a.label('find').b(0x00, BATTLE_FIELD, KIND_FIELD, 0xA5, 0x46)            # BRK 88 78 / LDA $46
-    a.b(0xCF, *_long(LAST_KIND)).rel(0xF0, 'found_kind')                     # CMP $111C / BEQ
-    a.b(0xE6, 0x42, 0xA5, 0x42, 0xC9, MONSTER_SLOTS).rel(0x90, 'find')        # INC LDA CMP BCC
-    a.b(0x64, 0x42)
-    a.label('found_kind').b(0x68, 0x85, 0x46)                                # PLA / STA $46
+    # 메시지의 몬스터 이름은 칸 0(첫 무리)의 것. BRK 는 놓인 뱅크를 DB 로 두어(4E 면 WRAM 대신 롬을 읽음) 이 뱅크에서 부르지 않는다
+    a.label('hit').long(0xBF, 'items').b(0x85, 0x46, 0x64, 0x42)             # LDA items,X / STA $46 / STZ $42
     back = DROP_ITEM - 1
     a.b(0xC2, 0x20, 0xA9, back & 0xFF, back >> 8 & 0xFF, 0x83, 0x01, 0xE2, 0x20, 0x6B)  # 돌아갈 곳 / RTL
     a.label('zones')
@@ -813,6 +807,8 @@ def ch3_writes(prg, dq5, report, at=CH3_CODE_AT):
     if not rows:
         raise ValueError('밤·낮 마스크가 있는 3장 필드 구역이 없음')
     blob, labels = ch3_code(rows, items, at)
+    if at + len(blob) > CH3_CODE_END:
+        raise ValueError(f'3장 몬스터 코드 {len(blob)}바이트가 {at:06X}~{CH3_CODE_END - 1:06X} 를 넘음')
 
     def put(addr, new, orig, note):
         return {'at': f'{addr >> 16:02X}:{addr & 0xFFFF:04X}', 'hex': new.hex(' ').upper(), 'orig': orig.hex(' ').upper(),

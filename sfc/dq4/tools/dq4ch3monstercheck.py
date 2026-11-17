@@ -284,6 +284,7 @@ def main():
     dq4freshstate.add_argument(ap)
     ap.add_argument('--out', required=True, type=Path)
     ap.add_argument('--jobs', type=int, default=4)
+    ap.add_argument('--only', help='장면 이름 앞부분을 쉼표로(예: drop,merchant). 롬 바이트 검사는 늘 돈다')
     args = ap.parse_args()
     mesence = Path(os.environ['MESENCE'])
     out = args.out.resolve()
@@ -420,6 +421,9 @@ def main():
     jobs += [(merchant_scene, f'merchant-{m}', m) for m in MERCHANT_PRESSES]
     jobs += [(drop_scene, f'drop-{lv:02X}', lv) for lv in DROP_LEVELS]
     jobs += [(drop_scene, 'drop-sure', 1, True), (drop_scene, 'drop-off', 1, False, True)]
+    if args.only:
+        jobs = [j for j in jobs if any(j[1].startswith(p) if isinstance(j[1], str) else
+                                       f'zone-{j[1]:02X}'.startswith(p) for p in args.only.split(','))]
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         results.update(dict(f.result() for f in [pool.submit(fn, *a) for fn, *a in jobs]))
     ok = all(r['ok'] for r in results.values())
