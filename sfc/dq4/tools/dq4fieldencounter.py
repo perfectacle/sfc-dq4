@@ -792,6 +792,19 @@ def ch3_code(rows, items, at=CH3_CODE_AT):
     return a.assemble()
 
 
+def ch3_labels(prg, dq5, report, at=CH3_CODE_AT):
+    """ch3_writes 가 쓰는 코드의 라벨(검사가 훅 안 자리를 고를 때)."""
+    table = fc_drop_table(prg)
+    return ch3_code(ch3_zone_masks(prg, report), list(zip((t for t, _ in table), dq5_drop_items(prg, dq5))), at)[1]
+
+
+def no_merchant_patch(prg, dq5, report):
+    """떠돌이 상인 갈래(rand(10) = 0 의 BEQ)를 NOP 로 덮는 ROMPATCH(파일 오프셋=바이트): 조우·무리를 보는 검사가 상인
+    대화에 걷기가 멈추지 않게."""
+    at = ch3_labels(prg, dq5, report)['rolled10'] + 3
+    return f'{_lorom(at):X}=EAEA'
+
+
 def ch3_writes(prg, dq5, report, at=CH3_CODE_AT):
     """dq5patch/1 쓰기: 코드·표와 훅 네 곳. report 는 docs 의 보고."""
     table = fc_drop_table(prg)

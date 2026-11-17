@@ -143,10 +143,12 @@ def main():
         (x, y), grid, props, fc = place(field, cell, dq4fieldencounter.FC_MAP3 if ch3 else dq4fieldencounter.FC_MAP)
         world = dq4fieldport.WORLDS[field]
         extra = {"POKE": f"7E1949={world:02X}"} if world else {}
+        patch = dq4fieldport.warp_patch(data, *dq4fieldport.stand(x, y))
         if ch3:
             flag, bit = dq4fieldencounter.chapter3_flag()
             extra["SET"] = f"{flag & 0xFFFF:04X}|{bit:02X}"
-        patch = dq4fieldport.warp_patch(data, *dq4fieldport.stand(x, y))
+            # 3장 조우의 1/10 은 떠돌이 상인이라 대화에 걷기가 멈춘다. 상인은 dq4ch3monstercheck 가 본다
+            patch += ";" + dq4fieldencounter.no_merchant_patch(prg, args.dq5.read_bytes(), report)
         scene = f"{name}-rate" if rates else f"{name}-zone{delay}"
         got = dq4groupcheck.scene(mesence, rom, state, out, scene, FIELD="{},{}".format(*dq4fieldport.stand(x, y)),
                                   ROMPATCH=patch if rates else f"{patch};{RATES}", TEST=f"wait:{delay},{WALK}" if delay else WALK, MAXF="2600",

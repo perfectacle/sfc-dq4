@@ -327,6 +327,8 @@ def main():
         field = stand(z)
         name = f'zone-{z:02X}-{mode}-{delay}'
         patch = dq4fieldport.warp_patch(data, *field)
+        # 떠돌이 상인(조우의 1/10)이 걸리면 대화에 걷기가 멈춘다: 무게를 보는 장면에서는 끈다(상인은 merchant-*)
+        patch += ';' + dq4fieldencounter.no_merchant_patch(prg, dq5, report)
         got = dq4groupcheck.scene(mesence, rom, state, out, name, FIELD='{},{}'.format(*field),
                                   ROMPATCH=f'{patch};{fec.RATES}', TEST=f'wait:{delay},{fec.WALK}', MAXF='2600',
                                   TRACE=','.join([FIRST, SECOND, *FIGHT_EXITS]), LOG=f'{WEIGHTS},{fec.LOG}',
