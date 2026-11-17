@@ -23,7 +23,7 @@ DQ5 = ROOT / 'rom' / 'dq5.sfc'
 
 class SlotTest(unittest.TestCase):
     def test_code_areas_stay_in_one_bank_and_off_each_other_and_chapter_two(self):
-        areas = [(k, s.code) for k, s in SLOTS.items()] + [('base', slots.BASE_CODE), ('raft', slots.RAFT_CODE)]
+        areas = [(k, s.code) for k, s in SLOTS.items() if s.code] + [('base', slots.BASE_CODE), ('raft', slots.RAFT_CODE)]
         areas += [(f'ch2.{k}', s.code) for k, s in ch2slots.SLOTS.items()]
         areas += [('ch2.base', ch2slots.BASE_CODE)]
         for k, (lo, hi) in areas:

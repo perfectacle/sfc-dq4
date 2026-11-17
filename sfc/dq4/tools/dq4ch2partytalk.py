@@ -1,4 +1,6 @@
-"""2장 동료 대화(はなす): 앞에 아무도 없을 때 「はなす」를 고르면 조건이 맞는 동료의 대사를 띄운다(NDS 리메이크의 동료 대화).
+"""동료 대화(はなす): 앞에 아무도 없을 때 「はなす」를 고르면 조건이 맞는 동료의 대사를 띄운다(NDS 리메이크의 동료 대화).
+훅·조건 평가 루틴·표는 이 2장 모듈 하나가 갖고, 3장 줄은 3장 모듈 dq4ch3partytalk 이 내놓아 같은 표에 합친다(같은
+「はなす」 훅을 두 모듈이 덮을 수 없음). 3장 대사 메시지는 3장 모듈의 것이라 3장 메시지 번호로 들어간다.
 
 DQ5 의 「はなす」는 앞에 말 상대가 없으면 05:D5B9 에서 대화 창을 열고 메시지 129「その方向には誰もいない。」를 띄운다.
 창 열기와 메시지(05:D5B9~D5BE)를 뱅크 05 받침으로 돌려, 받침이 창을 연 뒤 이 모듈의 네이티브가 지금 맵의 대사 목록에서 조건이 맞는 줄을 하나 고른다. 맞는
@@ -26,6 +28,7 @@ import dq4ch2king as king  # noqa: E402
 import dq4ch2tempe as tempe  # noqa: E402
 from dq4chapter1 import speak  # noqa: E402
 from dq4environmentrom import _Asm  # noqa: E402
+from dq4ch3slots import VARS_AT as _VARS_AT  # noqa: E402
 
 # 「はなす」의 앞에 아무도 없는 갈래(05:D5AE 의 12:FD9B 가 캐리를 내린 뒤): 05:D5B9 BRK 95 00(대화 창) / BRK 98 29(메시지
 # 129) / 05:D5BF BRK 09 0A / A 를 기다림 / RTS. D5BF 이하는 05:D817(ならびかえ)도 JSR 로 부르므로 건드리지 않고, 앞 두 BRK
@@ -57,8 +60,13 @@ ALENA, KIRYL, BREY = 0x00, ch2.RECRUITS[0]['person'], ch2.RECRUITS[1]['person']
 FIELD = 'field'                # 필드(7E:00BE bit7 꺼짐). 필드에서도 7E:00BC·00BD 는 떠난 맵 번호라 따로 둔다
 FIELD_KEY = (0xFE, 0xFE)
 TIMES = {'any': 0, 'day': 1, 'night': 2}
-# 조건 종류(3바이트: 종류, 값 1, 값 2)
-ON, OFF, EQUAL, LEAD, WITH, WITHOUT, TALKED = 1, 2, 3, 4, 5, 6, 7
+# 조건 종류(3바이트: 종류, 값 1, 값 2). HAVE·LACK 은 값 1 의 물건을 일행(7E:201D 명)의 가진 물건이나 맡긴 물건에
+# 누가 가짐·아무도 안 가짐, VAR 는 3장 변수 칸(dq4ch3slots.VARS_AT + 값 1)의 바이트 = 값 2
+ON, OFF, EQUAL, LEAD, WITH, WITHOUT, TALKED, HAVE, LACK, VAR = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+PARTY_ITEMS = 0x7E2056         # 일행 기록(7E:2040, 42바이트씩)의 가진 물건 12칸(빈 칸 FF)
+BAG = 0x7E2250                 # 맡긴 물건(물건 번호마다 개수)
+RECORD, ITEM_SLOTS = 42, 12
+VARS_AT = _VARS_AT
 
 
 @dataclass(frozen=True)
@@ -76,14 +84,19 @@ class Line:
     lead: int = None           # 선두 인물
     with_: tuple = ()          # 걷는 줄에 있어야 하는 인물
     without: tuple = ()        # 걷는 줄에 없어야 하는 인물
-    talked: tuple = ()         # 방금 말을 건 인물(짝 표의 「NDS 맵:인물 번호」 가운데 하나)
-    nds: int = None            # 옮겨 온 NDS 2장 동료 대화 레코드 번호
+    talked: tuple = ()         # 방금 말을 건 인물(짝 표의 「NDS 맵:인물 번호」, 3장은 dq4ch3partytalk 의 이름)
+    nds: int = None            # 옮겨 온 NDS 동료 대화 레코드 번호(그 장의 표)
+    have: tuple = ()           # 누가 가져야 하는 물건 번호
+    lack: tuple = ()           # 아무도 갖지 않아야 하는 물건 번호
+    var: tuple = ()            # 3장 변수 칸 바이트 값 ((오프셋, 값), …)
 
     def conditions(self, talk_set=0):
         """talk_set: talked 의 번호 묶음 주소(뱅크 안 16비트)."""
         return ([(ON, i, m) for i, m in self.on] + [(OFF, i, m) for i, m in self.off] +
                 [(EQUAL, i, v) for i, v in self.equal] + ([(LEAD, self.lead, 0)] if self.lead is not None else []) +
                 [(WITH, p, 0) for p in self.with_] + [(WITHOUT, p, 0) for p in self.without] +
+                [(HAVE, i, 0) for i in self.have] + [(LACK, i, 0) for i in self.lack] +
+                [(VAR, o, v) for o, v in self.var] +
                 ([(TALKED, talk_set & 0xFF, talk_set >> 8)] if self.talked else []))
 
 
@@ -207,11 +220,47 @@ def npc_lists(lists, ctx):
     return [], []
 
 
-def talk_tables(talks=None):
+def chapter3():
+    """3장 사건 모듈 가운데 동료 대화 줄을 내놓는 것(TALKS_FOUND 가 있는 모듈, dq4ch3partytalk). 없으면 None."""
+    import dq4ch3event
+    return next((m for _, m in dq4ch3event.modules() if hasattr(m, 'TALKS_FOUND')), None)
+
+
+def all_lines():
+    """롬 표에 들어가는 줄: 이 모듈(2장)의 줄 뒤에 3장 모듈의 줄."""
+    more = chapter3()
+    return LINES + (more.LINES if more else ())
+
+
+def all_talks():
+    """{말 상대 이름: 대화 번호 frozenset}: 2장 짝 표와 3장 모듈의 것. 빌드가 인물 목록을 만들기 전이면 None."""
+    more = chapter3()
+    found = more.TALKS_FOUND if more else {}
+    if _TALKS is None or found is None:
+        return None
+    if set(_TALKS) & set(found):
+        raise SystemExit('동료 대화: 2장과 3장 말 상대 이름이 겹침')
+    return {**_TALKS, **found}
+
+
+def _chapter3_messages(msg):
+    """{3장 줄 메시지 이름: 번호}. msg 는 이 모듈 MESSAGES 의 번호(None 이면 None). 3장 메시지는 2장 메시지(이 모듈과 그
+    뒤 사건 모듈 것까지) 바로 뒤라(dq4chapter1.chapter3_message) 이 모듈 첫 번호에서 센다."""
+    more = chapter3()
+    if not msg or more is None:
+        return {} if more is None else None
+    import dq4ch3event
+    mods = [m for _, m in ch2.modules()]
+    here = next(k for k, m in enumerate(mods) if m.__name__ == __name__)
+    first = min(msg.values()) + sum(len(getattr(m, 'MESSAGES', {})) for m in mods[here:])
+    return next(c for c in dq4ch3event.contexts(first_message=first) if c.module is more).msg
+
+
+def talk_tables(talks=None, lines=None):
     """(번호 표 [대화 번호], {talked 묶음: [차례 + 1]}). 대화 번호가 하나도 모이지 않은 묶음은 넣지 않는다(그 줄은
-    롬에 쓰지 않음). talks 가 None 이면 묶음이 없다(주소만 셀 때)."""
+    롬에 쓰지 않음). talks 가 None 이면 묶음이 없다(주소만 셀 때). lines 는 기본으로 all_lines()."""
     talks = {} if talks is None else talks
-    groups = sorted({ln.talked for ln in LINES if ln.talked})
+    groups = sorted({ln.talked for ln in (all_lines() if lines is None else lines) if ln.talked})
     ids = sorted({t for g in groups for k in g for t in talks.get(k, ())})
     if len(ids) > MAX_IDS:
         raise SystemExit(f'동료 대화: 말 건 인물 대화 번호가 {len(ids)}개(최대 {MAX_IDS})')
@@ -240,12 +289,15 @@ def record(line, msg, talk_set=0):
 def lists(msg, lines=None, sets=None):
     """{(맵 바이트 둘): [줄 바이트]}. 줄은 우선순위 차례(같으면 LINES 차례). msg 는 {이름: 번호}(None 이면 0),
     sets 는 {talked 묶음: 번호 묶음 주소}(None 이면 0). sets 를 주면 그 안에 없는 talked 묶음의 줄은 뺀다."""
-    lines = LINES if lines is None else lines
+    lines = all_lines() if lines is None else lines
+    if not msg:
+        more = chapter3()
+        known = set(MESSAGES) | set(more.MESSAGES if more else ())
     out = {}
     for line in sorted(lines, key=lambda ln: ln.priority):
         if sets is not None and line.talked and line.talked not in sets:
             continue
-        if line.message not in MESSAGES:
+        if line.message not in (msg or known):
             raise ValueError(f'{line.message}: MESSAGES 에 없는 대사')
         out.setdefault(_key(line.map), []).append(
             record(line, msg[line.message] if msg else 0, (sets or {}).get(line.talked, 0)))
@@ -320,6 +372,8 @@ def _code(origin):
     for kind, name in ((ON, 'c_on'), (OFF, 'c_off'), (EQUAL, 'c_eq'), (LEAD, 'c_lead'), (WITH, 'c_with'),
                        (WITHOUT, 'c_without')):
         a.b(0xC9, kind).rel(0xF0, name)
+    for kind, name in ((HAVE, 'c_have'), (LACK, 'c_lack'), (VAR, 'c_var')):
+        a.b(0xC9, kind).rel(0xD0, f'not{kind}').word(0x4C, name).label(f'not{kind}')
     a.b(0xC9, TALKED).rel(0xD0, 'no').word(0x4C, 'c_talked')
     a.label('no').b(0x18, 0x60)
     a.label('yes').b(0x38, 0x60)
@@ -345,6 +399,26 @@ def _code(origin):
     a.label('t_no').b(0x68)
     a.label('t_none').b(0x7A, 0xFA, 0x18, 0x60)
     a.label('t_yes').b(0x68, 0x7A, 0xFA, 0x38, 0x60)
+    # c_have·c_lack: X 의 조건(값 1 = 물건)을 has 로. c_var: 3장 변수 칸 바이트 = 값 2. X·Y 를 지킨다
+    a.label('c_have').word(0x20, 'has').b(0x60)
+    a.label('c_lack').word(0x20, 'has').rel(0xB0, 'l_no').b(0x38, 0x60)
+    a.label('l_no').b(0x18, 0x60)
+    a.label('c_var').b(0xDA)
+    lt(0xBF, 1).b(0xC2, 0x20, 0x29, 0xFF, 0x00, 0xAA, 0xE2, 0x20, 0xBF, *VARS_AT.to_bytes(3, 'little'), 0xFA)
+    lt(0xDF, 2).rel(0xF0, 'v_yes').b(0x18, 0x60)
+    a.label('v_yes').b(0x38, 0x60)
+    # has: X 의 조건 값 1 의 물건을 일행 기록 0~(7E:201D − 1)의 가진 물건 칸이나 맡긴 물건에 누가 가지면 캐리
+    a.label('has').b(0xDA, 0x5A)
+    lt(0xBF, 1).b(0x48, 0xAF, 0x1D, 0x20, 0x7E).rel(0xF0, 'h_bag')
+    a.b(0x48, 0xA2, *(PARTY_ITEMS & 0xFFFF).to_bytes(2, 'little'))
+    a.label('h_rec').b(0xA0, ITEM_SLOTS, 0x00)
+    a.label('h_slot').b(0xBF, 0x00, 0x00, 0x7E, 0xC3, 0x02).rel(0xF0, 'h_found').b(0xE8, 0x88).rel(0xD0, 'h_slot')
+    a.b(0xC2, 0x20, 0x8A, 0x18, 0x69, RECORD - ITEM_SLOTS, 0x00, 0xAA, 0xE2, 0x20)
+    a.b(0xA3, 0x01, 0x3A, 0x83, 0x01).rel(0xD0, 'h_rec').b(0x68)
+    a.label('h_bag').b(0xC2, 0x20, 0xA3, 0x01, 0x29, 0xFF, 0x00, 0xAA, 0xE2, 0x20, 0xBF, *BAG.to_bytes(3, 'little'))
+    a.rel(0xF0, 'h_none').b(0x68, 0x7A, 0xFA, 0x38, 0x60)
+    a.label('h_found').b(0x68, 0x68, 0x7A, 0xFA, 0x38, 0x60)
+    a.label('h_none').b(0x68, 0x7A, 0xFA, 0x18, 0x60)
     # fbyte: A = 7E:2190 + (X 의 값 1)
     a.label('fbyte').b(0xDA)
     lt(0xBF, 1).b(0xC2, 0x20, 0x29, 0xFF, 0x00, 0xAA, 0xE2, 0x20, 0xBF, 0x90, 0x21, 0x7E, 0xFA, 0x60)
@@ -376,13 +450,20 @@ def _code(origin):
 def native(ctx):
     """(바이트, {이름: 주소}). 코드 뒤에 맵 표(맵 바이트 둘, 목록 주소; FF FF 로 끝), 맵마다의 줄(길이 0 으로 끝),
     번호 묶음(수, 차례 + 1 …), 번호 표(대화 번호 2바이트씩, FFFF 로 끝)."""
-    if _TALKS is None and ctx.original is not None:
+    talks = all_talks()
+    if talks is None and ctx.original is not None:
         raise SystemExit('동료 대화: 인물 목록(npc_lists)을 만들기 전에 롬에 쓰려 함')
-    ids, groups = talk_tables(_TALKS)
+    msg = None
+    if ctx.msg:
+        more = _chapter3_messages(ctx.msg)
+        if set(more) & set(ctx.msg):
+            raise SystemExit('동료 대화: 2장과 3장 메시지 이름이 겹침')
+        msg = {**ctx.msg, **more}
+    ids, groups = talk_tables(talks)
     a = _code(ctx.code_at)
     code, labels = a.assemble({'maps': 0, 'ids': 0})
     maps_at = ctx.code_at + len(code)
-    rows = lists(ctx.msg, sets={g: 0 for g in groups})
+    rows = lists(msg, sets={g: 0 for g in groups})
     at = maps_at + 4 * len(rows) + 2 + sum(len(b''.join(r)) + 1 for r in rows.values())
     sets, blob = {}, bytearray()
     for g in sorted(groups):
@@ -390,7 +471,7 @@ def native(ctx):
         blob += bytes((len(groups[g]), *groups[g]))
     ids_at = at + len(blob)
     tail = bytes(blob) + b''.join(t.to_bytes(2, 'little') for t in ids) + b'\xff\xff'
-    rows = lists(ctx.msg, sets=sets)
+    rows = lists(msg, sets=sets)
     at = maps_at + 4 * len(rows) + 2
     head, body = bytearray(), bytearray()
     for key, recs in rows.items():

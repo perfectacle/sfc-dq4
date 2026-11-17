@@ -1,0 +1,49 @@
+# 3장 동료 대화(dq4ch3partytalk 의 줄, 표·훅은 2장 dq4ch2partytalk)의 검사. 형식은 tools/guards.py(트랙 sfc/dq4 의 조각), 규칙은 guards 스킬
+
+[[check]]
+name = "dq4-ch3-partytalk"
+why = "3장 동료 대화: 3장 출발 상태에서 줄이 있는 3장 맵 28곳과 필드에서, 일행(톨네코 혼자·용병 하나·둘)·3장 진행 단계·낮밤·용병 날수·은의 여신상·개를 WRAM 에 써 가며 「はなす」를 골라, 롬 표에서 조건 평가 루틴 모형이 고른 메시지(없으면 129)가 뜨는지 본다. 톨네코 혼자면 늘 129 다. 엔돌 왕·수집가·라이안에게 말을 건 뒤 「はなす」 는 「말 건 뒤」 줄이어야 한다. 용병은 몬스터 손님 기록(+0 = C0 | 종류)이라 말하는 이 번호가 2장과 다르다. 「はなす」 훅·조건 평가 루틴(물건·변수 칸 조건)·3장 줄 표·말 상대 짝(dq4ch2partytalknds.OBJECTS3)·3장 메시지를 바꾸면 깨진다"
+paths = [
+  "@ch3-modules",
+  "sfc/dq4/tools/dq4ch3partytalkcheck.py",
+  "sfc/dq4/tools/dq4ch3partytalk.tsv",
+  "sfc/dq4/tools/dq4ch3partytalk-text.tsv",
+  "sfc/dq4/tools/dq4ch2partytalk.py",
+  "sfc/dq4/tools/dq4ch2partytalk.tsv",
+  "sfc/dq4/tools/dq4ch2partytalk-text.tsv",
+  "sfc/dq4/tools/dq4ch2partytalk-people.tsv",
+  "sfc/dq4/tools/dq4ch2partytalkcheck.py",
+  "sfc/dq4/tools/lua/dq4partytalk.lua",
+  "sfc/dq4/tools/dq4ch3walkcheck.py",
+  "sfc/dq4/tools/dq4chapterwalk.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4npccheck.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
+  "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/lua/dq4holdwalk.lua",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/dq5npcrecordcheck.py",
+  "sfc/dq5/tools/lua/dq5npcrecordcheck.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3talk && uv run --locked python sfc/dq4/tools/dq4ch3partytalkcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3talk"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태·3장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+# 3장 동료 대화 모듈만 닿는 것: 줄·대사 표와, 3장 줄을 합쳐 롬 표를 쓰는 2장 동료 대화 모듈(과 그것만 닿는 파일)
+[groups]
+ch3-modules = [
+  "sfc/dq4/tools/dq4ch3partytalk.tsv",
+  "sfc/dq4/tools/dq4ch3partytalk-text.tsv",
+  "sfc/dq4/tools/dq4ch2partytalk.py",
+  "sfc/dq4/tools/dq4ch2partytalk.tsv",
+  "sfc/dq4/tools/dq4ch2partytalk-text.tsv",
+  "sfc/dq4/tools/dq4ch2partytalk-people.tsv",
+  "sfc/dq4/tools/dq4ch2frenol.py",
+]

@@ -106,13 +106,19 @@ def expected(rows, flags, night, talked=0, sets=None):
 def expected_row(rows, flags, night, talked=0, sets=None):
     """(메시지, 고른 줄 또는 None)."""
     values = {a: v for a, (v, _) in stage_bytes(flags).items()}
-    party, lead = {pt.ALENA, pt.KIRYL, pt.BREY}, pt.ALENA
+    return pick(rows, values, {pt.ALENA, pt.KIRYL, pt.BREY}, pt.ALENA, night, talked, sets)
 
+
+def pick(rows, values, party, lead, night, talked=0, sets=None, items=(), var=None):
+    """장에 매이지 않은 조건 평가 루틴의 모형: (메시지, 고른 줄 또는 None). values 는 {WRAM 하위 16비트: 바이트}(flag
+    자리), party 는 걷는 줄의 살아 있는 인물 번호, items 는 일행이 가진 물건 번호, var 는 {3장 변수 칸 오프셋: 값}."""
     def holds(kind, a, b):
         byte = values.get(0x2190 + a, 0)
         return {pt.ON: lambda: byte & b != 0, pt.OFF: lambda: byte & b == 0, pt.EQUAL: lambda: byte == b,
                 pt.LEAD: lambda: a == lead, pt.WITH: lambda: a in party, pt.WITHOUT: lambda: a not in party,
-                pt.TALKED: lambda: talked != 0 and talked in (sets or {}).get(a | b << 8, ())}[kind]()
+                pt.TALKED: lambda: talked != 0 and talked in (sets or {}).get(a | b << 8, ()),
+                pt.HAVE: lambda: a in items, pt.LACK: lambda: a not in items,
+                pt.VAR: lambda: (var or {}).get(a, 0) == b}[kind]()
     for row in rows:
         prio, speaker, when, msg, conds = row
         if speaker in party and when in (0, 2 if night else 1) and all(holds(*c) for c in conds):
@@ -193,7 +199,7 @@ def token_ids(data):
     """{「NDS 맵:인물 번호」: {차례 + 1}}: 롬의 번호 묶음을 줄 표의 talked 묶음과 짝지어(묶음은 talked 묶음의 정렬 차례로
     놓임) 사람 하나짜리 묶음에서 읽는다. 짝이 맞지 않으면(빈 묶음이 빠짐) 사람이 든 모든 묶음의 합."""
     _ids, sets = talk_sets(data)
-    groups = sorted({ln.talked for ln in pt.LINES if ln.talked})
+    groups = sorted({ln.talked for ln in pt.all_lines() if ln.talked})
     addrs = sorted(sets)
     out = {}
     if len(addrs) == len(groups):

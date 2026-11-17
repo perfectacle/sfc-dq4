@@ -10,6 +10,7 @@ import dq4ch2event as ev  # noqa: E402
 import dq4ch2partytalk as pt  # noqa: E402
 import dq4ch2partytalkcheck as check  # noqa: E402
 import dq4ch2partytalknds as nds  # noqa: E402
+import dq4ch3partytalk as ch3pt  # noqa: E402
 import dq4menumsg as mm  # noqa: E402
 from dq4ch2slots import SLOTS  # noqa: E402
 
@@ -43,17 +44,33 @@ class PartyTalkTest(unittest.TestCase):
         self.assertEqual([r[1] for r in tempe], sorted(r[1] for r in tempe))
 
     def _talks(self):
-        """줄 표의 talked 묶음마다 겹치지 않는 가짜 대화 번호(빌드의 npc_lists 대신)."""
-        tokens = sorted({k for ln in pt.LINES for k in ln.talked})
+        """줄 표(2장·3장)의 talked 묶음마다 겹치지 않는 가짜 대화 번호(빌드의 npc_lists 대신)."""
+        tokens = sorted({k for ln in pt.all_lines() for k in ln.talked})
         return {k: frozenset({0x900 + i}) for i, k in enumerate(tokens)}
+
+    def _patched(self, talks):
+        """(2장 _TALKS, 3장 TALKS_FOUND) 를 talks 로 나눠 넣는 컨텍스트. talks 가 None 이면 둘 다 None."""
+        import contextlib
+        ch3 = {k for ln in ch3pt.LINES for k in ln.talked}
+
+        @contextlib.contextmanager
+        def patch():
+            saved = pt._TALKS, ch3pt.TALKS_FOUND
+            if talks is None:
+                pt._TALKS = ch3pt.TALKS_FOUND = None
+            else:
+                pt._TALKS = {k: v for k, v in talks.items() if k not in ch3}
+                ch3pt.TALKS_FOUND = {k: v for k, v in talks.items() if k in ch3}
+            try:
+                yield
+            finally:
+                pt._TALKS, ch3pt.TALKS_FOUND = saved
+        return patch()
 
     def test_native_table_reads_back(self):
         ctx = _ctx()
-        saved, pt._TALKS = pt._TALKS, self._talks()
-        try:
+        with self._patched(self._talks()):
             blob, at = pt.native(ctx)
-        finally:
-            pt._TALKS = saved
         self.assertLessEqual(ctx.code_at + len(blob), SLOTS['P'].code[1])
         self.assertEqual(at, ctx.at)
         data = bytearray(0x400000)
@@ -62,7 +79,8 @@ class PartyTalkTest(unittest.TestCase):
         table = pt.table(bytes(data), at['maps'])
         ids, groups = pt.talk_tables(self._talks())
         self.assertEqual(pt.talk_ids(bytes(data), at), ids)
-        rows = pt.lists(ctx.msg, sets={g: 0 for g in groups})
+        msg = {**ctx.msg, **pt._chapter3_messages(ctx.msg)}
+        rows = pt.lists(msg, sets={g: 0 for g in groups})
         for recs in table.values():
             for row in recs:
                 for kind, lo, hi in row[4]:
@@ -71,20 +89,21 @@ class PartyTalkTest(unittest.TestCase):
         self.assertEqual(set(table), set(rows))
         for key, recs in rows.items():
             self.assertEqual([r[4] | r[5] << 8 for r in recs], [row[3] for row in table[key]])
-        self.assertEqual(set(ctx.msg.values()), {row[3] for recs in table.values() for row in recs})
+        self.assertEqual(set(msg.values()), {row[3] for recs in table.values() for row in recs})
 
     def test_without_npc_lists_the_talked_lines_are_left_out(self):
         # 주소만 셀 때(롬 없이)는 대화 번호를 모르므로 talked 줄을 쓰지 않는다. 롬에 쓸 때 모르면 멈춘다
         # 같은 프로세스의 다른 테스트가 빌드 경로(npc_lists)로 _TALKS 를 채웠을 수 있어 비우고 본다
         ctx = _ctx()
-        saved, pt._TALKS = pt._TALKS, None
+        saved = pt._TALKS
+        pt._TALKS = None
         try:
             blob, at = pt.native(ctx)
             data = bytearray(0x400000)
             o = pt.ch1.lorom(ctx.code_at)
             data[o:o + len(blob)] = blob
             n = sum(len(r) for r in pt.table(bytes(data), at['maps']).values())
-            self.assertEqual(n, sum(1 for ln in pt.LINES if not ln.talked))
+            self.assertEqual(n, sum(1 for ln in pt.all_lines() if not ln.talked))
             ctx.original = b''
             with self.assertRaises(SystemExit):
                 pt.native(ctx)
