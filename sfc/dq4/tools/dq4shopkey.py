@@ -10,6 +10,11 @@ several FC groups needs one key per FC group, so both reads of $BC first look up
 
 Maps not in the table keep $BC. Keys must avoid the DQ5 groups (00-35, among them 01/21/22 that 06:F58E
 treats apart) and the list end FF, so they start at KEY_FIRST.
+
+A one-shot key overrides the shop key once: an event that opens a shop whose goods change (Lakanaba's weapon shop
+master, whose list grows with the stock bought from customers) writes a key of ONE_SHOT to the override byte right
+before the talk opens the shop. The shop hook takes it and clears the byte, so the next shop is keyed by map again.
+Only ONE_SHOT values count, so a byte that was never written (or holds other data) leaves the key alone.
 """
 
 import sys
@@ -24,7 +29,8 @@ from dq4environmentrom import _Asm  # noqa: E402
 # 06:DC3B (STA's last byte) gets a NOP; nothing in the ROM branches or points into 06:DC38-06:DC3B.
 SHOP_SITE, SHOP_ORIG = 0x06DC37, bytes((0xA5, 0xBC, 0x8D, 0x25, 0x0F))
 INN_SITE, INN_ORIG = 0x06F576, bytes((0xA5, 0xBC, 0x85, 0x02))
-KEY_FIRST, KEY_LAST = 0x60, 0xFE
+KEY_FIRST, KEY_LAST = 0x60, 0xEF
+ONE_SHOT = range(0xF0, 0xF8)                   # aligned power-of-two run: the hook tests it with AND/CMP
 ROW_SIZE = 4
 
 
@@ -48,11 +54,18 @@ def table(rows):
     return bytes(out) + b"\xFF"
 
 
-def code(at, rows):
-    """(bytes at `at`, labels): both routines, the lookup they share, and the table."""
+def code(at, rows, one_shot_at=None):
+    """(bytes at `at`, labels): both routines, the lookup they share, and the table. `one_shot_at`: the WRAM byte of
+    the one-shot key (none: no override)."""
     asm = _Asm(at)
+    asm.label("shop").b(0x08, 0xC2, 0x10, 0xDA, 0xE2, 0x20).word(0x20, "find")
+    if one_shot_at is not None:
+        long = one_shot_at.to_bytes(3, "little")
+        # The key found stays on the stack; a one-shot key replaces it there and the byte is cleared.
+        asm.b(0x48, 0xAF, *long, 0x29, ~(len(ONE_SHOT) - 1) & 0xFF, 0xC9, ONE_SHOT.start).rel(0xD0, "s_one")
+        asm.b(0xAF, *long, 0x83, 0x01, 0xA9, 0x00, 0x8F, *long).label("s_one").b(0x68)
     # shop: B gets $BD only when the caller has 16-bit A (P on the stack at 4,S), as LDA $BC would load it.
-    asm.label("shop").b(0x08, 0xC2, 0x10, 0xDA, 0xE2, 0x20).word(0x20, "find").b(0x48, 0xA3, 0x04, 0x29, 0x20)
+    asm.b(0x48, 0xA3, 0x04, 0x29, 0x20)
     asm.rel(0xD0, "s_keep").b(0xA5, 0xBD, 0xEB)
     # The long store and load: the caller's DB is not known, and the load sets N/Z in the caller's width.
     asm.label("s_keep").b(0x68, 0xFA, 0x28, 0x8F, 0x25, 0x0F, 0x7E, 0xAF, 0x25, 0x0F, 0x7E, 0x6B)
@@ -70,9 +83,9 @@ def code(at, rows):
     return asm.assemble()
 
 
-def writes(at, rows):
+def writes(at, rows, one_shot_at=None):
     """dq5patch/1 writes: the routines with their table, and the two JSLs."""
-    data, labels = code(at, rows)
+    data, labels = code(at, rows, one_shot_at)
     if at >> 16 != (at + len(data) - 1) >> 16:
         raise ValueError("shop key hook crosses a bank")
     return [

@@ -5,6 +5,8 @@
 --   cursor:K  고르기 창 커서(7E:0AD7)가 K 가 될 때까지 아래(K 가 크면)·위를 6프레임 누르고 6프레임 뗀다(많아야 120 프레임)
 --   ask:N     물음 창(창 번호 32, 예/아니요)이 뜰 때까지 A 를 8프레임 누르고 8프레임 떼며 글을 넘긴다(많아야 N 프레임).
 --             창이 뜬 프레임부터 누르지 않으므로 넘기는 A 가 물음에 답하지 않는다(누른 채로 뜬 A 는 새 입력이 아님)
+--   pick:K    DQ5 가게 사기 목록에서 고른 물건 번호(7E:0F22, 10진 K)가 K 가 될 때까지 아래를 cursor 처럼 누른다. 목록 커서는
+--             0AD7 이 아니고, 목록이 열려야 움직이므로 열림을 함께 기다린다
 -- 프레임 수만 정해 누르면, 앞 장·앞 모듈이 메시지를 더해 창이 뜨는 때가 바뀔 때 누른 방향이 물음 창 커서를 옮겼다.
 -- STATE 세이브스테이트에서 시작해 주인공(인물 표 슬롯 0)을 WAYPOINTS 의 셀 좌표로 차례로 걷게 한다.
 -- WAYPOINTS="3,11;3,24;7,24;7,22" 처럼 x,y(맵 셀) 목록. 한 번에 한 축만 움직이므로 꺾이는 곳마다 점을 둔다.
@@ -31,7 +33,7 @@ for tok in string.gmatch(os.getenv("WAYPOINTS") or "", "[^;]+") do
     pts[#pts + 1] = {tonumber(x), tonumber(y)}
   else
     local b, f = tok:match("^(%a+):(%d+)$")
-    if b == "until" or b == "cursor" or b == "ask" then
+    if b == "until" or b == "cursor" or b == "ask" or b == "pick" then
       pts[#pts + 1] = {kind = b, arg = tonumber(f)}
     else
       pts[#pts + 1] = {b, tonumber(f)}
@@ -105,18 +107,18 @@ emu.addEventCallback(function()
         if since % 16 < 8 then L.press({a = true}) end
         since = since + 1
       end
-    elseif p.kind == "cursor" then
-      local c = emu.read(0x7E0AD7, m)
+    elseif p.kind == "cursor" or p.kind == "pick" then
+      local c = emu.read(p.kind == "pick" and 0x7E0F22 or 0x7E0AD7, m)
       if press == nil then press = 120 end
       press = press - 1
       if c == p.arg then
-        log[#log + 1] = string.format("f%05d cursor %d", n, c)
+        log[#log + 1] = string.format("f%05d %s %d", n, p.kind, c)
         press = nil; wi = wi + 1
       elseif press <= 0 then
-        log[#log + 1] = string.format("f%05d cursor timeout at %d want %d", n, c, p.arg)
+        log[#log + 1] = string.format("f%05d %s timeout at %d want %d", n, p.kind, c, p.arg)
         press = nil; wi = wi + 1
       elseif press % 12 >= 6 then
-        L.press({[(c < p.arg) and "down" or "up"] = true})
+        L.press({[(p.kind == "pick" or c < p.arg) and "down" or "up"] = true})
       end
     elseif type(p[1]) == "string" then
       if press == nil then press = p[2]; log[#log + 1] = string.format("f%05d press %s:%d at %d,%d", n, p[1], p[2], x, y) end

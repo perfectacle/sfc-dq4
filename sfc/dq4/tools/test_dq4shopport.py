@@ -113,6 +113,25 @@ class SyntheticPortTest(unittest.TestCase):
         self.assertEqual(report["missing_items"], ["36/00 うまのふん"])
         self.assertEqual(services["36/00"][1, 1, True], 1)
 
+    def test_lakanaba_master_lists_per_stock_combination(self):
+        # 레이크나바 무기점 주인: FC 무기 목록 뒤에 재고가 있는 품목을 STOCK 차례로 하나씩. 조합 비트마다 한 번 쓰는 키
+        from unittest import mock
+        lookup = {(1, 0x10, 0): [0x01], (3, 0x10, 1): [0x04], (2, 0x11, 0): [0x00, 0x05], (1, 0x11, 0): [0x81]}
+        with mock.patch.multiple(shopport, LAKANABA=(0x11, 0), LAKANABA_STOCK=(0x06, 0x02, 0x05)):
+            _, shops, writes, report = self.run_port(lookup=lookup)
+        one = shopport.dq4shopkey.ONE_SHOT.start
+        lists = {s["key"]: s["items"] for s in shops if s["key"] >= one}
+        self.assertEqual(lists, {one: [0x02], one + 1: [0x02, 0x01], one + 2: [0x02, 0x06], one + 3: [0x02, 0x01, 0x06],
+                                 one + 4: [0x02, 0x61], one + 5: [0x02, 0x01, 0x61], one + 6: [0x02, 0x06, 0x61],
+                                 one + 7: [0x02, 0x01, 0x06, 0x61]})
+        self.assertTrue(all(s["kind"] == 2 for s in shops if s["key"] >= one))
+        self.assertEqual(report["lakanaba"][f"{one + 7:02X}"], [0x02, 0x01, 0x06, 0x61])
+
+    def test_no_lakanaba_lists_without_its_map(self):
+        _, shops, _, report = self.run_port()
+        self.assertFalse([s for s in shops if s["key"] >= shopport.dq4shopkey.ONE_SHOT.start])
+        self.assertEqual(report["lakanaba"], {})
+
     def test_inn_table_keeps_the_original_entries_and_adds_the_new_keys(self):
         _, _, writes, report = self.run_port(inn_at=0x3CF123)
         first = shopport.dq4shopkey.KEY_FIRST

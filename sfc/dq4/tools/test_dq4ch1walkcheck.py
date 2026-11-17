@@ -333,6 +333,7 @@ class WalkDriverTests(unittest.TestCase):
         self.assertEqual(wc.walk_driver('up:16;until:300;until:300;cursor:0;a:8'), wc.DQ4_WALK)
         self.assertEqual(wc.walk_driver('cursor:1'), wc.DQ4_WALK)
         self.assertEqual(wc.walk_driver('right:8;ask:400;cursor:1;a:8'), wc.DQ4_WALK)
+        self.assertEqual(wc.walk_driver('a:8;pick:33;a:8'), wc.DQ4_WALK)
         self.assertEqual(wc.walk_driver('12,40;untilx:3'), wc.WALK)
         self.assertTrue(wc.DQ4_WALK.is_file())
 
@@ -350,7 +351,7 @@ class WindowTokenParityTests(unittest.TestCase):
     """창 상태 토큰은 MesenCE 걷기(lua/dq4walk.lua)와 libretro 호환성 걷기(dq4compatcheck.Walker) 두 곳에서 같은 칸을 본다."""
     def test_lua_and_walker_read_the_same_cells(self):
         lua = wc.DQ4_WALK.read_text(encoding='utf-8')
-        for value in (f'0x{wc.WINDOW:06X}', f'0x{wc.CURSOR:06X}', f'0x{wc.ASK_WINDOW:02X}'):
+        for value in (f'0x{wc.WINDOW:06X}', f'0x{wc.CURSOR:06X}', f'0x{wc.ASK_WINDOW:02X}', f'0x{wc.PICK:06X}'):
             self.assertIn(value, lua)
         walker = (wc.HERE / 'dq4compatcheck.py').read_text(encoding='utf-8')
         for name in re.findall(r'\w+', wc.WINDOW_TOKEN.pattern.split('(')[2].split(')')[0]):

@@ -11,6 +11,11 @@ FLAGS = {'BENTO': wc.flag(lakanaba.BENTO_TODAY), 'SEEN': wc.flag(lakanaba.SEEN),
 # 「とびら」 처럼 문 쪽을 보고 이 명령으로 연다. 걸어 들어가기만 하면 열리지 않는다
 DOOR = ('wait:20;a:8;wait:40;down:4;wait:15;down:4;wait:15;down:4;wait:15;a:8;wait:90;b:8;wait:30;b:8;wait:30')
 
+# 명령 창 「말하기」 → 0323(두 쪽) 「예」 → 0324 → 가게 메뉴 「사기」(물음·메뉴는 커서 토큰이 창을 기다림) → 「어느 걸로 하겠나?」 뒤 키를 기다리는
+# 동안(06:DC34) 누르면 목록이 열린다. 목록 커서는 열린 뒤에야 움직여 pick 토큰이 열림을 기다린다
+SHOP_PICK = 'wait:60;a:8'
+BOOMERANG = lakanaba.GOODS[lakanaba.STOCKED][0]
+
 # 네네: 오늘 도시락 전이라 잠 → 아침(날수 + 1) → 오늘 도시락. 손님 갈래·톰을 교회까지 미는 길은 dq4ch3lakanabacheck 가
 # 롬 사본·톰 자리로 본다
 SEGMENTS = [
@@ -39,6 +44,14 @@ SEGMENTS = [
     # 걷는다
     ('after_quit', 'walk', f'8,11;down:16;wait:150;4,47;right:8;{DOOR};10,47;10,49;10,53;20,53',
      {'map': TOWN, 'cell': (20, 53), 'maxf': 3200}),
+    # 그만둔 날은 주인이 카운터에 선다. 손님 쪽에서 말을 걸어(0323 「예」 → 0324) 주인 가게: 3장 무기 셋 뒤에 재고가 있는
+    # ブーメラン·はじゃのつるぎ 가 붙고, 넷째(ブーメラン 350G)를 산다. 금화만 줄고 재고는 그대로(FC 실측)
+    ('master_shop', 'walk', f'10,53;8,53;wait:30;left:8;wait:30;a:8;wait:40;a:8;until:600;wait:90;a:8;cursor:1;cursor:0;a:8;cursor:1;cursor:0;'
+     f'a:8;{SHOP_PICK};pick:{BOOMERANG};'
+     f'a:8;wait:90;{taps(4)};b:8;wait:90;b:8;wait:90;b:8;wait:90;b:8;wait:90;10,53',
+     {'map': TOWN, 'cell': (10, 53), 'maxf': 3200,
+      'set': f'{gold(5000)};{lakanaba.STOCK_AT & 0xFFFF:04X}=01;{(lakanaba.STOCK_AT + 2) & 0xFFFF:04X}=01',
+      'bytes': {'GOLD0': (5000 - 350) & 0xFF, 'GOLD1': (5000 - 350) >> 8}}),
 ]
 
 # 레이크나바 무기점 첫 출근: 문 칸이나 문 밖 칸에 들어서면 꾸지람(02F3) 뒤 카운터 안 (4,53)으로 걸려 들어가 031D. 문 밖
@@ -69,4 +82,6 @@ PASS_NO_DEVICE = {
     '(12,53)~(8,53) 만 걷고, 맵 구석으로 사라진 뒤 조작을 푼다(dq4ch3lakanabacheck 손님 사례)',
     lakanaba.SCRIPTS['first_master'][2]: '레이크나바 첫 출근 주인: 주인공이 문 칸·문 밖(X 14 이상)에 서면 조작을 막고 X 12 '
     '이하((12,53)→(10,53)→(10,49))로만 비킴(heroblock shop-right·shop-above·shop-below)',
+    lakanaba.SCRIPTS['master'][2]: '레이크나바 카운터 주인: 가게를 닫을 때만 걷고, 그때 주인공은 손님이 막은 채 카운터 안 '
+    '(4,53)에 서 있다. 주인은 계단 칸 (2,55)→(4,55) 한 걸음(dq4ch3lakanabacheck closing 사례)',
 }

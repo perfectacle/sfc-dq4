@@ -15,14 +15,17 @@ AT = 0x3CFC00
 ROWS = [(0x36, 0, 2, 0x60), (0x36, 3, 5, 0x61), (0x37, 0, 0x1F, 0x62)]
 
 
-def rom_with_hooks():
+ONE_SHOT_AT = 0x7E1F00
+
+
+def rom_with_hooks(one_shot_at=None):
     rom = bytearray(0x200000)
 
     def put(addr, data):
         at = (addr >> 16 & 0x7F) << 15 | addr & 0x7FFF
         rom[at:at + len(data)] = data
 
-    for w in hook.writes(AT, ROWS):
+    for w in hook.writes(AT, ROWS, one_shot_at):
         bank, addr = w["at"].split(":")
         put(int(bank, 16) << 16 | int(addr, 16), bytes.fromhex(w["hex"]))
     # What follows each original pair (06:DC3C JSR $DFBA, 06:F57A the price loop) only returns here.
@@ -115,9 +118,56 @@ class ShopKeyTest(unittest.TestCase):
             hook.table([(0x60, 0, 0, 0x61)])
 
     def test_sites_keep_their_length(self):
+        _, shop, inn = hook.writes(AT, ROWS, ONE_SHOT_AT)
+        self.assertEqual(len(bytes.fromhex(shop["hex"])), len(hook.SHOP_ORIG))
         _, shop, inn = hook.writes(AT, ROWS)
         self.assertEqual(len(bytes.fromhex(shop["hex"])), len(hook.SHOP_ORIG))
         self.assertEqual(len(bytes.fromhex(inn["hex"])), len(hook.INN_ORIG))
+
+
+
+class OneShotTest(unittest.TestCase):
+    """한 번 쓰는 키: ONE_SHOT 값이면 그 키로 열고 바이트를 지운다. 다른 값은 건드리지 않는다."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.rom = rom_with_hooks(ONE_SHOT_AT)
+
+    def shop(self, one_shot, m8=True, group=0x36, number=0x04):
+        wram = bytearray(0x20000)
+        wram[0xBC], wram[0xBD], wram[0x0F25], wram[0x0F26] = group, number, 0x77, 0x77
+        wram[ONE_SHOT_AT & 0xFFFF] = one_shot
+        cpu = Cpu(self.rom, wram)
+        p = 0x20 if m8 else 0
+        cpu.pbr, cpu.dbr, cpu.p, cpu.a, (cpu.x, cpu.y) = 0x06, 0x7E, p, 0xAB00, (0x1234, 0x5678)
+        cpu.jsr(hook.SHOP_SITE, max_steps=2000)
+        self.assertEqual((cpu.x, cpu.y, cpu.p & 0x30, cpu.s), (0x1234, 0x5678, p, 0x1FF))
+        return cpu.wram[0x0F25], cpu.wram[0x0F26], cpu.wram[ONE_SHOT_AT & 0xFFFF]
+
+    def test_one_shot_key_is_taken_once(self):
+        for key in hook.ONE_SHOT:
+            with self.subTest(key=key):
+                self.assertEqual(self.shop(key), (key, 0x77, 0))
+                self.assertEqual(self.shop(key, m8=False), (key, 0x04, 0))
+
+    def test_other_values_keep_the_map_key(self):
+        for value in (0x00, 0x60, 0xEF, 0xF8, 0xFF):
+            with self.subTest(value=value):
+                self.assertEqual(self.shop(value), (0x61, 0x77, value))
+
+    def test_inn_ignores_the_one_shot_key(self):
+        wram = bytearray(0x20000)
+        wram[0xBC], wram[0xBD], wram[ONE_SHOT_AT & 0xFFFF] = 0x36, 0x04, 0xF3
+        cpu = Cpu(self.rom, wram)
+        cpu.pbr, cpu.dbr, cpu.p, cpu.a, (cpu.x, cpu.y) = 0x06, 0x3C, 0x20, 0xAB00, (0x1234, 0x5678)
+        cpu.jsr(hook.INN_SITE, max_steps=2000)
+        self.assertEqual((cpu.wram[0x02], cpu.wram[ONE_SHOT_AT & 0xFFFF]), (0x61, 0xF3))
+
+    def test_one_shot_keys_stay_above_assigned_keys(self):
+        self.assertGreater(hook.ONE_SHOT.start, hook.KEY_LAST)
+        self.assertEqual(hook.ONE_SHOT.start % len(hook.ONE_SHOT), 0)
+        with self.assertRaises(ValueError):
+            hook.table([(0x36, 0, 0, hook.ONE_SHOT.start)])
 
 
 if __name__ == "__main__":

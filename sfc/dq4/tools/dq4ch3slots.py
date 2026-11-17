@@ -38,7 +38,7 @@ VARS2_SIZE = 25
 SLOTS = {
     'L': Slot('레이크나바: 무기점 일·도시락·네네·톰 노인·톰 아들', 'dq4ch3lakanaba', (0x5CD000, 0x5CE000),
               flags=(0x70, 0x71), scripts=(('10:9B81', (0, 1, *range(8, 14))), ('10:A031', tuple(range(6)))), lists='ch3_lakanaba_',
-              vars=(4, 10)),
+              vars=(4, 10), vars2=(20, 21)),
     'S': Slot('북쪽 동굴과 금고, 여신상 동굴의 배', 'dq4ch3safe', (0x5CE000, 0x5CE800), flags=(0x72, 0x7A),
               scripts=(('10:C8FF', (0, 1, 4, 6, 7, 8, 9)),), lists='ch3_safe_', vars=(14, 25)),
     'B': Slot('본몰 왕자·감옥·여우 마을·다리·개 토마스', 'dq4ch3bonmalmo', (0x5CE800, 0x5CF000), flags=(0x73, 0x74),
@@ -63,7 +63,7 @@ COMMON_VARS = (0, 4)
 SPARE = {
     'flags': (0x7B, 0x7C),
     'vars': (),
-    'vars2': (20, 25),
+    'vars2': (21, 25),
     'code': ((0x4ED000, 0x4F0000),),
 }
 # 여신상 동굴의 배(dq4raft, S 가 hooks 로 둠). S 몫 코드 자리가 차서 따로 둔다. 5D:8000~ 은 dq4windowtext 몬스터 자료

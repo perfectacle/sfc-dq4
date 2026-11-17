@@ -73,12 +73,23 @@ WORK_AT = f'{L.TOWN},{L.COUNTER_IN[0]},{L.COUNTER_IN[1] - 1}'      # 순간이�
 WAIT_CUSTOMER = 'wait:900;' + taps(14)                           # 손님 사이 400~700프레임(+걸어 들어옴)
 
 
-def work_case(variant, msgs, check, more=None, extra_set=None, maxf=3400):
+def ask(answer):
+    """예/아니오 물음 하나에 답한다(0 예, 1 아니오). 메시지 창과 예/아니오 창은 창 번호(7E:0A00)가 같아 until 로 가르지
+    못한다. 커서는 예/아니오 창이 열려야 움직이므로, 먼저 반대쪽으로 옮겨 창이 열린 것을 잡고(앞 물음의 커서가 남아
+    있으면 곧바로 지나가고 둘째 토큰이 창을 기다린다) 답 쪽으로 되돌려 A."""
+    return f'cursor:{1 - answer};cursor:{answer};a:8'
+
+
+# 말이 끝나면 창이 키를 기다린다. 닫고 손님이 다시 말을 걸어 창이 열릴 때까지
+RETALK = 'wait:30;b:8;wait:30;until:600'
+
+
+def work_case(variant, msgs, check, more=None, extra_set=None, maxf=3400, inputs=WAIT_CUSTOMER):
     """일하는 중(카운터 안)에서 손님 하나를 맞는다. check(seen) 는 끝 바이트로 본 문제 목록."""
     sets = {'L0': SEEN_SHIFT, **(extra_set or {})}
     return {'variant': variant,
             'steps': [('work', 'warp', WORK_AT, {'set': _set(**sets)}),
-                      ('customer', 'walk', f'{WAIT_CUSTOMER};{CLOSE}', {'maxf': maxf, **(more or {})})],
+                      ('customer', 'walk', f'{inputs};{CLOSE}', {'maxf': maxf, **(more or {})})],
             'msgs': msgs, 'check': check}
 
 
@@ -153,6 +164,10 @@ CASES = {
                           wage_is(1)),
     'raise': work_case(buyer('sold', DISCOUNT_BELOW=0, RAISE_BELOW=0xFF, LUCK40_BELOW=0xFF, flip_buy=True),
                        INTRO + ['buy', 'raise', 'raise_ok'], wage_is(2)),
+    # 물건을 보여 달라는 말(032B)에 「아니오」 면 032C 를 「예」 까지 되풀이한다. 둘째 032C 는 손님이 다시 말을 걸어 묻는다
+    'joke': work_case(buyer('sold'), INTRO + ['joke', 'joke', 'joke', 'buy', 'bought'], wage_is(0),
+                      inputs=';'.join(['until:900', ask(0), ask(1), ask(1), RETALK, ask(1), RETALK, ask(0), RETALK,
+                                       ask(0), taps(6)])),
     'no_deal': work_case(buyer('sold', DISCOUNT_BELOW=0, RAISE_BELOW=0, LUCK_BELOW=0xFF, flip_buy=True),
                          INTRO + ['buy', 'no_thanks'], same(WAGE0=0)),
     # 일삯이 100 을 넘으면 가게를 닫는다: 0341, 금화 + 일삯, 밤, 무기점 문 앞
@@ -179,15 +194,15 @@ CASES = {
             'check': lambda s: ([] if L.TOM_GOLD[0] <= s.get('GOLD0', 0) < sum(L.TOM_GOLD) else
                                 [f"금화 {s.get('GOLD0')}"]) +
                                ([] if s.get('L0', 0) & 0x60 == L.TOM_DONE[1] else [f"톰 flag {s.get('L0')}"])},
-    # 톰 아들: 개를 빌려줌(DOG). 마을을 다시 불러오면 우리의 개가 없다(아래 dog_gone)
-    'son': {'steps': [('son', 'warp', f'{L.TOWN},46,8', {}),
+    # 톰 아들(본몰 감옥에서 풀려난 뒤에만 섬): 개를 빌려줌(DOG). 마을을 다시 불러오면 우리의 개가 없다(아래 dog_gone)
+    'son': {'steps': [('son', 'warp', f'{L.TOWN},46,8', {'set': f'{0x2190 + L.SON_FREED[0]:04X}={L.SON_FREED[1]:02X}'}),
                       ('ask', 'walk', f'{wc.talk("up", 5)}', {'maxf': 1200}),
                       ('house', 'warp', f'{L.HOUSE},60,16', {}), ('town', 'warp', f'{L.TOWN},46,8', {})],
             'msgs': ['son_lend'], 'check': lambda s: [] if s.get('COMMON', 0) & ch3.DOG[1] else ['DOG 꺼짐'],
             'dog_gone': True},
     # 여우를 쫓은 뒤(본몰 FOXED) 개를 데리고 아들에게: 「예」 면 돌려줌(DOG 끔, DOG_BACK)
     'son_return': {'steps': [('son', 'warp', f'{L.TOWN},46,8',
-                              {'set': f'{0x2190 + L.FOXED[0]:04X}={L.FOXED[1]:02X};'
+                              {'set': f'{0x2190 + L.FOXED[0]:04X}={L.FOXED[1] | L.SON_FREED[1]:02X};'
                                       f'{_a(FLAGS["COMMON"][0]):04X}={ch3.DOG[1]:02X}'}),
                              ('ask', 'walk', f'{wc.talk("up", 6)}', {'maxf': 1400})],
                    'msgs': ['son_return', 'son_thanks', 'son_luck'],
