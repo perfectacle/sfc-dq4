@@ -19,7 +19,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 import dq4chapter1 as ch1  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 from dq4chapterbox import DB0, ENTER, LEAVE  # noqa: E402
-from dq4ch3slots import SLOTS, VARS_AT  # noqa: E402
+from dq4ch3slots import SLOTS, VARS2_AT, VARS_AT  # noqa: E402
 
 # 7E:2208 은 DQ5 가 색인 쓰기로만 덮는 자리(dq4ch2slots 「flag 자리」). 2장 첫머리·텐페·사건 전투가 bit0·1·2·4·6·7 을 쓴다
 CHAPTER3 = (0x78, 0x08)        # 7E:2208 bit3  3장 진행 중(2장 끝에서 켬). 주인공 그림·성장·장비를 톨네코로
@@ -285,6 +285,12 @@ def apply(data, original, dq4, first_message=None):
             if start + len(more) > end:
                 raise SystemExit(f'{ctx.key}: 사건 코드 {len(more)}바이트가 예약 {start:06X}~{end - 1:06X} 를 넘음')
             places.append((start, more))
+        if hasattr(ctx.module, 'far_native'):
+            more, _ = ctx.module.far_native(ctx)
+            start, end = ctx.slot.far
+            if start + len(more) > end:
+                raise SystemExit(f'{ctx.key}: 다른 뱅크 코드 {len(more)}바이트가 예약 {start:06X}~{end - 1:06X} 를 넘음')
+            places.append((start, more))
         if hasattr(ctx.module, 'hooks'):
             hooks += ctx.module.hooks(ctx)
     if TABLE_AT + len(places[1][1]) > CODE_END:
@@ -424,6 +430,10 @@ def _next_day(at):
         body += bytes((0xAF,)) + _al(a) + bytes((0x1A, 0xF0, 0x04, 0x8F)) + _al(a)
     tom = 0x7E2190 + lakanaba.TOM_PUSH[0]
     body += bytes((0xAF,)) + _al(tom) + bytes((0x29, ~(lakanaba.TOM_PUSH[1] | lakanaba.TOM_DONE[1]) & 0xFF, 0x8F)) + _al(tom)
+    # 날이 바뀔 때 할 일이 있는 모듈(DAY_HOOK)은 다른 뱅크 코드 몫 첫 주소에 그 루틴을 둔다(엔돌: 네네 가게 매상)
+    for key, mod in modules():
+        if getattr(mod, 'DAY_HOOK', False):
+            body += bytes((0x22,)) + _al(SLOTS[key].far[0])
     return bytes(body) + LEAVE
 
 
@@ -465,11 +475,26 @@ class Context(ch2.Context):
         self.points = points
         self.code_at = self.slot.code[0]
         self.vars_at = VARS_AT + self.slot.vars[0] if self.slot.vars else None
+        self.vars2_at = VARS2_AT + self.slot.vars2[0] if self.slot.vars2 else None
+        self.far_at = self.slot.far[0] if self.slot.far else None
         self.msg = None if message is None else {n: message + k for k, n in enumerate(getattr(module, 'MESSAGES', {}))}
         self.talk = None if talk is None else {n: talk + k for k, n in enumerate(getattr(module, 'TALKS', ()))}
         self.base = native()[1]
         self.calls = {}
         self._at = None
+
+    @property
+    def at(self):
+        """모듈 네이티브(native·far_native)의 주소. 롬 없이 센다."""
+        if self._at is None:
+            self._at = {}
+            saved, self.original = self.original, None
+            if hasattr(self.module, 'native'):
+                self._at = dict(self.module.native(self)[1])
+            if hasattr(self.module, 'far_native'):
+                self._at.update(self.module.far_native(self)[1])
+            self.original = saved
+        return self._at
 
     def say(self, name):
         """대화 명령: 이 모듈 메시지 name 을 띄움."""

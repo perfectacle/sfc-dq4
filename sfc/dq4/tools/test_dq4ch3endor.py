@@ -109,7 +109,7 @@ class HookTest(unittest.TestCase):
         ctx = _ctx()
         (site, old, new), *rest = endor.hooks(ctx)
         self.assertEqual([h[0] for h in rest], [endor.merc.PICTURE_TABLE + endor.merc.KINDS[w] for w in endor.merc.WHO] +
-                         [endor.merc.AI_AT, endor.merc.STEP_HOOK_AT])
+                         [endor.merc.AI_AT, endor.merc.STEP_HOOK_AT, endor.shop.LOW_STUBS[0]])
         safe_new = next(n for s, _, n in safe.hooks(_ctx('S')) if s == safe.EXIT_SITE)
         self.assertEqual((site, old), (safe.EXIT_SITE, safe_new))
         self.assertEqual(new, bytes((0x22, *endor._al(ctx.at['exit']))) + safe_new[4:])

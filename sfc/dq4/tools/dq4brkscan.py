@@ -95,6 +95,13 @@ def blobs():
             if problems:
                 raise ValueError('; '.join(problems))
             out.append((name, ctx.code_at, blob, entries))
+        if hasattr(ctx.module, 'far_native'):
+            blob, at = ctx.module.far_native(ctx)
+            name = f'ch3.{ctx.key}.far'
+            entries, problems = entries_of(name, ctx.far_at, blob, at)
+            if problems:
+                raise ValueError('; '.join(problems))
+            out.append((name, ctx.far_at, blob, entries))
     scenes = box.GAME_SCENES
     lay = box.Layout(box.CODE_AT, scenes, b'', [bytes(box.BOX_W * box.BOX_H * 2)] * len(scenes), box.palettes())
     out.append(('chapterbox', box.CODE_AT, lay.blob,

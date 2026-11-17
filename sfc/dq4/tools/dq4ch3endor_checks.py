@@ -2,12 +2,15 @@
 import dq4ch1walkcheck as wc
 import dq4ch3event as ch3
 import dq4ch3endor as endor
+import dq4neneshop as shop
 from dq4ch3walkparts import BENTO, CLOSE, FACE_UP, FIELD_OUT, SEARCH, TOWN, TOWN_WEST, gold, items, set_flag, talk, taps
 
 FLAGS = {
     **{f'ENDOR_{k}': wc.flag(getattr(endor, k)) for k in ('ALLOWED', 'SHOP', 'ORDER', 'DELIVERED', 'SOLD', 'SON_CHEER',
                                                           'NOTICE', 'BUTTON', 'ASKED', 'PRESSED')},
     'ENDOR_COUNT': (ch3.VARS_AT + ch3.SLOTS['E'].vars[0] + endor.VARS, 0xFF),
+    **{f'NENE_SALES{k}': (ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + shop.SALES + k, 0xFF) for k in range(3)},
+    'NENE_STOCK0': (ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + shop.STOCK, 0xFF),
 }
 
 # 엔돌: 사람 바로 아래 셀(FC 칸 한 칸 아래). 순간이동은 TO 의 한 셀 아래에 내린다

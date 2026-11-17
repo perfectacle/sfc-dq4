@@ -100,12 +100,39 @@ class SlotTest(unittest.TestCase):
             self.assertFalse([q for q in prefixes if q != p and q.startswith(p)], p)
             self.assertFalse('ch3_opening'.startswith(p), p)
 
+    def test_second_vars_and_far_code_are_owned_once(self):
+        spans = [('spare', slots.SPARE['vars2'])] + [(k, s.vars2) for k, s in SLOTS.items() if s.vars2]
+        used = set()
+        for k, (lo, hi) in spans:
+            self.assertTrue(0 <= lo < hi <= slots.VARS2_SIZE, k)
+            self.assertFalse(used & set(range(lo, hi)), k)
+            used |= set(range(lo, hi))
+        self.assertEqual(used, set(range(slots.VARS2_SIZE)))
+        # 둘째 칸도 칸 첫 바이트를 건너뛰고, 첫째 칸(49) 바로 앞 칸이다
+        self.assertEqual(slots.VARS2_AT, ev.MONSTER_SLOTS + slots.VARS2_SLOT * ev.MONSTER_SLOT + 1)
+        self.assertEqual(slots.VARS2_AT + slots.VARS2_SIZE + 1, slots.VARS_AT)
+        far = [(k, s.far) for k, s in SLOTS.items() if s.far] + [(f'spare{i}', c) for i, c in enumerate(slots.SPARE['code'])]
+        far.append(('monsters', slots.MONSTERS_CODE))
+        import dq4fieldencounter
+        self.assertEqual(dq4fieldencounter.CH3_CODE_AT, slots.MONSTERS_CODE[0])
+        # 몫 셋이 뱅크 4E 를 남김없이 나눈다
+        self.assertEqual(sum(hi - lo for _, (lo, hi) in far), 0x8000)
+        for i, (k, (lo, hi)) in enumerate(far):
+            self.assertEqual(lo >> 16, (hi - 1) >> 16, k)
+            self.assertEqual(lo >> 16, 0x4E, k)
+            for k2, (lo2, hi2) in far[i + 1:]:
+                self.assertTrue(hi <= lo2 or hi2 <= lo, f'{k} 와 {k2} 가 겹침')
+        # BRK 받침은 WRAM 거울이 있는 낮은 뱅크에
+        self.assertLess(slots.LOW_STUBS[0] >> 16, 0x40)
+        self.assertEqual(slots.LOW_STUBS[0] >> 16, (slots.LOW_STUBS[1] - 1) >> 16)
+
     def test_no_tool_names_a_reserved_flag_byte_or_the_vars(self):
         # 이 표와 사건 모듈만 이 자리를 쓴다. 다른 도구가 롱 주소로 직접 읽고 쓰면 예약이 깨진다
         mine = {f + 0x2190 for f in slots.COMMON_FLAGS} | {f + 0x2190 for s in SLOTS.values() for f in s.flags} | \
             {f + 0x2190 for f in slots.SPARE['flags']} | set(range(slots.VARS_AT & 0xFFFF,
-                                                                    (slots.VARS_AT & 0xFFFF) + slots.VARS_SIZE))
-        owners = {s.module for s in SLOTS.values()} | {'dq4ch3slots', 'dq4ch3event'}
+                                                                    (slots.VARS_AT & 0xFFFF) + slots.VARS_SIZE)) | \
+            set(range(slots.VARS2_AT & 0xFFFF, (slots.VARS2_AT & 0xFFFF) + slots.VARS2_SIZE))
+        owners = {s.module for s in SLOTS.values()} | {'dq4ch3slots', 'dq4ch3event', 'dq4neneshop'}
         for path in HERE.glob('*.py'):
             if path.stem.startswith('test_') or path.stem in owners:
                 continue
@@ -135,7 +162,13 @@ class RegisteredModuleTest(unittest.TestCase):
             if hasattr(ctx.module, 'native'):
                 code, at = ctx.module.native(ctx)
                 self.assertLessEqual(ctx.code_at + len(code), ctx.slot.code[1], ctx.key)
-                self.assertEqual(at, ctx.at, f'{ctx.key}: 주소가 롬에 따라 바뀜')
+                self.assertEqual(at, {k: v for k, v in ctx.at.items() if k in at}, f'{ctx.key}: 주소가 롬에 따라 바뀜')
+            if hasattr(ctx.module, 'far_native'):
+                code, at = ctx.module.far_native(ctx)
+                lo, hi = ctx.slot.far
+                self.assertLessEqual(lo + len(code), hi, ctx.key)
+                self.assertTrue(all(lo <= a < hi for a in at.values()), ctx.key)
+                self.assertFalse(set(at) & set(ctx.module.native(ctx)[1]), f'{ctx.key}: 두 코드 자리에 같은 이름')
 
     def test_talks_encode(self):
         import dq5talkwrite
