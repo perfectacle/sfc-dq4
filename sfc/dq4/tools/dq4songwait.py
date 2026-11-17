@@ -110,8 +110,15 @@ def wrappers(rom):
     return out
 
 
+def _in_messages(addr):
+    """덧붙인 메시지 덩어리(dq4menumsg.SEGMENTS) 안: 글자 바이트가 우연히 JSR·JSL 꼴이 되는 자리라 부르기가 아니다."""
+    import dq4menumsg
+    return any(start <= addr < end for start, end in dq4menumsg.SEGMENTS)
+
+
 def call_hits(rom, entry):
-    """입구를 부르는 바이트 자리 [(자리, 명령)]: 어디서나 JSL·JML(22·5C + 긴 주소), 같은 뱅크 안의 JSR·JMP(20·4C)."""
+    """입구를 부르는 바이트 자리 [(자리, 명령)]: 어디서나 JSL·JML(22·5C + 긴 주소), 같은 뱅크 안의 JSR·JMP(20·4C).
+    덧붙인 메시지 덩어리 안은 뺀다(같은 뱅크에 곡 코드와 메시지가 함께 있음, 71:8000~ 곡·71:A000~ 메시지)."""
     hits = []
     for op in (0x22, 0x5C):
         pat = bytes([op]) + _far(entry)
@@ -126,7 +133,7 @@ def call_hits(rom, entry):
         while i >= 0:
             hits.append((cpu(i), op))
             i = rom.find(pat, i + 1, lo + 0x8000)
-    return sorted(hits)
+    return sorted(h for h in hits if not _in_messages(h[0]))
 
 
 def sites(rom, port=True):
