@@ -316,7 +316,6 @@ RETALK = {
     (BONMALMO, 'day', (0x1F, 0x1A)): 'jail',
     (BONMALMO, 'day', (0x04, 0x15)): 'armor_buyer',
     (BONMALMO, 'day', (0x06, 0x06)): 'nanny',
-    (BONMALMO, 'day', (0x06, 0x07)): 'nanny',
     (PRISON, 'day', (0x0A, 0x0E)): 'jail_guard',
     (PRISON, 'day', (0x02, 0x07)): 'jail_guard',
 }
@@ -535,11 +534,9 @@ def state_messages(ctx):
         'towns_letter': (_set(LETTER1), {(BONMALMO, (0x06, 0x1C), False): m['arms_demand'],
                                          (BONMALMO, (0x06, 0x1C), True): m['arms_demand']}),
         # 왕자를 만난 뒤 다시 들어온 방문: 들 때 이미 켜져 있어 유모는 0836
-        'towns_prince': (_set(PRINCE_MET), {(BONMALMO, (0x06, 0x06), False): m['nanny_room'],
-                                            (BONMALMO, (0x06, 0x07), False): m['nanny_room']}),
+        'towns_prince': (_set(PRINCE_MET), {(BONMALMO, (0x06, 0x06), False): m['nanny_room']}),
         # 쫓겨난 그 방문: 맵 안 임시 비트라 맵에 든 뒤에 켠다(셋째 값 LATESET)
-        'towns_chased': ('', {(BONMALMO, (0x06, 0x06), False): m['nanny_out'],
-                              (BONMALMO, (0x06, 0x07), False): m['nanny_out']}, _set(PRINCE_MET, NANNY_SCOLDED)),
+        'towns_chased': ('', {(BONMALMO, (0x06, 0x06), False): m['nanny_out']}, _set(PRINCE_MET, NANNY_SCOLDED)),
         'towns_shop': (_set(SHOP), {(HOUSE, (0x02, 0x04), True): m['neighbor_proud']}),
         'towns_casino': (_set(_resumed()), {(CASINO, fc, night): first for fc, first in (
             ((0x1C, 0x08), COIN_EXCHANGE_FIRST), ((0x18, 0x02), COIN_SALE_FIRST), ((0x08, 0x0A), ARENA_FIRST),

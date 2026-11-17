@@ -111,6 +111,13 @@ def blobs():
     widths = {'encounter': (True, False), 'pick': (True, False), 'count': (True, False), 'pick2': (True, False),
               'wake': (True, False), 'drop': (True, True), 'talk': (True, True)}
     out.append(('ch3monsters', fe.CH3_CODE_AT, blob, [(at[k], m8, x8) for k, (m8, x8) in widths.items()]))
+    # 입구별 도착·맵별 필드 자리 훅(dq4entrancehook, 뱅크 5B). 표 내용과 상관없이 코드는 같다. 3장 본몰 모듈의 입구 훅이
+    # 그 enter 로 이어 간다. 2A:F28D 는 어떤 폭이든 들어오므로 M·X 8비트와 16비트 둘 다 훑는다
+    import dq4entrancehook as eh
+    import dq4groupbuild
+    blob, labels = eh.code(dq4groupbuild.ENTRANCE_HOOK_AT, [], [])
+    out.append(('entrancehook', dq4groupbuild.ENTRANCE_HOOK_AT, blob,
+                [(labels[k], m8, x8) for k in ('enter', 'leave') for m8 in (True, False) for x8 in (True, False)]))
     scenes = box.GAME_SCENES
     lay = box.Layout(box.CODE_AT, scenes, b'', [bytes(box.BOX_W * box.BOX_H * 2)] * len(scenes), box.palettes())
     out.append(('chapterbox', box.CODE_AT, lay.blob,

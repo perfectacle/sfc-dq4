@@ -2,7 +2,7 @@
 
 [[check]]
 name = "dq4-ch3-bonmalmo"
-why = "3장 다리: 필드를 불러올 때(01:9FD2 의 JSL) 다리가 고쳐지기 전이면 FC 다리 칸(블록 16 여덟 칸)을 막힌 블록으로 바꾸는 훅(dq4ch3bonmalmo.hooks)이 원래 대상(움직이는 바다 01:C5C8)을 이어 부르며 걸려 있는지, 사건 네이티브가 제자리인지 빌드 롬에서 본다. 다리 막힘·고친 뒤 건너기와 사건 장면은 dq4-ch3-walk·dq4-ch3-heroblock·dq4-ch3-npc 가 본다"
+why = "3장 다리: 필드를 불러올 때(01:9FD2 의 JSL) 다리가 고쳐지기 전이면 FC 다리 칸(블록 16 여덟 칸)을 막힌 블록으로 바꾸는 훅(dq4ch3bonmalmo.hooks)이 원래 대상(움직이는 바다 01:C5C8)을 이어 부르며 걸려 있는지, 여우를 쫓은 뒤 들어갈 때 숲을 고르는 입구 앞 훅(2A:F28D)이 입구 훅으로 이어지는지, 사건 네이티브가 제자리인지 빌드 롬에서 본다. 다리 막힘·고친 뒤 건너기와 사건 장면은 dq4-ch3-walk·dq4-ch3-heroblock·dq4-ch3-npc 가 본다"
 paths = [
   "@ch3-modules",
   "sfc/dq4/tools/test_dq4ch3bonmalmo.py",

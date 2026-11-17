@@ -31,6 +31,8 @@ BM_YES = 'ask:800;cursor:0'
 BM_PRINCE_HOLD = wc.DAY + ';7E3308=00'
 # 여우 마을 필드 입구 블록(FC (7C,34))의 왼쪽 위 칸
 BM_FOX_GATE = (0x7C * 2, 0x34 * 2)
+# 여우 마을 촌장 집 앞 줄(셀 Y 5)의 X 26. 한 줄 걷기 bm_fox 와 같은 길(40 줄 → 48 줄 → 위 → 왼쪽)
+DOG_PAST = (26, 5)
 BM_FULL = ';'.join(f'{0x2058 + k:04X}=02' for k in range(10))
 # 본몰 성 출구 줄(dq4groupbuild LINKS 3F arrival (11,1F) 위 칸)과 나가면 서는 필드 칸, 다리(FC (6F,4F)) 서쪽·동쪽 칸
 BM_GATE = (0x11 * 2, 0x1E * 2 + 1)
@@ -61,6 +63,13 @@ SEGMENTS = [
     ('bm_prince_full_side', 'warp', f'{bm.CASTLE},{bm.PRINCE["night"][0]},{bm.PRINCE["night"][1] + 1}',
      {'map': bm.CASTLE, 'set': BM_FULL, 'poke': wc.NIGHT}),
     ('bm_prince_full', 'walk', talk('up', 8), {'bytes': {'BM_SLOT2': 0x02, 'BM_BAG_LETTER': 0}, 'poke': wc.NIGHT}),
+    # 개가 따라오면 FC (14,13)에 설 때 마을의 개가 짖고(02F1) 촌장 옆 (0D,01)로 달려간다. 개는 주인공 칸도 지나간다
+    ('bm_dog_town', 'warp', f'{bm.FOX_TOWN},{bm.DOG_TRIGGER[0]},{bm.DOG_TRIGGER[1] + 2}',
+     {'map': bm.FOX_TOWN, 'set': '21FF|02', 'poke': wc.DAY}),
+    # 장면 뒤 개가 달린 길 끝 칸 (0F,02)을 지나 촌장 집 앞까지 걷는다(숨기만 하고 자리를 치우지 않으면 그 칸이 막혔다)
+    ('bm_dog', 'walk', f'{bm.DOG_TRIGGER[0]},{bm.DOG_TRIGGER[3]};wait:200;{taps(3, 80)};wait:900;'
+     f'40,23;48,23;48,{DOG_PAST[1]};{DOG_PAST[0]},{DOG_PAST[1]}',
+     {'map': bm.FOX_TOWN, 'cell': DOG_PAST, 'poke': wc.DAY}),
     # 개가 따라오면 촌장이 놀라 숲으로 바뀌고, 여우가 빌어 「예」 면 강철 갑옷, 돈 가아데가 떠나 FOXED
     ('bm_fox_town', 'warp', f'{bm.FOX_TOWN},{bm.CHIEF[0] - 2},{bm.CHIEF[1] - 1}',
      {'map': bm.FOX_TOWN, 'set': '21FF|02', 'poke': wc.DAY}),
@@ -72,10 +81,11 @@ SEGMENTS = [
     ('bm_forest_side', 'warp', f'{bm.FOREST},{bm.FOREST_ENTRY[0] + 2},{bm.FOREST_ENTRY[1] - 1}',
      {'map': bm.FOREST, 'poke': wc.DAY}),
     ('bm_forest_out', 'walk', 'left:80', {'field': True, 'poke': wc.DAY}),
-    # 입구 블록 칸까지 걷는다(누름 길이로 걸으면 snes9x 에서 입구에 못 닿았다). 48/00 을 거쳐 숲 어귀 (0,31)에 내린 뒤에도
-    # 걷기가 그 칸 쪽(오른쪽)으로 이어 걸어 나무에 막힌 (4,31)에서 멈춘다. 그 줄은 숲 어귀로만 닿는다
+    # 입구 블록 칸까지 걷는다(누름 길이로 걸으면 snes9x 에서 입구에 못 닿았다). 마을(48/00)을 거치지 않고 바로 숲 어귀
+    # (0,31)에 내린 뒤에도 걷기가 그 칸 쪽(오른쪽)으로 이어 걸어 나무에 막힌 (4,31)에서 멈춘다. 그 줄은 숲 어귀로만 닿는다.
+    # 맵 바뀜 한 번 뒤에 끝나므로 마을을 거치면 끝 맵이 48/00 이 된다
     ('bm_forest_in', 'walk', f'{BM_FOX_GATE[0]},{BM_FOX_GATE[1]}',
-     {'map': bm.FOREST, 'cell': (bm.FOREST_ENTRY[0] + 4, bm.FOREST_ENTRY[1]), 'changes': 2, 'after': 300,
+     {'map': bm.FOREST, 'cell': (bm.FOREST_ENTRY[0] + 4, bm.FOREST_ENTRY[1]), 'changes': 1, 'after': 300,
       'poke': wc.DAY}),
     # 다리: 고치기 전에는 본몰에서 나가 다리 서쪽 칸(FC (6E,4F))에서 동쪽으로 걸어도 그 자리
     ('bm_castle_gate', 'warp', f'{bm.CASTLE},{BM_GATE[0]},{BM_GATE[1] - 1}', {'map': bm.CASTLE, 'poke': wc.DAY}),
@@ -118,4 +128,8 @@ def hero_cases():
 PASS_NO_DEVICE = {
     bm.SCRIPTS['fox'][2]: '숲의 여우: 장면 동안 주인공은 (04,0C)에 묶이고 여우는 (05,0D)→(05,04) 열로만 걸음(bm-fox-right 사례 겹침 0)',
     bm.SCRIPTS['gaade'][2]: '돈 가아데: 주인공 아래 줄(FC Y 0D)로만 걸음(bm-fox-right 사례 겹침 0)',
+    bm.SCRIPTS['nanny'][2]: '유모: 셀 X 8 이상·Y 19 이하로만 걷고, 주인공은 왕자 곁(X 4 이하, Y 23 이상)에 묶여 있음'
+                            '(bm_prince 구간·bm-prince-below 사례)',
+    **{bm.SCRIPTS[k][2]: '여우 마을의 개: FC 도 주인공 칸 (14,13)을 지나 달린다(실측). 주인공은 조작이 막힌 채 서 있고 '
+                         '개는 한 번 지나갈 뿐(bm_dog 구간)' for k in ('village_dog', 'village_dog_night')},
 }
