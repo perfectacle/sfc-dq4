@@ -38,7 +38,11 @@ class RegisterTest(unittest.TestCase):
         self.assertIn('dq4ch3towns', ev.EVENTS)
         self.assertEqual(ev.SLOTS['W'].module, 'dq4ch3towns')
         self.assertEqual(W.FLAGS, ())
-        self.assertFalse(hasattr(W, 'native'))
+        # 네이티브는 내보내는 이벤트만: 예약 몫 안
+        code, at = W.native(ctx())
+        start, end = ev.SLOTS['W'].code
+        self.assertLessEqual(start + len(code), end)
+        self.assertEqual(set(W.CALLS), set(W.OUT_TO))
 
     def test_every_talk_has_a_body_and_every_message_is_used(self):
         c = ctx()
@@ -104,7 +108,10 @@ def _lists():
             out[m].append(_entry(t, like))
     for m in W.ENDOR_MAPS:
         out.setdefault(m, [])
-    out[W.CASINO] = [_entry('day', fc) for fc in W.CASINO_PEOPLE]
+    out[W.CASINO] = [_entry(t, fc) for fc in W.CASINO_PEOPLE for t in ('day', 'night')]
+    for (m, t, fc) in W.ENDOR_MOVED:
+        if not any(e["time"] == t and (e["fields"]["x"], e["fields"]["y"]) == W.cell(*fc) for e in out[m]):
+            out[m].append(_entry(t, fc))
     m, t, fc = W.EMPTY_SHOP
     out.setdefault(m, []).append(_entry(t, fc))
     return {m: {"map": m, "entries": e} for m, e in out.items()}
@@ -128,7 +135,8 @@ class ListTest(unittest.TestCase):
             self.assertTrue(hit and all(e["fields"]["talk"] == t[name] for e in hit), (m, fc))
         names = {lst["name"]: lst for lst in new}
         self.assertEqual({o["map"] for o in over}, {*W.ENDOR_MAPS, W.CASINO})
-        self.assertTrue(all(o["flag"] == ev.CHAPTER3[0] and o["mask"] == ev.CHAPTER3[1] for o in over))
+        self.assertTrue(all(o["flag"] == ev.CHAPTER3[0] and o["mask"] == ev.CHAPTER3[1] for o in over
+                            if o["list"] != "new:ch3_towns_4001_open"))
         hall = names['ch3_towns_4002']["entries"]
         cells = {(e["time"], (e["fields"]["x"], e["fields"]["y"])): e["fields"]["talk"] for e in hall}
         for t_, fc in W.ENDOR_GONE[W.ENDOR_HALL]:
@@ -141,6 +149,19 @@ class ListTest(unittest.TestCase):
         # 빼지 않고 말만 바꾼다(그림 배치가 바뀌지 않게)
         shop = [e for e in lists[m]["entries"] if (e["time"], (e["fields"]["x"], e["fields"]["y"])) == (t_, W.cell(*fc))]
         self.assertEqual([e["fields"]["talk"] for e in shop], [t['empty_shop']])
+        # 공사 재개 뒤의 열린 카지노가 닫힌 카지노보다 앞 줄이고, 장치 사람의 대화가 바뀌어 있다
+        casino = [o for o in over if o["map"] == W.CASINO]
+        self.assertEqual([o["list"] for o in casino], ["new:ch3_towns_4001_open", "new:ch3_towns_4001"])
+        opened = {(e["time"], (e["fields"]["x"], e["fields"]["y"])): e["fields"]["talk"]
+                  for e in names['ch3_towns_4001_open']["entries"]}
+        for fc, name in W.CASINO_DEVICES.items():
+            self.assertEqual(opened[('night', W.cell(*fc))], t[name])
+        # 엔돌 밤 사람 한 칸 옮김, 왕좌의 방 대신은 섬
+        town = {(e["time"], (e["fields"]["x"], e["fields"]["y"])): e for e in names['ch3_towns_4000']["entries"]}
+        self.assertIn(('night', W.cell(0x17, 0x1E)), town)
+        self.assertNotIn(('night', W.cell(0x16, 0x1E)), town)
+        throne = {(e["time"], (e["fields"]["x"], e["fields"]["y"])): e for e in names['ch3_towns_4006']["entries"]}
+        self.assertEqual(throne[('day', W.cell(0x0D, 0x0B))]["fields"]["interval"], 0)
         ryan = names['ch3_towns_4001']["entries"]
         self.assertEqual({e["time"] for e in ryan}, {'day', 'night'})
         self.assertTrue(all(e["fields"]["talk"] == t['ryan'] for e in ryan))
@@ -161,7 +182,8 @@ class ListTest(unittest.TestCase):
     def test_absent_and_start_tables_cover_the_changed_people(self):
         c = ctx()
         gone = W.absent(c)
-        self.assertEqual(len(gone), 2 * len(W.CASINO_PEOPLE) + 3)
+        moved = sum(1 for to, _ in W.ENDOR_MOVED.values() if to not in [fc for (_, _, fc) in W.ENDOR_MOVED])
+        self.assertEqual(len(gone), 2 * len(W.CASINO_PEOPLE) + 3 + moved)
         start = W.start_messages(c)
         for (m, time, fc) in (*W.RETALK, *W.ENDOR):
             key = (m, W.cell(*fc), None if time is None else time == 'night')
@@ -169,9 +191,11 @@ class ListTest(unittest.TestCase):
                 key = (m, W.cell(*fc), False)
             self.assertIn(key, start)
         states = W.state_messages(c)
-        for name, (sets, table) in states.items():
-            self.assertRegex(sets, r'^[0-9A-F]{4}\|[0-9A-F]{2}$', name)
+        for name, (sets, table, *late) in states.items():
+            # 맵에 들 때 켜거나(SET) 든 뒤에 켠다(셋째 값 LATESET)
+            self.assertRegex(late[0] if late else sets, r'^[0-9A-F]{4}\|[0-9A-F]{2}$', name)
             self.assertTrue(table)
+        self.assertEqual(states['towns_chased'][2], states['towns_prince'][0])
 
 
 class WindowTest(unittest.TestCase):
@@ -213,6 +237,21 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(check.candidate_lists(doc, ["40/05"])["40/05"], [("b", ["b"]), ("c", ["c"])])
         doc["overrides"].pop()
         self.assertEqual(check.candidate_lists(doc, ["40/05"])["40/05"], [("b", ["b"]), ("기본", ["base"])])
+
+
+@unittest.skipUnless((ROOT / 'rom' / 'dq5.sfc').is_file(), 'local source ROM not present')
+class BorrowedTest(unittest.TestCase):
+    def test_borrowed_record_has_the_script_and_room(self):
+        import dq5npc
+        from dq5map import Rom
+        rom = Rom((ROOT / 'rom' / 'dq5.sfc').read_bytes())
+        entries = dq5npc.list_entries(rom, int(W.SCRIPT_LIST.replace(':', ''), 16))
+        for index, address, room in W.SCRIPTS.values():
+            self.assertIn(index, dict(ev.SLOTS['W'].scripts)[W.SCRIPT_LIST])
+            a = int(address.replace(':', ''), 16)
+            e, _ = entries[index]
+            self.assertIn(a, (dq5npc.script_address(rom, e, False), dq5npc.script_address(rom, e, True)))
+            self.assertEqual(rom.u8(a), room)
 
 
 @unittest.skipUnless(DQ4.is_file(), 'local source ROM not present')
