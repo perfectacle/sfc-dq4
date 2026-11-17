@@ -26,6 +26,8 @@ import dq4ch3event as ch3  # noqa: E402
 from dq4chapterbox import ENTER, LEAVE  # noqa: E402
 from dq4ch2endor import Asm, BCC, BCS, BEQ, BNE, BRA, lda, sta  # noqa: E402
 from dq4itemport import BENTO  # noqa: E402
+from dq4ch3slots import SLOTS as _SLOTS, VARS2_AT  # noqa: E402
+from dq4shopkey import ONE_SHOT  # noqa: E402
 
 say, narrate = ch1.say, ch1.narrate
 pages = ch2._speaker_pages
@@ -61,8 +63,10 @@ SERVED = (0x14, 0x20)          # 이 손님을 맞았음(주인공이 먼저 말
 DISCOUNT = (0x14, 0x40)        # 흥정: 깎아 줌(0330)
 RAISE = (0x14, 0x80)           # 흥정: 값을 올림(0331)
 LUCK40 = (0x13, 0x40)          # 7E:21A3 bit6(맵을 옮기면 지워짐): 같은 r2 < 40(웃돈을 받아들임)
+JOKE = (0x13, 0x08)            # 7E:21A3 bit3(맵을 옮기면 지워짐): 032C 에 「아니오」. 손님이 다시 말을 걸면 032C 부터
 TEMP = 0x7E21A4
 FOXED = (0x73, 0x01)           # 본몰 모듈(dq4ch3slots B)의 여우를 쫓음(FC $6280&02). 조건으로만 본다
+SON_FREED = (0x73, 0x04)       # 본몰 모듈의 감옥의 톰 아들을 풀어 줌(FC $6280&04). 레이크나바의 아들이 이때부터 선다
 PACE = 0x7E21A2                # 다음 손님까지 남은 차례(맵을 옮기면 0)
 ANSWERED = ch2.ANSWERED        # 7E:21A3 bit0 대화가 끝남(맵을 옮기면 지워짐)
 
@@ -70,6 +74,8 @@ ANSWERED = ch2.ANSWERED        # 7E:21A3 bit0 대화가 끝남(맵을 옮기면 
 STOCK_AT = ch3.VARS_AT + 4     # 파는 손님에게서 산 ブーメラン·くさりがま·はじゃのつるぎ 수(FC $62E7~$62E9)
 WAGE_AT = ch3.VARS_AT + 7      # 오늘 일삯 16비트(FC $07C6~). 가게를 닫거나 그만둘 때 금화로
 ITEM_AT = ch3.VARS_AT + 9      # 지금 손님: bit0-2 품목 칸, bit4-5 값(0 그대로, 1 깎음, 2 웃돈, 3 파는 손님)
+# 둘째 변수 칸(dq4ch3slots L): 가게 키 덮어쓰기(dq4shopkey ONE_SHOT). 주인 가게를 열기 직전에 재고 조합으로 쓴다
+SHOP_KEY_AT = VARS2_AT + _SLOTS['L'].vars2[0]
 MODE_SELLER = 3
 ROW = 16                       # 값·일삯 표의 값 칸마다 칸 수(ITEM_AT 의 bit4-5 가 그대로 16 단위)
 # 무기점 품목: (DQ5 물건, FC 값). 앞 셋이 FC 무기점 목록(01 02 09), 뒤 셋은 파는 손님에게서 사면 그 재고만큼 목록 뒤에
@@ -134,6 +140,7 @@ TOM = {'day': cell(0x18, 0x0B), 'night': cell(0x16, 0x0B)}   # FC 16/00 대화 0
 SON = cell(0x17, 0x03)                                  # FC 16/00 슬롯 2, 대화 055
 DOG = cell(0x1B, 0x04)                                  # FC 16/00 우리 안의 개(대화 0663)
 NENE = {'day': ch3.NENE_CELL, 'night': cell(0x1D, 0x03)}     # FC 16/01 대화 057
+NENE_FC_STEP = 8                                         # FC 슬롯 07 의 걸음 간격(차례, 머리 바이트 80 = 128프레임)
 # FC 16/01 낮 목록의 둘째 네네(슬롯 07, 돌아다님). FC 는 첫머리 뒤 이쪽만 두지만, 첫머리 자리 (1B,04) 의 네네를 남기고 이쪽을
 # 뺀다(한 사람만 서게, 말 거는 자리가 검사·첫머리 인물과 같게)
 NENE_WALKER = (HOUSE, 'day', cell(0x21, 0x02))
@@ -142,13 +149,24 @@ QUIT_MASTER = (CELLAR, 'day', cell(0x07, 0x04))        # FC 16/02 대화 052
 MASTER_PIC = 0x07
 WALK_SPEED = 0x02               # 인물 명령 1E: 7E:3360(01 이면 한 칸 8프레임)
 CUSTOMER_PIC = 0x40            # FC 손님 겉모습 17(15:$A3FC 의 하나). 이 맵 인물이 이미 쓰는 그림이라 OBJ 자리가 늘지 않음
+# FC 는 손님마다 1D:$A3FC[rand & 7](그림 11 14 17 18 3B 1F 22 21)로 겉모습을 고른다. 인물 그림은 맵에 들 때 세트마다 한 번
+# VRAM 에 올라가고 슬롯은 칸 목록 번호(7E:3200+슬롯)로 그 타일을 가리키므로, 같은 맵 낮의 다른 인물이 쓰는 그림이면 그
+# 인물의 칸 목록 번호를 베껴 겉모습만 바꿀 수 있다(실측). 낮 3E/00 에 올라와 있는 FC 짝은 14(29)·17·21(40)뿐이라 나머지
+# 칸은 같은 맵 마을 사람 그림 05(두건 쓴 여자)·0B(소년)로 채운다
+LOOKS = (0x05, 0x29, 0x40, 0x0B, 0x05, 0x29, 0x0B, 0x40)
+CUSTOMER_SLOT = 0x08           # 목록 맨 앞이라 물체 슬롯 08(실측)
+SLOT_CELLS, SLOT_PIC, SLOT_DRAW = 0x7E3200, 0x7E3220, 0x7E32A0
+# 가게를 닫을 때 주인(FC 슬롯 14)이 (01,1B)에 나타나 (02,1B), 곧 카운터 안 주인공 바로 아래로 한 걸음 걸어와 0341(실측)
+CLOSE_FROM, CLOSE_AT = cell(0x01, 0x1B), cell(0x02, 0x1B)
 
 # 빌릴 인물 스크립트(dq4ch3slots L): 낮 칸 10:9B81, 밤 칸 10:A031
 DAY_LIST, NIGHT_LIST = '10:9B81', '10:A031'
 SCRIPTS = {'customer': (DAY_LIST, 0, '10:9B88'), 'first_master': (DAY_LIST, 1, '10:9BEC'),
            'master': (DAY_LIST, 8, '10:9C82'), 'tom': (DAY_LIST, 9, '10:9CBD'),
            'helper': (DAY_LIST, 10, '10:9D34'), 'dog': (DAY_LIST, 11, '10:9D83'),
-           'helper_night': (NIGHT_LIST, 0, '10:A038'), 'dog_night': (NIGHT_LIST, 1, '10:A04F')}
+           'helper_night': (NIGHT_LIST, 0, '10:A038'), 'dog_night': (NIGHT_LIST, 1, '10:A04F'),
+           'son': (DAY_LIST, 12, '10:9DD2'), 'cellar': (DAY_LIST, 13, '10:9E21'),
+           'son_night': (NIGHT_LIST, 2, '10:A07B')}
 
 
 def _mark(*pieces):
@@ -267,14 +285,14 @@ MESSAGES = {
 }
 
 # 네이티브 안의 자료(dq4brkscan 이 코드로 풀지 않게)
-DATA_ENTRIES = ('ids', 'prices', 'wages', 'close_event', 'sleep_event')
+DATA_ENTRIES = ('ids', 'prices', 'wages', 'looks', 'close_event', 'sleep_event')
 
 TALKS = ('nene', 'popolo_day', 'popolo_night', 'late', 'master', 'quit', 'buyer_intro', 'buyer', 'seller', 'tom',
          'son')
 # 첫 칸(표 칸 0)은 네네의 잠: dq4ch3opencheck 의 공용 장치 시험이 이 칸을 바꿔 네네 대화로 부른다
 CALLS = {'sleep': ('sleep', 0), 'where': ('where', 0), 'prep': ('prep', 0), 'result': ('result', 0),
          'haggle': ('haggle', 0), 'sell': ('sell', 0),
-         'buy_in': ('buy_in', 0), 'pay_wage': ('pay_wage', 0)}
+         'buy_in': ('buy_in', 0), 'pay_wage': ('pay_wage', 0), 'shop_key': ('shop_key', 0)}
 
 
 def _flag_addr(flag):
@@ -313,6 +331,12 @@ def _where():
     return a.label('end').bytes() + LEAVE
 
 
+def _hero_across():
+    """인물 명령 05: 주인공이 카운터 바깥(손님 쪽)이면 0."""
+    a = Asm()(ENTER, 0xE2, 0x30, lda(0x7E3020), 0x29, 0x7F, 0xC9, COUNTER_X).br(BCS, 'go')
+    return a(POLL_END[1]).label('go')(POLL_END[0]).bytes()
+
+
 def _pace():
     """인물 명령 05: 손님 사이의 쉼. 처음 부르면 50 + rand(38) 차례(이동 간격 1 의 8프레임씩, FC 실측 400~700프레임)를
     잡고 1, 그 뒤 하나씩 줄여 0 이 되면 0."""
@@ -344,6 +368,27 @@ def _arrive():
     a.label('buyer_item')(sta(ITEM_AT))
     a.label('end')
     return a.bytes() + LEAVE
+
+
+def _shop_key():
+    """대화 호출: 주인 가게를 열기 직전에 재고 조합(STOCK_AT 의 k 번째가 0 이 아니면 bit k)으로 가게 키를 덮어쓴다
+    (dq4shopport 가 조합마다 둔 무기 목록)."""
+    a = Asm()(ENTER, 0xE2, 0x30, 0xA0, ONE_SHOT.start)
+    for k in range(len(GOODS) - STOCKED):
+        a(lda(STOCK_AT + k)).br(BEQ, f'none{k}')(0x98, 0x09, 1 << k, 0xA8).label(f'none{k}')
+    return a(0x98, sta(SHOP_KEY_AT)).bytes() + LEAVE
+
+
+def _look(at):
+    """인물 명령 37: 다음 손님 겉모습을 LOOKS[rand(8)] 로. 그 그림을 쓰는 다른 슬롯이 없으면(숨은 인물) 그대로 둔다."""
+    a = Asm()(ENTER, 0xE2, 0x30, _rand(len(LOOKS)), 0xAA, 0xBF, *_al(at['looks']), 0xA2, 0x03)
+    a.label('scan')(0xE0, CUSTOMER_SLOT).br(BEQ, 'next')(0xDF, *_al(SLOT_PIC)).br(BEQ, 'found')
+    a.label('next')(0xE8, 0xE0, 0x20).br(BCC, 'scan').br(BRA, 'end')
+    a.label('found')(sta(SLOT_PIC + CUSTOMER_SLOT), 0xBF, *_al(SLOT_CELLS), sta(SLOT_CELLS + CUSTOMER_SLOT))
+    # 32A0 의 위 두 비트는 그림 세트가 고르는 그리기 루틴(dq5-graphics-format 「인물 그림」)이라 함께 옮긴다
+    a(0xBF, *_al(SLOT_DRAW), 0x29, 0xC0, 0x48, lda(SLOT_DRAW + CUSTOMER_SLOT), 0x29, 0x3F, 0x03, 0x01)
+    a(sta(SLOT_DRAW + CUSTOMER_SLOT), 0x68)
+    return a.label('end').bytes() + LEAVE
 
 
 def _pick():
@@ -551,7 +596,11 @@ def native(ctx):
     # 값 루틴 주소가 _item_to_f5 에 들어가므로 먼저 둔다
     put('price_to_f5', _price_to_f5(at))
     put('where', _where())
+    put('looks', bytes(LOOKS))
+    put('look', _look(at))
+    put('shop_key', _shop_key())
     put('pace', _pace())
+    put('hero_across', _hero_across())
     put('arrive', _arrive())
     put('set_talk', _set_talk(talk))
     put('prep', _prep(at))
@@ -589,6 +638,7 @@ def _not(cond):
 
 
 YES = {"code": "05"}
+WEAPON_SHOP = {"op": "service", "index": 1}    # DQ5 대화 번호 01 의 무기점(목록 키는 shop_key 가 덮어씀)
 DAY = {"code": "14"}
 
 
@@ -606,7 +656,8 @@ def talk_scripts(ctx, flip_buy=False):
                             [say_('home'), say_('goodnight'), call('sleep')])])])],
                 [say_('night_home'), say_('goodnight'), call('sleep')])
     master = [call('where'),
-              when(flag(ACROSS), [say_('across'), when(YES, [say_('customer_ok')], [say_('come_in')])],
+              when(flag(ACROSS), [say_('across'), when(YES, [say_('customer_ok'), call('shop_key'), WEAPON_SHOP],
+                                                       [say_('come_in')])],
                    [say_('work'), when(YES, [on(START)], [say_('not_today')])])]
     quit_ = [when(flag(SHIFT), [when(flag(DONE), [say_('tomorrow')],
                                      [say_('quit_ask'), when(YES, [call('pay_wage'), say_('quit_pay'), say_('tomorrow')],
@@ -630,14 +681,16 @@ def talk_scripts(ctx, flip_buy=False):
              when(flag(NO_EQUIP), [say_('no_equip'), when(YES, [say_('gift'), call('sell')], [say_('no_sale')])]),
              when(flag(SOLD), [say_('bought'), call('sell')])]
     served = when(_not(flag(AGAIN)), [on(SERVED)])
-    # 물건을 보자고 하면(032B 「예」·「아니오」 모두) 값 제시부터는 손님 스크립트가 buyer 로 다시 말을 건다. FC 는 032C 를
-    # 「예」 까지 되풀이하지만 여기서는 032C 한 번 뒤 값 제시로 간다
+    # 물건을 보자고 하면(032B 「예」) 값 제시부터는 손님 스크립트가 buyer 로 다시 말을 건다. 「아니오」 면 032C 를 「예」
+    # 까지 되풀이한다(FC 실측): 「아니오」 마다 손님 스크립트가 다시 말을 걸어 JOKE 갈래로 032C 부터
     # 맞은 손님(SERVED)은 나가는 동안 말을 걸어도 다시 팔지 않는다(FC 15:$A26F 가 $6288 bit5 로 두 번 응대하지 않음)
+    joke = [say_('joke'), when(YES, [_flag_off(JOKE), on(STAGE)], [on(JOKE)])]
     intro = [call('where'),
-             when(flag(HERE_), [when(_not(flag(SERVED)), [say_('is_shop'),
-                                when(YES, [say_('show'), on(STAGE), on(AGAIN), when(_not(YES), [say_('joke')])],
-                                     [say_('wrong')]),
-                                served])],
+             when(flag(HERE_), [when(_not(flag(SERVED)), [
+                 when(flag(JOKE), [on(AGAIN), *joke],
+                      [say_('is_shop'), when(YES, [say_('show'), on(AGAIN), when(YES, [on(STAGE)], joke)],
+                                             [say_('wrong')])]),
+                 served])],
                   [say_('angry')]),
              done]
     buyer = [call('where'), when(flag(HERE_), [when(_not(flag(SERVED)), [*price, served])], [say_('angry')]), done]
@@ -720,22 +773,31 @@ def scripts(ctx):
         _wait_on(SHIFT) | {"label": "wait"}, _cmd('09', DONE[0], DONE[1]), poll(at['pace']),
         _if_off(SHIFT, 'wait'), _if_on(DONE, 'wait'),
         # 주인공이 카운터 안에 선 뒤 조작을 막고서야 들어와, 걷는 길((12,53)~(8,53))이 주인공과 겹치지 않는다
-        poll(at['at_counter']), _cmd('3F'),
+        poll(at['at_counter']), _cmd('3F'), call(at['look']),
         _cmd('2B', out_x, out_y), _cmd('13', *COUNTER_OUT), _cmd('14'), _cmd('2F', 0x22),
         call(at['arrive']),
         _and_off(ANSWERED) | {"label": "talk"}, _and_off(AGAIN), call(at['set_talk']), call(talk_here),
         _wait_on(ANSWERED), _if_on(AGAIN, 'talk'),
         _if_on(CLOSE, 'close'),
         _cmd('13', out_x, out_y), _cmd('14'), _cmd('2B', *PARK), _cmd('40'), _cmd('03', target='wait'),
-        _cmd('2B', *PARK, label='close'), _cmd('40'), call(at['close']), _cmd('16')]
+        # 가게를 닫는 것은 주인 스크립트가 맡는다(조작은 막힌 채)
+        _cmd('2B', *PARK, label='close'), _cmd('16')]
     first = [_if_on(SEEN, 'hide'), _cmd('1E', WALK_SPEED), _cmd('1C'), poll(at['first_trigger']), _cmd('3F'), msg('late'),
              *[c for x, y in FIRST_ASIDE for c in (_cmd('13', x, y), _cmd('14'))],
              call(at['first_walk']), poll(at['at_counter']), call(at['face_right']), msg('how'),
              _or(SEEN), _or(SHIFT), _and_off(DONE), _cmd('40'), _cmd('28'), _cmd('52'), _cmd('16'), *hide]
-    master = [_if_off(SEEN, 'hide'), _if_on(SHIFT, 'hide'),
-              _wait_on(START), _and_off(START), _cmd('3F'), _cmd('28'), _cmd('52'),
+    # 출근 중에는 맵 구석에서 기다리다 손님 스크립트가 가게를 닫으면(CLOSE, 손님 말이 끝난 뒤) 걸어 나와 0341. 숨는 것은
+    # 52 가 아니라 2B 로: 52 로 치운 인물은 다시 걷지 못했다(손님 스크립트와 같은 실측). 일찍 그만둔 날(DONE)은 FC 처럼
+    # ($6285 bit0 이 꺼져 슬롯 13 이 섬) 카운터에 서서 가게를 열어 준다. 다만 아래층에서 올라온 주인공이 계단 앞 칸
+    # (4,55)에 서므로, 주인공이 카운터 바깥으로 나간 뒤에 선다(그 칸 위가 주인 자리라 먼저 서면 주인공이 갇혔다, 실측)
+    master = [_if_off(SEEN, 'hide'), _if_off(SHIFT, 'stand'), _if_off(DONE, 'shift'),
+              _cmd('2B', *PARK), poll(at['hero_across']), _cmd('2B', *COUNTER_IN), _cmd('2F', 0x11),
+              _wait_on(START) | {"label": "stand"}, _and_off(START), _cmd('3F'), _cmd('2B', *PARK),
               call(at['counter_walk']), poll(at['at_counter']), call(at['face_right']), msg('how'),
-              _or(SHIFT), _and_off(DONE), _cmd('40'), _cmd('16'), *hide]
+              _or(SHIFT), _and_off(DONE), _cmd('40'),
+              _cmd('2B', *PARK, label='shift'), _cmd('1E', WALK_SPEED), _cmd('1C'), _wait_on(CLOSE), _wait_on(ANSWERED),
+              _cmd('2B', *CLOSE_FROM), _cmd('13', *CLOSE_AT), _cmd('14'), _cmd('2F', 0x88), _cmd('40'),
+              call(at['close']), _cmd('16'), *hide]
     tom = [_if_on(TOM_DONE, 'stand'), _wait_on(TOM_PUSH), _cmd('1F'), _cmd('1B'), _cmd('16', label='stand')]
     helper = [_cmd('07', *FIELD_ARRIVAL, target='field'), _cmd('03', target='tom'),
               _and_off(BENTO_TODAY, SHIFT, label='field'),
@@ -744,8 +806,12 @@ def scripts(ctx):
     helper_night = [_cmd('07', *FIELD_ARRIVAL, target='field'), _cmd('16'),
                     _and_off(BENTO_TODAY, SHIFT, label='field'), _cmd('16')]
     dog = [_if_off(ch3.DOG, 'stay'), _if_on(DOG_BACK, 'stay'), _cmd('28'), _cmd('52'), _cmd('16', label='stay')]
+    # 아들은 본몰 감옥에서 풀려난 뒤에만(FC 1C:$A29A 가 $6280&04 로 목록을 고침), 아래층 주인은 출근 중에만(1C:$A326)
+    son = [_if_off(SON_FREED, 'hide'), _cmd('16'), *hide]
+    cellar = [_if_off(SHIFT, 'hide'), _if_on(DONE, 'hide'), _cmd('16'), *hide]
     bodies = {'customer': customer, 'first_master': first, 'master': master, 'tom': tom, 'helper': helper,
-              'dog': dog, 'helper_night': helper_night, 'dog_night': list(dog)}
+              'dog': dog, 'helper_night': helper_night, 'dog_night': list(dog), 'son': son, 'son_night': list(son),
+              'cellar': cellar}
     return [{"address": SCRIPTS[name][2], "commands": bodies[name]} for name in SCRIPTS]
 
 
@@ -789,7 +855,8 @@ def npc_lists(lists, ctx):
             e["fields"] = {**e["fields"], "talk": t['tom']}
             hit += 1
         elif _at(e) == SON:
-            e["fields"] = {**e["fields"], "talk": t['son']}
+            town[k] = _person('son' if e["time"] == 'day' else 'son_night', e["time"], SON, e["fields"]["facing"],
+                              t['son'], e["fields"]["gfx"])
             hit += 1
         elif _at(e) == DOG:
             town[k] = _person('dog' if e["time"] == 'day' else 'dog_night', e["time"], DOG, e["fields"]["facing"],
@@ -810,11 +877,23 @@ def npc_lists(lists, ctx):
             raise SystemExit(f'{HOUSE}: 둘째 네네 {NENE_WALKER[2]} 이 {before - len(house)}명')
         for time, c in NENE.items():
             ctx.retalk(lists, HOUSE, c, t['nene'], time=time)
+        # 낮 네네는 FC 슬롯 07 처럼 집 안을 돌아다닌다(128프레임마다 한 걸음, 실측). 첫머리는 따로 목록(dq4ch3event
+        # ch3_opening)이라 서 있는 연출 그대로다
+        import dq4npcport
+        for e in house:
+            if (e["time"], _at(e)) == ('day', NENE['day']):
+                e["from"] = dq4npcport.WALK
+                e["fields"] = {**e["fields"], "interval": dq4npcport.dq5_interval(NENE_FC_STEP)}
         for time, cells in POPOLO.items():
             for c in cells:
                 ctx.retalk(lists, HOUSE, c, t[f'popolo_{time}'], time=time)
     if CELLAR in lists:
-        ctx.retalk(lists, CELLAR, QUIT_MASTER[2], t['quit'], time='day')
+        cellar = lists[CELLAR]["entries"]
+        hit = [k for k, e in enumerate(cellar) if (e["time"], _at(e)) == QUIT_MASTER[1:]]
+        if len(hit) != 1:
+            raise SystemExit(f'{CELLAR}: 아래층 주인 {QUIT_MASTER[2]} 이 {len(hit)}명')
+        e = cellar[hit[0]]
+        cellar[hit[0]] = _person('cellar', 'day', QUIT_MASTER[2], e["fields"]["facing"], t['quit'], e["fields"]["gfx"])
     return [], []
 
 
@@ -824,14 +903,15 @@ def start_messages(ctx):
     m = ctx.msg
     return {(HOUSE, FC_NENE, False): m['home'], (HOUSE, FC_NENE, True): m['night_home'],
             (HOUSE, FC_POPOLO_DAY, False): m['popolo_day'], (HOUSE, FC_POPOLO_NIGHT, True): m['popolo_night'],
-            (TOWN, FC_TOM, False): m['tom_hello'], (TOWN, FC_TOM, True): m['tom_night'],
-            (TOWN, FC_SON, None): m['son_lend'], (CELLAR, FC_QUIT, False): m['tomorrow']}
+            (TOWN, FC_TOM, False): m['tom_hello'], (TOWN, FC_TOM, True): m['tom_night']}
 
 
 def absent(ctx):
     """{(맵, DQ5 셀 x, y, 밤)}: 처음 상태에서 없는 FC 인물. 카운터 주인은 첫 출근(꾸지람) 전에는 숨고, 문·밖에 세운 FC 슬롯
-    11·14·15 와 집의 둘째 네네는 목록에서 뺐다(첫 출근 주인·손님·가게를 닫는 이벤트, 첫머리 자리 네네가 맡음)."""
-    return {(m, *c, time == 'night') for m, time, c in (MASTER, *STRAYS, NENE_WALKER)}
+    11·14·15 와 집의 둘째 네네는 목록에서 뺐다(첫 출근 주인·손님·가게를 닫는 이벤트, 첫머리 자리 네네가 맡음). 아래층 주인은
+    출근 전, 톰 아들은 본몰 감옥에서 풀려나기 전에 숨는다."""
+    return {(m, *c, time == 'night') for m, time, c in (MASTER, *STRAYS, NENE_WALKER, QUIT_MASTER,
+                                                         (TOWN, 'day', SON), (TOWN, 'night', SON))}
 
 
 FC_NENE, FC_TOM, FC_SON, FC_MASTER, FC_QUIT = 0x057, 0x058, 0x055, 0x054, 0x052

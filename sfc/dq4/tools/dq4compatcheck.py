@@ -304,14 +304,14 @@ class Walker:
                     press -= 1
                     if w != since or press <= 0:
                         press, wi = None, wi + 1
-                elif p[0] == 'cursor':
-                    c = self.rd(wc.CURSOR)
+                elif p[0] == 'cursor' or p[0] == 'pick':
+                    c = self.rd(wc.PICK if p[0] == 'pick' else wc.CURSOR)
                     press = 120 if press is None else press
                     press -= 1
                     if c == p[1] or press <= 0:
                         press, wi = None, wi + 1
                     elif press % 12 >= 6:
-                        buttons = {'down' if c < p[1] else 'up'}
+                        buttons = {'down' if p[0] == 'pick' or c < p[1] else 'up'}
                 elif p[0] == 'ask':
                     w = self.rd(wc.WINDOW)
                     press, since = (p[1], 0) if press is None else (press, since)

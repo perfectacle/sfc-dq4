@@ -31,6 +31,7 @@ import dq4shopkey  # noqa: E402
 from dq4environmentrom import GROUPS  # noqa: E402
 from dq4groupbuild import chapter, fc_map, has_people, placement  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
+from dq4ch3slots import SLOTS as _CH3_SLOTS, VARS2_AT as _CH3_VARS2  # noqa: E402
 
 # FC shop kind (dq4shop.KINDS) -> DQ5 shop list kind (04:FBD5: 0 item, 1 armor, 2 weapon).
 LIST_KIND = {1: 2, 2: 0, 3: 1}
@@ -62,6 +63,12 @@ MAX_ITEMS = 6
 # 않고 필드에서 다른 가게를 열지 않는다. 키는 그룹 줄 뒤에 붙여 앞 키 번호가 그대로다
 MERCHANT = (0xFE, 0xFE)
 MERCHANT_MAP = (0x01, 0x00)
+# 레이크나바 무기점 주인(FC 16/00 대화 054 → 15:$B847)의 목록: 이 맵의 FC 무기 목록 뒤에 파는 손님에게서 산 재고가
+# 0 이 아닌 품목을 STOCK 차례로 하나씩 붙인다(15:$B26B, 개수만큼 붙이지 않음. 헤드리스 실측). 재고 조합 비트(STOCK 의
+# 순번 k 가 bit k)마다 목록 하나를 한 번 쓰는 키 ONE_SHOT.start + 비트로 두고, 주인 대화(dq4ch3lakanaba)가 고른다
+LAKANABA = (0x16, 0x00)
+LAKANABA_STOCK = (0x0B, 0x04, 0x23)
+ONE_SHOT_AT = _CH3_VARS2 + _CH3_SLOTS['L'].vars2[0]     # 한 번 쓰는 키 바이트(레이크나바 몫)
 # Sellers who come only with a chapter's event (dq4shop.npc_lists 「목록 플래그 n&m」): FC map -> the person list that
 # brings them. The event that switches the map to that list puts the seller; here its shop list goes under the map's
 # key so that the seller's talk number (event_sellers) opens it. テンペ's shop opens once the monster is beaten
@@ -287,6 +294,27 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
     counts[LIST_KIND[2]] += 1
     inns[key] = dq4shop.inn_price(prg, *MERCHANT)
     report["merchant"] = {"key": f"{key:02X}", "items": picked, "inn": inns[key]}
+    if key >= dq4shopkey.ONE_SHOT.start:
+        raise ValueError(f"가게 키 {key:02X} 가 한 번 쓰는 키에 닿음")
+    report["lakanaba"] = lakanaba = {}
+    # 3장 인물을 옮기지 않는 빌드(with_people False)나 맵 묶음에 레이크나바가 없으면 주인 가게도 없다
+    has_lakanaba = any(fc_map(prg, g, n) == LAKANABA and has_people(LAKANABA[0], with_people) for g, n in maps)
+    for bits in range(1 << len(LAKANABA_STOCK)) if has_lakanaba else ():
+        fc_items = [i & 0x7F for i in dq4shop.lookup(prg, 1, *LAKANABA)]
+        fc_items += [i for k, i in enumerate(LAKANABA_STOCK) if bits >> k & 1]
+        picked = []
+        for i in fc_items:
+            if own_prices.get(i) is None or _fold(names[i]) not in items:
+                raise ValueError(f"레이크나바 무기점 {names[i]}: 값이 없거나 DQ5 짝이 없음")
+            picked.append(items[_fold(names[i])])
+            if prices.setdefault(picked[-1], own_prices[i]) != own_prices[i]:
+                raise ValueError(f"{names[i]}: FC prices {prices[picked[-1]]} and {own_prices[i]}")
+        if len(picked) > MAX_ITEMS:
+            raise ValueError(f"레이크나바 무기점: more than {MAX_ITEMS} items")
+        shops.append({"kind": LIST_KIND[1], "index": counts[LIST_KIND[1]], "key": dq4shopkey.ONE_SHOT.start + bits,
+                      "items": picked})
+        counts[LIST_KIND[1]] += 1
+        lakanaba[f"{dq4shopkey.ONE_SHOT.start + bits:02X}"] = picked
     report["keys"] = {f"{g:02X}/{first:02X}-{last:02X}": f"{k:02X}" for g, first, last, k in rows}
     report["event_sellers"] = {m: {f"{x},{y},{'night' if n else 'day'}": SERVICE[k] for (x, y, n), k in e.items()}
                                for m, e in events.items()}
@@ -298,7 +326,7 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
         {"at": _cpu(INN_BANK_OPERAND), "hex": f"{inn_at >> 16:02X}", "orig": "04", "note": "여관 표 뱅크(DB)"},
         {"at": _cpu(INN_ADDR_OPERAND), "hex": f"{inn_at & 0xFF:02X} {inn_at >> 8 & 0xFF:02X}", "orig": "6D FD",
          "note": "여관 표 주소"},
-        *dq4shopkey.writes(key_at, rows),
+        *dq4shopkey.writes(key_at, rows, ONE_SHOT_AT),
         *dq4itemport.writes(rom, prg, prices),
     ]
     report["prices"] = {f"{i:02X} {dq4itemport.fc_name(rom, i)}": p

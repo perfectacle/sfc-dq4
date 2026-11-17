@@ -53,10 +53,33 @@ class FlagTest(unittest.TestCase):
 
     def test_temporary_bits_live_in_bytes_the_map_load_clears(self):
         # 7E:21A2~21A4 는 맵을 옮기면 지워진다(dq5flags). ANSWERED 는 2장과 같은 칸
-        for f in (L.ACROSS, L.START, L.AGAIN, L.SLEPT, L.HERE_, L.SERVED, L.DISCOUNT, L.RAISE, L.LUCK40):
+        for f in (L.ACROSS, L.START, L.AGAIN, L.SLEPT, L.HERE_, L.SERVED, L.DISCOUNT, L.RAISE, L.LUCK40, L.JOKE):
             self.assertIn(f[0], (0x13, 0x14), f)
         self.assertEqual(L.PACE, 0x7E21A2)
         self.assertEqual(L.TEMP, 0x7E2190 + 0x14)
+
+    def test_joke_bit_is_free_in_21a3(self):
+        # 21A3 의 다른 3장 비트: ANSWERED(bit0)·FRESH(bit5)·LUCK40(bit6)
+        others = L.ANSWERED[1] | ev.FRESH[1] | L.LUCK40[1]
+        self.assertEqual(L.JOKE[0], 0x13)
+        self.assertFalse(L.JOKE[1] & others)
+
+    def test_shop_key_byte_is_the_l_share_of_the_second_vars(self):
+        import dq4ch3slots
+        import dq4shopport
+        lo, hi = dq4ch3slots.SLOTS['L'].vars2
+        self.assertEqual((L.SHOP_KEY_AT, hi - lo), (dq4ch3slots.VARS2_AT + lo, 1))
+        self.assertEqual(dq4shopport.ONE_SHOT_AT, L.SHOP_KEY_AT)
+        # 재고 칸 차례가 가게 목록의 덧붙임 차례와 같다(ブーメラン·くさりがま·はじゃのつるぎ)
+        self.assertEqual(len(dq4shopport.LAKANABA_STOCK), len(L.GOODS) - L.STOCKED)
+
+    def test_looks_are_pictures_of_the_day_town(self):
+        import dq4npcport
+        lists, _, _ = dq4npcport.port(DQ5, ROOT / 'rom' / 'dq4.nes')
+        town = next(lst for lst in lists if lst.get('map') == L.TOWN)['entries']
+        day = {e['fields']['gfx'] for e in town if e['time'] == 'day'}
+        self.assertEqual(len(L.LOOKS), 8)
+        self.assertLessEqual(set(L.LOOKS), day)
 
     def test_vars_stay_in_the_l_var_slot(self):
         lo, hi = ev.SLOTS['L'].vars
@@ -176,8 +199,12 @@ class ListTest(unittest.TestCase):
         self.assertEqual(table[(L.HOUSE, L.FC_NENE, False)], c.msg['home'])
         gone = L.absent(c)
         self.assertIn((L.TOWN, *L.COUNTER_IN, False), gone)
-        self.assertEqual(len(gone), 2 + len(L.STRAYS))
+        self.assertEqual(len(gone), 5 + len(L.STRAYS))
         self.assertIn((L.HOUSE, *L.NENE_WALKER[2], False), gone)
+        # 아래층 주인은 출근 전, 톰 아들은 감옥에서 풀려나기 전(낮·밤)에 숨는다
+        self.assertIn((L.CELLAR, *L.QUIT_MASTER[2], False), gone)
+        self.assertIn((L.TOWN, *L.SON, False), gone)
+        self.assertIn((L.TOWN, *L.SON, True), gone)
         # 공용 표는 모든 모듈의 것을 모은다: 이 모듈 몫이 다 들어 있으면 된다
         self.assertLessEqual(gone, ev.absent())
 
@@ -192,13 +219,19 @@ class PortedListTest(unittest.TestCase):
         L.npc_lists(by, c)
         town = by[L.TOWN]['entries']
         froms = [e.get('from') for e in town]
-        for name in ('customer', 'first_master', 'master', 'tom', 'helper', 'dog', 'helper_night', 'dog_night'):
+        for name in ('customer', 'first_master', 'master', 'tom', 'helper', 'dog', 'helper_night', 'dog_night', 'son',
+                     'son_night'):
             self.assertIn(L._src(name), froms, name)
         self.assertFalse([e for e in town if (e['time'], (e['fields']['x'], e['fields']['y'])) in
                           {(t, c_) for _, t, c_ in L.STRAYS}])
         house = by[L.HOUSE]['entries']
         nenes = [e for e in house if e['time'] == 'day' and e['fields']['talk'] == c.talk['nene']]
         self.assertEqual([(e['fields']['x'], e['fields']['y']) for e in nenes], [L.NENE['day']])
+        # 낮 네네는 돌아다니는 틀(FC 슬롯 07 의 걸음 간격)
+        self.assertEqual((nenes[0]['from'], nenes[0]['fields']['interval']), (dq4npcport.WALK, 15))
+        cellar = by[L.CELLAR]['entries']
+        self.assertEqual([e['from'] for e in cellar if e['time'] == 'day'
+                          and (e['fields']['x'], e['fields']['y']) == L.QUIT_MASTER[2]], [L._src('cellar')])
 
 
 if __name__ == '__main__':
