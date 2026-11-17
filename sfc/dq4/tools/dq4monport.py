@@ -112,13 +112,13 @@ def doc(rom, out_dir, only=None):
 # (26:8765 번호). 주문은 일행 주문(01~38)이 아니라 몬스터용 주문(39~65)이어야 한다: 일행 번호를 몬스터가 쓰면 전투가
 # 멈춘다. 사건 모듈의 표(dq4ch1event·dq4ch2tempe·dq4ch2endor .FC_ACTIONS)에 없는 것만 둔다.
 # 47 にげだす 는 DQ5 슬라임의 98(필드 68 이 0 이 아니면 주인공 레벨이 구역 레벨 + 4 를 넘을 때만 고름). 48·4B なかまをよぶ
-# 는 DQ5 의 부르기(AE~B5)가 정해진 DQ5 몬스터(dq5monlimits.SUMMONED)를 불러 그 그림이 들어오므로, 메시지만 나오는 66 으로.
-# 55(행동 ID 66, 11:$A292 가 무리를 몬스터 30 キングスライム 으로 바꿈: 코드 읽기)도 부르기를 옮기지 않아 무리가 모이지 않으므로 66.
+# 는 고쳐 쓴 DQ5 부르기 칸 B5·B4(summon_writes).
+# 55(행동 ID 66, 11:$A292 가 무리를 몬스터 30 キングスライム 으로 바꿈: 코드 읽기)는 무리를 합치는 처리가 없어 66.
 # DQ5 몬스터 スカラ 는 55·56 둘이 주문 표(범위·대상 루틴·MP)가 같아 앞의 것. ピオリム(1E, 1장 ピクシー)은 DQ5 에 몬스터용도
 # 일행용도 없어 부르기처럼 66
 FC_ACTIONS = {0x0A: '45', 0x10: '4B', 0x11: '4C', 0x12: '4D', 0x13: '4E', 0x16: '53', 0x17: '54', 0x19: '59',
               0x1A: '52', 0x1C: '55', 0x1E: '66', 0x25: '5B', 0x33: '74', 0x36: '77', 0x38: '8B', 0x43: '96', 0x45: 'A3',
-              0x47: '98', 0x48: '66', 0x49: '71', 0x4B: '66', 0x5D: 'AA', 0x55: '66'}
+              0x47: '98', 0x48: 'B5', 0x49: '71', 0x4B: 'B4', 0x5D: 'AA', 0x55: '66'}
 # FC 내성 칸 0~E(fc dq4data.RESIST_NAMES 차례: イオ ギラ メラ デイン バギ ヒャド マヌーサ ラリホー ザキ ニフラム マホトラ
 # マホトーン メダパニ ルカニ メガンテ) → DQ5 내성 종류(50~61, dq5-data-format 「동료가 되는 몬스터」 앞 내성 표). DQ5 에만 있는
 # 5F(쓰는 곳 없음)·60 どくのいき·61 なめまわし 등은 FC 에 짝이 없어 바탕 값을 둔다
@@ -349,11 +349,64 @@ def picture_writes(original, dq5_of):
     return out
 
 
+# 부르기(FC 11:$A0F8·$A151, 빈 전투원 칸과 그림 자리가 있을 때 한 마리): 48(행동 ID 59)은 부른 몬스터의 무리와 같은
+# 몬스터, 4B(ID 5C)는 14:$8646 첫 칸 0F 를 14:$B2D5 로 찾은 몬스터 14 ホイミスライム. DQ5 부르기 AE~B5 의 처리기
+# (20:D9D6 + 4 × n: LDA #몬스터 / BRA 20:DA4B)는 정해진 몬스터를 부르므로, 이 해킹이 쓰는 DQ5 몬스터(used_numbers)가
+# 쓰지 않는 칸 둘을 고쳐 쓴다(B4: 원래 DQ5 B0 만, B5: D0·D9 만). 20:DA4B 는 A 의 몬스터가 이미 무리에 있으면 그 무리에
+# 더하고, 그림 자리(22:D2FE)·빈 무리가 없으면 부르지 못한다
+SUMMON_HANDLERS, SUMMON_COMMON = 0x20D9D6, 0x20DA4B
+SUMMON_SAME, SUMMON_FIXED = 0xB5, 0xB4
+SUMMON_FIXED_FC = 0x14
+# 같은 몬스터 부르기 코드: BRK 88 7D(전투원 칸 $42 → 무리 $46)를 쓰므로 40 아래 뱅크. 원래 롬 빈 자리 16:FE10~ 가운데
+# 맡기는 곳 수수료(dq4bankfee) 뒤
+SUMMON_CODE_AT = 0x16FF00
+ACTOR, GROUP_MONSTERS = 0x10F6, 0x1001          # 행동하는 전투원(bit7 몬스터), 무리마다 몬스터
+
+
+def summon_code(at=SUMMON_CODE_AT):
+    """(바이트, 라벨): 20:D9F2(B5 의 처리기)에서 JML 로 와서, 행동하는 몬스터의 무리 몬스터를 A 로 20:DA4B 에. M·X 8비트."""
+    from dq4environmentrom import _Asm
+    a = _Asm(at)
+    a.label('same').b(0x8B, 0x4B, 0xAB, 0xA5, 0x42, 0x48, 0xA5, 0x46, 0x48)   # PHB PHK PLB / $42·$46 쌓기
+    a.b(0xAD, *ACTOR.to_bytes(2, 'little'), 0x29, 0x7F, 0x85, 0x42)           # $42 = 몬스터 칸
+    a.b(0x00, 0x88, 0x7D, 0xA6, 0x46)                                         # BRK 88 7D / LDX $46(무리)
+    a.b(0xBD, *GROUP_MONSTERS.to_bytes(2, 'little'), 0x85, 0x71)              # $71 = 그 무리의 몬스터
+    a.b(0x68, 0x85, 0x46, 0x68, 0x85, 0x42, 0xA5, 0x71, 0xAB)                 # 되돌리기 / A = 몬스터 / PLB
+    a.b(0x5C, *SUMMON_COMMON.to_bytes(3, 'little'))                           # JML 20:DA4B
+    return a.assemble()
+
+
+def summon_writes(original):
+    """dq5patch/1 쓰기: B4 처리기의 몬스터를 ホイミスライム 의 DQ5 번호로, B5 처리기를 같은 몬스터 부르기로."""
+    from dq5map import lorom
+    import dq4fieldencounter
+    data, labels = summon_code()
+
+    def handler(action):
+        at = SUMMON_HANDLERS + 4 * (action - 0xAE)
+        return at, original[lorom(at):lorom(at) + 4]
+    fixed_at, fixed_orig = handler(SUMMON_FIXED)
+    same_at, same_orig = handler(SUMMON_SAME)
+    for orig in (fixed_orig, same_orig):
+        if orig[0] != 0xA9 or orig[2] != 0x80:
+            raise ValueError(f'부르기 처리기가 LDA # / BRA 가 아님: {orig.hex()}')
+    fixed = bytes((0xA9, dq4fieldencounter.MONSTERS[SUMMON_FIXED_FC], *fixed_orig[2:]))
+    same = bytes((0x5C, *labels['same'].to_bytes(3, 'little')))
+
+    def put(at, new, orig, note):
+        return {'at': f'{at >> 16:02X}:{at & 0xFFFF:04X}', 'hex': new.hex(' '), 'orig': orig.hex(' '), 'note': note}
+    return [{'at': f'{SUMMON_CODE_AT >> 16:02X}:{SUMMON_CODE_AT & 0xFFFF:04X}', 'hex': data.hex(' '),
+             'note': '부르기: 행동하는 몬스터와 같은 몬스터(FC 48)'},
+            put(fixed_at, fixed, fixed_orig, '부르기 B4 는 ホイミスライム(FC 4B)'),
+            put(same_at, same, same_orig, '부르기 B5 는 같은 몬스터(FC 48)')]
+
+
 def records_patch(original, prg, path):
-    """record_writes 와 picture_writes 를 dq5patch/1 파일로. prg 는 FC 롬 PRG."""
+    """record_writes·picture_writes·summon_writes 를 dq5patch/1 파일로. prg 는 FC 롬 PRG."""
     import dq4fieldencounter
     writes = record_writes(original, dq4fieldencounter.PLACEHOLDERS, prg)
     writes += picture_writes(original, dq4fieldencounter.PLACEHOLDERS)
+    writes += summon_writes(original)
     path.write_text(json.dumps({'format': 'dq5patch/1', 'name': 'dq4-monster-records', 'writes': writes},
                                ensure_ascii=False))
     return path
