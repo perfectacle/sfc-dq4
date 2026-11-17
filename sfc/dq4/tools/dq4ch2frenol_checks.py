@@ -49,7 +49,7 @@ SEGMENTS = [
 # 묘지 (03,0B)는 위(3 열)나 왼쪽 (02,0B)에서만 들어선다. -no 는 처음 요구에 아니요
 FRENOL_INN = '60,16;wait:60;a:8;wait:50;{close};60,14;58,14;58,12;wait:60;{taps};wait:400;{close}'
 FRENOL_GRAVE = [('frenol-grave-above', '6,23', ''), ('frenol-grave-left', '4,23;6,23', ''),
-                ('frenol-grave-no', '6,23', 'wait:300;down:8;wait:40;a:8;wait:120;')]
+                ('frenol-grave-no', '6,23', 'ask:600;cursor:1;a:8;wait:120;')]
 
 
 def hero_cases():

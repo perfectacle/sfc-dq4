@@ -332,6 +332,7 @@ class WalkDriverTests(unittest.TestCase):
         self.assertEqual(wc.walk_driver('up:40;wait:200;a:8'), wc.WALK)
         self.assertEqual(wc.walk_driver('up:16;until:300;until:300;cursor:0;a:8'), wc.DQ4_WALK)
         self.assertEqual(wc.walk_driver('cursor:1'), wc.DQ4_WALK)
+        self.assertEqual(wc.walk_driver('right:8;ask:400;cursor:1;a:8'), wc.DQ4_WALK)
         self.assertEqual(wc.walk_driver('12,40;untilx:3'), wc.WALK)
         self.assertTrue(wc.DQ4_WALK.is_file())
 

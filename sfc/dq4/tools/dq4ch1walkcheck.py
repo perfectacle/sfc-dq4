@@ -61,9 +61,9 @@ from dq4pins import RNG  # noqa: E402
 
 WALK = ROOT / 'tools' / 'lua' / 'walk.lua'
 WALK_STATE = HERE / 'lua' / 'dq4walkstate.lua'
-# 창 상태를 보고 넘기는 경유점 토큰(until:N·cursor:K)이 든 걷기는 dq4 판 걷기(walk.lua 에 그 둘을 더한 것)로 돈다
+# 창 상태를 보고 넘기는 경유점 토큰(until:N·cursor:K·ask:N)이 든 걷기는 dq4 판 걷기(walk.lua 에 그 둘을 더한 것)로 돈다
 DQ4_WALK = HERE / 'lua' / 'dq4walk.lua'
-WINDOW_TOKEN = re.compile(r'(^|;)(until|cursor):\d+(;|$)')
+WINDOW_TOKEN = re.compile(r'(^|;)(until|cursor|ask):\d+(;|$)')
 
 
 def walk_driver(waypoints):

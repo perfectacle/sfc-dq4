@@ -34,10 +34,9 @@ CLEAR = f'{0x2190 + endor.IDX:04X}=00;{0x2190 + endor.IDX2:04X}=00'
 
 
 def talk_no(face, before, after):
-    """그 쪽을 보고 말을 건 뒤 A 를 before 번 눌러 물음에 닿고, 「아니요」(아래)를 고른 다음 A 를 after 번(남은 쪽 수.
-    더 누르면 다시 말을 걸어 갈래가 섞인다)."""
-    return (f'{face}:8;wait:30;a:8;wait:60;a:8;wait:60;{wc.taps(before, 90)};wait:150;down:8;wait:30;'
-            f'{wc.taps(after, 90)};{CLOSE}')
+    """그 쪽을 보고 말을 건 뒤 물음 창이 뜰 때까지 A 로 글을 넘기고(dq4walk.lua ask), 커서를 「아니요」 에 둔 다음 A 를
+    after 번(고르기 + 남은 쪽 수. 더 누르면 다시 말을 걸어 갈래가 섞인다). before 는 물음까지의 쪽 수(넘길 시간의 상한)."""
+    return f'{face}:8;wait:30;ask:{300 + 120 * before};cursor:1;{wc.taps(after, 90)};{CLOSE}'
 
 
 def sets(*flags, more=()):
@@ -198,7 +197,7 @@ SEGMENTS = [
     # 단추에 「아니요」: 그대로 48/03, 칸을 떠났다가 다시 서야 또 묻는다
     ('button_no_side', 'warp', f'{endor.CAVE_WET},{endor_checks.BUTTON_CELL[0]},{endor_checks.BUTTON_CELL[1] + 1}',
      {'map': endor.CAVE_WET, 'set': sets()}),
-    ('button_no', 'walk', f'up:40;wait:200;down:8;wait:30;a:8;wait:200;{CLOSE};wait:300',
+    ('button_no', 'walk', f'up:16;ask:300;cursor:1;a:8;wait:200;{CLOSE};wait:300',
      {'map': endor.CAVE_WET, 'off': ['ENDOR_BUTTON', 'ENDOR_ASKED', 'ENDOR_PRESSED']}),
 ]
 
