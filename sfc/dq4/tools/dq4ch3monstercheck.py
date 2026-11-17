@@ -23,6 +23,10 @@
            도구점 인사 000·여관 낮 070·밤 071(FC 「こんな よふけまで」)이고, 깬 뒤 필드를 다시 그린다(01:A04B, 실내 다시
            부르기 00:C6D8 없음)
   merchant-off  3장 flag 없이는 rand(10) 을 덮어도 상인 갈래에 오지 않고 싸운다
+  bank-*   맡기는 곳 수수료(dq4bankfee): 떠돌이 상인의 대화 번호를 04(맡기는 곳)로, 첫 메뉴 고르기(06:E4F7)를 맡기기·
+           꺼내기로 덮은 롬 사본에서 A 만 누른다. deposit: 안내 0AA 뒤 0C8 로 맡기고 금화 그대로. withdraw: 맡긴 약초를
+           0AA 뒤 돌려받고 금화 -10. poor: 금화 5 면 0AA 뒤 0C2, 물건은 맡긴 채 금화 그대로. poor-money: 맡긴 돈이 있으면
+           0C2 뒤 돈 돌려받기(0CD)
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4ch3monstercheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3monsters
 결과: OUT/results.json.
@@ -42,6 +46,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import dq4bankfee  # noqa: E402
 import dq4battlecheck  # noqa: E402
 import dq4ch1walkcheck as wc  # noqa: E402
 import dq4encounter  # noqa: E402
@@ -80,6 +85,20 @@ MERCHANT_FRAMES = 4000
 MERCHANT_GOLD = 1000
 MERCHANT_SET = '2019=E8;201A=03;201B=00;2042=05'
 MERCHANT_ITEMS = ((0xA1, 8),)                # 도구점 첫 줄 やくそう(DQ5 A1, 8G)
+# 맡기는 곳 장면: 첫 메뉴의 LDA $E8(06:E4F7)을 LDA #n 으로(0 맡기기, 1 꺼내기). 맡긴 물건은 7E:2250 + 물건의 개수,
+# 맡긴 돈은 7E:203A(1000골드 단위, BRK 88 97)
+BANK_TALK = 0x04
+BANK_FEE_PAY = dq4bankfee.code()[1]['pay']
+BANK_MENU = 0x06E4F7
+BANK_STORE, BANK_MONEY = 0x2250, 0x203A
+BANK_ITEM = 0xA1
+BANK_SCENES = {
+    'deposit': (0, '2019=E8;201A=03;201B=00', [0x0AA, 0x0C8], 0),
+    'withdraw': (1, f'2019=E8;201A=03;201B=00;{BANK_STORE + BANK_ITEM:04X}=01', [0x0AA, 0x0E2], 10),
+    'poor': (1, f'2019=05;201A=00;201B=00;{BANK_STORE + BANK_ITEM:04X}=01', [0x0AA, 0x0C2, 0x0E4], 0),
+    'poor-money': (1, f'2019=05;201A=00;201B=00;{BANK_STORE + BANK_ITEM:04X}=01;{BANK_MONEY:04X}=03',
+                   [0x0AA, 0x0C2, 0x0CD], 0),
+}
 MERCHANT_INN_PRICE = 10
 SHOP_PC, INN_PC = '06E01F', '06E384'         # 특수 기능 도구점·여관(06:DBD2 의 02·06)
 BATTLE_PC = '01860D'                         # 걸음 전투가 걸림(dq4battlecheck)                      # 고정 무리 6바이트씩(dq5encounterwrite fixed_groups)
@@ -417,7 +436,41 @@ def main():
         problems += judge_merchant(mode, events, MERCHANT_GOLD - gold, bag, wram[0x2042], wram[0x204E], wram[0xBE])
         return name, {'events': events[:40], 'spent': MERCHANT_GOLD - gold, 'problems': problems, 'ok': not problems}
 
+    def bank_scene(name, mode):
+        menu, money, want, fee = BANK_SCENES[mode]
+        field = stand(0x14)
+        patch = [dq4fieldport.warp_patch(data, *field), fec.RATES, f"{lorom(labels['found']) + 1:X}=01",
+                 f"{lorom(labels['rolled256']) + 1:X}=00", f"{lorom(labels['rolled256']) + 3:X}={BANK_TALK:02X}",
+                 f'{lorom(BANK_MENU):X}=A9{menu:02X}']
+        pcs = {MESSAGE_PC: 'msg', f'{BANK_FEE_PAY:06X}': 'pay'}
+        got = dq4groupcheck.scene(mesence, rom, state, out, name, FIELD='{},{}'.format(*field), ROMPATCH=';'.join(patch),
+                                  TEST='idle:16,right:40,left:40,right:40,left:40,right:40,left:40,'
+                                       + ','.join(['wait:120,a:2'] * 9),
+                                  MAXF='3000', TRACE=','.join(pcs), LOG='7E2019',
+                                  SET=f'{ch3_set};{money};2042=05', POKE=CLOCK['day'])
+        trace = list(fec.lines(out / name / 'trace.txt')) if (out / name / 'trace.txt').exists() else []
+        events = [(pcs[at], int(kv['A'], 16) & 0x3FF) for _, at, kv in trace]
+        messages = [a for k, a in events if k == 'msg']
+        wram = (out / name / 'final.wram').read_bytes() if (out / name / 'final.wram').exists() else bytes(0x10000)
+        start = int(money.split(';')[0].split('=')[1], 16) | int(money.split(';')[1].split('=')[1], 16) << 8
+        gold = int.from_bytes(wram[0x2019:0x201C], 'little')
+        stored = wram[BANK_STORE + BANK_ITEM]
+        problems = [got['error']] if 'error' in got else []
+        at = next((k for k in range(len(messages)) if messages[k:k + len(want)] == want), None)
+        if at is None:
+            problems.append(f'메시지 {[f"{m:03X}" for m in messages[:12]]} 에 {[f"{m:03X}" for m in want]} 가 차례로 없음')
+        if mode == 'withdraw':
+            if start - gold != fee or stored != 0 or BANK_ITEM not in wram[BAG:BAG + BAG_SLOTS]:
+                problems.append(f'금화 {start} → {gold}, 맡긴 약초 {stored}')
+        elif gold != start:
+            problems.append(f'금화 {start} → {gold}(수수료를 받으면 안 됨)')
+        if mode.startswith('poor') and stored != 1:
+            problems.append(f'금화가 모자란데 맡긴 약초가 {stored}')
+        return name, {'messages': [f'{m:03X}' for m in messages[:16]], 'gold': [start, gold], 'problems': problems,
+                      'ok': not problems}
+
     jobs = [(zone_scene, z, mode, d) for z in dq4fieldencounter.CH3_FIELD for mode in ('day', 'night') for d in DELAYS]
+    jobs += [(bank_scene, f'bank-{m}', m) for m in BANK_SCENES]
     jobs += [(merchant_scene, f'merchant-{m}', m) for m in MERCHANT_PRESSES]
     jobs += [(drop_scene, f'drop-{lv:02X}', lv) for lv in DROP_LEVELS]
     jobs += [(drop_scene, 'drop-sure', 1, True), (drop_scene, 'drop-off', 1, False, True)]
