@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_release_gate_workflow import WORKFLOWS, jobs, run_texts, top_block, triggers, with_value  # noqa: E402
+from test_release_gate_workflow import GATE, WARM, WORKFLOWS, jobs, run_texts, top_block, triggers, with_value  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import guards  # noqa: E402
@@ -56,6 +56,22 @@ class PrGuardsWorkflowTest(unittest.TestCase):
         for bad in ('pull_request_target', 'workflow_run', 'issue_comment'):
             self.assertNotRegex(self.text, rf'\b{bad}\b')
         self.assertNotRegex(self.text, r'secrets:\s*inherit')
+
+    def test_newer_push_cancels_older_run(self):
+        # PR 과 main push 는 ref 하나에 그룹 하나라 새 푸시가 앞 run 을 끊는다. 손으로 띄운 run 은 run 마다 그룹이 달라 끝까지 돈다.
+        block = '\n'.join(top_block(self.text, 'concurrency'))
+        group = re.search(r'group: (.+)', block)[1]
+        self.assertIn("format('{0}-{1}', github.event_name, github.ref)", group)
+        self.assertIn("github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id)", group)
+        self.assertNotIn('github.sha', group)
+        self.assertIn("cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}", block)
+
+    def test_gate_and_warm_never_cancel(self):
+        # 관문은 손으로 띄운 결과를 끝까지 봐야 하고, 데우기는 관문과 그룹을 나눠 겹치지 않을 뿐 끊기면 안 된다.
+        for wf in (GATE, WARM):
+            block = '\n'.join(top_block(wf.read_text(encoding='utf-8'), 'concurrency'))
+            self.assertRegex(block, r'group: release-gate-', wf.name)
+            self.assertRegex(block, r'cancel-in-progress: false\b', wf.name)
 
     def test_only_pr_guards_touches_secrets(self):
         for name, body in self.jobs.items():
