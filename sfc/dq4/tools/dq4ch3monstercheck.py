@@ -18,8 +18,10 @@
   drop-sure  문턱 16칸을 FF 로 덮은 롬 사본: 이길 때마다 시작 칸의 물건을 얻는다
   drop-off  3장 flag 를 끄면 훅이 표를 굴리지 않는다(원래 떨어뜨림 판정)
   merchant-roll  롬 그대로 걸음마다 싸우게 하고, 조우마다 rand(10) 이 0 일 때만 떠돌이 상인 갈래로 간다
-  merchant-shop·inn  rand(10) 을 늘 0 으로(·여관 문턱을 00·FF 로) 덮은 롬 사본: 싸우지 않고 도구점(06:E01F)에서 약초를 산
-           만큼 금화가 줄고 가방에 들거나, 여관(06:E384)에서 1인 10G 를 내고 HP 가 차며 필드에 남는다
+  merchant-shop·inn·innnight  rand(10) 을 늘 0 으로(·여관 문턱을 00·FF 로) 덮은 롬 사본: 싸우지 않고 도구점(06:E01F)에서
+           약초를 산 만큼 금화가 줄고 가방에 들거나, 여관(06:E384)에서 1인 10G 를 내고 HP 가 차며 필드에 남는다. 첫 메시지가
+           도구점 인사 000·여관 낮 070·밤 071(FC 「こんな よふけまで」)이고, 깬 뒤 필드를 다시 그린다(01:A04B, 실내 다시
+           부르기 00:C6D8 없음)
   merchant-off  3장 flag 없이는 rand(10) 을 덮어도 상인 갈래에 오지 않고 싸운다
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4ch3monstercheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3monsters
@@ -66,7 +68,12 @@ GIVE = '2589B3'                              # STA $10F7: 떨어뜨린 물건
 BAG, BAG_SLOTS = 0x2056, 12                  # 일행 기록 0(7E:2040)의 가진 물건 +16~
 FIXED_GROUPS = 0x23B04B
 # 떠돌이 상인 장면: 장면마다 A 를 누르는 횟수(가게는 「사기」·약초·개수·확인, 여관은 한 밤), 시작 금화·HP
-MERCHANT_PRESSES = {'shop': 25, 'inn': 12, 'roll': 20, 'off': 12}
+MERCHANT_PRESSES = {'shop': 25, 'inn': 12, 'innnight': 12, 'roll': 20, 'off': 12}
+# 첫 메시지(DQ5 가게·여관 메시지 번호, 글은 FC 공용 대사 dq4sysmsg): 도구점 인사, 여관 낮·밤 인사
+MERCHANT_GREET = {'shop': 0x000, 'day': 0x070, 'night': 0x071}
+NIGHT_ONCE = ';075E=F8;075F=00'               # 밤으로 한 번만 둠(깬 뒤 아침이 되게)
+MESSAGE_PC = '248157'                         # 메시지 띄우기(A = 번호)
+RELOAD_PC, REDRAW_PC = '00C6D8', '01A04B'     # 실내 맵 다시 부르기, 필드 다시 그리기
 # 대화가 다 끝나게(가게는 금화를 먼저 빼고 「자, 여기요」 뒤에 물건을 넣음) B 로 닫고 기다림
 MERCHANT_CLOSE = ','.join(['wait:90,b:2'] * 4) + ',wait:120'
 # merchant-roll 은 걷기·전투(주인공 HP 고정)를 되풀이해 rand(10) 을 여러 번 본다
@@ -262,6 +269,14 @@ def judge_merchant(mode, events, spent, bag, hp, max_hp, be):
     want = 'shop' if mode == 'shop' else 'inn'
     if want not in kinds:
         problems.append(f'{want} 처리기에 오지 않음')
+    messages = [a for k, a in events[first:] if k == 'msg']
+    greet = {'shop': MERCHANT_GREET['shop'], 'inn': MERCHANT_GREET['day'], 'innnight': MERCHANT_GREET['night']}[mode]
+    if messages[:1] != [greet]:
+        problems.append(f'첫 메시지 {messages[:1]}, 기대 {greet:03X}')
+    if mode != 'shop':
+        after = kinds[kinds.index('inn'):] if 'inn' in kinds else []
+        if 'reload' in after or 'redraw' not in after:
+            problems.append('여관에서 깬 뒤 필드를 다시 그리지 않음(실내 다시 부르기 00:C6D8 이거나 필드 그리기 01:A04B 없음)')
     if be & 0x80:
         problems.append(f'끝에 실내($BE {be:02X})')
     if mode == 'shop':
@@ -397,17 +412,20 @@ def main():
         patch = [dq4fieldport.warp_patch(data, *field), fec.RATES]
         if mode != 'roll':
             patch.append(f"{lorom(labels['found']) + 1:X}=01")              # rand(10) 를 rand(1) 로: 늘 상인
-        if mode in ('shop', 'inn'):
-            patch.append(f"{lorom(labels['rolled256']) + 1:X}={'FF' if mode == 'inn' else '00'}")
+        if mode in ('shop', 'inn', 'innnight'):
+            patch.append(f"{lorom(labels['rolled256']) + 1:X}={'00' if mode == 'shop' else 'FF'}")
         pcs = {f'{labels[k]:06X}': k for k in ('rolled10', 'merchant', 'rolled256')}
-        pcs.update({f'{dq4fieldencounter.TALK:06X}': 'talk', SHOP_PC: 'shop', INN_PC: 'inn', BATTLE_PC: 'battle'})
+        pcs.update({f'{dq4fieldencounter.TALK:06X}': 'talk', SHOP_PC: 'shop', INN_PC: 'inn', BATTLE_PC: 'battle',
+                    MESSAGE_PC: 'msg', RELOAD_PC: 'reload', REDRAW_PC: 'redraw'})
         presses = ','.join(['wait:60,a:2'] * MERCHANT_PRESSES[mode]) + ',' + MERCHANT_CLOSE
         rounds = MERCHANT_ROUNDS if mode == 'roll' else 1
         test = 'idle:16,' + ','.join(['right:40,left:40,right:40,left:40,right:40,left:40,' + presses] * rounds)
         got = dq4groupcheck.scene(mesence, rom, state, out, name, FIELD='{},{}'.format(*field), ROMPATCH=';'.join(patch),
                                   TEST=test, MAXF=str(MERCHANT_FRAMES * rounds), TRACE=','.join(pcs), LOG='7E2019',
-                                  SET=('' if mode == 'off' else f'{ch3_set};') + MERCHANT_SET,
-                                  POKE=f"{CLOCK['day']} {wc.HERO_HP if mode in ('roll', 'off') else ''}")
+                                  SET=('' if mode == 'off' else f'{ch3_set};') + MERCHANT_SET
+                                  + (NIGHT_ONCE if mode == 'innnight' else ''),
+                                  POKE=f"{'' if mode == 'innnight' else CLOCK['day']} "
+                                       f"{wc.HERO_HP if mode in ('roll', 'off') else ''}")
         trace = list(fec.lines(out / name / 'trace.txt')) if (out / name / 'trace.txt').exists() else []
         events = [(pcs[at], int(kv['A'], 16)) for _, at, kv in trace]
         wram = (out / name / 'final.wram').read_bytes() if (out / name / 'final.wram').exists() else bytes(0x10000)

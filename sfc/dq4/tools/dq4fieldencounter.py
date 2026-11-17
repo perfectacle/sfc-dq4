@@ -630,6 +630,8 @@ TALK_LOW, TALK_HIGH = 0x36E0, 0x3700
 TALK = 0x06AF1C             # JSR $AF20 / RTL: A = 인물 칸으로 대화(06:AFF4 가 대화 번호로 갈래)
 TALK_SHOP, TALK_INN = 0x02, 0x06    # 특수 기능 도구점·여관(06:DBD2)
 WAKE_SITE, WAKE_ORIG = 0x06E462, bytes((0xA5, 0xBC, 0xC9, 0x01))     # 여관에서 깬 뒤 맵 고르기(06:E43A 안)
+WAKE_RTS = 0x06E47F         # E43A 의 끝 RTS
+FIELD_REDRAW = 0x06D98E     # 낮밤 바꾸기 06:D905 의 필드 갈래(LDA #$07 / JSL 03:A6CB / JSL 01:A04B …)
 
 # FC 3장 전용 표(12:$91DE): 문턱 12:$928E, 물건 12:$929E 의 16칸
 FC_BANK, FC_THRESHOLDS, FC_ITEMS, DROP_SLOTS = 0x12, 0x928E, 0x929E, 16
@@ -745,11 +747,18 @@ def ch3_code(rows, items, at=CH3_CODE_AT):
     # 06:AF20 은 DB 를 정하지 않고 $0F1E 에 쓴다: WRAM 이 보이는 뱅크로
     a.b(0xA9, 0x7E, 0x48, 0xAB, 0xA9, MERCHANT_SLOT, 0x22, *_long(TALK))     # DB 7E / LDA #칸 / JSL 06:AF1C
     a.b(0xAB, 0x28, 0x6B)                                                     # PLB PLP RTL
-    # 06:E462 에서(여관에서 깬 뒤, A 8비트): 원래 LDA $BC / CMP #$01 은 그룹 01(DQ5 ラインハット 여관)이면 01/00 (50,83)
-    # 에 세운다. 필드의 $BC 도 01 이라 필드에서 자면 그 맵으로 갔다: 필드($BE bit7 꺼짐)면 Z = 0 으로 지금 자리를 다시 그림
+    # 06:E462 에서(여관에서 깬 뒤, 06:E43A 안, A 8비트): 원래 LDA $BC / CMP #$01 은 그룹 01(DQ5 ラインハット 여관)이면
+    # 01/00 (50,83)에 세우고, 아니면 00:C6D8 로 지금 맵을 실내로 다시 불러온다. 필드의 $BC 도 01 이고 C6D8 은 $BE 를 80
+    # 으로 두어 필드에서 자면 01/00 그림이 그려졌다. 필드($BE bit7 꺼짐)면 낮밤 바꾸기(06:D905)의 필드 갈래 06:D98E(필드
+    # 다시 그리기 01:A04B 와 밝히기)로 간다. D905 는 PHP / PHB 로 들어와 PLB / PLP / RTL 로 끝나므로 같은 꼴로 쌓고, RTL 은
+    # 06:E47F 의 RTS 로 가 E43A 를 부른 JSR 로 돌아간다
     a.label('wake').b(0xAF, 0xBE, 0x00, 0x7E).rel(0x10, 'wake_field')         # LDA $BE / BPL
     a.b(0xAF, 0xBC, 0x00, 0x7E, 0xC9, 0x01, 0x6B)                            # LDA $BC / CMP #$01 / RTL
-    a.label('wake_field').b(0xA9, 0x00, 0xC9, 0x01, 0x6B)                     # Z = 0
+    back = WAKE_RTS - 1
+    a.label('wake_field').b(0x68, 0x68, 0x68)                                 # 이 훅의 돌아갈 곳을 버림
+    a.b(0xA9, WAKE_RTS >> 16, 0x48, 0xC2, 0x20, 0xA9, back & 0xFF, back >> 8 & 0xFF, 0x48, 0xE2, 0x20)
+    a.b(0x08, 0x8B, 0xA9, WAKE_RTS >> 16, 0x48, 0xAB, 0xE2, 0x30)            # PHP PHB / DB 06 / SEP #$30
+    a.b(0x5C, *_long(FIELD_REDRAW))                                           # JML 06:D98E
     # 23:E907·23:EAB0 에서: M 8비트, X·Y 16비트, Y = 칸
     a.label('weight').b(0x29, 0x07).rel(0xF0, 'weight_store')               # AND #7 / BEQ
     a.b(0x48, 0x5A, 0xC2, 0x20, 0xAF, *_long(MASK))                         # PHA PHY REP #$20 LDA MASK
