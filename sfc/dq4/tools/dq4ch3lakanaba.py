@@ -715,7 +715,9 @@ def scripts(ctx):
     # 구석으로 순간이동(2B)해서 한다: 52(사라진 뒤 치우기)·53(나타나기) 뒤에는 걷기가 도착하지 않았다(실측)
     customer = [
         _cmd('1E', WALK_SPEED), _cmd('1C'), _cmd('2B', *PARK),
-        _wait_on(SHIFT) | {"label": "wait"}, _if_on(DONE, 'wait'), poll(at['pace']),
+        # 기다림은 09 로: 06 으로 같은 자리로 되뛰면 두 명령이 한 프레임 안에서 끝없이 돌아(출근 중 일찍 그만둔 뒤 낮
+        # 마을이 멈췄다, 실측) 차례를 넘기지 않는다
+        _wait_on(SHIFT) | {"label": "wait"}, _cmd('09', DONE[0], DONE[1]), poll(at['pace']),
         _if_off(SHIFT, 'wait'), _if_on(DONE, 'wait'),
         # 주인공이 카운터 안에 선 뒤 조작을 막고서야 들어와, 걷는 길((12,53)~(8,53))이 주인공과 겹치지 않는다
         poll(at['at_counter']), _cmd('3F'),
