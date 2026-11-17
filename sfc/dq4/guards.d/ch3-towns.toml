@@ -2,7 +2,7 @@
 
 [[check]]
 name = "dq4-ch3-towns"
-why = "3장 마을 사람(dq4ch3towns): 3장 그룹 맵마다 3장 동안 걸릴 수 있는 인물 목록의 모든 대화 갈래가 띄우는 메시지에 가나·한자가 0 이고(다른 모듈 몫으로 남긴 사람은 그 모듈 파일이 생기면 함께 0), 한글 메시지가 창을 넘지 않는지(dq4ch3townscheck). 사건 flag 하나씩(아들이 돌아옴·여우를 쫓음·왕자의 편지·가게를 삼)을 켜고 말을 바꾼 사람의 첫 메시지를 본다(npccheck --states). 엔돌은 FC 3장 목록대로 사람이 바뀌고 카지노는 닫혀 있어야 한다: 기본 목록(2장 대회 중)이나 2장 끝 우승 목록이 3장에 걸렸었다"
+why = "3장 마을 사람(dq4ch3towns): 3장 그룹 맵마다 3장 동안 걸릴 수 있는 인물 목록의 모든 대화 갈래가 띄우는 메시지에 가나·한자가 0 이고(다른 모듈 몫으로 남긴 사람은 그 모듈 파일이 생기면 함께 0), 한글 메시지가 창을 넘지 않는지(dq4ch3townscheck). 사건 flag 하나씩(아들이 돌아옴·여우를 쫓음·왕자의 편지·왕자를 만남(들 때·든 뒤)·가게를 삼·공사 재개)을 켜고 말을 바꾼 사람의 첫 메시지를 걷는 사람까지 걸음을 멈춰 본다(npccheck --states). 공사 재개 뒤에는 열린 카지노가 걸려야 한다. 엔돌은 FC 3장 목록대로 사람이 바뀌고 카지노는 닫혀 있어야 한다: 기본 목록(2장 대회 중)이나 2장 끝 우승 목록이 3장에 걸렸었다"
 paths = [
   "@ch3-modules",
   "sfc/dq4/tools/dq4ch3*.py",
@@ -29,6 +29,6 @@ paths = [
   "sfc/dq5/tools/dq5npcrecordcheck.py",
   "tools/mesence_settings.py",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4chapter1.py build --rom work/ch3/menu.sfc --keep work/ch3/keep --chapter3 --out work/ch3/npc.sfc && uv run --locked python sfc/dq4/tools/dq4ch3townscheck.py --keep work/ch3/keep --texts work/ch3/messages.json && rm -rf work/ch3towns && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter3 --rom work/ch3/npc.sfc --build work/ch3/keep/groups --layout work/ch3/keep/npc-layout.json --texts work/ch3/messages.json --out work/ch3towns --states towns_son_freed,towns_foxed,towns_letter,towns_shop --jobs 4"
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4chapter1.py build --rom work/ch3/menu.sfc --keep work/ch3/keep --chapter3 --out work/ch3/npc.sfc && uv run --locked python sfc/dq4/tools/dq4ch3townscheck.py --keep work/ch3/keep --texts work/ch3/messages.json && rm -rf work/ch3towns && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter3 --rom work/ch3/npc.sfc --build work/ch3/keep/groups --layout work/ch3/keep/npc-layout.json --texts work/ch3/messages.json --out work/ch3towns --states towns_son_freed,towns_foxed,towns_letter,towns_prince,towns_chased,towns_shop,towns_casino --jobs 4"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태·3장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-build", "ch1-walk"]

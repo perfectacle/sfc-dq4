@@ -30,10 +30,14 @@ pages = ch2._speaker_pages
 # flag 는 그 모듈의 예약 바이트(dq4ch3slots)·비트를 여기 적고, test_dq4ch3towns 가 그 모듈이 있으면 같은지 본다
 FLAGS = ()
 FOXED = (0x73, 0x01)           # 본몰 B: 여우를 쫓음(FC $6280&02)
+PRINCE_MET = (0x73, 0x02)      # 본몰 B: 낮에 왕자를 만나 유모에게 쫓겨남(FC $6280&08)
+# 7E:21A3 bit7(맵을 옮기면 지워짐): 3F/01 에 들 때 이미 PRINCE_MET 였음. 유모는 쫓겨난 그 방문에만 03B1 이다(FC
+# $6289&40 은 필드로 나가면 지워짐. 여기서는 3F/01 을 떠나면)
+MET_BEFORE = (0x13, 0x80)
 SON_FREED = (0x73, 0x04)       # 본몰 B: 톰 아들에게 키메라의 날개를 줌(FC $6280&04)
 LETTER1 = (0x73, 0x10)         # 본몰 B: 왕자의 편지를 모니카에게 전함(FC $6280&01)
 SHOP = (0x75, 0x02)            # 엔돌 E: 가게를 삼(FC $6286&20)
-OWNERS = {'dq4ch3bonmalmo': ('FOXED', 'SON_FREED', 'LETTER1'), 'dq4ch3endor': ('SHOP',)}
+OWNERS = {'dq4ch3bonmalmo': ('FOXED', 'PRINCE_MET', 'SON_FREED', 'LETTER1'), 'dq4ch3endor': ('SHOP',)}
 
 YES = {"code": "05"}
 DAY = {"code": "14"}
@@ -66,9 +70,6 @@ PORTED = {
     (0x828,): say('여기는 방어구 가게인데요, 괴물이 돌아다니고부터 방어구가 팔리고 또 팔려서……',
                   '그래서 물건이 다 떨어졌어요. 죄송해요.'),
     (0x66C,): say('본몰 성에 어서 오세요.'),
-    # 유모(대화 05F). FC 는 왕자를 만나 쫓겨난 그 방문 동안($6289&40, 필드로 나가면 지워짐)만 03B1 을 말한다.
-    # 쫓겨나는 말(03B0·03B1)은 본몰 모듈의 왕자 대화가 띄우므로, 유모는 늘 0836 으로 둔다
-    (0x836,): say('여기는 왕자님 방이에요. 너 같은 천한 것이 올 곳이 아닙니다.'),
     (0x558,): say('왕자님! 왕자님이 안 계세요. 어쩌면 좋아……'),
     (0x556,): say('이런 한밤중에 성에 들어오는 것은 허락할 수 없다!'),
     (0x557,): say('내일 다시 오는 것이 좋을 것이오.'),
@@ -235,6 +236,22 @@ MESSAGES = {
     'statue_ask': say('오, 당신도 상인이군요? 그럼 당신도 은의 여신상을 손에 넣으려고?'),     # 0858
     'statue_me_too': say('실은 저도 그렇답니다. 분명 비싸게 팔리겠지요.'),                    # 0859
     'statue_oops': say('아이고, 그러셨군요…… 방금 한 말은 못 들은 걸로 해 주세요. 와하하핫.'),  # 085A
+    # 본몰 성 3F/01 유모 (06,06)·(06,07) 대화 05F
+    'nanny_room': say('여기는 왕자님 방이에요. 너 같은 천한 것이 올 곳이 아닙니다.'),        # 0836
+    'nanny_out': say('자! 나가세요!'),                                                      # 03B1
+    # 말한 뒤 일행을 내보내는 파수꾼(FC 대화 066·028). 옮긴 대사(034A·038E)와 같은 말
+    'jail_out': say('여기는 감옥이다! 죄수와 이야기하는 것은 허락할 수 없다! 자, 나가시오!'),       # 034A
+    'night_out': say('이런 한밤중에 성에 들어오다니!', '내 눈에 띈 이상 가만있을 수는 없다. 자, 물러가시오!'),  # 038E
+    # 열린 카지노(공사 재개 뒤)의 코인·교환·슬롯·포커 사람. 놀이는 옮기지 않았다(코인을 살 수 없음)
+    'coin_exchange': say('여기는 코인을 물건으로 바꾸는 교환소입니다.'),                    # 0350
+    'coin_none': say('@ 님은 지금……', '어머, 코인이 한 장도 없네요.', '코인이 모이면 언제든 또 오세요.'),   # 03CF
+    'coin_seller': say('어서 오세요. 여기는 코인 판매소입니다.'),                           # 0355
+    'coin_closed': say('죄송하지만 지금은 코인을 팔지 않습니다.'),                          # FC 에 없는 말(판매를 옮기지 않음)
+    'slots_ask': say('슬롯머신이 있습니다. 해 보시겠습니까?'),                              # 038A
+    'no_coins': say('코인이 없으시네요. 코인을 사신 뒤 다시 오세요!'),                       # 047C
+    'poker_ask': say('여기는 포커 테이블입니다. 즐기시겠습니까?'),                           # 07F6
+    'poker_short': say('어이쿠 손님, 코인이 모자라시네요. 코인을 사신 뒤 다시 오세요!'),      # 0482
+    'poker_later': say('그럼 마음이 내키시면 언제든 오세요.'),                               # 07F7
 }
 
 
@@ -247,7 +264,8 @@ SIMPLE = ('profit', 'clouds', 'monsters_back', 'tournament_over', 'shop_permit',
           'arena_closed', 'pizarro_gone', 'emperor_rumor2', 'hero_rumor', 'kitchen', 'gaade_bridges', 'pizarro_fan',
           'sky_sword', 'king_meets_all', 'empty_shop')
 TALKS = ('safe_man', 'nun', 'warrior', 'neighbor', 'prisoner', 'castle_man', 'bridge', 'jail',
-         'armor_buyer', 'gate', 'drunk', 'statue_merchant') + SIMPLE
+         'armor_buyer', 'gate', 'drunk', 'statue_merchant', 'jail_guard', 'night_guard', 'nanny', 'coin_exchange',
+         'coin_seller', 'slots', 'poker') + SIMPLE
 
 
 def talk_scripts(ctx):
@@ -269,6 +287,14 @@ def talk_scripts(ctx):
         'gate': [s('gate_ask'), when(YES, [s('gate_in')], [s('gate_no')])],
         'drunk': [s('drunk_ask'), when(YES, [s('drunk_yes')], [s('drunk_no')])],
         'statue_merchant': [s('statue_ask'), when(YES, [s('statue_me_too')], [s('statue_oops')])],
+        'jail_guard': [s('jail_out'), ctx.call('jail_out')],
+        'nanny': [when(flag(PRINCE_MET), [when(flag(MET_BEFORE), [s('nanny_room')], [s('nanny_out')])],
+                       [s('nanny_room')])],
+        'night_guard': [s('night_out'), ctx.call('night_out')],
+        'coin_exchange': [s('coin_exchange'), s('coin_none')],
+        'coin_seller': [s('coin_seller'), s('coin_closed')],
+        'slots': [s('slots_ask'), when(YES, [s('no_coins')])],
+        'poker': [s('poker_ask'), when(YES, [s('poker_short')], [s('poker_later')])],
     }
     bodies.update({name: [s(name)] for name in SIMPLE})
     return [bodies[name] for name in TALKS]
@@ -288,7 +314,14 @@ RETALK = {
     (BONMALMO, 'day', (0x0B, 0x10)): 'bridge',
     (BONMALMO, 'day', (0x1F, 0x1A)): 'jail',
     (BONMALMO, 'day', (0x04, 0x15)): 'armor_buyer',
+    (BONMALMO, 'day', (0x06, 0x06)): 'nanny',
+    (BONMALMO, 'day', (0x06, 0x07)): 'nanny',
+    (PRISON, 'day', (0x0A, 0x0E)): 'jail_guard',
+    (PRISON, 'day', (0x02, 0x07)): 'jail_guard',
 }
+# 파수꾼이 일행을 내보내는 자리(FC 실측: 3장 상태로 말을 걸어 끝난 맵·칸). 감옥 05/00 → 05/01 (19,02),
+# 엔돌 성 밤 04/02 → 04/00 (17,0A)
+OUT_TO = {'jail_out': ('3F/01', (0x19, 0x02)), 'night_out': ('40/00', (0x17, 0x0A))}
 
 # FC 16/01 맨 윗줄 (10,00)의 서비스 3 인물(대화 003). 16/01 에는 가게 목록이 없어 옮기면 「＜なにもない＞」 만 낸다.
 # 사건과 상관없는 사람이라 앞 칸의 빈 사람과 같은 말로 바꾼다. 목록에서 빼면 안 된다: 3E 그룹에서 그림 36 을 쓰는 유일한
@@ -322,7 +355,12 @@ ENDOR = {
     (THRONE, 'day', (0x0D, 0x0B)): 'king_meets_all',
     (INN, 'day', (0x03, 0x01)): 'statue_merchant',
     (INN, 'night', (0x03, 0x01)): 'statue_merchant',
+    (ENDOR_HALL, 'night', (0x0C, 0x1C)): 'night_guard',
 }
+# FC 3장 목록에서 자리·걸음이 기본 목록과 다른 사람: (맵, 낮·밤, FC 칸) → (FC 칸, 서 있음). 밤 마을 사람 하나가 한 칸
+# 오른쪽, 왕좌의 방 대신은 서 있다
+ENDOR_MOVED = {(ENDOR_TOWN, 'night', (0x16, 0x1E)): ((0x17, 0x1E), False),
+               (THRONE, 'day', (0x0D, 0x0B)): ((0x0D, 0x0B), True)}
 # FC 3장 목록에 없는 기본 목록의 사람: 성 1층의 콜로세움 길 병사 둘과 대회 이야기꾼
 ENDOR_GONE = {ENDOR_HALL: (('day', (0x02, 0x21)), ('day', (0x18, 0x21)), ('day', (0x0D, 0x16)))}
 # FC 3장 목록에만 있는 사람: (맵, 낮·밤, FC 칸, 대화, 같은 겉모습의 기본 목록 사람 칸). 콜로세움 문의 둘째 병사(대화 03D)
@@ -334,6 +372,9 @@ CASINO_PEOPLE = ((0x04, 0x0C), (0x08, 0x0A), (0x0C, 0x03), (0x0F, 0x07), (0x10, 
                  (0x13, 0x0B), (0x15, 0x06), (0x17, 0x0D), (0x18, 0x02), (0x1C, 0x08), (0x1F, 0x00))
 # 3장 동안 다른 모듈의 3장 목록이 없으면 이 모듈이 기본 목록을 베껴 거는 엔돌 맵. 2장 끝의 우승 목록(dq4ch2ending,
 # 빈 성 flag 가 3장에도 켜져 있음)이 3장에 걸리지 않게 한다. 04/07·04/0B 는 FC 3장도 기본 목록이다
+# 열린 카지노의 장치 사람(FC 칸 → 대화): 교환소(046)·코인 판매(047)·슬롯(048)·포커(049)
+CASINO_DEVICES = {(0x1C, 0x08): 'coin_exchange', (0x18, 0x02): 'coin_seller', (0x08, 0x0A): 'slots',
+                  (0x13, 0x0B): 'poker'}
 ENDOR_MAPS = (ENDOR_TOWN, ENDOR_HALL, KITCHEN, THRONE, ARENA, INN)
 
 
@@ -358,6 +399,12 @@ def _retalk_entries(entries, m, talks):
             continue
         if key in want:
             e = {**e, "fields": {**e["fields"], "talk": talks[want[key]]}}
+        moved = next((v for (mm, t, fc), v in ENDOR_MOVED.items() if mm == m and (t, cell(*fc)) == key), None)
+        if moved:
+            import dq4npcport
+            (x, y), stand = cell(*moved[0]), moved[1]
+            e = {**e, "fields": {**e["fields"], "x": x, "y": y, **({"interval": 0} if stand else {})},
+                 **({"from": dq4npcport.STAND} if stand else {})}
         out.append(e)
     for mm, t, fc, name, like in ENDOR_ADDED:
         if mm != m:
@@ -400,6 +447,10 @@ def npc_lists(lists, ctx):
                 hit += 1
         if hit != 1:
             raise SystemExit(f'마을 사람: {m} {fc} 의 빈 가게 사람이 {hit}명')
+    # 3F/01 에 들 때 PRINCE_MET 를 MET_BEFORE 에 옮겨 두는 보이지 않는 사람. 그림은 이 그룹에 이미 있는 병사(6):
+    # 그룹에 새 그림을 더하면 dq4people 의 그림 배치가 바뀌어 다른 장 화면이 달라진다
+    lists[BONMALMO]["entries"] += [{**e, "fields": {**e["fields"], "gfx": HELPER_GFX, "x": HELPER_CELL[0], "y": HELPER_CELL[1]}}
+                                   for e in ch2._invisible(_src('met_before'), t['nanny'])]
     new, over = [], []
 
     def on(m, name):
@@ -412,10 +463,19 @@ def npc_lists(lists, ctx):
             name = f'ch3_towns_{m.replace("/", "")}'
             new.append({"name": name, "entries": _retalk_entries(copy.deepcopy(lists[m]["entries"]), m, t)})
             over.append(on(m, name))
+    # 공사 재개(굴 모듈 RESUMED, FC $6287&80) 뒤에는 FC 처럼 기본 목록의 열린 카지노. 닫힌 목록보다 앞 줄이어야 한다
+    import dq4ch3tunnel as tunnel
+    devices = {(t, cell(*fc)): talk for fc, talk in CASINO_DEVICES.items() for t in ('day', 'night')}
+    opened = [{**e, "fields": {**e["fields"], "talk": t[devices[(e["time"], _at(e))]]}}
+              if (e["time"], _at(e)) in devices else e for e in copy.deepcopy(lists[CASINO]["entries"])]
+    if sum(1 for e in opened if (e["time"], _at(e)) in devices) != len(devices):
+        raise SystemExit(f'마을 사람: {CASINO} 에 카지노 장치 사람이 모자람')
+    new.append({"name": 'ch3_towns_4001_open', "entries": opened})
+    over.append({"map": CASINO, "flag": tunnel.RESUMED[0], "when": "on", "mask": tunnel.RESUMED[1],
+                 "list": "new:ch3_towns_4001_open"})
     name = f'ch3_towns_{CASINO.replace("/", "")}'
     # 굴 모듈이 기본 목록에 더한 보이지 않는 인물(공사 재개 뒤 들어오면 개통 소식을 켬, dq4ch3tunnel.NOTICE_MAP)은 닫힌
     # 카지노에도 둔다
-    import dq4ch3tunnel as tunnel
     notice = {"list": tunnel.SCRIPT_LIST, "index": tunnel.SCRIPTS['notice'][0]}
     new.append({"name": name, "entries": _ryan(t['ryan']) + [e for e in lists[CASINO]["entries"] if e.get("from") == notice]})
     over.append(on(CASINO, name))
@@ -426,6 +486,7 @@ def absent(ctx=None):
     """{(맵, DQ5 셀 x, y, 밤)}: 3장 동안 목록에 없는 기본 목록의 사람(닫힌 카지노, 성 1층의 셋)."""
     out = {(CASINO, *cell(*fc), night) for fc in CASINO_PEOPLE for night in (False, True)}
     out |= {(m, *cell(*fc), t == 'night') for m, gone in ENDOR_GONE.items() for t, fc in gone}
+    out |= {(m, *cell(*fc), t == 'night') for (m, t, fc), (to, _) in ENDOR_MOVED.items() if to != fc}
     return out
 
 
@@ -435,7 +496,8 @@ def start_messages(ctx):
     first = {'safe_man': None, 'nun': 'nun_pray', 'warrior': 'warrior', 'neighbor': 'neighbor_dream',
              'prisoner': 'thief_rumor', 'castle_man': 'fox_rumor', 'bridge': 'bridge_wait',
              'jail': 'jail_hint', 'armor_buyer': 'armor_ask', 'gate': 'gate_ask', 'drunk': 'drunk_ask',
-             'statue_merchant': 'statue_ask', **{n: n for n in SIMPLE}}
+             'statue_merchant': 'statue_ask', 'jail_guard': 'jail_out', 'night_guard': 'night_out', 'nanny': 'nanny_room',
+             **{n: n for n in SIMPLE}}
     out = {}
     for (mp, time, fc), name in (*RETALK.items(), *ENDOR.items(), (EMPTY_SHOP, 'empty_shop')):
         if name == 'safe_man':
@@ -463,5 +525,72 @@ def state_messages(ctx):
                                       (BONMALMO, (0x1F, 0x1A), False): m['jail_broke']}),
         'towns_letter': (_set(LETTER1), {(BONMALMO, (0x06, 0x1C), False): m['arms_demand'],
                                          (BONMALMO, (0x06, 0x1C), True): m['arms_demand']}),
+        # 왕자를 만난 뒤 다시 들어온 방문: 들 때 이미 켜져 있어 유모는 0836
+        'towns_prince': (_set(PRINCE_MET), {(BONMALMO, (0x06, 0x06), False): m['nanny_room'],
+                                            (BONMALMO, (0x06, 0x07), False): m['nanny_room']}),
+        # 쫓겨난 그 방문: 맵에 든 뒤에 켜면(셋째 값 LATESET) 03B1
+        'towns_chased': ('', {(BONMALMO, (0x06, 0x06), False): m['nanny_out'],
+                              (BONMALMO, (0x06, 0x07), False): m['nanny_out']}, _set(PRINCE_MET)),
         'towns_shop': (_set(SHOP), {(HOUSE, (0x02, 0x04), True): m['neighbor_proud']}),
+        'towns_casino': (_set(_resumed()), {(CASINO, fc, night): m[first] for fc, first in (
+            ((0x1C, 0x08), 'coin_exchange'), ((0x18, 0x02), 'coin_seller'), ((0x08, 0x0A), 'slots_ask'),
+            ((0x13, 0x0B), 'poker_ask')) for night in (False, True)}),
     }
+
+
+SCRIPT_LIST = '10:B135'
+SCRIPTS = {'met_before': (6, '10:B171', 21)}       # 이름: (목록 칸, 스크립트 주소, 자리 바이트)
+HELPER_GFX = 0x06
+# 왕자 방(FC X 01~08, Y 05~0E) 왼쪽 벽 칸. 이동 간격 1 로 스크립트만 돈다(간격 0 이면 차례를 받지 못함)
+HELPER_CELL = cell(0x00, 0x08)
+
+
+def _src(name):
+    return {"list": SCRIPT_LIST, "index": SCRIPTS[name][0]}
+
+
+def _cmd(op, *args, **kw):
+    return {"op": op, "args": list(args), **kw}
+
+
+def scripts(ctx):
+    """빌린 인물 스크립트: 3F/01 에 들 때 PRINCE_MET 면 MET_BEFORE 를 켠다."""
+    met = [_cmd('28'), _cmd('52'), _cmd('06', 0x80 | PRINCE_MET[0], PRINCE_MET[1], target='end'),
+           _cmd('10', *MET_BEFORE), _cmd('16', label='end')]
+    return [{"address": SCRIPTS['met_before'][1], "commands": met}]
+
+
+def _resumed():
+    import dq4ch3tunnel
+    return dq4ch3tunnel.RESUMED
+
+
+# ---- 내보내기(파수꾼이 말한 뒤 일행을 다른 자리로) ----
+
+DATA_ENTRIES = tuple(f'{name}_event' for name in OUT_TO)
+CALLS = {name: (name, 0) for name in OUT_TO}
+
+
+def _warp_event(name):
+    mp, fc = OUT_TO[name]
+    g, n = (int(v, 16) for v in mp.split('/'))
+    return bytes((0x90, g, n, *cell(*fc), 0x01, 0x80, 0xFF))
+
+
+def native(ctx):
+    """(바이트, {이름: 주소}): 내보내는 이벤트 스크립트와 그것을 거는 대화 호출 루틴."""
+    import dq4prologue
+    out, at = bytearray(), {}
+
+    def put(name, code):
+        at[name] = ctx.code_at + len(out)
+        out.extend(code)
+    for name in OUT_TO:
+        put(f'{name}_event', _warp_event(name))
+        put(name, dq4prologue._event_start(at[f'{name}_event']))
+    return bytes(out), at
+
+
+def events(ctx):
+    """이벤트 스크립트 토큰(dq4msgwait 가 봄). 메시지를 띄우지 않는다."""
+    return [[_warp_event(name)] for name in OUT_TO]

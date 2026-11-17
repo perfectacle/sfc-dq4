@@ -59,6 +59,7 @@ PROBE = DQ5_TOOLS / "lua" / "dq5npcrecordcheck.lua"
 SHOP_PROBE = DQ5_TOOLS / "lua" / "dq5progresscheck.lua"
 DECODE_PROBE = DQ5_TOOLS / "lua" / "dq5textgrowcheck.lua"
 HOLD_PROBE = TOOLS / "lua" / "dq4holdwalk.lua"
+HOLD_ALL = "08-1F"              # 인물 슬롯 전부(dq4holdwalk.lua, 간격 2 이상: 스크립트 도우미는 둠)
 # First message of each DQ5 service (06:DBD2, sfc/dq5/docs/dq5-data-format.md 「가게 종류」). At night the
 # inn opens with 071 and the church with 080 (measured on 36/00 and 37/00).
 SERVICE_MESSAGE = {1: 0x002, 2: 0x000, 3: 0x001, 4: 0x0B9, 5: 0x07E, 6: 0x070}
@@ -125,7 +126,7 @@ def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret
     dest.mkdir(parents=True)
     group, number = to.split(",")[0].split("/")
     env = {k: v for k, v in os.environ.items()
-           if k not in ("ADULT", "ANYWHERE", "BATTLE", "FIELD", "GROUP", "HOLD_NEXT", "HOLD_SLOTS", "LATESET", "PARTY",
+           if k not in ("ADULT", "ANYWHERE", "BATTLE", "FIELD", "GROUP", "HOLD_MIN", "HOLD_NEXT", "HOLD_SLOTS", "LATESET", "PARTY",
                         "POKE", "ROMPATCH", "SAVE", "SET", "WAGON")}
     env.update(LIBDIR=str(libdir), STATE=str(state), SHOT_DIR=str(dest), MAXF="1800", SETTLE="120", TO=to,
                TEST=f"{test},wait:30", CHECK_GROUP=group, CHECK_MAP=number,
@@ -144,7 +145,7 @@ def run(mesence, rom, state, out, name, libdir, to, test, night, shop=False, ret
         env.update(INNER=str(PROBE), RETURN_PC=f"{ret:06X}")
     probe = SHOP_PROBE if shop else PROBE if ret is None else DECODE_PROBE
     if hold:
-        env.update(HOLD_SLOTS=hold, HOLD_NEXT=str(probe))
+        env.update(HOLD_SLOTS=hold, HOLD_NEXT=str(probe), HOLD_MIN="2")
         probe = HOLD_PROBE
     with (dest / "mesen.log").open("w", encoding="utf-8") as log:
         try:
@@ -371,6 +372,7 @@ def main():
             if hasattr(dq4ch3event, "absent"):
                 gone |= dq4ch3event.absent()
     states = {}
+    held = bool(args.states) and args.chapter3
     if args.states:
         if args.chapter3:
             table = dq4ch3event.state_messages(third)
@@ -384,6 +386,9 @@ def main():
         states = {n: table[n] for n in args.states.split(",")}
         args.no_tables = True
     job_sets = {}
+    # 상태의 셋째 값: 도착해 조작할 수 있게 된 첫 프레임에 둘 SET(LATESET). 맵에 들 때 flag 를 보는 인물 스크립트보다
+    # 뒤에 켜야 하는 상태(그 방문 동안 켜진 flag)
+    job_late = {}
 
     jobs, later = [], []
     for m, persons in people.items():
@@ -394,7 +399,7 @@ def main():
             continue
         if args.maps and m not in args.maps:
             continue
-        if states and not any(k[0] == m for _, table in states.values() for k in table):
+        if states and not any(k[0] == m for _, table, *_ in states.values() for k in table):
             continue
         if groups and not args.maps and not states and m[:2] not in groups:
             continue
@@ -408,7 +413,11 @@ def main():
             jobs.append(("table", f"table-{m.replace('/', '')}-{'night' if night else 'day'}", m,
                          f"{m},{','.join(map(str, cell(*start)))}", "wait:60", night, None))
         for i, p in enumerate(persons):
-            if p["interval"] or (m, p["dq5"]["x"], p["dq5"]["y"], p["night"]) in gone:
+            # 걷는 사람은 건너뛴다. 3장 상태 장면(--chapter3 --states)은 맵을 불러온 프레임부터 걸음을 멈춰(HOLD_ALL)
+            # 처음 칸에 세워 두고 말을 건다
+            # 처음 상태에서 없앤 사람(absent)도 상태 표에 든 사람이면 그 상태에서는 서 있다(공사 재개 뒤 열린 카지노 등)
+            listed = any((m, (p["x"], p["y"]), p["night"]) in table for _, table, *_ in states.values())
+            if (p["interval"] and not held) or ((m, p["dq5"]["x"], p["dq5"]["y"], p["night"]) in gone and not listed):
                 continue
             # People of the other time are not there. A walking person's start cell is the last resort: the hero
             # warps onto it before that person walks off.
@@ -429,12 +438,14 @@ def main():
             sx, sy, d = side
             to = warp_to(m, sx, sy, lift)
             if states:
-                for label, (more, table) in states.items():
+                for label, (more, table, *late) in states.items():
                     message = table.get((m, (p["x"], p["y"]), p["night"]))
                     if message is not None:
                         name = f"{label}-talk-{m.replace('/', '')}-{i}"
                         jobs.append(("talk", name, m, to, d, p["night"], (message, None)))
                         job_sets[name] = ";".join(v for v in (sets, more) if v)
+                        if late:
+                            job_late[name] = late[0]
                 continue
             service = p.get("service")
             if service in SHOPS:
@@ -472,7 +483,8 @@ def main():
         for n, talk in enumerate(TALKS):
             wram, messages = run(mesence, rom_path, state, out, f"{name}-{n}", libdir, to,
                                  talk.format(dir=test) + (BUY if shop else STAY if kind == "inn" else ""), night, shop,
-                                 None if shop else ret, sets=job_sets.get(name, sets))
+                                 None if shop else ret, sets=job_sets.get(name, sets), late=job_late.get(name),
+                                 hold=HOLD_ALL if held else None)
             if messages and (shop or messages[0]):
                 return wram, messages, n
         return wram, messages, None
