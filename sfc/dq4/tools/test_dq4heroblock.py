@@ -21,6 +21,7 @@ import dq4ch2event as ch2  # noqa: E402
 import dq4ch2frenol as fr  # noqa: E402
 import dq4ch2king as king  # noqa: E402
 import dq4ch3lakanaba as lakanaba  # noqa: E402
+import dq4ch3tunnel as tunnel  # noqa: E402
 import dq4chapter1 as ch  # noqa: E402
 import dq4prologue as pro  # noqa: E402
 
@@ -31,6 +32,9 @@ WALK_EXEMPT = {
     ch.WALK_OUT_RIGHT: '1장 첫머리 전사: 위와 같음',
     ev.OLD_MAN_SCRIPT: '성 앞 노인: 조작을 막지 않고 주인공 쪽으로 2셀 앞까지만 따라온다(_old_man_step)',
     fr.SCRIPTS[fr.USE['trio']]: '프레놀 납치범 셋: 조작을 막지 않고 서쪽 길로 나간다. 주인공이 길에 서면 비킬 때까지 기다린다',
+    tunnel.SCRIPTS['migrant'][1]: '뚫린 굴 이주민: 조작을 막지 않고 서쪽 계단으로 나간다. 토막마다 그 둘레에 주인공이 '
+                                  '없을 때 걷는다(dq4ch3tunnel.GAP, tunnel-migrants-* 사례 겹침 0)',
+    tunnel.SCRIPTS['traveler'][1]: '뚫린 굴 나그네: 조작을 막지 않고 동쪽 계단으로 나간다. 이주민과 같음',
 }
 # 주인공 걸음이 있어도 되는 이벤트: (모듈, at 이름) → 시작 칸을 못 박는 판정
 MOVE_PINNED = {

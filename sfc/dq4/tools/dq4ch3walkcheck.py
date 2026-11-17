@@ -32,6 +32,7 @@ import dq4ch3event as ch3  # noqa: E402
 import dq4ch3lakanaba as lakanaba  # noqa: E402
 import dq4ch3opencheck as opening  # noqa: E402
 import dq4ch3safe as safe  # noqa: E402
+import dq4ch3tunnel as tunnel  # noqa: E402
 import dq4chapterwalk as cwk  # noqa: E402
 
 talk, taps = wc.talk, wc.taps
@@ -54,7 +55,7 @@ FLAGS = {
     'RAFT_X': (safe.RAFT_VARS + safe.raft.RX, 0xFF),
     'RAFT_Y': (safe.RAFT_VARS + safe.raft.RY, 0xFF),
     **{f'ENDOR_{k}': wc.flag(getattr(endor, k)) for k in ('ALLOWED', 'SHOP', 'ORDER', 'DELIVERED', 'SOLD', 'SON_CHEER',
-                                                          'NOTICE', 'OPENED', 'BUTTON', 'ASKED', 'PRESSED')},
+                                                          'NOTICE', 'BUTTON', 'ASKED', 'PRESSED')},
     'ENDOR_COUNT': (ch3.VARS_AT + ch3.SLOTS['E'].vars[0] + endor.VARS, 0xFF),
     'SCOTT': wc.flag(ch3.SCOTT), 'LAWRENCE': wc.flag(ch3.LAWRENCE), 'LAWRENCE_DAYS': (ch3.LAWRENCE_DAYS, 0xFF),
     'PARTY_N': (0x7E201D, 0xFF), 'PARTY1': (ch3.PARTY_ITEMS - 0x16 + ch3.RECORD, 0xFF),
@@ -70,6 +71,11 @@ FLAGS = {
     # 톨네코 물건 칸 2(칸 0 옷, 칸 1 도시락 다음): 사건 물건을 두고 빠지는지 보는 칸
     'BM_SLOT2': (0x7E2056 + 2, 0xFF),
     'BM_BAG_LETTER': (0x7E2250 + bm.PRINCE_LETTER, 0xFF),
+    'TUNNEL_PAID': wc.flag(tunnel.PAID),
+    'TUNNEL_WAITING': wc.flag(tunnel.WAITING),
+    'TUNNEL_RESUMED': wc.flag(tunnel.RESUMED),
+    'TUNNEL_OPENED': wc.flag(tunnel.OPENED),
+    'TUNNEL_GOLD0': (0x7E2019, 0xFF), 'TUNNEL_GOLD1': (0x7E201A, 0xFF), 'TUNNEL_GOLD2': (0x7E201B, 0xFF),
 }
 
 TOWN = '3E/00'                 # FC 16/00 레이크나바
@@ -229,7 +235,7 @@ SEGMENTS = [
     ('endor_nene_sleep', 'walk', talk('right', 8), {'map': endor.TOWN, 'cell': endor.NENE_SIDE[1], 'changes': 1,
                                                      'after': 600, 'items': [BENTO]}),
     ('endor_nene_notice', 'walk', talk('right', 12), {'map': endor.TOWN, 'set': _set(endor.NOTICE),
-                                                       'want': ['ENDOR_OPENED']}),
+                                                       'want': ['TUNNEL_OPENED']}),
     # 납품: 주문 전에는 안내만, 주문 뒤 없으면 그대로, 칼 둘·갑옷 하나를 받고, 다 차면 60000 골드
     ('endor_deliver', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]), {'map': endor.CASTLE_HALL}),
     ('endor_deliver_none', 'walk', talk('up', 8), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0}}),
@@ -370,6 +376,103 @@ SEGMENTS += [
      {'map': bm.CASTLE, 'set': f'{BM_SLOT2}={bm.KING_LETTER:02X}', 'poke': wc.DAY}),
     ('bm_king_letter', 'walk', talk('up', 12), {'want': ['BM_LETTER2'], 'bytes': {'BM_SLOT2': 0xFF}, 'poke': wc.DAY}),
 ]
+
+# 굴(dq4ch3tunnel). 47/00 노인 아래 칸에서 위를 보고 말을 건다. 쪽마다 A 하나(글이 다 찍히도록 90프레임 간격), 마지막
+# A 하나가 연 명령 창은 닫는다. 「예」 는 커서 그대로 A
+TUNNEL_BELOW_OLD = tunnel.cell(tunnel.OLD_MAN[0], tunnel.OLD_MAN[1] + 1)
+TUNNEL_ARRIVAL = tunnel.cell(0x05, 0x0B)
+
+
+def tunnel_talk(presses):
+    return f'up:8;wait:30;a:8;wait:60;a:8;wait:90;{taps(presses + 1, 90)};wait:60;{CLOSE}'
+
+
+# 노인 아래 칸 ↔ 47/00 계단: FC (11,0B) → 줄 08 → (05,08) → 계단 (05,0B). 계단은 웨이포인트 대신 아래 누르기로
+# 밟는다(필드에 나온 뒤에도 웨이포인트 셀로 걸어가 버림)
+TUNNEL_TO_STAIRS = '34,23;34,17;10,17;10,21;down:16;wait:60'
+TUNNEL_TO_OLD = '10,21;10,17;34,17;34,23;36,23'
+# 47/00 을 나서면 서는 필드 칸(dq4groupbuild 의 입구 블록 아래)과 그 위 입구
+TUNNEL_FIELD = (0xF2, 0xBD)
+TUNNEL_GOLD = lambda v: f'2019={v & 0xFF:02X};201A={v >> 8 & 0xFF:02X};201B={v >> 16:02X}'  # noqa: E731
+# 47/01 동쪽 통로(FC 줄 04)에서 계단 앞 (1E,02)로 가 오른쪽 계단 (1F,02)을 밟는다
+TUNNEL_EAST = f'{tunnel.OPEN_MAP},50,8'
+TUNNEL_TO_END = f'60,9;60,5;right:16'
+SEGMENTS += [
+    # 금화가 모자라면 「예」 를 해도 그대로(0895)
+    ('tunnel_short_side', 'warp', f'{tunnel.BLOCKED},{TUNNEL_BELOW_OLD[0]},{TUNNEL_BELOW_OLD[1] - 1}',
+     {'map': tunnel.BLOCKED, 'set': TUNNEL_GOLD(10000)}),
+    ('tunnel_short', 'walk', tunnel_talk(5),
+     {'map': tunnel.BLOCKED, 'off': ['TUNNEL_PAID', 'TUNNEL_WAITING'],
+      'bytes': {'TUNNEL_GOLD0': 0x10, 'TUNNEL_GOLD1': 0x27, 'TUNNEL_GOLD2': 0}}),
+    # 가게를 사기 전이면 「예」 뒤 0894(엔돌 모듈 SHOP 을 끔)
+    ('tunnel_noshop_side', 'warp', f'{tunnel.BLOCKED},{TUNNEL_BELOW_OLD[0]},{TUNNEL_BELOW_OLD[1] - 1}',
+     {'map': tunnel.BLOCKED, 'set': f'{TUNNEL_GOLD(65000)};{0x2190 + endor.SHOP[0]:04X}=00'}),
+    ('tunnel_noshop', 'walk', tunnel_talk(5),
+     {'map': tunnel.BLOCKED, 'off': ['TUNNEL_PAID', 'TUNNEL_WAITING'],
+      'bytes': {'TUNNEL_GOLD0': 0xE8, 'TUNNEL_GOLD1': 0xFD, 'TUNNEL_GOLD2': 0}}),
+    # 60000 을 내고(0896·0897), 다시 말을 걸면 0897. 필드에 나갔다 들어오면 WAITING 이 꺼지고, 말을 걸면 공사 재개(0898)
+    # 앞의 엔돌 구간(endor_nene_notice)이 켠 OPENED 를 끄고 시작한다
+    ('tunnel_pay_side', 'warp', f'{tunnel.BLOCKED},{TUNNEL_BELOW_OLD[0]},{TUNNEL_BELOW_OLD[1] - 1}',
+     {'map': tunnel.BLOCKED, 'set': f'{TUNNEL_GOLD(65000)};{0x2190 + tunnel.IDX:04X}=00'}),
+    ('tunnel_pay', 'walk', tunnel_talk(6),
+     {'map': tunnel.BLOCKED, 'want': ['TUNNEL_PAID', 'TUNNEL_WAITING'],
+      'bytes': {'TUNNEL_GOLD0': 0x88, 'TUNNEL_GOLD1': 0x13, 'TUNNEL_GOLD2': 0}}),
+    ('tunnel_wait', 'walk', tunnel_talk(1), {'map': tunnel.BLOCKED, 'want': ['TUNNEL_WAITING'], 'off': ['TUNNEL_RESUMED']}),
+    ('tunnel_out', 'walk', TUNNEL_TO_STAIRS, {'field': True, 'cell': TUNNEL_FIELD, 'poke': wc.DAY}),
+    ('tunnel_in', 'walk', f'{TUNNEL_FIELD[0]},{TUNNEL_FIELD[1] - 2};wait:60',
+     {'map': tunnel.BLOCKED, 'field': False, 'cell': TUNNEL_ARRIVAL, 'poke': wc.DAY, 'off': ['TUNNEL_WAITING']}),
+    ('tunnel_resume', 'walk', f'{TUNNEL_TO_OLD};{tunnel_talk(2)}', {'map': tunnel.BLOCKED, 'want': ['TUNNEL_RESUMED']}),
+    # 공사 재개만으로는 뚫리지 않는다(엔돌 네네의 알림 전): 나갔다 들어와도 47/00
+    ('tunnel_closed_out', 'walk', TUNNEL_TO_STAIRS, {'field': True, 'cell': TUNNEL_FIELD, 'poke': wc.DAY}),
+    ('tunnel_closed_in', 'walk', f'{TUNNEL_FIELD[0]},{TUNNEL_FIELD[1] - 2};wait:60',
+     {'map': tunnel.BLOCKED, 'field': False, 'cell': TUNNEL_ARRIVAL, 'poke': wc.DAY, 'off': ['TUNNEL_OPENED']}),
+    # 엔돌 네네의 개통 알림(dq4ch3tunnel.news_talk, OPENED) 뒤 엔돌 쪽 입구는 뚫린 47/01 의 (05,0F) 계단으로. 알림부터
+    # 걷는 길은 seam_* 묶음이 보고, 여기서는 set 으로 둔다
+    ('tunnel_open_side', 'warp', f'{tunnel.BLOCKED},{TUNNEL_ARRIVAL[0]},{TUNNEL_ARRIVAL[1] - 3}',
+     {'map': tunnel.BLOCKED, 'set': f'{0x2190 + tunnel.OPENED[0]:04X}|{tunnel.OPENED[1]:02X}'}),
+    ('tunnel_open_out', 'walk', 'down:16;wait:60', {'field': True, 'cell': TUNNEL_FIELD, 'poke': wc.DAY}),
+    ('tunnel_open_in', 'walk', f'{TUNNEL_FIELD[0]},{TUNNEL_FIELD[1] - 2};wait:60',
+     {'map': tunnel.OPEN_MAP, 'field': False, 'cell': tunnel.OPEN_ARRIVAL, 'poke': wc.DAY, 'want': ['TUNNEL_OPENED']}),
+    # 동쪽 계단을 밟으면 장 끝 서술 → 엔딩 곡 → 「제4장 … 다음에 계속」 상자 → 버튼으로 타이틀
+    ('tunnel_end_side', 'warp', TUNNEL_EAST, {'map': tunnel.OPEN_MAP}),
+    ('tunnel_end_walk', 'walk', f'{TUNNEL_TO_END};wait:20', {'map': tunnel.OPEN_MAP}),
+    ('tunnel_end', 'ending', tunnel.END_SCENE, {}),
+    # 서술을 넘기면 엔딩 곡(14)이 지금 곡이 된 뒤 끝 상자가 버튼을 기다린다. 장 끝 구간과 묶음을 나누는 까닭은 2장 끝
+    # song_in 과 같다(남은 A 가 리셋 뒤 타이틀에서 눌림)
+    ('tunnel_song_side', 'warp', TUNNEL_EAST, {'map': tunnel.OPEN_MAP}),
+    ('tunnel_song', 'walk', f'{TUNNEL_TO_END};wait:60;{taps(3, 120)};wait:400',
+     {'map': tunnel.OPEN_MAP, 'bytes': {'SONG': tunnel.ENDING_SONG}}),
+    # 계단 앞 칸에 서기만 해서는 걸리지 않고(다시 걸어 나옴), 아래 칸 (1F,03) 에서 위로 누르면 걸린다
+    ('tunnel_near_side', 'warp', TUNNEL_EAST, {'map': tunnel.OPEN_MAP}),
+    ('tunnel_near', 'walk', '60,9;60,5;wait:200;60,9', {'map': tunnel.OPEN_MAP, 'cell': (60, 9)}),
+    ('tunnel_below', 'walk', f'62,9;62,7;up:16;wait:60;{taps(3, 120)};wait:400',
+     {'map': tunnel.OPEN_MAP, 'bytes': {'SONG': tunnel.ENDING_SONG}}),
+]
+
+# 굴과 엔돌을 잇는 길(둘 다 머지된 뒤 나중 PR 이 붙임): 노인에게 60000G(tunnel_pay 묶음) → 필드 → 0898 → 공사 재개 뒤 엔돌
+# 40/01 에 들면 소식(NOTICE) → 네네 「예」 → OPENED → 엔돌 쪽 입구가 뚫린 굴로 → 굴을 지나 동쪽 계단 → 장 끝. 소식·개통
+# flag 는 set 으로 켜지 않는다(묶음 사이로는 앞 구간 want 만 이어짐). 가게를 산 것(SHOP)만 네네가 서도록 둔다
+SEAM_NOTICE_CELL = (24, 14)                 # 40/01(FC 04/01) 의 바닥 FC (12,07) 위 셀(한 셀 아래에 내림)
+# 47/01 도착 계단 (10,31) → 이주민이 지나가게 (6,31) 로 비켰다가 계단을 밟지 않게 열 03 으로 → (03,0C) → (0A,0C) → (0A,06) →
+# (12,06) → (12,04) → (1E,04) → 계단 앞 (1E,02)
+SEAM_THROUGH = '6,31;wait:1200;6,25;20,25;20,13;36,13;36,9;60,9;60,5'
+SEAM = [
+    ('seam_notice_side', 'warp', f'{tunnel.NOTICE_MAP},{SEAM_NOTICE_CELL[0]},{SEAM_NOTICE_CELL[1]}',
+     {'map': tunnel.NOTICE_MAP}),
+    ('seam_notice', 'walk', 'wait:60', {'map': tunnel.NOTICE_MAP, 'want': ['ENDOR_NOTICE'], 'off': ['TUNNEL_OPENED']}),
+    ('seam_nene_side', 'warp', f'{endor.TOWN},{endor.NENE_SIDE[1][0]},{endor.NENE_SIDE[1][1] - 1}',
+     {'map': endor.TOWN, 'set': _set(endor.SHOP)}),
+    ('seam_nene', 'walk', talk('right', 12), {'map': endor.TOWN, 'want': ['TUNNEL_OPENED']}),
+    ('seam_tunnel_side', 'warp', f'{tunnel.BLOCKED},{TUNNEL_ARRIVAL[0]},{TUNNEL_ARRIVAL[1] - 3}', {'map': tunnel.BLOCKED}),
+    ('seam_out', 'walk', 'down:16;wait:60', {'field': True, 'cell': TUNNEL_FIELD, 'poke': wc.DAY}),
+    ('seam_in', 'walk', f'{TUNNEL_FIELD[0]},{TUNNEL_FIELD[1] - 2};wait:60',
+     {'map': tunnel.OPEN_MAP, 'field': False, 'cell': tunnel.OPEN_ARRIVAL, 'poke': wc.DAY}),
+    ('seam_through', 'walk', f'{SEAM_THROUGH};right:16;wait:60;{taps(3, 120)};wait:400',
+     {'map': tunnel.OPEN_MAP, 'maxf': 9000, 'bytes': {'SONG': tunnel.ENDING_SONG}}),
+]
+# 공사 재개(tunnel_resume)·「재개만으로는 막힘」(tunnel_closed_in, OPENED 꺼짐) 뒤, OPENED 를 set 하는 tunnel_open 묶음 앞에
+_at = next(k for k, seg in enumerate(SEGMENTS) if seg[0] == 'tunnel_closed_in') + 1
+SEGMENTS[_at:_at] = SEAM
 
 
 def units(segments=None):

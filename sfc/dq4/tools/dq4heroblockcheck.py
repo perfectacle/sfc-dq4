@@ -291,12 +291,13 @@ def chapter3_cases():
     out['safe-boulder-pit'] = {'warp': f'{safe.ROLL},6,22', 'set': '', 'walk': '6,73;wait:900;down:40;wait:300',
                                'free': '6,29', 'want': [], 'map': safe.PIT_BELOW, 'maxf': 4000}
     # 여신상 동굴 단추 칸(FC 40/01 (11,02))의 두 열마다: 한 줄 아래(FC (11,03))에서 올라서 「예」 면 물이 빠진 48/04 의 같은 칸에 서고, 왼쪽
-    # 통로(FC (0C,02))로 걸어 간다
+    # 통로(FC (0C,02))로 걸어 간다. 위는 물음 창이 뜬(18~26프레임) 뒤로 넉넉히 누른다: 40 이면 메시지 번호만 다른 롬에서
+    # x 34 의 커서가 「아니요」 로 갔다(창이 뜨는 프레임과 떼는 프레임이 가까움)
     import dq4ch3endor as endor
     bx0, _, _, by1 = endor._hero_rect(*endor.BUTTON_FC)
     for x in (bx0, bx0 + 1):
         out[f'endor-button-{x}'] = {'warp': f'{endor.CAVE_WET},{x},{by1}', 'set': '',
-                                    'walk': 'up:40;wait:200;a:8;wait:60;a:8;wait:800', 'free': '24,5',
+                                    'walk': 'up:80;wait:200;a:8;wait:60;a:8;wait:800', 'free': '24,5',
                                     'want': [('ENDOR_BUTTON', endor.BUTTON)], 'map': endor.CAVE_DRY, 'maxf': 3000}
     # 여신상 동굴 배(48/02, FC 40/00 배 (16,05)). 배 칸이 아닌 물 칸으로는 못 걷는다: 배 위 칸 (15,04)에서 오른쪽 물
     # (16,04)로 밀기, 배를 타고 한 칸 가서 땅에 내린 뒤(배는 (16,05)에 남음) 위 칸에서 다시 물로 밀기. 배는 단추 앞에만 있다
@@ -307,6 +308,15 @@ def chapter3_cases():
                               'walk': '44,11;46,11;44,11;42,11;42,9;right:40;wait:30', 'hero_at': (42, 9),
                               'free': '24,9', 'want': [], 'not': [('RAFT_RIDING', safe.RIDING)], 'map': endor.CAVE_ENTRY,
                               'maxf': 3000, 'ride': (RAFT_SLOT,)}
+    # 뚫린 굴의 이주민 둘은 조작을 막지 않고 서쪽 계단 (05,0F) 까지 걸어 사라진다. 주인공이 그 계단(엔돌 쪽에서 든 도착
+    # 칸)이나 길 가운데 (0A,08) 에 서 있으면 다가와 기다리고, 주인공이 길 옆((03,0F)·(0B,08))으로 비키면 지나가 사라진다
+    import dq4ch3tunnel as tunnel
+    sx, sy = tunnel.OPEN_ARRIVAL
+    for name, (x, y), (ax, ay) in (('stairs', (sx, sy), tunnel.cell(0x03, 0x0F)),
+                                   ('path', tunnel.cell(0x0A, 0x08), tunnel.cell(0x0B, 0x08))):
+        away = f'{ax},{ay}'
+        out[f'tunnel-migrants-{name}'] = {'warp': f'{tunnel.OPEN_MAP},{x},{y - 1}', 'set': '', 'walk': f'wait:900;{away};wait:600',
+                                          'free': away, 'want': [], 'map': tunnel.OPEN_MAP, 'maxf': 3000}
     out.update(shop_cases(lakanaba))
     out.update(bonmalmo_cases())
     return out
