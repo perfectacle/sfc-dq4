@@ -548,3 +548,9 @@ stage = "chapter1"
 at = "23:8064~23:80AD"
 data = true
 why = "몬스터 표의 04·05·06 칸: dq4monport.PORT 의 새 번호에 대역 레코드를 옮김"
+
+[[original]]
+stage = "chapter1"
+at = "23:8FEB~23:904D"
+data = true
+why = "몬스터 표의 A3·A4·A5·A6 칸: 2장 사건 번호(A3 석상·A4 대회 상대)와 dq4monport.PORT(A6) 사이의 A5 에 3장 새 번호(dq4monport.CH3)를 넣어 네 칸이 한 덩어리로 잡힘"
