@@ -182,10 +182,17 @@ class TalkTest(unittest.TestCase):
         fox = self.bodies['fox']
         self.assertEqual(fox[-1], self.ctx.flag_on(bm.ANSWERED))
 
-    def test_monica_branches_on_chapter3(self):
-        monica = self.bodies['monica'][0]
-        self.assertEqual(monica['cond'], self.ctx.flag(ev.CHAPTER3))
-        self.assertEqual(monica['else'], [self.ctx.say('monica_ch2')])
+    def test_monica_is_left_on_the_base_list(self):
+        # 기본 40/06 은 2장에도 쓰이고 2장 동료 대화가 대화 번호로 사람을 찾는다(dq4-ch2-partytalk)
+        lists = _lists()
+        before = lists[bm.ENDOR_THRONE]["entries"][0]["fields"]["talk"]
+        bm.npc_lists(lists, self.ctx)
+        self.assertEqual(lists[bm.ENDOR_THRONE]["entries"][0]["fields"]["talk"], before)
+
+    def test_monica_talk_is_the_module_talk(self):
+        first = min(self.ctx.talk.values()) - sum(len(getattr(m, 'TALKS', ())) for k, m in ev.modules()
+                                                   if list(ev.SLOTS).index(k) < list(ev.SLOTS).index('B'))
+        self.assertEqual(bm.monica_talk(first), self.ctx.talk['monica'])
 
     def test_monica_swaps_the_letters(self):
         calls = [op['args'][0] for _, op in _walk(self.bodies['monica']) if op.get('op') == 'call']
@@ -230,7 +237,6 @@ class ListTest(unittest.TestCase):
         self.assertEqual([e["from"] for e in town[:2]], [bm._src('arrive'), bm._src('arrive_night')])
         forest = lists[bm.FOREST]["entries"]
         self.assertEqual([e["from"] for e in forest], [bm._src('fox'), bm._src('gaade')])
-        self.assertEqual(lists[bm.ENDOR_THRONE]["entries"][0]["fields"]["talk"], t['monica'])
         self.assertEqual((new, over), ([], []))
 
     def test_missing_person_stops_the_build(self):

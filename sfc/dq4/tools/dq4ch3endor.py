@@ -600,6 +600,21 @@ def _who(people, mp):
     return [(t, fc) for m, t, fc in people if m == mp]
 
 
+def _monica(ctx):
+    """[(낮·밤, FC 칸, 대화)]: 본몰 모듈이 있으면 3장 목록의 모니카(FC 04/06 (0F,0A))에 그 모듈의 편지 대화. 기본 목록은
+    2장에도 쓰여 거기서 바꾸지 않는다."""
+    if 'dq4ch3bonmalmo' not in ch3.EVENTS:
+        return []
+    import dq4ch3bonmalmo as bm
+    # 3장 첫 대화 번호: 이 모듈 첫 대화에서 앞 모듈들의 대화 수를 뺀다(번호는 등록 차례로 이어 매김)
+    before = 0
+    for key, mod in ch3.modules():
+        if key == ctx.key:
+            break
+        before += len(getattr(mod, 'TALKS', ()))
+    return [('day', (0x0F, 0x0A), bm.monica_talk(ctx.talk[TALKS[0]] - before))]
+
+
 def npc_lists(lists, ctx):
     """3장 동안의 엔돌 맵을 기본 목록을 베껴 대화를 바꾼 목록으로 덮는다(CHAPTER3). 40/00·40/08 은 가게를 산 뒤(SHOP)
     목록이 따로다. 여신상 동굴 40/01(48/03)에 단추를 묻는 보이지 않는 인물을 더한다."""
@@ -611,7 +626,7 @@ def npc_lists(lists, ctx):
     talks = {TOWN: [(tm, fc, t['nene']) for tm, fc in _who(NENE, TOWN)] + [(SCOTT[1], SCOTT[2], t['scott'])],
              BARD_HALL: [(tm, fc, t['lawrence']) for _, tm, fc in LAWRENCE],
              CASTLE_HALL: [(DELIVER[1], DELIVER[2], t['deliver']), (GUIDE[1], GUIDE[2], t['guide'])],
-             THRONE: [(KING[1], KING[2], t['king'])],
+             THRONE: [(KING[1], KING[2], t['king'])] + _monica(ctx),
              SHOP_UP: [(tm, fc, t['seller']) for tm, fc in _who(SELLER, SHOP_UP)] +
                       [(tm, fc, t['son']) for tm, fc in _who(SON, SHOP_UP)] +
                       [(tm, fc, t['nene']) for tm, fc in _who(NENE, SHOP_UP)],

@@ -209,10 +209,6 @@ MESSAGES = {
     'monica_trust': pages('모니카', '아버님께는 분명/좋은 생각이/있으실 거예요./아버님을 믿어요.'),                     # 0884
     'monica_thanks': pages('모니카', '사랑하는 릭과의/결혼을 허락받다니/마치 꿈만 같아요!',                             # 0885
                            '톨네코라고 했죠./진심으로/감사드려요.'),
-    # 2장 모니카(같은 사람, FC 대화 03A, 우승 전): 07FA·07FB
-    'monica_ch2': _join(say('아버님이 모두에게/약속하신 탓에/저는 우승자와/결혼해야 해요…….',
-                             '하지만 만약 우승자가/여자라면/억지 결혼을/하지 않아도 되겠죠.', '부디 무술 대회에/나가 주세요!'),
-                         say('아리나 공주님./저는 자유롭게 사는/당신이 부러워요.')),
 }
 TALKS = ('prince', 'king', 'son', 'chief', 'fox', 'monica')
 CALLS = {'give_prince_letter': ('give', PRINCE_LETTER), 'take_prince_letter': ('take', PRINCE_LETTER),
@@ -334,12 +330,10 @@ def talk_scripts(ctx):
            on(ANSWERED)]
     letter = [say_('monica_letter'), say_('endor_king_letter'), call('take_prince_letter'), call('give_king_letter'),
               say_('got_king_letter'), call('jingle'), say_('endor_king_ask'), on(LETTER1)]
-    # 같은 인물이 2장(대회 전)에도 서므로 3장 flag 로 가른다
-    monica = [when(flag(ch3.CHAPTER3),
-                   [when(flag(LETTER2), [say_('monica_thanks')],
-                         [when(flag(LETTER1), [say_('monica_trust')],
-                               [when(has(PRINCE_LETTER), letter, [say_('monica_hello')])])])],
-                   [say_('monica_ch2')])]
+    # 3장 엔돌 목록(dq4ch3endor)의 모니카만 이 대화를 쓴다(monica_talk)
+    monica = [when(flag(LETTER2), [say_('monica_thanks')],
+                   [when(flag(LETTER1), [say_('monica_trust')],
+                         [when(has(PRINCE_LETTER), letter, [say_('monica_hello')])])])]
     bodies = {'prince': prince, 'king': king, 'son': son, 'chief': chief, 'fox': fox, 'monica': monica}
     return [bodies[name] for name in TALKS]
 
@@ -429,8 +423,9 @@ def _replace(entries, time, at, make):
 
 
 def npc_lists(lists, ctx):
-    """옮긴 목록을 고친다(인물 스크립트가 flag 를 보고 숨거나 나타난다). 3장 엔돌 왕좌의 방은 엔돌 모듈이 이 뒤에
-    기본 목록을 베껴 3장 목록으로 덮으므로, 기본 목록의 모니카를 바꾸면 그 목록에도 들어간다."""
+    """옮긴 목록을 고친다(인물 스크립트가 flag 를 보고 숨거나 나타난다). 엔돌 모니카는 여기서 바꾸지 않는다: 기본
+    40/06 은 2장 동안에도 쓰이고 2장 동료 대화가 그 대화 번호로 사람을 찾는다. 3장 엔돌 목록을 베끼는 엔돌 모듈이
+    monica_talk() 로 바꾼다."""
     t = ctx.talk
     if CASTLE not in lists:
         return [], []           # 인물 없이 옮긴 목록(dq4npcport.port 의 with_people=False)
@@ -438,7 +433,6 @@ def npc_lists(lists, ctx):
         ctx.retalk(lists, CASTLE, c, t['prince'], time=time)
     ctx.retalk(lists, CASTLE, KING, t['king'])
     ctx.retalk(lists, FOX_TOWN, CHIEF, t['chief'])
-    ctx.retalk(lists, ENDOR_THRONE, MONICA, t['monica'], time='day')
     _replace(lists[PRISON]["entries"], 'day', SON, lambda e: _scripted(e, 'son', t['son']))
     forest = lists[FOREST]["entries"]
     _replace(forest, 'day', FOX, lambda e: _scripted(e, 'fox', t['fox']))
@@ -451,6 +445,11 @@ def npc_lists(lists, ctx):
     town[:0] = [_person('arrive', 'day', HELPER_CELL, 'down', t['chief'], 0),
                 _person('arrive_night', 'night', HELPER_CELL, 'down', t['chief'], 0)]
     return [], []
+
+
+def monica_talk(first_talk=None):
+    """3장 엔돌 왕좌의 방 모니카(셀 MONICA, 낮)에게 줄 대화 번호. first_talk 는 3장 첫 대화 번호(없으면 기본)."""
+    return next(c for c in ch3.contexts(first_talk=first_talk) if c.key == 'B').talk['monica']
 
 
 def absent(ctx=None):
