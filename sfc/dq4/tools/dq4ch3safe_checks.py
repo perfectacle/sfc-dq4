@@ -18,6 +18,7 @@ FLAG_BLOCKS = {
     'cave': {
         # 구르는 바위(dq4boulder)의 메움 비트(bit0 왼쪽 구덩이, bit1 가운데)
         'SAFE_FILL': (safe.BOULDER_VARS(safe.boulder.FILL), 0xFF),
+        'SAFE_ROCK_Y': (safe.BOULDER_VARS(safe.boulder.BY), 0xFF),
     },
     'raft': {
         'RAFT_RIDING': wc.flag(safe.RIDING),
@@ -33,6 +34,15 @@ SAFE_LEFT = (safe.LEFT['rect'][0], safe.LEFT['rect'][3])
 SAFE_OFF = ['SAFE_ANSWERED', 'SAFE_YES']
 SAFE_ASK = 'wait:30'
 SAFE_FLOOR = 'a:8;wait:80;a:8;wait:80;a:8;wait:120'
+
+# 풀림 칸 FC (03~04,0E)를 멈추지 않고 걸어 지나가도 바위가 풀림(FC 는 그 칸을 밟는 걸음에 풀림). 걷기 앞 쉼을 0~21 프레임
+# 3 씩 두어 dq4boulder.ctl 부름(약 8프레임)·차례(TICK 번째 부름) 위상을 고루 어긋나게 한다(8 의 나머지 0~7 을 다 지남).
+# 바위는 왼쪽 통로를 굴러 내려와 주인공 바로 위 FC 줄 RELEASE_STOP 에서 멈춘다
+RELEASE_STOP = 0x11
+RELEASE = [seg for k in range(0, 24, 3) for seg in (
+    (f'safe_release_{k}', 'warp', f'{safe.ROLL},6,22', {'map': safe.ROLL}),
+    (f'safe_release_{k}_walk', 'walk', f'wait:{k + 1};6,39;wait:600',
+     {'map': safe.ROLL, 'cell': (6, 39), 'bytes': {'SAFE_ROCK_Y': RELEASE_STOP}}))]
 
 SEGMENT_BLOCKS = {
     # 북쪽 동굴(dq4ch3safe). 수문 앞 칸에 서면 묻고, 「아니요」 면 그대로, 칸을 떠났다 다시 서서 「예」 면 물살에 계단으로
@@ -80,6 +90,7 @@ SEGMENT_BLOCKS = {
         ('safe_boulder_mid_side', 'warp', f'{safe.ROLL},6,22', {'map': safe.ROLL}),
         ('safe_boulder_mid', 'walk', '6,29;8,29;8,61;16,61;wait:810;22,61;22,53;wait:270;22,39;8,39;8,43;wait:520;'
          '8,39;22,39;22,89;22,91;wait:200', {'map': safe.PIT_BELOW, 'changes': 1, 'after': 60, 'bytes': {'SAFE_FILL': 0x02}}),
+        *RELEASE,
     ],
     # 여신상 동굴 배(dq4raft): 단추 앞(앞 구간이 켠 BUTTON 을 끔). 입구 층의 배 칸으로 걸어 들어가 타고 호수를 돌아
     # 아래 끝에서 48/05 의 물로 넘어간다
