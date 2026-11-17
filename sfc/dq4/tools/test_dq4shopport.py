@@ -298,5 +298,29 @@ class Chapter2ShopTest(unittest.TestCase):
 
 
 
+@unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
+class ArenaTest(unittest.TestCase):
+    def test_fc_chapter3_matches(self):
+        import dq4monport
+        from kr_patch.fc import ines
+        prg = ines.prg(DQ4.read_bytes())
+        picked, skipped = shopport.arena(shopport.dq5item.Rom(DQ5.read_bytes()), prg)
+        # FC 3장 20시합 = 옮긴 것 + 뺀 것(짝 없는 몬스터·그림 아직·폭)
+        self.assertEqual(len(picked) + len(skipped), 20)
+        self.assertIn((6, []), skipped)
+        numbers = dq4monport.field_numbers()
+        for match in picked:
+            self.assertTrue(1 <= len(match) <= 4)
+            for m, odds in match:
+                self.assertIn(m, numbers.values())
+                self.assertNotIn(m, dq4monport.LATER)
+                self.assertTrue(1 <= odds < 0x80)
+        # 첫 시합은 FC 표 첫 줄: 46·4D ×3, 배율 1·33
+        self.assertEqual(picked[0], [(numbers[0x46], 1)] + [(numbers[0x4D], 33)] * 3)
+        writes, _ = shopport.arena_writes(shopport.dq5item.Rom(DQ5.read_bytes()), prg)
+        levels = bytes.fromhex(writes[1]["hex"])
+        self.assertEqual(levels, bytes(len(picked)) + b"\xFF" * (shopport.ARENA_SIZE - len(picked)))
+
+
 if __name__ == "__main__":
     unittest.main()

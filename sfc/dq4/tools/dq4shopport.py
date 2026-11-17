@@ -76,6 +76,16 @@ COIN_KIND, COIN_KEY = 3, 0x15
 COIN_PRICES = 0x04FD5B
 COIN_SALE, COIN_SALE_ORIG, COIN_SALE_PRICE = 0x06EEDC, 0x14, 200
 LAKANABA_STOCK = (0x0B, 0x04, 0x23)
+# 카지노 몬스터 격투장(FC 04/01 (08,0A) 대화 048 → 18:$A813). FC 는 장마다 시합 수(18:$ADAA,$615A, 3장 20)만큼 앞에서
+# 시합 표 18:$ADBA(8바이트: 몬스터 4·배율 4, FF 는 빈 자리)를 쓰고, 배율은 표 값 ± 난수/10(18:$A906, 최소 1.1)이다.
+# DQ5 격투장(대화 0E)의 시합 표 23:DA97(8바이트: [몬스터][배율 정수] ×4, 50개)과 레벨 문턱 23:DC27(앞에서부터 문턱이
+# 레벨 이하인 마지막 시합까지 고름, 26:8E5A)에 옮긴다. 몬스터가 모두 FC 능력치 번호(dq4monport.field_numbers)에 있고
+# 그림이 들어가는(dq4monport.LATER 밖) 시합만 앞에서부터 두고, 문턱은 그 수만큼 0·나머지 FF 라 레벨과 무관하게 그 안에서 고른다
+FC_ARENA_BANK, FC_ARENA_TABLE, FC_ARENA_COUNTS, FC_ARENA_CHAPTER = 0x18, 0xADBA, 0xADAA, 2
+ARENA_MATCHES, ARENA_LEVELS, ARENA_SIZE = 0x23DA97, 0x23DC27, 50
+# 옮기지 않는 FC 시합: 넷의 그림 가로 합이 전투 화면을 넘어 넷째가 놓이지 않는다(dq5monlimits.Pictures.place, 빌드 롬에서
+# dq4ch3townscheck --rom 이 옮긴 시합마다 본다). 놓이지 않은 몬스터에도 걸 수 있어 빼 둔다
+ARENA_WIDE = {6}
 ONE_SHOT_AT = _CH3_VARS2 + _CH3_SLOTS['L'].vars2[0]     # 한 번 쓰는 키 바이트(레이크나바 몫)
 # Sellers who come only with a chapter's event (dq4shop.npc_lists 「목록 플래그 n&m」): FC map -> the person list that
 # brings them. The event that switches the map to that list puts the seller; here its shop list goes under the map's
@@ -359,9 +369,46 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
              "note": "카지노 경품 코인 값(FC 04/01)"},
             {"at": _cpu(COIN_SALE), "hex": f"{COIN_SALE_PRICE:02X}", "orig": f"{COIN_SALE_ORIG:02X}",
              "note": "코인 한 장 값(FC 3장)"}]
+        arena_w, report["arena"] = arena_writes(rom, prg)
+        writes += arena_w
     report["prices"] = {f"{i:02X} {dq4itemport.fc_name(rom, i)}": p
                         for i, p in sorted(prices.items())}
     return services, shops, writes, report
+
+
+def arena(rom, prg):
+    """(DQ5 시합 표에 둘 [(DQ5 몬스터, 배율) ×1~4], 빠진 FC 시합 [(순번, 빠진 FC 몬스터)])."""
+    import dq4monport
+    numbers = dq4monport.field_numbers()
+
+    def fc(a):
+        return prg[FC_ARENA_BANK * 0x4000 + a - 0x8000]
+    picked, skipped = [], []
+    for k in range(fc(FC_ARENA_COUNTS + FC_ARENA_CHAPTER)):
+        row = [fc(FC_ARENA_TABLE + 8 * k + i) for i in range(8)]
+        slots = [(m, row[4 + i]) for i, m in enumerate(row[:4]) if m != 0xFF]
+        missing = [m for m, _ in slots if m not in numbers or numbers[m] in dq4monport.LATER]
+        if k in ARENA_WIDE:
+            skipped.append((k, []))
+            continue
+        if missing:
+            skipped.append((k, missing))
+            continue
+        picked.append([(numbers[m], odds) for m, odds in slots])
+    return picked, skipped
+
+
+def arena_writes(rom, prg):
+    picked, skipped = arena(rom, prg)
+    table = b"".join(bytes(b for m, odds in match for b in (m, odds)).ljust(8, b"\xFF") for match in picked)
+    levels = bytes(len(picked)) + b"\xFF" * (ARENA_SIZE - len(picked))
+    orig = lambda at, n: bytes(rom.u8(at + k) for k in range(n)).hex(" ").upper()
+    writes = [{"at": _cpu(ARENA_MATCHES), "hex": table.hex(" ").upper(), "orig": orig(ARENA_MATCHES, len(table)),
+               "note": "격투장 시합 표(FC 3장 18:$ADBA)"},
+              {"at": _cpu(ARENA_LEVELS), "hex": levels.hex(" ").upper(), "orig": orig(ARENA_LEVELS, ARENA_SIZE),
+               "note": "격투장 시합 레벨 문턱(옮긴 시합만)"}]
+    return writes, {"matches": [[f"{m:02X}x{o}" for m, o in match] for match in picked],
+                    "skipped": [f"FC {k}: " + (" ".join(f"{m:02X}" for m in ms) or "폭") for k, ms in skipped]}
 
 
 def _dump_progress(dq5_path):
