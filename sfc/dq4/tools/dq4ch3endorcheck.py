@@ -18,6 +18,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4ch1walkcheck as wc  # noqa: E402
 import dq4ch3endor as endor  # noqa: E402
+import dq4ch3tunnel as tunnel  # noqa: E402
 import dq4ch3event as ch3  # noqa: E402
 import dq4ch3walkcheck as walk  # noqa: E402
 import dq4chapterwalk as cwk  # noqa: E402
@@ -79,7 +80,11 @@ SEGMENTS = [
     ('nene_no', 'walk', talk_no('right', 0, 2), {'map': endor.TOWN}),
     ('nene_lie_side', 'warp', f'{endor.TOWN},{endor.NENE_SIDE[1][0]},{endor.NENE_SIDE[1][1] - 1}',
      {'map': endor.TOWN, 'set': sets(endor.SHOP, endor.NOTICE)}),
-    ('nene_lie', 'walk', talk_no('right', 2, 5), {'map': endor.TOWN, 'want': ['ENDOR_OPENED']}),
+    ('nene_lie', 'walk', talk_no('right', 2, 5), {'map': endor.TOWN, 'want': ['TUNNEL_OPENED']}),
+    # 공사 재개 뒤 소식 전(굴 모듈 RESUMED): 「아무 소식도 안 왔어요」(08A1)
+    ('nene_nonews_side', 'warp', f'{endor.TOWN},{endor.NENE_SIDE[1][0]},{endor.NENE_SIDE[1][1] - 1}',
+     {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(f'{0x2190 + tunnel.IDX:04X}=00', _set(tunnel.RESUMED)))}),
+    ('nene_nonews', 'walk', talk('right', 3), {'map': endor.TOWN, 'off': ['TUNNEL_OPENED']}),
     # 납품: 주문 전·「아니요」·다 채운 뒤. 안내하는 옆 사람도 셋
     ('deliver_idle_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
      {'map': endor.CASTLE_HALL, 'set': sets()}),
@@ -160,7 +165,7 @@ MESSAGES = {
     'king_no': ['king_first', 'king_first_no'], 'king_wait': ['king_wait'], 'king_done': ['king_done'],
     'seller_no': ['seller_old', 'seller_offer', 'seller_pity'],
     'son_night': ['son_home'], 'nene_night': ['nene_late', 'nene_night', 'nene_morning', 'nene_bento'],
-    'nene_no': ['nene_rest', 'nene_shopkeep'], 'nene_lie': ['nene_notice', 'nene_lie', 'nene_farewell'],
+    'nene_no': ['nene_rest', 'nene_shopkeep'], 'nene_lie': ['news', 'news_no', 'news_farewell'], 'nene_nonews': ['no_news'],
     'deliver_idle': ['deliver_idle'], 'deliver_done': ['deliver_thanks'],
     'deliver_empty': ['deliver_ask', 'deliver_take', 'deliver_none', 'deliver_left', 'left_swords', 'left_armors',
                       'deliver_more'],
@@ -188,7 +193,12 @@ def message_ids():
     root = HERE.parents[2]
     _, ported, _ = dq4npcport.port(root / 'rom' / 'dq5.sfc', root / 'rom' / 'dq4.nes')
     first = dq4chapter1.chapter3_message(dq4npcport.FIRST_MESSAGE + len(ported))
-    return next(c for c in ch3.contexts(first) if c.key == 'E').msg
+    msg = {k: c.msg for c in ch3.contexts(first) for k in ('E', 'T') if c.key == k}
+    # 네네의 개통 갈래는 굴 모듈 메시지(dq4ch3tunnel.news_talk)
+    clash = set(msg['E']) & set(msg['T'])
+    if clash:
+        raise SystemExit(f'엔돌·굴 메시지 이름이 겹침: {sorted(clash)}')
+    return {**msg['E'], **msg['T']}
 
 
 def units():

@@ -50,10 +50,13 @@ ENDING = Scene('end', None, None, CHAPTER2.title, subtitle='― 다음에 계속
 ENDING2 = Scene('end2', None, None, '제3장  무기상인 톨네코', subtitle=ENDING.subtitle)
 # 2장 끝에서 레이크나바 톨네코의 집(3E/01)으로 옮긴 뒤 첫머리를 마칠 때까지(첫머리 대기 깃발 7E:2208 bit5, --chapter3)
 CHAPTER3 = Scene('box3', (0x3E, 0x01), None, ENDING2.title, since=(0x7E2208, 0x20))
+# 3장 끝(굴을 지남, dq4ch3tunnel): 4장 제목과 「다음에 계속」. 4장 이름은 nds/dq4/tables/adopt.tsv
+ENDING3 = Scene('end3', None, None, '제4장  몬바바라의 자매', subtitle=ENDING.subtitle)
 # 게임에 넣는 장면 차례. 상자·밝히기 네이티브 주소가 이 목록으로 정해지므로, 주소를 부르는 스크립트(서장·1장)와
 # 빌드가 같은 목록을 써야 한다. 새 장면은 끝에 더해 앞 장면의 상자 주소를 지킨다
-GAME_SCENES = (PROLOGUE, CHAPTER1, CHAPTER2, ENDING, ENDING2, CHAPTER3)
+GAME_SCENES = (PROLOGUE, CHAPTER1, CHAPTER2, ENDING, ENDING2, CHAPTER3, ENDING3)
 SUB_GAP = 1                                 # 상자와 부제 띠 사이 행
+ROW = BOX_W * 2                             # 상자 타일맵 한 행의 바이트
 
 # FC 팔레트(MesenCE 색): 0 검정, 1 금색(테두리)·흰색(글자), 2 파랑, 3 흰색
 GOLD, BLUE, WHITE = (234, 158, 34), (20, 18, 167), (255, 254, 255)
@@ -389,17 +392,18 @@ class Layout:
 
     def build(self):
         # 코드 길이는 자료 주소에 따라 바뀌지 않으므로(즉값 폭 고정) 두 번 짜서 자리를 맞춘다
-        addr = {'tiles': 0, 'maps': [0] * len(self.maps), 'pal': 0, 'blank': 0, 'load': 0}
-        # 한 타일맵이 다른 타일맵의 앞머리면(같은 제목의 장 상자와 부제 달린 끝 상자) 긴 것 한 벌만 두고 함께 쓴다
+        # 주소만 셀 때는 빈 타일맵을 받으므로 장면의 행 수까지 0 으로 채운다(코드 길이는 자료와 상관없음)
+        maps = [m.ljust(ROW * rows(s.subtitle), b'\0') for s, m in zip(self.scenes, self.maps)]
+        addr = {'tiles': 0, 'maps': [[0] * (len(m) // ROW) for m in maps], 'pal': 0, 'blank': 0, 'load': 0}
+        # 타일맵은 행(52바이트)마다 따로 부르므로 같은 행은 한 벌만 둔다. 상자의 테두리 행·빈 행과 끝 상자의 부제
+        # 행은 장면마다 같고, 제목 행만 다르다
         kept, where = [], []
-        for m in self.maps:
-            k = next((k for k, o in enumerate(kept) if o.startswith(m) or m.startswith(o)), None)
-            if k is None:
-                kept.append(m)
-                k = len(kept) - 1
-            elif len(m) > len(kept[k]):
-                kept[k] = m
-            where.append(k)
+        for m in maps:
+            rows_ = [m[r:r + ROW] for r in range(0, len(m), ROW)]
+            for row in rows_:
+                if row not in kept:
+                    kept.append(row)
+            where.append([kept.index(row) for row in rows_])
         for _ in range(2):
             start, hook, boxes, reveal, boot, load = self.code(addr)
             self.start_at = self.base
@@ -414,10 +418,9 @@ class Layout:
             self.load_at = self.boot_at + len(boot)
             self.data_at = data_at = self.load_at + len(load)
             maps_at = data_at + 2 + len(self.pal)
-            kept_at = [maps_at + sum(map(len, kept[:k])) for k in range(len(kept))]
             addr = {'blank': data_at, 'pal': data_at + 2, 'load': self.load_at,
-                    'maps': [kept_at[k] for k in where],
-                    'tiles': maps_at + sum(map(len, kept))}
+                    'maps': [[maps_at + k * ROW for k in rows_] for rows_ in where],
+                    'tiles': maps_at + ROW * len(kept)}
         self.blob = (start + hook + b''.join(boxes) + reveal + boot + load + b'\x00\xff' + self.pal + b''.join(kept) +
                      self.tiles)
         if (self.base & 0xFFFF) + len(self.blob) > 0x10000:
@@ -457,9 +460,9 @@ class Layout:
                 bytes((0xC2, 0x30)) + mvn(a['pal'], CGRAM_BUFFER + pal_off, len(self.pal)) + DB0 +
                 bytes((0xE2, 0x20, 0x60)))                                   # SEP #$20 / RTS
         call_load = bytes((0x20, *le(a['load'] & 0xFFFF, 2)))               # JSR load
-        def box(map_at):
+        def box(row_at):
             return (ENTER + save + bytes((0x9C, 0x1D, 0x00)) + screen_off() + bytes((0xC2, 0x10)) +   # STZ $001D
-                   call_load + map_rows(lambda r: map_at + r * BOX_W * 2) +
+                   call_load + map_rows(lambda r: row_at[r]) +
                    dma_vram(BG3_MAP, MAP_BUFFER, 0x800) + screen_on() +
                    fade(1, 15, FADE_STEP) + wait(HOLD) + fade(14, 0, FADE_STEP) +
                    screen_off() + bytes((0xC2, 0x10)) + clear_map +
@@ -467,16 +470,16 @@ class Layout:
                    fill_vram(BG3_CHR + CANVAS * 8, a['blank'], len(self.tiles) // 2) +
                    restore + dma_cgram(PAL_BORDER * 4, CGRAM_BUFFER + pal_off, n) +
                    bytes((0xA9, 0x0F, 0x8D, 0x1D, 0x00)) + screen_on() + LEAVE)      # 메시지 창은 밝은 채로
-        def ending(map_at, n):
+        def ending(row_at, n):
             # 메시지 창이 남지 않게 BG3 타일맵 버퍼를 모두 비운 뒤 상자·부제를 놓고, 버튼을 누르면 어둡게 해 리셋한다
             clear_all = (bytes((0xC2, 0x30, 0xA9, *le(BLANK, 2), 0x8F, *le(MAP_BUFFER, 3))) +
                          mvn(MAP_BUFFER, MAP_BUFFER + 2, 0x800 - 2) + DB0 + bytes((0xE2, 0x20)))
             return (ENTER + bytes((0x9C, 0x1D, 0x00)) + screen_off() + bytes((0xC2, 0x10)) +
-                    call_load + clear_all + map_rows(lambda r: map_at + r * BOX_W * 2, n) +
+                    call_load + clear_all + map_rows(lambda r: row_at[r], n) +
                     dma_vram(BG3_MAP, MAP_BUFFER, 0x800) + screen_on() +
                     fade(1, 15, FADE_STEP) + wait_button() + fade(14, 0, FADE_STEP) + soft_reset())
-        boxes = [ending(map_at, rows(scene.subtitle)) if scene.subtitle else box(map_at)
-                 for scene, map_at in zip(self.scenes, a['maps'])]
+        boxes = [ending(row_at, rows(scene.subtitle)) if scene.subtitle else box(row_at)
+                 for scene, row_at in zip(self.scenes, a['maps'])]
         reveal = reveal_code()
         return start, hook, boxes, reveal, soft_boot(), load
 
@@ -508,13 +511,13 @@ CODE_AT = 0x5F8000
 
 def entry_points(scenes=(CHAPTER1,)):
     """인물 스크립트가 부를 네이티브 주소 {장면 이름(상자), 'reveal'}. 코드가 자료보다 앞이라 자료 크기와 상관없다."""
-    lay = Layout(CODE_AT, scenes, b'', [bytes(BOX_W * BOX_H * 2)] * len(scenes), palettes())
+    lay = Layout(CODE_AT, scenes, b'', [bytes(ROW * rows(s.subtitle)) for s in scenes], palettes())
     return {**lay.box_at, 'reveal': lay.reveal_at}
 
 
 def boot_points(scenes=(CHAPTER1,)):
     """리셋 훅 주소 {'boot': 입구, 'acked': 드라이버가 다시 시작 명령을 받아 올리기를 건너뛰는 RTL 자리}."""
-    lay = Layout(CODE_AT, scenes, b'', [bytes(BOX_W * BOX_H * 2)] * len(scenes), palettes())
+    lay = Layout(CODE_AT, scenes, b'', [bytes(ROW * rows(s.subtitle)) for s in scenes], palettes())
     return {'boot': lay.boot_at, 'acked': lay.boot_at + soft_boot().index(bytes((0x68, 0x28, 0x6B)))}
 
 

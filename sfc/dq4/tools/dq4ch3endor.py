@@ -43,8 +43,7 @@ ORDER = (IDX, 0x04)            # 왕의 무기 주문을 받음(FC $6284&08)
 DELIVERED = (IDX, 0x08)        # 납품을 다 채워 대금을 받음(FC $6288&10)
 SOLD = (IDX, 0x10)             # 여신상을 수집가에게 팖(FC $6286&80)
 SON_CHEER = (IDX, 0x20)        # 아들이 「와아 아빠 최고」 라 함(FC $6288&02)
-NOTICE = (IDX, 0x40)           # 굴이 뚫렸다는 소식이 왔음(FC $6286&01). 굴 모듈이 04/01 에 들 때 켤 자리
-OPENED = (IDX, 0x80)           # 네네에게 개통을 들음(FC $62AA&08). 굴 입구가 뚫린 쪽으로
+NOTICE = (IDX, 0x40)           # 굴이 뚫렸다는 소식이 왔음(FC $6286&01). 굴 모듈(dq4ch3tunnel)이 40/01 에 들 때 켬
 # 7E:2206
 IDX2 = 0x76
 BUTTON = (IDX2, 0x01)          # 여신상 동굴 단추를 누름(FC $62AA&20). 40/01 첫 출구가 40/02 로
@@ -56,7 +55,7 @@ GAVE_ARMORS = (IDX2, 0x10)     # 이번에 갑옷을 받음
 FULL = (IDX2, 0x20)            # 칼·갑옷이 다 참
 LEFT_SWORDS = (IDX2, 0x40)     # 아직 받을 칼이 남음(남은 수 줄을 띄움)
 LEFT_ARMORS = (IDX2, 0x80)     # 아직 받을 갑옷이 남음
-FLAGS = (ALLOWED, SHOP, ORDER, DELIVERED, SOLD, SON_CHEER, NOTICE, OPENED, BUTTON, ASKED, PRESSED,
+FLAGS = (ALLOWED, SHOP, ORDER, DELIVERED, SOLD, SON_CHEER, NOTICE, BUTTON, ASKED, PRESSED,
          GAVE_SWORDS, GAVE_ARMORS, FULL, LEFT_SWORDS, LEFT_ARMORS)
 
 # 본몰 모듈(dq4ch3bonmalmo)의 편지 flag. test_dq4ch3endor 가 그 모듈이 있으면 같은지 본다
@@ -184,13 +183,6 @@ MESSAGES = {
     'nene_night': pages('네네', '자, 푹 쉬세요./잘 자요, 여보…….'),                                          # 080C
     'nene_morning': pages('네네', '좋은 아침이에요,/여보. 벌써/아침이에요.'),                                 # 080D
     'nene_bento': pages('네네', '자, 여기 도시락./오늘도 힘내고 와요.'),                                      # 080E
-    'nene_notice': pages('네네', '여보, 어서 와요!/방금 소식이 왔는데/동굴이 뚫렸대요!',
-                         '하지만 나는/무슨 말인지/모르겠어서…….', '설마 당신……./또 여행을 떠날/생각이에요?'),  # 08A0
-    'nene_quiet': pages('네네', '알았어요./이제 아무 말도/안 할게요.'),                                       # 08A2
-    'nene_lie': pages('네네', '괜찮아요./그런 거짓말로/나를 달래지/않아도…….',
-                      '나도 천공의 검/소문을 들었어요./그걸 찾을/생각이군요…….'),                            # 08A4
-    'nene_farewell': pages('네네', '당신은 언제나/꿈이 없으면/살 수 없는/사람…….',
-                           '그런 당신이라서/나도 좋아하게/된 거겠죠.', '다녀와요, 여보!/언제까지나/기다릴게요!'),  # 08A3
     # 성 아래층 납품(FC 대화 03F)·안내(03E)
     'deliver_idle': say('호오, 그대는/무기상인가? 요즘은/여러 강한 무기도/있다더군.',
                         '하지만 이 성에서는/병사들이 아직도/구리 검을 쓰고/있지. 한심한 일이야…….'),          # 0871
@@ -540,8 +532,9 @@ def talk_scripts(ctx):
                                        [say_('seller_wish')])]
     son = when(DAY, [on(SON_CHEER), say_('son_cheer')], [say_('son_home')])
     sleep = [say_('nene_night'), call('sleep')]
-    nene = when(flag(NOTICE), [say_('nene_notice'), when(YES, [say_('nene_quiet')], [say_('nene_lie')]),
-                               say_('nene_farewell'), on(OPENED)], [
+    # 개통 알림(NOTICE 면 08A0~08A3)과 공사 재개 뒤 「소식 없음」(08A1)은 굴 모듈의 갈래·메시지
+    import dq4ch3tunnel
+    nene, = dq4ch3tunnel.news_talk(ctx, NOTICE, [
         when(DAY, [say_('nene_rest'), when(YES, sleep, [say_('nene_shopkeep')])], [say_('nene_late'), *sleep])])
     # FC 15:$A118 실측: 「예」 면 받을 것이 없어도 0874 부터. 받은 수·남은 수 줄은 그 종류가 0 이면 빠진다
     tally = [say_('deliver_left'), when(flag(LEFT_SWORDS), [call('left_swords'), say_('left_swords')]),

@@ -413,7 +413,11 @@ def npc_lists(lists, ctx):
             new.append({"name": name, "entries": _retalk_entries(copy.deepcopy(lists[m]["entries"]), m, t)})
             over.append(on(m, name))
     name = f'ch3_towns_{CASINO.replace("/", "")}'
-    new.append({"name": name, "entries": _ryan(t['ryan'])})
+    # 굴 모듈이 기본 목록에 더한 보이지 않는 인물(공사 재개 뒤 들어오면 개통 소식을 켬, dq4ch3tunnel.NOTICE_MAP)은 닫힌
+    # 카지노에도 둔다
+    import dq4ch3tunnel as tunnel
+    notice = {"list": tunnel.SCRIPT_LIST, "index": tunnel.SCRIPTS['notice'][0]}
+    new.append({"name": name, "entries": _ryan(t['ryan']) + [e for e in lists[CASINO]["entries"] if e.get("from") == notice]})
     over.append(on(CASINO, name))
     return new, over
 

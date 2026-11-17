@@ -307,6 +307,15 @@ def chapter3_cases():
                               'walk': '44,11;46,11;44,11;42,11;42,9;right:40;wait:30', 'hero_at': (42, 9),
                               'free': '24,9', 'want': [], 'not': [('RAFT_RIDING', safe.RIDING)], 'map': endor.CAVE_ENTRY,
                               'maxf': 3000, 'ride': (RAFT_SLOT,)}
+    # 뚫린 굴의 이주민 둘은 조작을 막지 않고 서쪽 계단 (05,0F) 까지 걸어 사라진다. 주인공이 그 계단(엔돌 쪽에서 든 도착
+    # 칸)이나 길 가운데 (0A,08) 에 서 있으면 다가와 기다리고, 주인공이 길 옆((03,0F)·(0B,08))으로 비키면 지나가 사라진다
+    import dq4ch3tunnel as tunnel
+    sx, sy = tunnel.OPEN_ARRIVAL
+    for name, (x, y), (ax, ay) in (('stairs', (sx, sy), tunnel.cell(0x03, 0x0F)),
+                                   ('path', tunnel.cell(0x0A, 0x08), tunnel.cell(0x0B, 0x08))):
+        away = f'{ax},{ay}'
+        out[f'tunnel-migrants-{name}'] = {'warp': f'{tunnel.OPEN_MAP},{x},{y - 1}', 'set': '', 'walk': f'wait:900;{away};wait:600',
+                                          'free': away, 'want': [], 'map': tunnel.OPEN_MAP, 'maxf': 3000}
     out.update(shop_cases(lakanaba))
     out.update(bonmalmo_cases())
     return out

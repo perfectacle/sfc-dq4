@@ -311,7 +311,7 @@ class LayoutTests(unittest.TestCase):
             self.assertIn(bytes((0x20, *(lay.load_at & 0xFFFF).to_bytes(2, 'little'))), code[:64], name)
         self.assertEqual(lay.blob[data_at:data_at + 2], b'\x00\xff')
         self.assertEqual(lay.blob[data_at + 2:data_at + 2 + len(lay.pal)], lay.pal)
-        self.assertEqual(lay.blob[data_at + 2 + len(lay.pal):][:len(maps[0])], maps[0])
+        self.assertEqual(lay.blob[data_at + 2 + len(lay.pal):][:box.ROW], maps[0][:box.ROW])
         self.assertEqual(list(lay.box_at), [s.name for s in box.GAME_SCENES])
         self.assertEqual(sorted(lay.box_at.values()), list(lay.box_at.values()))
 
@@ -323,17 +323,35 @@ class LayoutTests(unittest.TestCase):
         title = lay.blob[lay.box_at['box'] - lay.base:lay.box_at['box2'] - lay.base]
         self.assertNotIn(box.wait_button(), title)
         self.assertTrue(title.endswith(box.LEAVE))
-        chapter3 = lay.blob[lay.box_at['box3'] - lay.base:lay.reveal_at - lay.base]
+        chapter3 = lay.blob[lay.box_at['box3'] - lay.base:lay.box_at['end3'] - lay.base]
         self.assertNotIn(box.wait_button(), chapter3)
         self.assertTrue(chapter3.endswith(box.LEAVE))
+        ending3 = lay.blob[lay.box_at['end3'] - lay.base:lay.reveal_at - lay.base]
+        self.assertIn(box.wait_button(), ending3)
+        self.assertTrue(ending3.endswith(box.soft_reset()))
 
-    def test_a_box_map_that_begins_another_is_shared(self):
+    def test_each_box_copies_its_own_rows(self):
+        import re
         lay, _, maps = self.layout(box.GAME_SCENES)
-        names = [s.name for s in box.GAME_SCENES]
-        end2, box3 = maps[names.index('end2')], maps[names.index('box3')]
-        self.assertTrue(end2.startswith(box3))
-        self.assertEqual(lay.blob.count(end2), 1)
-        self.assertEqual(lay.blob.count(box3), 1)
+        ends = sorted(lay.box_at.values()) + [lay.reveal_at]
+        for scene, m in zip(box.GAME_SCENES, maps):
+            at = lay.box_at[scene.name]
+            code = lay.blob[at - lay.base:ends[ends.index(at) + 1] - lay.base]
+            # map_rows 의 행 복사: LDX #src / LDY #dst / LDA #51 / MVN $7E,$5F
+            srcs = [int.from_bytes(s, 'little') for s in
+                    re.findall(rb'\xA2(..)\xA0..\xA9\x33\x00\x54\x7E\x5F', code, re.S)]
+            got = b''.join(lay.blob[s - (lay.base & 0xFFFF):s - (lay.base & 0xFFFF) + box.ROW] for s in srcs)
+            self.assertEqual(got, m, scene.name)
+
+    def test_each_tilemap_row_is_kept_once(self):
+        lay, tiles, maps = self.layout(box.GAME_SCENES)
+        start = lay.data_at - lay.base + 2 + len(lay.pal)
+        data = lay.blob[start:len(lay.blob) - len(tiles)]
+        kept = [data[k:k + box.ROW] for k in range(0, len(data), box.ROW)]
+        self.assertEqual(len(kept), len(set(kept)))
+        self.assertEqual(set(kept), {m[k:k + box.ROW] for m in maps for k in range(0, len(m), box.ROW)})
+        # 같은 제목의 장 상자와 끝 상자, 끝 상자끼리의 부제 행은 함께 쓴다
+        self.assertLess(len(data), sum(map(len, maps)) - len(maps[-1]))
 
     def test_bank_overflow_is_rejected(self):
         with self.assertRaisesRegex(ValueError, '뱅크를 넘음'):
