@@ -1483,7 +1483,7 @@ class BuildFlowTests(unittest.TestCase):
         self.assertEqual([(m['map'], m['line']) for m in plain], [('36/FF', '09'), ('36/FF', '0A'), ('37/FF', '09'),
                                                                    ('37/FF', '0A')])
         flagged = [m for m in maps if m['flag'] != 'FF']
-        every = [f'{g:02X}/FF' for g in P.chapter_groups(2)] + ['FE/00', 'FE/01', 'FE/02']
+        every = [f'{g:02X}/FF' for g in P.party_groups(2)] + ['FE/00', 'FE/01', 'FE/02']
         self.assertEqual([m['map'] for m in flagged], every)
         self.assertTrue(all((m['line'], m['flag'], m['mask']) == ('0C', '12', '40') for m in flagged))
         self.assertEqual(flagged[0]['colors'][:2], [31, 0])
