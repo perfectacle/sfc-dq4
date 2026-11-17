@@ -2,6 +2,14 @@
 name = "dq4-ch3-monsters"
 why = "3장 몬스터가 FC 대로여야 한다: 3장 구역 19종의 레코드가 FC 능력치·행동·내성·드롭(새 6종은 2장 예비였던 C5·B6·9D·A5·E3·3D), 3장 구역 레코드·고정 무리(FC 17 필드 편성)가 docs 대로, 3장 flag 가 켜진 필드의 첫 무리·둘째 종 칸 무게에서 낮에는 FC 의 밤 칸(メラゴースト·밤 ホイミスライム 무리)이 0, 전투 뒤 물건은 FC 3장 전용 16칸 표(문턱 0 칸은 톨네코 레벨)를 굴린 결과가 모형(drop_roll)과 같고 그 물건이 가방에 듦, 3장 flag 가 꺼지면 표를 굴리지 않음"
 paths = [
+  "@ch3-modules",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4windowcheck.py",
+  "sfc/dq4/tools/lua/dq4battle.lua",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/dq5progresscheck.py",
+  "sfc/dq5/tools/lua/dq5battle.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq4/tools/dq4ch3monstercheck.py",
   "sfc/dq4/tools/dq4monport.py",
   "sfc/dq4/tools/dq4fieldencounter.py",

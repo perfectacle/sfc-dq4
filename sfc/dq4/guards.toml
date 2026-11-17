@@ -297,6 +297,9 @@ groups = ["ch1-walk", "ch3-modules"]
 name = "dq4-heroblock"
 why = "주인공이 선 칸 때문에 사건이 멈추거나(서장 저녁 의자 칸·탑 병사 왼쪽) 주인공 걸음이 엇나가는(저녁 왼쪽, 왕의 귀환 위쪽 방) 일, 1C·이벤트 걸음으로 인물이 주인공·동료와 겹쳐 보이는 일(저녁 의자 칸·신시아 오른쪽·탑 병사 왼쪽·왕의 귀환 옆 칸)이 다시 생기지 않게"
 paths = [
+  "sfc/dq4/tools/dq4ch2checks.py",
+  "sfc/dq4/tools/dq4ch2walkparts.py",
+  "sfc/dq4/tools/dq4ch2*_checks.py",
   "sfc/dq4/tools/dq4growth.py",
   "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4prologue.py",
@@ -394,6 +397,9 @@ groups = ["ch1-build", "ch1-walk", "ch3-modules"]
 name = "dq4-npc-walk"
 why = "FC 가 세워 두는 인물(블록이 이벤트를 기다리거나 서 있기만, 레코드 간격은 1)을 걷는 인물로 옮겨 DQ5 간격 1 로 몇 프레임마다 한 칸씩 쉬지 않고 돌아다녔다(왕좌의 방 병사 1800프레임에 153번). 2장 출발 상태 3D/01 에서 그 인물이 서 있고, 걷는 인물은 DQ5 마을 사람 간격(8~15)으로 천천히 걷는지 시드 0·5·9 를 두 번씩 본다"
 paths = [
+  "sfc/dq4/tools/dq4ch2checks.py",
+  "sfc/dq4/tools/dq4ch2walkparts.py",
+  "sfc/dq4/tools/dq4ch2*_checks.py",
   "sfc/dq4/tools/dq4npcwalkcheck.py",
   "sfc/dq4/tools/lua/dq4npcwalk.lua",
   "sfc/dq4/tools/dq4npcport.py",
@@ -509,6 +515,9 @@ groups = ["ch1-build"]
 name = "dq4-field-obj-math"
 why = "필드에서 장 주인공(OBJ 팔레트 5~7)이 BG 와 반씩 섞여 반투명하게 보이는 일: DQ5 필드 맵 불러오기(2B:82E5)의 OBJ 반 더하기($2131 = 50)를 dq4people.hook_patch 가 끈다"
 paths = [
+  "sfc/dq4/tools/dq4ch2checks.py",
+  "sfc/dq4/tools/dq4ch2walkparts.py",
+  "sfc/dq4/tools/dq4ch2*_checks.py",
   "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/tools/dq4fieldmathcheck.py",
@@ -1215,6 +1224,9 @@ groups = ["ch1-build", "ch1-walk", "ch3-modules"]
 name = "dq4-wrap-routine"
 why = "환경 훅 wrap 이 $BE bit7(실내)로 바꾼 맵을 가려 매 프레임 루틴 7E:1AA6 을 두는 것이 다시 깨지지 않게. 필드로 나갈 때(01:9FD6)는 필드 루틴 02:AB33(시각 색)이 남고(남은 $BC/$BD 로 물 루틴이 덮어 필드가 늘 낮 색이었음), 필드에서 걸어 들어갈 때와 바꾼 맵마다 필드 입구로 들어갈 때(01:8F84)·맵을 그 자리에서 다시 풀 때(01:98FC)는 bit7 이 켜진 채 돌아 물·분수·뚜껑 루틴이 들어가야 한다. 문턱을 좁히거나 옮기면 깨진다(단위 테스트 test_wrap_keeps_the_field_routine 은 바이트만 본다)"
 paths = [
+  "sfc/dq4/tools/dq4ch2checks.py",
+  "sfc/dq4/tools/dq4ch2walkparts.py",
+  "sfc/dq4/tools/dq4ch2*_checks.py",
   "sfc/dq4/tools/dq4environmentrom.py",
   "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4wrapcheck.py",
@@ -1310,6 +1322,9 @@ groups = ["ch1-build", "ch1-walk"]
 name = "dq4-door-stand"
 why = "문을 열고 문 칸에 선 주인공이 위층 벽 밑(OAM 우선순위 2)에 그려져 다리만 보이던 일(옆문 넷: 바트랜드 성 마을 36/00 (70,41) 등)이 다시 생기지 않게. 문 칸의 속성 패스 2 bit0 을 빼면 깨진다"
 paths = [
+  "sfc/dq4/tools/dq4ch2checks.py",
+  "sfc/dq4/tools/dq4ch2walkparts.py",
+  "sfc/dq4/tools/dq4ch2*_checks.py",
   "sfc/dq4/tools/dq4environmentrom.py",
   "sfc/dq4/tools/dq4door.py",
   "sfc/dq4/tools/dq4doorcheck.py",
@@ -3299,6 +3314,9 @@ ch1-walk = [
   "sfc/dq4/tools/dq4ch2talk.py",
   "sfc/dq4/tools/dq4ch2tempe.py",
   "sfc/dq4/tools/dq4ch2walkcheck.py",
+  "sfc/dq4/tools/dq4ch2checks.py",
+  "sfc/dq4/tools/dq4ch2walkparts.py",
+  "sfc/dq4/tools/dq4ch2*_checks.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
   "sfc/dq4/tools/dq4ch3walkcheck.py",
   "sfc/dq4/tools/dq4ch3checks.py",

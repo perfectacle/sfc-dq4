@@ -171,16 +171,9 @@ WALL = [('wall-left', '22,10;26,10'), ('wall-above', '22,10;24,10;24,8;26,8;26,1
         ('wall-below', '22,10;24,10;24,12;26,12;26,10')]
 # 걷어찬 뒤 필드 산트하임 앞 (78,149): 어느 쪽으로 걸어도 네 걸음째에 합류한다(필드 걸음 훅)
 JOIN = [('join-down', 'down:120'), ('join-left', 'left:120'), ('join-right', 'right:120')]
-# 텐페 신부(3D/03 (24,49)): 촌장에게 들은 뒤 예 → 바구니 이벤트로 제단 두 칸 아래에 닿아 보스 전투(dq4ch2tempe,
-# 몬스터를 약하게 덮고 HP 를 채워 이김) → 아침의 같은 자리. 끝에 마을 쪽으로 걸어 내려간다
-# 보스 전투 동안 아리나 혼자 버티게 HP 를 999 로(일행 기록 0 의 지금 HP)
-HERO_FULL = '2042=E7;2043=03'
-PRIEST = [('priest-below', '24,51', 'up'), ('priest-left', '22,51;22,49', 'right'),
-          ('priest-right', '26,51;26,49', 'left')]
-
-
 def chapter2_cases():
-    """2장 사건 사례. 출발 상태는 2장 왕좌의 방(dq4ch2walkcheck.head)."""
+    """2장 사건 사례. 출발 상태는 2장 왕좌의 방(dq4ch2walkcheck.head). 성(dq4ch2event) 사례는 여기, 사건 모듈의
+    사례는 그 모듈 옆 dq4ch2<모듈>_checks.py 의 hero_cases() 가 낸다(dq4ch2checks)."""
     import dq4ch2event as ch2
     out = {}
     ready = ch2_flags(ch2.TALKED_GATE, ch2.TALKED_BREY, ch2.TALKED_KIRYL, ch2.READY)
@@ -196,58 +189,8 @@ def chapter2_cases():
         out[name] = {'warp': f'{ch2.BEDROOM},22,9', 'set': ready,
                      'walk': f'22,10;26,10;{WALL_YES};{step};wait:200;{taps(8)};{close}',
                      'want': [('JOINED', ch2.JOINED)], 'maxf': 4500}
-    import dq4ch2tempe as tempe
-    heard = ch2_flags(ch2.TEMPE_HEARD)
-    px, py = ch2.PRIEST
-    mx, my = tempe.MORNING_CELL
-    for name, at, face in PRIEST:
-        out[name] = {'warp': f'{ch2.TEMPE},{px},{py + 1}', 'set': ';'.join((heard, HERO_FULL)),
-                     'walk': f'{at};{wc.talk(face, 14)};wait:600;{taps(10)};{taps(110, 40)};wait:600;{taps(6)};{close}',
-                     'free': f'{mx},{my + 6}', 'battle': 'win', 'want': [('TEMPE_WON', tempe.WON)],
-                     'not': [('TEMPE_ALTAR', ch2.TEMPE_ALTAR)], 'hero_at': tempe.MORNING_CELL, 'maxf': 12000}
-    out.update(frenol_cases())
-    out.update(king_cases(ch2))
-    return out
-
-
-# 프레놀(dq4ch2frenol). 여관 2층은 계단 앞 (1E,08)에서 방 줄로 올라간다(셀 60 줄은 Y 05 에서 쓰러진 가짜 크리프트가
-# 막아 58 줄로). 밤의 묘지 (03,0B)는 위(3 열)나 왼쪽 (02,0B)에서만 들어선다. -no 는 처음 요구에 아니요
-FRENOL_INN = '60,16;wait:60;a:8;wait:50;{close};60,14;58,14;58,12;wait:60;{taps};wait:400;{close}'
-FRENOL_GRAVE = [('frenol-grave-above', '6,23', ''), ('frenol-grave-left', '4,23;6,23', ''),
-                ('frenol-grave-no', '6,23', 'wait:300;down:8;wait:40;a:8;wait:120;')]
-
-
-def frenol_cases():
-    import dq4ch2frenol as fr
-    taps, close = wc.taps, pc.CLOSE
-    out = {'frenol-inn': {'warp': f'{fr.INN},60,17', 'set': '', 'walk': FRENOL_INN.format(close=close, taps=taps(6)),
-                          'want': [('FRENOL_KIDNAPPED', fr.KIDNAPPED)], 'free': '58,14', 'maxf': 3000}}
-    night = f'{wc.NIGHT_SET};{(wc.ITEMS & 0xFFFF) + 1:04X}={fr.BRACELET:02X}'
-    for name, at, first in FRENOL_GRAVE:
-        out[name] = {'warp': f'{fr.TOWN},4,19', 'set': ';'.join((ch2_flags(fr.KIDNAPPED, fr.LEFT), night)),
-                     'late': wc.NIGHT_SET, 'walk': f'{at};wait:120;{first}{taps(30, 50)};wait:300;{close}',
-                     'want': [('FRENOL_RESCUED', fr.RESCUED)], 'hero_at': fr.MORNING_CELL, 'maxf': 6000,
-                     'distinct': 8 if first else 7}
-    return out
-
-
-def king_cases(ch2):
-    """왕의 병(dq4ch2king): 칸으로 거는 장면을 들어서는 쪽마다. 걸린 뒤 다시 걸을 수 있어야 한다(free)."""
-    import dq4ch2king as king
-    taps, close = wc.taps, pc.CLOSE
-    out = {}
-    # 바자: 오른쪽에서 X 09 줄을 지나 왼쪽으로
-    out['bazaar-left'] = {'warp': f'{king.BAZAAR_MAP},26,22', 'set': '', 'walk': f'16,23;wait:60;{taps(3)};{close}',
-                          'free': '24,23', 'want': [('KING_BAZAAR', king.BAZAAR)], 'maxf': 2500}
-    # 왕좌의 방 계단 위 줄은 출발 상태가 그 맵이라 순간이동할 수 없어(같은 맵) 걷기 검사의 throne 구간이 본다
-    heard = ch2_flags(king.BAZAAR, king.HEARD)
-    # 탑 꼭대기: 계단 옆과 오른쪽에서 위로 줄 0C 에 든다. 꿀은 오른쪽에서 엘프가 섰던 칸에
-    for name, warp, at in (('elves-up', '14,28', '14,25'), ('elves-right', '24,28', '24,25')):
-        out[name] = {'warp': f'{king.TOWER_TOP},{warp}', 'set': heard, 'walk': f'{at};wait:60;{taps(6, 60)};wait:200',
-                     'free': '22,23', 'want': [('KING_SEEN', king.SEEN)], 'maxf': 3000}
-    out['honey-left'] = {'warp': f'{king.TOWER_TOP},24,18', 'set': ch2_flags(king.BAZAAR, king.HEARD, king.SEEN),
-                         'walk': f'18,19;wait:60;{taps(3, 60)};{close}', 'free': '24,21',
-                         'want': [('KING_GOT', king.GOT)], 'maxf': 2500}
+    import dq4ch2checks
+    out.update(dq4ch2checks.merged('hero_cases'))
     return out
 
 

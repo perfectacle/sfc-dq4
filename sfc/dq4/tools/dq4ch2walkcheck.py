@@ -25,69 +25,40 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4ch1walkcheck as wc  # noqa: E402
 import dq4chapterwalk as cwk  # noqa: E402
+import dq4ch2checks  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
-import dq4ch2endor as endor  # noqa: E402
-import dq4ch2tempe as tempe  # noqa: E402
-import dq4ch2frenol as frenol  # noqa: E402
-import dq4ch2king as king  # noqa: E402
-import dq4ch2ending as ending  # noqa: E402
+from dq4ch2walkparts import CLOSE, flag, talk, taps  # noqa: E402
 
-talk, taps = wc.talk, wc.taps
-CLOSE = wc.pc.CLOSE
+# 사건 모듈 _checks 의 flag 표를 잇는 차례. flag 표 차례가 기록(WATCH·SET) 차례라 모듈로 나누기 전의 차례를 지킨다.
+# 새 모듈·묶음은 여기 적지 않는다: 여기 없는 것은 EVENTS 차례로 뒤에 붙는다(dq4eventchecks.ordered). 구간 표는 공용
+# 구간 뒤에 EVENTS 차례 그대로다
+FLAG_ORDER = ('common.castle', 'E1', 'E4', 'common.kiryl', 'E2', 'E3', 'E5', 'common.bank')
 
-
-def flag(pair):
-    return wc.flag(pair)
-
-
-# 1장 flag(머리 구간이 보는 REPORTED·CHAPTER2·OPENING 등)에 2장 flag 를 더한다. 새 사건 flag 는 여기에 한 줄씩
-FLAGS = {
-    **wc.FLAGS,
-    'TALKED_GATE': flag(ch2.TALKED_GATE),
-    'TALKED_BREY': flag(ch2.TALKED_BREY),
-    'TALKED_KIRYL': flag(ch2.TALKED_KIRYL),
-    'READY': flag(ch2.READY),
-    'KICKED': flag(ch2.KICKED),
-    'JOINED': flag(ch2.JOINED),
-    'TEMPE_HEARD': flag(ch2.TEMPE_HEARD),
-    'TEMPE_GONE': flag(ch2.TEMPE_GONE),
-    'TEMPE_ALTAR': flag(ch2.TEMPE_ALTAR),
-    'TEMPE_WON': flag(tempe.WON),
-    'ENDOR_IN': flag(endor.IN),
-    'ENDOR_LOST': flag(endor.LOST),
-    'ENDOR_CHAMPION': flag(endor.CHAMPION),
-    'ENDOR_MESSENGER': flag(endor.MESSENGER),
-    # 선택 bytes 로 값을 견주는 칸(want·off 에 넣지 않는다: 뒤 묶음 첫머리에 OR 로 놓이므로). 대회에서 이긴 수, 일행 수,
-    # 일행 순서 셋, 아리나의 장비 비트·물건 첫 두 칸
-    'ENDOR_STAGE': flag(endor.STAGE),
-    'PARTY_COUNT': (endor.COUNTS[0], 0xFF),
-    **{f'ORDER{k}': (endor.ORDERS[0] + k, 0xFF) for k in range(3)},
-    'ALENA_EQUIP': (endor.ALENA_EQUIP, 0xFF),
-    **{f'ALENA_ITEM{k}': (endor.ALENA_ITEMS + k, 0xFF) for k in range(2)},
-    # 크리프트의 셋째 칸(HONEY_SET 이 꿀을 두는 곳). 왕에게 먹이면 비어야 한다
-    'KIRYL_ITEM2': (ch2.JOIN_RECORDS_AT + 0x16 + 2, 0xFF),
-    'FRENOL_KIDNAPPED': flag(frenol.KIDNAPPED),
-    'FRENOL_LEFT': flag(frenol.LEFT),
-    'FRENOL_RESCUED': flag(frenol.RESCUED),
-    # 묘지 장면 동안만 켜는 flag 다섯(끝에 모두 꺼짐)
-    'FRENOL_SCENE': (0x7E2190 + frenol.IDX, frenol.SCENE_BITS),
-    'BRACELET_CHEST': (0x7E0000 | frenol.CHEST_OPEN[0], frenol.CHEST_OPEN[1]),
-    'KING_BAZAAR': flag(king.BAZAAR),
-    'KING_HEARD': flag(king.HEARD),
-    'KING_SEEN': flag(king.SEEN),
-    'KING_GOT': flag(king.GOT),
-    'KING_CURED': flag(king.CURED),
-    'SEEN_BREY': flag(ending.SEEN_BREY),
-    'SEEN_KIRYL': flag(ending.SEEN_KIRYL),
-    # 지금 울리는 곡 자리(선택 bytes 로만 본다)
-    'SONG': (0x7E1D8B, 0xFF),
+# 2장 공용 flag(dq4ch2event). 사건 flag 는 그 사건 모듈의 _checks 에
+COMMON_FLAGS = {
+    'common.castle': {
+        'TALKED_GATE': flag(ch2.TALKED_GATE),
+        'TALKED_BREY': flag(ch2.TALKED_BREY),
+        'TALKED_KIRYL': flag(ch2.TALKED_KIRYL),
+        'READY': flag(ch2.READY),
+        'KICKED': flag(ch2.KICKED),
+        'JOINED': flag(ch2.JOINED),
+    },
+    # 크리프트의 셋째 칸(지저귐의 꿀을 두는 곳). 왕에게 먹이면 비어야 한다
+    'common.kiryl': {'KIRYL_ITEM2': (ch2.JOIN_RECORDS_AT + 0x16 + 2, 0xFF)},
     # flag 가 아니라 바이트 전체(마스크 FF)를 본다: 1장에 맡긴 やくそう 개수와 맡긴 금화(1000G 단위) 아래 바이트
-    'BANK_HERB': (ch2.BANK_ITEMS_AT + 0xA1, 0xFF),
-    'BANK_GOLD': (ch2.BANK_GOLD_AT, 0xFF),
+    'common.bank': {'BANK_HERB': (ch2.BANK_ITEMS_AT + 0xA1, 0xFF), 'BANK_GOLD': (ch2.BANK_GOLD_AT, 0xFF)},
 }
+
+# 1장 flag(머리 구간이 보는 REPORTED·CHAPTER2·OPENING 등)에 2장 공용·사건 flag 를 잇는다
+FLAGS = dict(wc.FLAGS)
+for _, _flags in dq4ch2checks.ordered(list(COMMON_FLAGS.items()) + dq4ch2checks.blocks('FLAGS', 'FLAG_BLOCKS'),
+                                      FLAG_ORDER):
+    FLAGS.update(_flags)
 
 # 1장 왕 보고 앞에 맡긴 것: やくそう 3 개와 금화 2000. FC 장 초기화처럼 2장 첫머리에는 둘 다 0 이어야 한다
 CH1_BANK = f'{(ch2.BANK_ITEMS_AT + 0xA1) & 0xFFFF:04X}=03;{ch2.BANK_GOLD_AT & 0xFFFF:04X}=02'
+
 
 def join_set(data):
     """두 사람 합류(dq4ch2event._join)가 기록에 남기는 것: 일행 기록 1·2, 일행 수 3, 순서 0 1 2. 다음 레벨 경험치는
@@ -103,22 +74,10 @@ def join_set(data):
 
 def effects(data):
     """구간이 flag 말고 기록(7E:2000~2A9F)에 남기는 것(구간 이름 → SET(set)·dq5warp.lua PARTY(party)). 묶음 첫
-    구간에 둔다. 롬의 기록 틀을 읽는 것이 있어 롬 바이트를 받는다."""
-    return {'join': {'set': join_set(data)}, 'chest': {'set': BRACELET_SET}, 'honey': {'set': HONEY_SET}}
+    구간에 둔다. 롬의 기록 틀을 읽는 것이 있어 롬 바이트를 받는다. 사건 모듈 _checks 의 effects 를 더한다."""
+    return {'join': {'set': join_set(data)}, **dq4ch2checks.effects(data)}
 
 
-
-# 남쪽 동굴의 상자를 연 기록: 주인공(비단 로브 하나를 가짐)의 둘째 칸에 황금의 팔찌, 상자 열림 비트
-BRACELET_SET = f'{(wc.ITEMS & 0xFFFF) + 1:04X}={frenol.BRACELET:02X};{frenol.CHEST_OPEN[0]:04X}|{frenol.CHEST_OPEN[1]:02X}'
-
-# 탑 꼭대기에서 찾은 지저귐의 꿀. 묶음마다 따로 시작하므로 크리프트(일행 기록 1, 물건 둘)의 셋째 칸에 둔다. 주인공의
-# 칸은 앞 사건의 물건과 겹친다
-HONEY_SET = f'{(ch2.JOIN_RECORDS_AT & 0xFFFF) + 0x16 + 2:04X}={king.HONEY:02X}'
-
-# 왕좌의 방에서 성 앞마당으로 내려가는 계단(셀 (22,35), dq4groupcheck 의 stair-3D01-1)의 오른쪽 칸에서 왼쪽으로
-ENDING_STAIRS = '24,35;left:32'
-SARAN = '45/00'
-SARAN_OUT, GATE_IN = 'down:60;68,149', '78,149;78,147'
 # 같은 맵 안으로 순간이동하는 묶음이 먼저 들르는 곳(2장 출발 상태는 왕좌의 방 3D/01)
 HOPS = {ch2.THRONE: f'{ch2.CASTLE},28,45'}
 
@@ -140,13 +99,6 @@ SEGMENTS = [
 ]
 HEAD = 3
 
-# 신부에게 대신 간다 → 바구니 서술. 제단 앞에 닿으면 곧 보스 전투(dq4ch2tempe)다
-BASKET = talk('up', 14) + ';wait:600;' + taps(10)
-# 지면 FC 2장 시작 귀환 자리(サラン 교회 45/02, dq4fieldtravel 의 2장 칸)에서 다시 시작한다
-WIPE_MAP, WIPE_CELL = '45/02', (8, 19)
-# 아침의 제단 위에서 곧장 아래로(교회를 지나) 촌장 위 칸까지 걸어 내려온다
-LEAVE_ALTAR = f'{tempe.CHIEF_TALK_CELL[0]},{tempe.CHIEF_TALK_CELL[1]}'
-
 
 def battle_patch(data, kind):
     """사건 전투 몬스터(dq4ch2event 모듈의 BATTLES)를 덮는 ROMPATCH(dq4chapterwalk.battle_patch)."""
@@ -154,14 +106,10 @@ def battle_patch(data, kind):
     return cwk.battle_patch(data, kind, every)
 
 
-# 명령 창 → 「조사하기」(dq4chestcheck.SEARCH 를 walk.lua 꼴로)
-CHEST_SEARCH = ('a:8;wait:60;down:6;wait:25;down:6;wait:25;down:6;wait:25;right:6;wait:25;a:8;wait:200;'
-                'a:4;wait:150;a:4;wait:150;b:4;wait:220')
-
-
 # 2장 사건 구간. 순간이동(warp) 구간마다 새 묶음이고, 묶음 첫 구간에는 앞 구간들의 want·off·effects 가 놓인다.
-# 선택은 dq4ch1walkcheck.SEGMENTS 의 것에 더해 cell(끝에 주인공이 선 셀 (x, y))
-SEGMENTS += [
+# 선택은 dq4ch1walkcheck.SEGMENTS 의 것에 더해 cell(끝에 주인공이 선 셀 (x, y)). 사건 구간은 사건 모듈 _checks 의
+# SEGMENTS(dq4ch2checks)
+COMMON_SEGMENTS = [
     # 산트하임 성: 크리프트·브라이·성문 병사와 이야기해 「셋 다」를 켠다(dq4ch2event TALKED_*·READY)
     ('kiryl_side', 'warp', f'{ch2.CASTLE},52,22', {'map': ch2.CASTLE}),
     ('kiryl', 'walk', talk('up'), {'want': ['TALKED_KIRYL']}),
@@ -175,160 +123,9 @@ SEGMENTS += [
     ('wall', 'walk', f'{ch2.WALL_STAND[0]},{ch2.WALL_STAND[1]};right:8;wait:60;' + taps(5, 60) + ';wait:400',
      {'want': ['KICKED'], 'field': True, 'cell': (78, 149)}),
     ('join', 'walk', 'down:120;wait:200;' + taps(8) + ';' + CLOSE, {'want': ['JOINED'], 'field': True}),
-    # 텐페 제물 사건 앞 절반: 촌장의 부탁 → 신부에게 대신 간다 → 바구니로 제단 앞(밤)
-    ('chief_side', 'warp', f'{ch2.TEMPE},{ch2.CHIEF[0]},{ch2.CHIEF[1] + 1}', {'map': ch2.TEMPE}),
-    ('chief', 'walk', talk('up', 10), {'want': ['TEMPE_HEARD']}),
-    # 텐페 뒤 절반: 바구니로 제단 앞에 닿으면 보스 전투(dq4ch2tempe). 지면 기록한 교회(サラン)로 가고 앞 절반 flag 가
-    # 꺼져 촌장에게 다시 듣는다. 이기면 서술 뒤 아침의 제단 앞, 괴물이 사라진 뒤의 마을
-    ('lose_side', 'warp', f'{ch2.TEMPE},{ch2.PRIEST[0]},{ch2.PRIEST[1] + 1}', {'map': ch2.TEMPE}),
-    ('lose', 'walk', BASKET + ';' + taps(40, 40) + ';wait:300;' + CLOSE,
-     {'battle': 'lose', 'off': ['TEMPE_HEARD', 'TEMPE_GONE', 'TEMPE_ALTAR', 'TEMPE_WON'], 'map': WIPE_MAP,
-      'cell': WIPE_CELL}),
-    ('rechief_side', 'warp', f'{ch2.TEMPE},{ch2.CHIEF[0]},{ch2.CHIEF[1] + 1}', {'map': ch2.TEMPE}),
-    ('rechief', 'walk', talk('up', 10), {'want': ['TEMPE_HEARD']}),
-    ('priest_side', 'warp', f'{ch2.TEMPE},{ch2.PRIEST[0]},{ch2.PRIEST[1] + 1}', {'map': ch2.TEMPE}),
-    ('priest', 'walk', BASKET + ';' + taps(110, 40) + ';wait:600;' + taps(6) + ';' + CLOSE,
-     {'battle': 'win', 'poke': wc.HERO_HP, 'want': ['TEMPE_WON'], 'off': ['TEMPE_HEARD', 'TEMPE_GONE', 'TEMPE_ALTAR'],
-      'map': ch2.TEMPE, 'cell': tempe.MORNING_CELL}),
-    ('leave_altar', 'walk', LEAVE_ALTAR, {'map': ch2.TEMPE, 'cell': tempe.CHIEF_TALK_CELL}),
-    ('chief_won', 'walk', talk('down', 6), {'want': ['TEMPE_WON'], 'map': ch2.TEMPE}),
-    # 프레놀 가짜 공주(dq4ch2frenol): 여관 2층 방 아래 (1E,08)에서 위로 올라가면 비명 → 「멈춰라!」 → 셋이 계단으로
-    ('inn_side', 'warp', f'{frenol.INN},60,17', {'map': frenol.INN}),
-    ('kidnap', 'walk', '60,16;wait:60;' + taps(1) + ';' + CLOSE + ';60,14;58,14;58,12;wait:60;' + taps(6) + ';wait:400;' + CLOSE,
-     {'want': ['FRENOL_KIDNAPPED'], 'map': frenol.INN}),
-    # 마을에서는 셋이 서쪽 길로 빠져나간다. 서쪽 어귀 위 (05,06)에서 기다린다
-    ('kidnap_town_side', 'warp', f'{frenol.TOWN},10,13', {'map': frenol.TOWN}),
-    ('kidnap_town', 'walk', 'wait:1200', {'want': ['FRENOL_LEFT'], 'map': frenol.TOWN}),
-    # 납치 뒤에는 여관 주인이 「아이고, 아이고……」 뒤 여관을 연다(FC 대화 033 의 15:BF30). 카운터 아래 (11,0E)에서
-    ('inn_open_side', 'warp', f'{frenol.TOWN},34,28', {'map': frenol.TOWN}),
-    ('inn_open', 'walk', talk('up', 2), {'map': frenol.TOWN}),
-    # 남쪽 동굴: 상자 아래 칸에서 위를 보고 「조사하기」
-    ('cave_side', 'warp', f'{frenol.CAVE},20,71', {'map': frenol.CAVE}),
-    ('chest', 'walk', 'up:8;wait:30;' + CHEST_SEARCH + ';' + CLOSE,
-     {'want': ['BRACELET_CHEST'], 'items': [frenol.BRACELET], 'map': frenol.CAVE}),
-    # 밤의 묘지: 서쪽 어귀에서 내려와 (03,0B)에 서면 망토가 요구 → 예 → 메이 → 도적의 열쇠 → 아침의 같은 칸
-    ('grave_side', 'warp', f'{frenol.TOWN},6,19', {'map': frenol.TOWN, 'poke': wc.NIGHT}),
-    ('grave', 'walk', '6,23;wait:120;' + taps(30, 50) + ';wait:300;' + CLOSE,
-     {'want': ['FRENOL_RESCUED'], 'off': ['FRENOL_SCENE'], 'items': [frenol.THIEF_KEY], 'map': frenol.TOWN}),
 ]
-
-# 엔돌 쪽 사당 문 (6,7)에서 아래 입구로 나가 필드 (174,167), 필드를 걸어 엔돌 입구 블록 (67,65)로 든다. 사당은 FC
-# 1F/00 의 문 쪽 반(왼쪽 기둥 열)을 따라 내려가고, 필드 길은 FC 필드 블록 속성에서 막히지 않은 칸을 이은 것이다
-SHRINE_FAR_OUT = '4,7;4,13;0,13;0,29;14,29;down:60;174,167'
-ENDOR_ROAD = ('176,167;176,169;178,169;178,171;180,171;180,173;182,173;182,175;184,175;184,177;186,177;'
-              '186,179;188,179;188,181;190,181;190,183;196,183;196,197;198,197;198,199;206,199;206,203')
-
-# 왕의 병(dq4ch2king): 바자 병사 → 왕좌의 방 병사 → 사당이 막힘 → 탑 꼭대기의 엘프와 꿀 → 왕 회복 → 사당의 여행의 문
-SEGMENTS += [
-    ('bazaar_side', 'warp', f'{king.BAZAAR_MAP},{king.BAZAAR_SOLDIER[0]},{king.BAZAAR_SOLDIER[1] + 1}',
-     {'map': king.BAZAAR_MAP}),
-    ('bazaar', 'walk', talk('up'), {'want': ['KING_BAZAAR']}),
-    # 계단 아래 칸에서 위로 걸어 계단 위 줄에 들면 병사가 알린다
-    ('throne_side', 'warp', f'{ch2.THRONE},24,36', {'map': ch2.THRONE}),
-    ('throne', 'walk', '24,34;wait:120;' + taps(4, 60) + ';' + CLOSE, {'want': ['KING_HEARD']}),
-    # 왕이 낫기 전에는 사당 병사가 위 방으로 가는 틈에 서 있어 여행의 문에 닿지 못한다
-    ('closed_side', 'warp', f'{king.SHRINE},10,20', {'map': king.SHRINE}),
-    ('closed', 'walk', '10,15;8,15;8,11;wait:60;' + taps(4, 60) + ';' + CLOSE,
-     {'map': king.SHRINE, 'maxf': 1500, 'cell': (8, 15)}),
-    # 탑 꼭대기: 계단 옆에서 위로 걸어 줄 0C 에 들면 엘프가 달아나고, 엘프가 섰던 칸을 밟으면 꿀을 찾는다
-    ('tower_side', 'warp', f'{king.TOWER_TOP},14,28', {'map': king.TOWER_TOP}),
-    ('tower', 'walk', '14,25;wait:60;' + taps(6, 60) + ';wait:200', {'want': ['KING_SEEN']}),
-    ('honey', 'walk', '16,18;wait:60;' + taps(3, 60) + ';' + CLOSE, {'want': ['KING_GOT']}),
-    # 꿀을 가진 채 왕에게 말을 걸면 먹이고 왕이 낫는다. 먹인 꿀은 크리프트의 칸에서 빠진다
-    ('cure_side', 'warp', f'{ch2.THRONE},{ch2.START_CELL[0]},{ch2.START_CELL[1] - 1}', {'map': ch2.THRONE}),
-    ('cure', 'walk', talk('up', 20), {'want': ['KING_CURED'], 'bytes': {'KIRYL_ITEM2': 0xFF}}),
-    # 병사가 비켜선 사당: 위 방의 여행의 문으로 엔돌 쪽 사당에 닿는다
-    ('shrine_side', 'warp', f'{king.SHRINE},10,20', {'map': king.SHRINE}),
-    ('shrine', 'walk', '10,15;8,15;8,11;10,11;10,7', {'map': king.SHRINE_FAR, 'changes': 1}),
-    ('shrine_out', 'walk', SHRINE_FAR_OUT, {'field': True, 'cell': (174, 167), 'poke': wc.DAY}),
-    ('endor_road', 'walk', ENDOR_ROAD, {'map': endor.TOWN, 'changes': 1, 'after': 60, 'poke': wc.DAY, 'maxf': 4000}),
-]
-
-
-# 엔돌 무술 대회(dq4ch2endor). 일행 순서를 0 1 2 가 아닌 브라이·아리나·크리프트로 두고 들어가, 빼고 되돌린 뒤에도 그
-# 순서인지 본다. 대회 중 상태(IN·이긴 수·일행 하나)로 링에 서면 링 인물이 그 판부터 잇는다
-ENDOR_ORDER = (2, 0, 1)
-ENDOR_ORDER_POKE = ';'.join(f'7E{a + k & 0xFFFF:04X}={v:02X}' for a in endor.ORDERS for k, v in enumerate(ENDOR_ORDER))
-ENDOR_RING = f'{endor.ARENA},28,26'        # 링 아래 길 (28,27)에 내린다. 위로 걸어 (28,25)에서 링에 든다
-ENDOR_IN_RING = '28,24;wait:60;'
-ENDOR_BACK = {'PARTY_COUNT': 3, **{f'ORDER{k}': v for k, v in enumerate(ENDOR_ORDER)}}
-ENDOR_FLAGS_OFF = ['ENDOR_IN', 'ENDOR_LOST']
-
-
-def endor_in(stage):
-    """대회 중 상태: IN 과 맡긴 순서 첫 둘, 이긴 수, 일행 하나(아리나)."""
-    keep = (ENDOR_ORDER[0] | ENDOR_ORDER[1] << 2) << endor.ORDER_SHIFT | endor.IN[1]
-    return (f'7E{endor.FLAG_AT & 0xFFFF:04X}={keep:02X};7E{endor.STAGE_AT & 0xFFFF:04X}={stage:02X};' +
-            ';'.join(f'7E{c & 0xFFFF:04X}=01' for c in endor.COUNTS) + ';' +
-            ';'.join(f'7E{a & 0xFFFF:04X}=00' for a in endor.ORDERS))
-
-
-def endor_monster(k):
-    return f'{endor.OPPONENTS[k][1]:02X}'
-
-
-# 약초 둘과 셋째 칸의 장비한 비단 로브. 둘 다 쓰면 로브가 첫 칸으로 당겨지고 장비 비트도 따라온다
-ENDOR_HERBS = (f'7E{endor.ALENA_ITEMS & 0xFFFF:04X}={endor.HERB:02X};7E{endor.ALENA_ITEMS + 1 & 0xFFFF:04X}={endor.HERB:02X};'
-               f'7E{endor.ALENA_ITEMS + 2 & 0xFFFF:04X}={ch2.SILK_ROBE:02X};7E{endor.ALENA_ITEMS + 3 & 0xFFFF:04X}=FF;'
-               f'7E{endor.ALENA_EQUIP & 0xFFFF:04X}=04;7E{endor.ALENA_EQUIP + 1 & 0xFFFF:04X}=00')
-
-SEGMENTS += [
-    # ① 출전·③ 짐: 링에 들어서면 응원·규칙 뒤 첫 상대. 지면 대기실 침대 옆에서 깨어나고 일행이 그 순서로 돌아온다
-    ('endor_lose_side', 'warp', ENDOR_RING, {'map': endor.ARENA, 'poke': ENDOR_ORDER_POKE}),
-    ('endor_lose', 'walk', ENDOR_IN_RING + taps(30, 60) + ';wait:300;' + CLOSE,
-     {'battle': f'lose:{endor_monster(0)}', 'map': endor.BEDROOM, 'cell': endor.BED_CELL,
-      'off': ENDOR_FLAGS_OFF + ['ENDOR_CHAMPION'], 'bytes': {'ENDOR_STAGE': 0, **ENDOR_BACK}, 'maxf': 5500}),
-    # ② 상대마다 따로: 이긴 수 k 인 대회 중 상태로 링에 서서 k 번째 상대를 이기고, 다음 상대에게 져 침대로. 첫 상대는
-    # 약초 둘을 쥐고 이긴 뒤 둘 다 쓴다(047D → 047E → 047F)
-    *[seg for k in range(endor.ROUNDS - 1) for seg in (
-        (f'endor_bout{k}_side', 'warp', ENDOR_RING,
-         {'map': endor.ARENA, 'poke': endor_in(k) + (';' + ENDOR_HERBS if k == 0 else '')}),
-        (f'endor_bout{k}', 'walk', ENDOR_IN_RING + taps(50, 60) + ';wait:300;' + CLOSE,
-         {'battle': f'weak:{endor_monster(k)}+lose:{endor_monster(k + 1)}', 'map': endor.BEDROOM,
-          'cell': endor.BED_CELL, 'off': ENDOR_FLAGS_OFF + ['ENDOR_CHAMPION'], 'maxf': 7000,
-          'bytes': {'ENDOR_STAGE': k + 1, **ENDOR_BACK,
-                    **({'ALENA_ITEM0': ch2.SILK_ROBE, 'ALENA_ITEM1': 0xFF, 'ALENA_EQUIP': 0x01} if k == 0 else {})}}))],
-    # 대회 중 판 사이마다 방향 키를 눌러도 링 인물의 대화가 끊기지 않고 넷째·다섯째를 잇달아 이겨 우승, 일행이
-    # 돌아온다(일행 하나인 채 대회 밖으로 나가는 길이 없음). 아래·위는 전투 명령 창에서 「도망」 을 골라 오른쪽을 쓴다
-    ('endor_held_side', 'warp', ENDOR_RING, {'map': endor.ARENA, 'poke': endor_in(endor.ROUNDS - 2)}),
-    ('endor_held', 'walk', ENDOR_IN_RING + taps(6, 60) + ';' + ';'.join(['a:8;wait:40;right:24;wait:20'] * 90) + ';wait:300;' + CLOSE,
-     {'battle': f'weak:{endor_monster(endor.ROUNDS - 2)},{endor_monster(endor.ROUNDS - 1)}', 'map': endor.ARENA,
-      'want': ['ENDOR_CHAMPION'], 'off': ENDOR_FLAGS_OFF, 'bytes': {'ENDOR_STAGE': endor.ROUNDS, **ENDOR_BACK},
-      'maxf': 12000}),
-    # 다섯째 상대를 이기면 결승 상대 데스피사로가 없어 우승, 브라이·크리프트와 일행이 돌아온다
-    ('endor_final_side', 'warp', ENDOR_RING, {'map': endor.ARENA, 'poke': endor_in(endor.ROUNDS - 1)}),
-    ('endor_final', 'walk', ENDOR_IN_RING + taps(40, 60) + ';wait:300;' + CLOSE,
-     {'battle': f'weak:{endor_monster(endor.ROUNDS - 1)}', 'map': endor.ARENA, 'want': ['ENDOR_CHAMPION'],
-      'off': ENDOR_FLAGS_OFF, 'bytes': {'ENDOR_STAGE': endor.ROUNDS, **ENDOR_BACK}, 'maxf': 5500}),
-    # ④ 우승 뒤 엔돌 성 앞: 해자 다리 아래에서 성 쪽으로 오르면 산트하임에서 온 사자가 말한다
-    ('endor_messenger_side', 'warp', f'{endor.TOWN},46,28', {'map': endor.TOWN}),
-    ('endor_messenger', 'walk', '46,23;wait:60;' + taps(4) + ';wait:200;' + CLOSE,
-     {'map': endor.TOWN, 'want': ['ENDOR_MESSENGER']}),
-]
-
-# 빈 산트하임 성과 2장 끝(dq4ch2ending). 우승 flag 가 켜진 앞 구간 뒤라 성이 비어 있다. 왕좌의 방·왕의 방에 들어서면
-# 브라이·크리프트가 말한다. 본 flag 가 켜진 채 성 앞마당에 들어서면 장 끝이라, 앞마당을 들르는(HOPS) 왕좌의 방 묶음을
-# 먼저 두고 그 묶음에서 계단으로 내려가 장 끝 서술 → 「다음에 계속」 상자 → 리셋까지 본다
-SEGMENTS += [
-    ('empty_throne_side', 'warp', f'{ch2.THRONE},24,36', {'map': ch2.THRONE}),
-    ('empty_brey', 'walk', 'wait:60;' + taps(1, 60) + ';' + CLOSE, {'want': ['SEEN_BREY'], 'map': ch2.THRONE}),
-    ('empty_leave', 'walk', ENDING_STAIRS, {'map': ch2.CASTLE, 'changes': 1, 'after': 60}),
-    ('empty_end', 'ending', ending.END_SCENE, {}),
-    ('empty_bedroom_side', 'warp', f'{ch2.BEDROOM},22,9', {'map': ch2.BEDROOM}),
-    ('empty_kiryl', 'walk', 'wait:60;' + taps(2, 60) + ';' + CLOSE, {'want': ['SEEN_KIRYL'], 'map': ch2.BEDROOM}),
-    # 두 사람의 말을 본 뒤 성을 나갔다가 필드에서 성문으로 들어와도 끝난다. 이웃 사란(FC 13/00, 필드 입구 (22,49))의
-    # 도착 칸에서 아래로 나가 필드 (68,149), 오른쪽으로 걸어 성 입구 블록 (27,49) 아래에서 위로 든다
-    ('gate_end_side', 'warp', f'{SARAN},24,50', {'map': SARAN}),
-    ('gate_out', 'walk', SARAN_OUT, {'field': True, 'cell': (68, 149), 'poke': wc.DAY}),
-    ('gate_in', 'walk', GATE_IN, {'map': ch2.CASTLE, 'changes': 1, 'after': 60, 'poke': wc.DAY}),
-    ('gate_end', 'ending', ending.END_SCENE, {}),
-    # 엔딩 곡은 들어선 뒤 약 190프레임에 지금 곡이 되고 서술이 바로 뒤따른다(곡 자료를 올리는 동안 검은 화면).
-    # 장 끝 구간과 묶음을 나누는 것은 그만큼 늦게 남긴 상태로 끝 상자를 넘기면 서술을 넘기는 A 가 남아 리셋 뒤 타이틀에서 눌리기 때문이다(bsnes 에서 소리 없음)
-    ('song_side', 'warp', f'{SARAN},24,50', {'map': SARAN}),
-    ('song_out', 'walk', SARAN_OUT, {'field': True, 'poke': wc.DAY}),
-    ('song_in', 'walk', GATE_IN, {'map': ch2.CASTLE, 'changes': 1, 'after': 400, 'poke': wc.DAY,
-                                  'bytes': {'SONG': ending.ENDING_SONG}}),
-]
+SEGMENTS += [seg for _, segs in dq4ch2checks.ordered(
+    [('common', COMMON_SEGMENTS)] + dq4ch2checks.blocks('SEGMENTS', 'SEGMENT_BLOCKS'), ('common',)) for seg in segs]
 
 
 def units(segments=None):

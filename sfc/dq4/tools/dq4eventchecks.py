@@ -1,4 +1,4 @@
-"""장마다 사건 모듈 옆 <모듈>_checks.py 의 검사 표를 모으는 틀(3장 dq4ch3checks).
+"""장마다 사건 모듈 옆 <모듈>_checks.py 의 검사 표를 모으는 틀(3장 dq4ch3checks, 2장 dq4ch2checks).
 
 사건 모듈 dq4chN<이름>.py 옆의 dq4chN<이름>_checks.py 가 그 사건의 검사 표를 갖는다. 파일이 있으면 등록 장치 차례로
 들어오므로, 사건을 더하거나 고치는 PR 은 자기 _checks 파일만 고친다. _checks 파일이 내놓는 것(모두 골라 씀):
@@ -8,6 +8,7 @@
   effects(data)  구간이 flag 말고 기록에 남기는 것 {구간 이름: {'set': …, 'party': …}}(dq4chapterwalk.setup)
   hero_cases()   주인공 막기 사례 {이름: 사례}(dq4heroblockcheck)
   PASS_NO_DEVICE 겹침 피하기 장치 없이 1C 로 걷는 인물 스크립트의 까닭 {스크립트 주소: 까닭}(test_dq4heroblock)
+  WALK_EXEMPT    조작을 막지 않고 걷는 인물 스크립트의 까닭 {스크립트 주소: 까닭}(test_dq4heroblock)
 
 걷기 표는 묶음마다 앞 구간의 want·off 를 누적해 시작하고 flag 표 차례가 기록 차례이므로, 표를 잇는 차례가 결과에 닿는다.
 잇는 곳(장 걷기 검사)이 차례를 고정할 이름을 주고, 거기 없는 모듈·묶음은 등록 차례(한 모듈 안에서는 적은 차례)로 뒤에 붙는다.

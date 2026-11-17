@@ -20,6 +20,9 @@ name = "dq4-ch2-field-walk"
 tier = "release"
 why = "2장 사건 사이 필드 길을 순간이동 없이 걷는다(산트하임 성 → 사란 → 텐페 → 프레놀 → 남쪽 동굴 → 프레놀 → 바자 → 텐페 → 성 → 이쪽 사당 → 서쪽 탑 → 성 → 사당, 엔돌 → 엔돌 쪽 사당 → 여행의 문 → 텐페 → 성, 그리고 2장 걷기 검사의 사당 → 엔돌·사란 → 성문 묶음). 길마다 그 앞 사건까지의 flag 로 출발지 도착 칸에 내려, 나가는 길로 필드의 나오는 칸에 서는지, FC 필드 속성으로 찾은 길을 걸어 다음 곳의 입구에서 그 FC 그룹의 도착 맵·칸에 드는지 본다. 텐페 블록이 산트하임 쪽과 프레놀 쪽을 잇는 유일한 칸이라, 텐페 위 가장자리로 나가면 북쪽에 서야 한다(dq4groupbuild LINKS leave_rows). 두 번 걸어 기록이 같아야 한다"
 paths = [
+  "sfc/dq4/tools/dq4ch2checks.py",
+  "sfc/dq4/tools/dq4ch2walkparts.py",
+  "sfc/dq4/tools/dq4ch2*_checks.py",
   "sfc/dq4/tools/dq4ch2fieldwalkcheck.py",
   "sfc/dq4/tools/dq4ch2walkcheck.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
@@ -34,6 +37,9 @@ groups = ["ch1-build", "ch1-walk"]
 name = "dq4-ch2-partytalk"
 why = "2장 동료 대화: 동료 대화 줄이 있는 맵 28곳 × 2장 진행 단계 12 × 낮밤마다 「はなす」를 골라, 롬 표에서 맞는 한글 대사(없으면 원래의 129) 하나가 뜨고 창이 닫혀 다음 「はなす」가 되는지 본다(672번). 짝 표(dq4ch2partytalk-people.tsv)의 인물마다 옆 칸에서 말을 걸고 돌아서서 「はなす」를 골라, 대화 시작 훅(06:AF6A)이 적은 「말 건 인물」 값과 그 값으로 고른 대사를 본다. 「はなす」 갈래 훅(05:D5B9·받침 05:FEE8), 대화 시작 훅, 조건 평가 루틴, 줄 표·짝 표·대사·메시지 셋째 자리(71:A000~)를 바꾸면 깨진다"
 paths = [
+  "sfc/dq4/tools/dq4ch2checks.py",
+  "sfc/dq4/tools/dq4ch2walkparts.py",
+  "sfc/dq4/tools/dq4ch2*_checks.py",
   "sfc/dq4/tools/dq4ch2partytalk.py",
   "sfc/dq4/tools/dq4ch2partytalk.tsv",
   "sfc/dq4/tools/dq4ch2partytalk-text.tsv",
