@@ -621,6 +621,18 @@ BATTLE_FIELD = 0x88         # BRK 88 n: 칸 $42 의 전투 필드 n → $46
 KIND_FIELD = 0x78
 MONSTER_SLOTS = 0x10
 
+# 떠돌이 상인(FC 18:$9D12): 3장 필드 조우의 1/10 은 싸우지 않고 여관(rand(256) < 16)이나 도구점
+MERCHANT_RATE = 10
+MERCHANT_INN = 0x10
+EVENT_SCRIPT, EVENT_FLAG = 0x7E19B3, 0x7E19AE
+CELLS_SINCE_FIGHT = 0x7E1A9A
+# 말을 걸 인물 칸: 필드에서 인물 표(대화 번호 7E:36E0·7E:3700)의 끝 칸은 비어 있다(실측: 1D~1F 가 0)
+MERCHANT_SLOT = 0x1F
+TALK_LOW, TALK_HIGH = 0x36E0, 0x3700
+TALK = 0x06AF1C             # JSR $AF20 / RTL: A = 인물 칸으로 대화(06:AFF4 가 대화 번호로 갈래)
+TALK_SHOP, TALK_INN = 0x02, 0x06    # 특수 기능 도구점·여관(06:DBD2)
+WAKE_SITE, WAKE_ORIG = 0x06E462, bytes((0xA5, 0xBC, 0xC9, 0x01))     # 여관에서 깬 뒤 맵 고르기(06:E43A 안)
+
 # FC 3장 전용 표(12:$91DE): 문턱 12:$928E, 물건 12:$929E 의 16칸
 FC_BANK, FC_THRESHOLDS, FC_ITEMS, DROP_SLOTS = 0x12, 0x928E, 0x929E, 16
 
@@ -682,14 +694,9 @@ def ch3_masks(prg, z):
 
 
 def ch3_zone_masks(prg, report):
-    """[(DQ5 구역, 낮 마스크, 밤 마스크)]: 3장 필드 구역(CH3_FIELD) 가운데 마스크가 있는 것. report 는
-    docs 의 보고(FC 구역 → zone)."""
-    out = []
-    for z in CH3_FIELD:
-        day, night = ch3_masks(prg, z)
-        if day or night:
-            out.append((report[f'{z:02X}']['zone'], day, night))
-    return out
+    """[(DQ5 구역, 낮 마스크, 밤 마스크)]: 3장 필드 구역(CH3_FIELD) 모두. 마스크가 없는 구역도 떠돌이 상인이 나오는
+    구역이라 둔다. report 는 docs 의 보고(FC 구역 → zone)."""
+    return [(report[f'{z:02X}']['zone'], *ch3_masks(prg, z)) for z in CH3_FIELD]
 
 
 def _long(v):
@@ -710,13 +717,41 @@ def ch3_code(rows, items, at=CH3_CODE_AT):
     a.b(0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8)                                  # INX ×6
     a.b(0xE0, *(6 * len(rows)).to_bytes(2, 'little')).rel(0x90, 'zone')      # CPX #n / BCC
     a.rel(0x80, 'night_16')
-    a.label('found').b(0x22, *_long(IS_NIGHT)).rel(0xB0, 'dark')            # JSL 21:8000 / BCS
+    a.label('found').b(0xA9, MERCHANT_RATE, 0x00, 0x22, *_long(RANDOM))    # rand(10)
+    a.label('rolled10').b(0xC9, 0x00, 0x00).rel(0xF0, 'merchant')            # CMP #0 / BEQ
+    a.b(0x22, *_long(IS_NIGHT)).rel(0xB0, 'dark')                            # JSL 21:8000 / BCS
     a.long(0xBF, 'zones', 2).rel(0x80, 'store')                             # LDA zones+2,X (낮)
     a.label('dark').long(0xBF, 'zones', 4)                                  # LDA zones+4,X (밤)
     a.label('store').b(0x8F, *_long(MASK))
     a.label('night_16').b(0xE2, 0x20)
     a.label('night_out').b(0xFA, 0x68, 0x28)                                 # PLX PLA PLP
     a.b(*NIGHT_ORIG, 0x6B)                                                   # LDY #$FFFF / STY $1001 / RTL
+    # 떠돌이 상인: 이벤트 스크립트를 걸고(23:E2F4 와 같이 $19B3~$19B5·$19AE bit7) 걸음 수를 처음부터, 23:E7C2 는 조우 없음
+    # (23:E91C 의 PLB / PLP / CLC / RTL)으로 끝낸다. 여기는 M 16비트, X 16비트
+    a.label('merchant').word(0xA9, 'script').b(0x8F, *_long(EVENT_SCRIPT))   # LDA #script / STA $19B3
+    a.b(0xE2, 0x20, 0xA9, at >> 16)                                           # SEP / LDA #뱅크(스크립트는 이 코드와 한 뱅크)
+    a.b(0x8F, *_long(EVENT_SCRIPT + 2))                                       # STA $19B5
+    a.b(0xAF, *_long(EVENT_FLAG), 0x09, 0x80, 0x8F, *_long(EVENT_FLAG))       # $19AE |= 80
+    a.b(0xA9, 0x00, 0x8F, *_long(CELLS_SINCE_FIGHT))                          # $1A9A = 0
+    a.b(0xFA, 0x68, 0x28, 0x68, 0x68, 0x68, 0xAB, 0x28, 0x18, 0x6B)          # PLX PLA PLP / 돌아갈 곳 버림 / PLB PLP CLC RTL
+    # 이벤트 스크립트: 네이티브 하나(00:C046 이 7E:1A2E 의 JSL 로 부름, M·X 8비트) 뒤 끝
+    a.label('script').long(0xA0, 'talk').b(0xFF)
+    # 16/256 이면 여관(대화 번호 06), 아니면 도구점(02)을 인물 칸 MERCHANT_SLOT 에 두고 말을 건다(06:AF1C, A = 칸,
+    # 05:D596 과 같이 M 8비트·X 16비트). 키는 필드 $BC/$BD 의 상인 키(dq4shopport.MERCHANT_MAP)
+    a.label('talk').b(0x08, 0x8B, 0xC2, 0x30)                                # PHP PHB / REP #$30
+    a.b(0xA9, 0x00, 0x01, 0x22, *_long(RANDOM), 0xE2, 0x20)                  # rand(256)
+    a.label('rolled256').b(0xC9, MERCHANT_INN, 0xA9, TALK_SHOP).rel(0xB0, 'talk_set')  # CMP #16 / LDA #02 / BCS
+    a.b(0xA9, TALK_INN)
+    a.label('talk_set').b(0x8F, *_long(0x7E0000 | TALK_LOW + MERCHANT_SLOT))
+    a.b(0xA9, 0x00, 0x8F, *_long(0x7E0000 | TALK_HIGH + MERCHANT_SLOT))      # 상위 0
+    # 06:AF20 은 DB 를 정하지 않고 $0F1E 에 쓴다: WRAM 이 보이는 뱅크로
+    a.b(0xA9, 0x7E, 0x48, 0xAB, 0xA9, MERCHANT_SLOT, 0x22, *_long(TALK))     # DB 7E / LDA #칸 / JSL 06:AF1C
+    a.b(0xAB, 0x28, 0x6B)                                                     # PLB PLP RTL
+    # 06:E462 에서(여관에서 깬 뒤, A 8비트): 원래 LDA $BC / CMP #$01 은 그룹 01(DQ5 ラインハット 여관)이면 01/00 (50,83)
+    # 에 세운다. 필드의 $BC 도 01 이라 필드에서 자면 그 맵으로 갔다: 필드($BE bit7 꺼짐)면 Z = 0 으로 지금 자리를 다시 그림
+    a.label('wake').b(0xAF, 0xBE, 0x00, 0x7E).rel(0x10, 'wake_field')         # LDA $BE / BPL
+    a.b(0xAF, 0xBC, 0x00, 0x7E, 0xC9, 0x01, 0x6B)                            # LDA $BC / CMP #$01 / RTL
+    a.label('wake_field').b(0xA9, 0x00, 0xC9, 0x01, 0x6B)                     # Z = 0
     # 23:E907·23:EAB0 에서: M 8비트, X·Y 16비트, Y = 칸
     a.label('weight').b(0x29, 0x07).rel(0xF0, 'weight_store')               # AND #7 / BEQ
     a.b(0x48, 0x5A, 0xC2, 0x20, 0xAF, *_long(MASK))                         # PHA PHY REP #$20 LDA MASK
@@ -757,6 +792,19 @@ def ch3_code(rows, items, at=CH3_CODE_AT):
     return a.assemble()
 
 
+def ch3_labels(prg, dq5, report, at=CH3_CODE_AT):
+    """ch3_writes 가 쓰는 코드의 라벨(검사가 훅 안 자리를 고를 때)."""
+    table = fc_drop_table(prg)
+    return ch3_code(ch3_zone_masks(prg, report), list(zip((t for t, _ in table), dq5_drop_items(prg, dq5))), at)[1]
+
+
+def no_merchant_patch(prg, dq5, report):
+    """떠돌이 상인 갈래(rand(10) = 0 의 BEQ)를 NOP 로 덮는 ROMPATCH(파일 오프셋=바이트): 조우·무리를 보는 검사가 상인
+    대화에 걷기가 멈추지 않게."""
+    at = ch3_labels(prg, dq5, report)['rolled10'] + 3
+    return f'{_lorom(at):X}=EAEA'
+
+
 def ch3_writes(prg, dq5, report, at=CH3_CODE_AT):
     """dq5patch/1 쓰기: 코드·표와 훅 네 곳. report 는 docs 의 보고."""
     table = fc_drop_table(prg)
@@ -778,6 +826,7 @@ def ch3_writes(prg, dq5, report, at=CH3_CODE_AT):
     out += [put(site, jsl('weight') + b'\xEA', WEIGHT_ORIG, '칸 무게를 읽을 때 마스크로 뺀 칸은 0')
             for site in WEIGHT_SITES]
     out.append(put(DROP_SITE, jsl('drop') + bytes((0xD0, 0x04, 0xEA)), DROP_ORIG, '3장이면 전투 뒤 물건을 FC 3장 표로'))
+    out.append(put(WAKE_SITE, jsl('wake'), WAKE_ORIG, '필드 여관(떠돌이 상인)에서 깨면 그룹 01 갈래로 가지 않음'))
     return out
 
 

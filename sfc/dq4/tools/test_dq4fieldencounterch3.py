@@ -44,6 +44,20 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(len(m.DROP_ORIG), 7)
         # 25:8966 의 BNE 는 JSL 뒤 두 바이트에서 25:8970 으로 간다
         self.assertEqual(m.DROP_SITE + 4 + 2 + 4, 0x258970)
+        # 떠돌이 상인: 이벤트 스크립트는 네이티브 talk 하나(A0 주소) 뒤 끝(FF), 여관에서 깬 뒤 갈래는 4바이트 그대로 JSL
+        script = blob[labels['script'] - m.CH3_CODE_AT:][:5]
+        self.assertEqual(script, bytes((0xA0, *labels['talk'].to_bytes(3, 'little'), 0xFF)))
+        self.assertEqual(len(m.WAKE_ORIG), 4)
+        # rand(10) 다음이 0 이면 상인, 대화 번호 02·06 은 특수 기능 도구점·여관(06:DBDB 표의 E01F·E384)
+        self.assertEqual(blob[labels['found'] - m.CH3_CODE_AT:][:3], bytes((0xA9, m.MERCHANT_RATE, 0x00)))
+        self.assertEqual((m.TALK_SHOP, m.TALK_INN), (0x02, 0x06))
+
+    def test_merchant_writes_include_the_wake_hook(self):
+        rows = [(32, 0, 0), (33, 0x200, 0), (78, 0x210, 0), (35, 0x210, 0)]
+        blob, labels = m.ch3_code(rows, [(t, k) for k, (t, _) in enumerate(DOC_TABLE)])
+        # 표에는 3장 필드 구역 넷이 모두(마스크가 없는 14 도 상인이 나오는 구역)
+        zones = blob[labels['zones'] - m.CH3_CODE_AT:labels['thresholds'] - m.CH3_CODE_AT]
+        self.assertEqual(len(zones), 6 * 4)
 
 
 @unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), 'rom/dq4.nes and rom/dq5.sfc')
@@ -100,6 +114,19 @@ class RomTests(unittest.TestCase):
             want = m.drop_roll(table, level, start, rolls)
             self.assertEqual(got, want, (level, start, rolls))
             self.assertEqual(used, 16 if want is None else (want - start) % 16 + 1)
+
+    def test_merchant_matches_fc(self):
+        # FC 18:$9D19 LDA #$0A / BRK 17 0F: rand(10) = 0 이면 たびのしょうにん. 15:$BEF4 rand < 10 이면 여관
+        import dq4encounter
+        o = 0x18 * 0x4000 + (0x9D19 & 0x3FFF)
+        self.assertEqual(bytes(self.prg[o:o + 5]), bytes((0xA9, m.MERCHANT_RATE, 0x00, 0x17, 0x0F)))
+        self.assertEqual(m.MERCHANT_INN, dq4encounter.MERCHANT_INN)
+        self.assertEqual(self.dq5[(0x06 & 0x7F) * 0x8000 + (m.WAKE_SITE & 0x7FFF):][:4], m.WAKE_ORIG)
+
+    def test_every_chapter3_field_zone_is_in_the_table(self):
+        import dq4fieldencounter
+        report = {f'{z:02X}': {'zone': z} for z in dq4fieldencounter.CH3_FIELD}
+        self.assertEqual([r[0] for r in m.ch3_zone_masks(self.prg, report)], list(dq4fieldencounter.CH3_FIELD))
 
     def test_items_have_dq5_counterparts(self):
         items = m.dq5_drop_items(self.prg, self.dq5)
