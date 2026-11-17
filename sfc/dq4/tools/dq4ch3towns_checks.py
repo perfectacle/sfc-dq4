@@ -41,7 +41,11 @@ FLAGS.update({'TOWNS_SLOT_COIN0': (0x7E1216, 0xFF), 'TOWNS_SLOT_COIN1': (0x7E121
 SELLER = W.cell(0x18, 0x02)
 EXCHANGE = W.cell(0x1C, 0x08)
 SLOT = W.cell(*W.SLOT_CELLS[2])
+SLOT_RNG = 0x7E1200
 ARENA = W.cell(0x08, 0x0A)
+ARENA_RNG = '7E075B=11;7E075C=22;7E075D=33'
+# 시합 동안 셋째 몬스터(몬스터 칸 2, 7E:07C0 + 칸 × 16 의 +2 HP)를 999 로 묶어 난수와 상관없이 셋째가 이기게 한다
+ARENA_STRONG = '7E07E2=E7;7E07E3=03'
 MAGIC_WATER = 0xA9              # DQ5 まほうのせいすい(FC 경품 첫 줄 5A)
 
 
@@ -52,6 +56,10 @@ def _resumed():
 
 def _gold(n):
     return ';'.join(f'{(ch3.GOLD_AT & 0xFFFF) + k:04X}={n >> 8 * k & 0xFF:02X}' for k in range(3))
+
+
+def _slot_rng(fill):
+    return ';'.join(f'{SLOT_RNG + k:06X}={fill:02X}' for k in range(16))
 
 
 def _coins(n):
@@ -65,15 +73,23 @@ NANNY_BELOW = W.cell(0x04, 0x0A)
 PRINCE_HOLD = '7E3308=00'
 
 SEGMENTS = [
-    # 격투장 맞은편에서 코인 100
-    ('towns_arena_side', 'warp', f'{W.CASINO},{ARENA[0]},{ARENA[1] + 1}',
-     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
-    # 격투장(DQ5 대화 0E, 시합은 FC 3장 표): 첫 몬스터에 한 장 걸면 시합 전에 코인이 준다. 이기고 지는 것은 시합과
-    # 코어(MesenCE·snes9x·bsnes)의 난수에 따라 달라 코인은 건 뒤에만 본다
-    ('towns_arena', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 7)}',
-     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'bytes': {'TOWNS_COIN0': 99, 'TOWNS_COIN1': 0}}),
-    # 시합 뒤에는 B 로 글을 넘기고 「다시 도전」 에 아니오(시합 길이가 표에 따라 달라 A 수로 맞추지 않음)
-    ('towns_arena_end', 'walk', f'{";".join(["b:8;wait:90"] * 40)}', {'map': W.CASINO}),
+    # 격투장(DQ5 대화 0E, 시합은 FC 3장 표). 게임 난수(7E:075B~075D)는 매 프레임 굴러(가만히 서 있어도 30프레임에
+    # 4A, 31프레임에 4B) 코어마다 늦는 프레임 수가 달라 시합 고르기·승패가 갈린다. 말 거는 동안은 난수를 묶어 시합을
+    # FC 4번(슬라임 5.0·오두방정메뚜기 5.3·가위 사슴 벌레 3.9·슬라임 베스 3.9)으로 정하고, 시합 동안은 난수를 풀고
+    # (내내 묶으면 전투가 같은 고리에서 멈춤) 셋째 HP 를 묶어(ARENA_STRONG) 셋째가 이기게 한다. 수 창에서 위 한 번에
+    # 2장씩 늘어 위 넷이면 9장: 셋째에 걸면 이겨 91 + 9 × 3.9(반올림 35) = 126, 첫째에 걸면 져 91. 시합을 여는 A 는
+    # 시합 구간에 둔다(앞 구간에서 전투에 들면 dq4peoplesample 이 시합을 전투로 세지 못함)
+    *(seg for k, (pick, coins) in enumerate(((2, 126), (0, 91)))
+      for seg in ((f'towns_arena_{("win", "lose")[k]}_side', 'warp', f'{W.CASINO},{ARENA[0]},{ARENA[1] + 1}',
+                   {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
+                  (f'towns_arena_{("win", "lose")[k]}', 'walk',
+                   f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:60;{"down:8;wait:30;" * pick}'
+                   f'wait:{38 * (3 - pick) + 1};a:8;wait:90;{"up:2;wait:14;" * 4}a:8;wait:100',
+                   {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{ARENA_RNG}',
+                    'bytes': {'TOWNS_COIN0': 91, 'TOWNS_COIN1': 0}}),
+                  (f'towns_arena_{("win", "lose")[k]}_fight', 'walk', f'a:8;wait:3000;{";".join(["b:8;wait:150"] * 6)}',
+                   {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{ARENA_STRONG}',
+                    'bytes': {'TOWNS_COIN0': coins, 'TOWNS_COIN1': 0}}))),
     # 슬롯(FC 기계 칸 가운데, 아래에서 위를 보고 말 걸기 → DQ5 1코인 기계): 583·584 에 「예」, 위로 한 장 넣으면 슬롯 안
     # 코인이 99. 돌린 뒤 배당은 코어 난수에 따라 달라 코인은 넣은 뒤에만 본다
     ('towns_slot_side', 'warp', f'{W.CASINO},{SLOT[0]},{SLOT[1] + 1}',
@@ -81,11 +97,16 @@ SEGMENTS = [
     ('towns_slot', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:8;wait:60',
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'bytes': {'TOWNS_SLOT_COIN0': 99, 'TOWNS_SLOT_COIN1': 0}}),
     # 한 판 돌리고 나오기: 넣고 A 로 돌린 뒤 B 로 「もういちど」 를 띄워 「いいえ」. 슬롯 화면 안에서 구간을 나누면 다음
-    # 구간이 슬롯에 든 것을 모르고 시작하므로(dq4peoplesample 이 슬롯 입구로 화면을 가림) 맞은편부터 다시 걷는다
-    ('towns_slot_play_side', 'warp', f'{W.CASINO},{SLOT[0]},{SLOT[1] + 1}',
-     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
-    ('towns_slot_out', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:8;wait:60;'
-     'a:8;wait:1500;b:8;wait:300;right:8;wait:30;a:8;wait:300', {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}'}),
+    # 구간이 슬롯에 든 것을 모르고 시작하므로(dq4peoplesample 이 슬롯 입구로 화면을 가림) 맞은편부터 다시 걷는다.
+    # 릴이 서는 칸은 슬롯 전용 난수 7E:1200~120F(11:BC26, 슬롯 화면에서 매 프레임 굴림)가 정해 코어마다 갈리므로
+    # 판 동안 묶는다: 모두 04 면 가운데 줄 체리 셋(배당 3)이라 99 + 3 = 102, 모두 00 이면 맞지 않아 99
+    *(seg for name, fill, coins in (('win', 0x04, 102), ('lose', 0x00, 99))
+      for seg in ((f'towns_slot_{name}_side', 'warp', f'{W.CASINO},{SLOT[0]},{SLOT[1] + 1}',
+                   {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
+                  (f'towns_slot_{name}', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:8;wait:60;'
+                   'a:8;wait:1500;b:8;wait:300;right:8;wait:30;a:8;wait:300',
+                   {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{_slot_rng(fill)}',
+                    'bytes': {'TOWNS_COIN0': coins, 'TOWNS_COIN1': 0}}))),
     # 코인 판매(DQ5 대화 0B): 금화 1000 에서 한 장(3장 한 장 200)
     ('towns_coin_side', 'warp', f'{W.CASINO},{SELLER[0]},{SELLER[1] + 3}',
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _gold(1000), _coins(0)))}),

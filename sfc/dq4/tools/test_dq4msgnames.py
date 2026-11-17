@@ -41,6 +41,15 @@ class HookTests(unittest.TestCase):
         self.assertEqual(target(self.hook, bne), self.found + 3)
         self.assertEqual(self.hook[-4:], bytes((0x5C, *names.le(names.QUEUE_RUN, 3))))
 
+    def test_monster_exit_pops_its_handler_frame(self):
+        # {100F}(24:8506)은 PHX / PHY / PHP 뒤 JSR $89B6 이라 몬스터만 PLP / PLY / PLX 를 더 꺼낸 뒤 대기열로 간다.
+        # 이것이 빠지면 격투장 116 이 몬스터 이름 뒤에서 멈춘다
+        at = self.hook.index(bytes((0xA5, 0x43, 0xC9, names.MONSTER, 0xD0)), self.found)
+        monster = self.hook[at + 6:target(self.hook, at + 4)]
+        self.assertEqual(monster, bytes((0x68, 0x68, 0xC2, 0x20, 0x68, 0x28, 0x7A, 0xFA, 0xC2, 0x30,
+                                         0x5C, *names.le(names.QUEUE_RUN, 3))))
+        self.assertIn(names.MONSTER, names.KINDS)
+
 
 if __name__ == '__main__':
     unittest.main()
