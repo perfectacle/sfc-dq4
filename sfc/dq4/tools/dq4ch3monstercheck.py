@@ -2,9 +2,9 @@
 형식 문서 sfc/dq4/docs/dq4-ch3-monsters-format.md.
 
 롬 바이트(에뮬레이터 없이):
-  records  3장 구역(dq4fieldencounter.CH3_ZONES)에 나오는 FC 몬스터 19종의 DQ5 번호(CHAPTER3_MONSTERS) 레코드가 FC 값
+  records  3장 구역(dq4fieldencounter.CH3_ZONES)에 나오는 FC 몬스터 19종의 DQ5 번호(dq4fieldencounter.MONSTERS) 레코드가 FC 값
            (dq4monport.fc_entry: HP·MP·민첩·공격·수비·경험치·금화·행동 여섯·내성·드롭·드롭률)과 같고, 이름이 전투 글 이름
-           표·창 이름 표에 있다
+           표·창 이름 표에 있다. records-ch1 은 1장 구역(필드 04~06, 던전 40~43) 14종의 같은 대조
   zones    3장 구역의 DQ5 구역 레코드·고정 무리가 dq4fieldencounter.docs 대로
   table    훅의 3장 전용 표(문턱 16칸·물건 16칸)가 FC 12:$928E·$929E 와 그 물건의 DQ5 짝
 장면(서장 끝 출발 상태에서 dq5warp.lua FIELD 로 3장 필드 구역에 서고 3장 flag 를 켬):
@@ -94,25 +94,37 @@ def lorom(a):
     return (a >> 16 & 0x7F) * 0x8000 + (a & 0x7FFF)
 
 
-def chapter3_species(prg):
-    """FC 3장 구역에서 낮·밤(던전은 던전 마스크)에 나올 수 있는 FC 몬스터(dq4encounter.zone_monsters, 편성 포함)."""
+# FC 1장 구역: 필드 04~06(バトランド·イムル 둘레)과 던전 40~43(古井戸の底·탑·동굴·우물 아래)
+CH1_FIELD, CH1_DUNGEON = (0x04, 0x05, 0x06), (0x40, 0x41, 0x42, 0x43)
+
+
+def zone_species(prg, field, dungeon):
+    """FC 구역에서 낮·밤(던전은 던전 마스크)에 나올 수 있는 FC 몬스터(dq4encounter.zone_monsters, 편성 포함)."""
     out = set()
-    for z in dq4fieldencounter.CH3_FIELD:
+    for z in field:
         out |= dq4encounter.zone_monsters(prg, z, 'day') | dq4encounter.zone_monsters(prg, z, 'night')
-    for z in dq4fieldencounter.CH3_DUNGEON:
+    for z in dungeon:
         out |= dq4encounter.zone_monsters(prg, z, 'dungeon')
     return sorted(out)
 
 
-def record_problems(data, prg, dq5):
-    """3장 구역 몬스터의 레코드가 FC 값과 다른 곳."""
+def chapter3_species(prg):
+    return zone_species(prg, dq4fieldencounter.CH3_FIELD, dq4fieldencounter.CH3_DUNGEON)
+
+
+def chapter1_species(prg):
+    return zone_species(prg, CH1_FIELD, CH1_DUNGEON)
+
+
+def record_problems(data, prg, dq5, species=None):
+    """species(없으면 3장 구역 몬스터)의 레코드가 FC 값과 다른 곳."""
     import dq5tables
     table = dq5tables.TABLES['monsters']
     drop_item = dq4monport.drop_items(prg, dq5)
-    species = chapter3_species(prg)
+    species = chapter3_species(prg) if species is None else species
     out, rows = [], {}
     for fc in sorted(species):
-        m = dq4fieldencounter.CHAPTER3_MONSTERS[fc]
+        m = dq4fieldencounter.MONSTERS[fc]
         got = dq5tables.decode(table, None, data, m)
         want = dq4monport.fc_entry(prg, fc, drop_item)
         diff = {k: (got[k], v) for k, v in want.items() if k != '내성' and got[k] != v}
@@ -156,7 +168,7 @@ def name_problems(data, dq5):
         o += 1 + n + 1 + 2 * data[o + 1 + n]
     index = bm.lorom(wt.TEXT_BANK << 16 | wt.INDEX + 4 * 0x200)
     out = []
-    for m, _ in dq4monport.CH3.values():
+    for m, _ in dq4monport.NUMBERED.values():
         if bytes(names[m]) not in entries:
             out.append(f'몬스터 {m:02X} 가 전투 글 이름 표에 없음')
         if not int.from_bytes(data[index + 2 * m:index + 2 * m + 2], 'little'):
@@ -322,6 +334,8 @@ def main():
     problems, rows = record_problems(data, prg, dq5)
     problems += name_problems(data, dq5)
     results['records'] = {'species': rows, 'problems': problems, 'ok': not problems}
+    problems, rows = record_problems(data, prg, dq5, chapter1_species(prg))
+    results['records-ch1'] = {'species': rows, 'problems': problems, 'ok': not problems}
     ch3_areas = {report[f'{z:02X}']['zone'] for z in dq4fieldencounter.CH3_ZONES}
     problems = zone_problems(data, [r for r in progress['encounters'] if r['index'] in ch3_areas], grid)
     results['zones'] = {'problems': problems, 'ok': not problems}
@@ -356,7 +370,7 @@ def main():
         mask = day if mode == 'day' else night
         want_first, want_second = masked(weights, mask), masked(weights, mask)[:5]
         first, second = weight_lines(trace, FIRST, 11), weight_lines(trace, SECOND, 5)
-        allowed = {dq4fieldencounter.CHAPTER3_MONSTERS[m]
+        allowed = {dq4fieldencounter.MONSTERS[m]
                    for m in dq4encounter.zone_monsters(prg, z, mode)}
         fights = [(FIGHT_EXITS[at], fec.groups(kv)) for _, at, kv in trace if at in FIGHT_EXITS]
         problems = []

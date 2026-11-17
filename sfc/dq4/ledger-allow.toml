@@ -545,9 +545,9 @@ why = "몬스터 표의 5F·60 칸: dq4monport.PORT 의 새 번호에 대역 레
 
 [[original]]
 stage = "chapter1"
-at = "23:8064~23:80AD"
+at = "23:8064~23:80E0"
 data = true
-why = "몬스터 표의 04·05·06 칸: dq4monport.PORT 의 새 번호에 대역 레코드를 옮김"
+why = "몬스터 표의 04~08 칸: 04·05·06·08 은 dq4monport.PORT, 07 은 1장 새 번호(dq4monport.CH1)에 대역 레코드를 옮겨 FC 값을 덮음. 07 이 사이를 메워 다섯 칸이 한 덩어리로 잡힘"
 
 [[original]]
 stage = "chapter1"

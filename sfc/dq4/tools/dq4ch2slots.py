@@ -59,7 +59,7 @@ SLOTS = {
 # 모든 사건이 함께 쓰는 것(dq4ch2battle): 마지막으로 건 사건 전투를 이겼는지. 전투마다 다시 쓴다
 BATTLE_WON = (0x78, 0x80)      # 7E:2208 bit7
 # 아직 아무에게도 주지 않은 몫. 쓰려면 이 표를 고치는 PR 을 먼저 올린다. 남았던 flag 바이트와 코드 자리는 3장 사건
-# 예약표(dq4ch3slots)로, DQ5 몬스터 번호는 3장 몬스터(dq4monport.CH3)로 넘겼다
+# 예약표(dq4ch3slots)로, DQ5 몬스터 번호는 3장 몬스터(dq4monport.CH3)로 넘겼다. 그 뒤 빈 DQ5 번호는 dq4monport.free_numbers 가 센다
 SPARE = {
     'flags': (),
     'flag_bits': (),

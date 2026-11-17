@@ -80,6 +80,16 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(names[dq4monport.CH3[0x13][0]], '킬러 스콥')
         self.assertEqual(names[dq4monport.CH3[0x1E][0]], '릴리펏')
 
+    def test_chapter1_numbers_were_free(self):
+        # 1장 셋의 DQ5 번호는 이 해킹이 쓰지 않고 부르기·격투장·동료·빈 레코드·겹치는 이름·FC 같은 이름이 아닌 번호에서
+        numbers = {m for m, _ in dq4monport.CH1.values()}
+        before = dq4monport.free_numbers(self.dq5, self.prg, dq4monport.used_numbers() - numbers)
+        self.assertLessEqual(numbers, set(before))
+        after = dq4monport.free_numbers(self.dq5, self.prg)
+        self.assertFalse(numbers & set(after))
+        self.assertEqual(len(before) - len(after), len(numbers))
+        self.assertGreaterEqual(len(after), 60)
+
     def test_monster_mp_is_fc(self):
         # べビーマジシャン: FC MP 2. 주문 MP 를 FC 값(ヒャド 2)으로 두므로 MP 를 올리지 않는다
         self.assertEqual(self.entry(dq4monport.PORT[0x1D])['MP'], 2)
