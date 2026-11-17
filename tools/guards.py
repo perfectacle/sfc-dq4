@@ -56,8 +56,9 @@ PR 에서는 바뀐 파일이 그 검사의 paths 에 바로 맞을 때, 또는 
   python tools/guards.py --record-times FILE…    보고서(release_check report.json 또는 --json 결과)의 검사 시간으로
                                                  guardshard-times.json 을 고쳐 씀
 
---shard 는 검사마다 지난 실행 시간(guardshard-times.json, 없으면 이 체크아웃의 검사 결과 캐시, 둘 다 없으면 아는 시간의
-평균)으로 긴 것부터 가장 가벼운 조각에 넣는다. 같은 목록·같은 시간 파일이면 어느 머신에서든 같은 조각이 나온다.
+--shard 는 검사마다 지난 실행 시간(guardshard-times.json, 없으면 그 파일에 있는 시간의 평균)으로 긴 것부터 가장 가벼운
+조각에 넣는다(split_weights). 조각 잡마다 따로 나누므로 러너마다 다른 결과 캐시는 보지 않는다: 같은 목록·같은 시간 파일이면
+어느 머신에서든 같은 조각이 나온다.
 --exclude-needs 로 뺀 검사는 「로컬 몫」 으로 찍고 --json 에 남긴다(배포 관문이 로컬에서 돌린다).
 parts = n 인 검사는 --shard 때 조각 수와 상관없이 하위 조각 n 개로 펼친다(expand_parts). 하위 조각 k 는 환경 변수
 DQ4_GUARD_PART=k/n 으로 돌고, 검사 도구가 장면 목록의 k 번째 몫만 돈다(sfc/dq4/tools/dq4shards.part_of). 무게는 검사
@@ -988,6 +989,12 @@ def shard_weights(checks, times=None, cached=None):
     return {n: (v if v is not None else default) for n, v in known.items()}
 
 
+def split_weights(checks):
+    """--shard 로 나눌 때의 무게: 커밋에 든 시간 파일만 본다(없는 검사는 그 평균). CI 조각 잡마다 같은 목록을 따로 나누므로,
+    잡마다 되살린 결과 캐시(cached_seconds)를 섞으면 잡마다 나눔이 달라 한 검사가 두 조각에서 돌거나 빠진다."""
+    return shard_weights(checks, cached={})
+
+
 def part_tag(check):
     """하위 조각·스윕 시드 단위의 이름 꼬리(캐시·로그 파일 이름). 「~」 는 NAME 에 없어 cached_seconds 가 검사 이름으로
     읽지 않는다."""
@@ -1580,7 +1587,7 @@ def main():
             hit = hit + sweep_units(sweeps)
         hit, local = split_local(hit, [n for n in args.exclude_needs.split(',') if n])
         if shard:
-            hit = shard_part(expand_parts(hit), *shard, shard_weights(hit))
+            hit = shard_part(expand_parts(hit), *shard, split_weights(hit))
         print(f'고른 검사 {len(hit)}개' + (f'(조각 {shard[0]}/{shard[1]})' if shard else '') + ': '
               + (', '.join(map(unit_name, hit)) or '없음'))
         if local:
