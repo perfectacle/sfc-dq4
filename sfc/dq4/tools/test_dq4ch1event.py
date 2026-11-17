@@ -819,5 +819,19 @@ class SyntheticListTest(unittest.TestCase):
         self.assertTrue(all(o["list"].removeprefix("new:") in names for o in self.over))
 
 
+
+class DogFollowerTest(unittest.TestCase):
+    def test_dog_flag_is_the_chapter3_common_flag(self):
+        import dq4ch3event
+        self.assertEqual(ev.DOG, dq4ch3event.DOG)
+
+    def test_followers_add_the_dog_picture_after_the_kids(self):
+        from dq4npcport import PICTURES
+        code = ev._followers(0x5C8000)
+        flag = (0x7E2190 + ev.DOG[0]).to_bytes(3, 'little')
+        at = code.index(bytes((0xAF, *flag, 0x29, ev.DOG[1])))
+        self.assertIn(bytes((0xA9, PICTURES[ev.FC_DOG_PICTURE], 0x20)), code[at:])
+
+
 if __name__ == "__main__":
     unittest.main()
