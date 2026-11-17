@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 import unittest.mock
@@ -184,12 +185,14 @@ class SheetTests(unittest.TestCase):
     def test_place_keeps_earlier_waves_when_a_later_person_joins(self):
         a = P.Person((0x10,), None, 'x', 'a')
         b = P.Person((0x11,), None, 'x', 'b')
-        late = P.Person((0x12,), None, 'x', 'late', wave=1, weight=P.KEY_WEIGHT)
+        late = P.Person((0x12,), None, 'x', 'late', weight=P.KEY_WEIGHT)
         hists = {a: Counter({(200, 30, 30): 50, (20, 20, 20): 10}), b: Counter({(40, 40, 220): 50, (20, 20, 20): 10}),
                  late: Counter({(210, 60, 20): 80, (30, 200, 30): 40})}
         where = {a: {0x36, 0x46}, b: {0x37}, late: {0x36, 0x46}}
         before, was = P.place([a, b], hists, {a: {0x36}, b: {0x37}})
-        after, board = P.place([a, b, late], hists, where)
+        pins = {p.role: P.Pin(0, (0x36, 0x46) if p is a else (0x37,), *before[p][:1], tuple(before[p][1].items()))
+                for p in (a, b)}
+        after, board = P.place([a, b, late], hists, where, pins)
         for p in (a, b):
             self.assertEqual(after[p], before[p])
         # 뒤 차례 인물이 서지 않는 그룹의 줄 색은 그대로다
@@ -1161,6 +1164,108 @@ class WeightTests(unittest.TestCase):
         self.assertEqual([p.weight for p in P.PEOPLE if p.role == '남자'], [1])
 
 
+class PinTests(unittest.TestCase):
+    """배치 표: 이미 정한 인물의 줄·칸은 롬의 인물 목록이나 다른 인물이 바뀌어도 움직이지 않는다."""
+
+    def setUp(self):
+        # c 는 무겁게 세어 같은 차례에서 먼저 줄을 고른다. 표가 없으면 c 를 빼거나 더하기만 해도 a·b 의 줄이 바뀐다
+        self.a = P.Person((0x10,), None, 'x', 'a')
+        self.b = P.Person((0x11,), None, 'x', 'b')
+        self.c = P.Person((0x12,), None, 'x', 'c', weight=P.KEY_WEIGHT)
+        self.hists = {self.a: Counter({(200, 30, 30): 50, (20, 20, 20): 10, (90, 90, 90): 7}),
+                      self.b: Counter({(40, 40, 220): 50, (20, 20, 20): 10}),
+                      self.c: Counter({(30, 200, 30): 40, (210, 60, 20): 9})}
+        self.used = {0x10: {0x36, 0x3E}, 0x11: {0x36, 0x37}, 0x12: {0x36, 0x37}}
+
+    def pin(self, people, used=None):
+        """지금 계산한 배치를 표로 떠서 다시 읽는다(--pin 과 같은 길)."""
+        pins = {}
+        spots = P.pinned_where(people, self.used if used is None else used, pins)
+        placed, _ = P.place(people, self.hists, spots, pins)
+        with tempfile.TemporaryDirectory() as t:
+            path = Path(t) / 'pin.toml'
+            path.write_text(P.pin_text(people, placed, spots, P.waves(people, pins)))
+            return P.read_pins(path), placed
+
+    def test_table_round_trips_the_placement(self):
+        pins, placed = self.pin([self.a, self.b, self.c])
+        for p in (self.a, self.b, self.c):
+            self.assertEqual((pins[p.role].line, dict(pins[p.role].slots)), placed[p])
+        self.assertEqual(pins['a'].groups, (0x36, 0x3E))
+
+    def test_pinned_rows_ignore_changes_in_the_rom_people_list(self):
+        people = [self.a, self.b, self.c]
+        pins, placed = self.pin(people)
+        # 장 모듈이 인물을 빼서 그림 10 이 다른 그룹에서만 나오고, 그림 12 는 목록에서 사라졌다
+        moved = {0x10: {0x40}, 0x11: {0x37}}
+        spots = P.pinned_where(people, moved, pins)
+        self.assertEqual(spots[self.a], {0x36, 0x3E})
+        self.assertEqual(spots[self.c], {0x36, 0x37})
+        again, board = P.place(people, self.hists, spots, pins)
+        self.assertEqual(again, placed)
+        # 표 없이 계산하면 그룹이 바뀐다(표가 지키는 것)
+        self.assertNotEqual(P.where(people, moved)[self.a], spots[self.a])
+
+    def test_new_person_goes_after_the_table_and_leaves_its_rows(self):
+        pins, placed = self.pin([self.a, self.b])
+        _, board = P.place([self.a, self.b], self.hists, P.pinned_where([self.a, self.b], self.used, pins), pins)
+        people = [self.a, self.b, self.c]
+        spots = P.pinned_where(people, self.used, pins)
+        after, board2 = P.place(people, self.hists, spots, pins)
+        for p in (self.a, self.b):
+            self.assertEqual(after[p], placed[p])
+        self.assertEqual(P.waves(people, pins)[self.c], max(pin.wave for pin in pins.values()) + 1)
+        self.assertEqual(set(after[self.c][1]), set(self.hists[self.c]))
+        # 새 인물이 서지 않는 그룹의 줄 색은 그대로다
+        self.assertEqual(board2[(0x3E, after[self.a][0])], board[(0x3E, placed[self.a][0])])
+
+    def test_removed_person_leaves_the_other_rows(self):
+        pins, placed = self.pin([self.a, self.b, self.c])
+        del pins['c']
+        people = [self.a, self.b]
+        after, _ = P.place(people, self.hists, P.pinned_where(people, {}, pins), pins)
+        for p in people:
+            self.assertEqual(after[p], placed[p])
+        # 표 없이 다시 계산하면 a·b 가 c 가 쓰던 줄로 옮겨 간다(표가 지키는 것)
+        free, _ = P.place(people, self.hists, P.pinned_where(people, self.used, {}))
+        self.assertNotEqual(free, {p: placed[p] for p in people})
+
+    def test_problems_when_people_drift_from_the_table(self):
+        pins, _ = self.pin([self.a, self.b, self.c])
+        self.assertEqual(P.pin_problems([self.a, self.b, self.c], pins, self.hists), [])
+        # 표를 다시 뜨지 않고 인물을 뺌
+        self.assertRegex(P.pin_problems([self.a, self.b], pins, self.hists)[0], '^c: 표에만 있는 인물')
+        # 그림을 고쳐 색이 바뀜
+        hists = {**self.hists, self.a: Counter({(201, 30, 30): 50, (20, 20, 20): 10, (90, 90, 90): 7})}
+        self.assertRegex(P.pin_problems([self.a, self.b, self.c], pins, hists)[0], '^a: 그림 색이 표와 다름')
+        # 표를 고치지 않고 줄을 못박음
+        other = next(n for n in P.SHARED_LINES if n != pins['b'].line)
+        moved = P.Person((0x11,), None, 'x', 'b', weight=P.KEY_WEIGHT, line=other)
+        self.assertRegex(P.pin_problems([self.a, moved, self.c], pins, {**self.hists, moved: self.hists[self.b]})[0],
+                         f'^b: 못박은 줄 {other} 이 표의 줄')
+
+    def test_committed_table_covers_every_shared_line_person(self):
+        pins = P.read_pins()
+        who = [p.role for p in P.PEOPLE if p.palette is None]
+        self.assertEqual(sorted(pins), sorted(who), '인물을 더하거나 뺐으면 dq4people.py --pin 으로 표를 다시 뜬다')
+        for p in P.PEOPLE:
+            if p.role in pins:
+                self.assertIn(pins[p.role].line, P.SHARED_LINES + (5, 6, 7), p.role)
+                if p.line is not None:
+                    self.assertEqual(pins[p.role].line, p.line, p.role)
+                self.assertEqual(len({k for _, k in pins[p.role].slots}) <= 15, True, p.role)
+        self.assertEqual(P.PINS.read_text(), P.pin_text(
+            P.PEOPLE, {p: (pins[p.role].line, dict(pins[p.role].slots)) for p in P.PEOPLE if p.role in pins},
+            {p: set(pins[p.role].groups) for p in P.PEOPLE if p.role in pins},
+            P.waves(P.PEOPLE, pins)), '표는 --pin 이 쓴 꼴 그대로')
+
+    @unittest.skipUnless(os.environ.get('DQ4_ASSETS') and (Path(os.environ.get('DQ4_ASSETS', '')) / P.FIELD).is_dir(),
+                         'NDS 인물 시트가 없음')
+    def test_committed_table_matches_the_sheets(self):
+        hists = P.histograms({p: P.rgb_frames(p, Path(os.environ['DQ4_ASSETS'])) for p in P.PEOPLE})
+        self.assertEqual(P.pin_problems(P.PEOPLE, P.read_pins(), hists), [])
+
+
 def synthetic_person(name, sheet, **kw):
     return P.Person((0x10 + len(name),), None, sheet, name, **kw)
 
@@ -1182,7 +1287,7 @@ class PrepareTests(unittest.TestCase):
         table = dict(zip(self.people, sets))
         with unittest.mock.patch.object(P, 'PEOPLE', self.people), \
                 unittest.mock.patch.object(P, 'target', lambda person, rom: (table[person], 'simple', limit)):
-            return P.prepare(None, self.assets, self.work, **kw)
+            return P.prepare(None, self.assets, self.work, pins={}, **kw)
 
     def test_each_person_gets_a_sheet_a_line_and_colours(self):
         rows, board = self.prepare(limit=99)
