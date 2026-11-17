@@ -47,6 +47,9 @@ CH3 = {0x0A: (0xC5, 9), 0x13: (0xB6, 15), 0x17: (0x9D, 110), 0x19: (0xA5, 6), 0x
 # 1장 구역에만 나오던 대역 셋(エアラット·みならいあくま·ピクシー). 번호는 이 해킹이 쓰지 않는 DQ5 몬스터(free_numbers)
 CH1 = {0x09: (0x07, 20), 0x10: (0x16, 10), 0x22: (0x21, 26)}
 NUMBERED = {**CH3, **CH1}
+# 조우에는 없고 합체(がったい, FC 55 → DQ5 6F)로만 나오는 FC 몬스터 → (DQ5 번호, NDS 그림 번호). DQ5 6F 는 무리를 DQ5
+# キングスライム 6B 한 마리로 바꾸므로 6B 레코드에 FC キングスライム(30) 값을 둔다. 그림은 DQ5 6B 그대로
+MERGED = {0x30: (0x6B, 107)}
 # 1·2장 조우·사건 무리에 아직 나오지 않아 빌드가 그림을 넣지 않는 번호(dq4monport.build 의 appear). 그 장을 옮기면
 # 여기서 빼고, dq4monartcheck 는 이 밖의 번호가 원래 DQ5 그림이면 실패로 본다
 LATER = {0x0C}     # メタルスライム(FC 5C)
@@ -113,12 +116,14 @@ def doc(rom, out_dir, only=None):
 # 멈춘다. 사건 모듈의 표(dq4ch1event·dq4ch2tempe·dq4ch2endor .FC_ACTIONS)에 없는 것만 둔다.
 # 47 にげだす 는 DQ5 슬라임의 98(필드 68 이 0 이 아니면 주인공 레벨이 구역 레벨 + 4 를 넘을 때만 고름). 48·4B なかまをよぶ
 # 는 고쳐 쓴 DQ5 부르기 칸 B5·B4(summon_writes).
-# 55(행동 ID 66, 11:$A292 가 무리를 몬스터 30 キングスライム 으로 바꿈: 코드 읽기)는 무리를 합치는 처리가 없어 66.
+# 55 がったい(행동 ID 66, 11:$A292: AI 평가 10:$BBAF 가 같은 편 8마리 이상일 때만 남기고, 모두를 キングスライム 30 한 마리로)는
+# 같은 일을 하는 DQ5 がったいだ 6F(조건 12: 같은 몬스터 8마리 이상, 필드 68 ≥ 1)로. 합체한 キングスライム 의 1B マホステ 는 DQ5
+# 몬스터용 주문에 없어 66.
 # DQ5 몬스터 スカラ 는 55·56 둘이 주문 표(범위·대상 루틴·MP)가 같아 앞의 것. ピオリム(1E, 1장 ピクシー)은 DQ5 에 몬스터용도
 # 일행용도 없어 부르기처럼 66
 FC_ACTIONS = {0x0A: '45', 0x10: '4B', 0x11: '4C', 0x12: '4D', 0x13: '4E', 0x16: '53', 0x17: '54', 0x19: '59',
               0x1A: '52', 0x1C: '55', 0x1E: '66', 0x25: '5B', 0x33: '74', 0x36: '77', 0x38: '8B', 0x43: '96', 0x45: 'A3',
-              0x47: '98', 0x48: 'B5', 0x49: '71', 0x4B: 'B4', 0x5D: 'AA', 0x55: '66'}
+              0x47: '98', 0x48: 'B5', 0x49: '71', 0x4B: 'B4', 0x5D: 'AA', 0x55: '6F', 0x1B: '66'}
 # FC 내성 칸 0~E(fc dq4data.RESIST_NAMES 차례: イオ ギラ メラ デイン バギ ヒャド マヌーサ ラリホー ザキ ニフラム マホトラ
 # マホトーン メダパニ ルカニ メガンテ) → DQ5 내성 종류(50~61, dq5-data-format 「동료가 되는 몬스터」 앞 내성 표). DQ5 에만 있는
 # 5F(쓰는 곳 없음)·60 どくのいき·61 なめまわし 등은 FC 에 짝이 없어 바탕 값을 둔다
@@ -203,8 +208,8 @@ def drop_items(prg, dq5):
 
 
 def field_numbers():
-    """FC 능력치를 넣는 필드 번호: {FC 몬스터: DQ5 번호}(PORT 와 NUMBERED)."""
-    return {**PORT, **{fc: m for fc, (m, _) in NUMBERED.items()}}
+    """FC 능력치를 넣는 필드 번호: {FC 몬스터: DQ5 번호}(PORT·NUMBERED·MERGED)."""
+    return {**PORT, **{fc: m for fc, (m, _) in {**NUMBERED, **MERGED}.items()}}
 
 
 def record_writes(original, dq5_of, prg):
@@ -216,7 +221,8 @@ def record_writes(original, dq5_of, prg):
     drop_item = drop_items(prg, original)
     out = []
     for fc, m in field_numbers().items():
-        b = bytearray(original[lorom(RECORD + dq5_of[fc] * RECORD_SIZE):][:RECORD_SIZE])
+        base_of = dq5_of.get(fc, m)       # MERGED 는 대역이 없어 제 레코드 바탕
+        b = bytearray(original[lorom(RECORD + base_of * RECORD_SIZE):][:RECORD_SIZE])
         base = ''.join(str(dq5tables.get(b, [dq5tables.resist_piece(i)])) for i in range(dq5tables.RESISTS))
         for k, v in fc_entry(prg, fc, drop_item, base).items():
             if k == '내성':
@@ -230,7 +236,7 @@ def record_writes(original, dq5_of, prg):
         if bytes(b) == orig:
             continue
         out.append({'at': f'{at >> 16:02X}:{at & 0xFFFF:04X}', 'hex': b.hex(' '), 'orig': orig.hex(' '),
-                    'note': f'FC {fc:02X} 몬스터 레코드(대역 {dq5_of[fc]:02X} 바탕에 FC 능력치·행동)'})
+                    'note': f'FC {fc:02X} 몬스터 레코드({base_of:02X} 바탕에 FC 능력치·행동)'})
     return out
 
 
@@ -421,7 +427,7 @@ def korean_names(window=False):
     그 모듈의 MONSTER_NAMES."""
     names = dq4monart.korean_names()
     out = {m: SHORT.get(fc) if window and fc in SHORT else names[nds_of(fc)][1] for fc, m in PORT.items()}
-    out.update({m: names[nds][1] for m, nds in NUMBERED.values()})
+    out.update({m: names[nds][1] for m, nds in {**NUMBERED, **MERGED}.values()})
     return out
 
 
