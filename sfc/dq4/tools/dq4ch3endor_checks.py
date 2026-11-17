@@ -17,6 +17,8 @@ FLAGS = {
 KING_BELOW = endor.cell(endor.KING[2][0], endor.KING[2][1] + 1)
 ENDOR_OFF = ['ENDOR_ALLOWED', 'ENDOR_SHOP', 'ENDOR_ORDER']
 BUTTON_CELL = endor.BUTTON_LAND[1]
+# 말 창 뒤 물음 창이 뜨기를 기다려 커서를 「예」 에(dq4walk.lua 의 until·cursor)
+ASK = 'until:300;until:300;cursor:0'
 
 
 def below(mp, fc):
@@ -105,10 +107,11 @@ SEGMENTS = [
 
 def hero_cases():
     # 여신상 동굴 단추 칸(FC 40/01 (11,02))의 두 열마다: 한 줄 아래(FC (11,03))에서 올라서 「예」 면 물이 빠진 48/04 의
-    # 같은 칸에 서고, 왼쪽 통로(FC (0C,02))로 걸어 간다. 위는 물음 창이 뜬(18~26프레임) 뒤로 넉넉히 누른다: 40 이면
-    # 메시지 번호만 다른 롬에서 x 34 의 커서가 「아니요」 로 갔다(창이 뜨는 프레임과 떼는 프레임이 가까움)
+    # 같은 칸에 서고, 왼쪽 통로(FC (0C,02))로 걸어 간다. 칸에 올라서면 말 창(00)에 이어 A 없이 물음 창(32)이 뜬다. 위를
+    # 정해진 프레임만큼 누르면 물음 창이 뜨는 때(번호만 밀려도 두 프레임쯤 달라짐)에 따라 커서가 「아니요」 로 가므로, 창이 두 번
+    # 바뀌기를 기다려 커서를 「예」(0)에 두고 고른다
     bx0, _, _, by1 = endor._hero_rect(*endor.BUTTON_FC)
     return {f'endor-button-{x}': {'warp': f'{endor.CAVE_WET},{x},{by1}', 'set': '',
-                                  'walk': 'up:80;wait:200;a:8;wait:60;a:8;wait:800', 'free': '24,5',
+                                  'walk': f'up:16;{ASK};a:8;wait:60;a:8;wait:800', 'free': '24,5',
                                   'want': [('ENDOR_BUTTON', endor.BUTTON)], 'map': endor.CAVE_DRY, 'maxf': 3000}
             for x in (bx0, bx0 + 1)}
