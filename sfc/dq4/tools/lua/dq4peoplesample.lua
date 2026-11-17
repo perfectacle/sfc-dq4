@@ -24,6 +24,8 @@ local function enter()
 end
 emu.addMemoryCallback(enter, emu.callbackType.exec, 0x208001, 0x208001)
 emu.addMemoryCallback(enter, emu.callbackType.exec, 0x208226, 0x208226)
+-- 슬롯 화면(06:D17C 의 JSL $02A8BC)도 OBJ 팔레트를 제 색으로 덮어 전투처럼 센다
+emu.addMemoryCallback(enter, emu.callbackType.exec, 0x02A8BC, 0x02A8BC)
 local function bytes(from, n, kind)
   local s = {}
   for i = 0, n - 1 do s[#s + 1] = string.char(emu.read(from + i, kind)) end

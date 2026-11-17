@@ -36,8 +36,11 @@ BUYER = W.cell(0x04, 0x15)
 # 엔돌 카지노(열린 목록: 굴 공사 재개 RESUMED). 코인 수는 DQ5 7E:203C(16비트)
 COINS = 0x7E203C
 FLAGS.update({'TOWNS_COIN0': (COINS, 0xFF), 'TOWNS_COIN1': (COINS + 1, 0xFF)})
+# 슬롯 화면 안의 코인(7E:1216, 슬롯을 나올 때 7E:203C 로 옮김)
+FLAGS.update({'TOWNS_SLOT_COIN0': (0x7E1216, 0xFF), 'TOWNS_SLOT_COIN1': (0x7E1217, 0xFF)})
 SELLER = W.cell(0x18, 0x02)
 EXCHANGE = W.cell(0x1C, 0x08)
+SLOT = W.cell(*W.SLOT_CELLS[2])
 ARENA = W.cell(0x08, 0x0A)
 MAGIC_WATER = 0xA9              # DQ5 まほうのせいすい(FC 경품 첫 줄 5A)
 
@@ -69,6 +72,18 @@ SEGMENTS = [
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'bytes': {'TOWNS_COIN0': 99, 'TOWNS_COIN1': 0}}),
     # 시합 뒤에는 B 로 글을 넘기고 「다시 도전」 에 아니오(시합 길이가 표에 따라 달라 A 수로 맞추지 않음)
     ('towns_arena_end', 'walk', f'{";".join(["b:8;wait:90"] * 40)}', {'map': W.CASINO}),
+    # 슬롯(FC 기계 칸 가운데, 아래에서 위를 보고 말 걸기 → DQ5 1코인 기계): 583·584 에 「예」, 위로 한 장 넣으면 슬롯 안
+    # 코인이 99. 돌린 뒤 배당은 코어 난수에 따라 달라 코인은 넣은 뒤에만 본다
+    ('towns_slot_side', 'warp', f'{W.CASINO},{SLOT[0]},{SLOT[1] + 1}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
+    ('towns_slot', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:8;wait:60',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'bytes': {'TOWNS_SLOT_COIN0': 99, 'TOWNS_SLOT_COIN1': 0}}),
+    # 한 판 돌리고 나오기: 넣고 A 로 돌린 뒤 B 로 「もういちど」 를 띄워 「いいえ」. 슬롯 화면 안에서 구간을 나누면 다음
+    # 구간이 슬롯에 든 것을 모르고 시작하므로(dq4peoplesample 이 슬롯 입구로 화면을 가림) 맞은편부터 다시 걷는다
+    ('towns_slot_play_side', 'warp', f'{W.CASINO},{SLOT[0]},{SLOT[1] + 1}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
+    ('towns_slot_out', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:8;wait:60;'
+     'a:8;wait:1500;b:8;wait:300;right:8;wait:30;a:8;wait:300', {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}'}),
     # 코인 판매(DQ5 대화 0B): 금화 1000 에서 한 장(3장 한 장 200)
     ('towns_coin_side', 'warp', f'{W.CASINO},{SELLER[0]},{SELLER[1] + 3}',
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _gold(1000), _coins(0)))}),
