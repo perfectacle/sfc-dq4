@@ -35,20 +35,6 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(fw.corners([(0, 0), (1, 0), (2, 0), (2, 1), (2, 2)]), '4,1;4,5')
 
 
-class PartyPaletteTests(unittest.TestCase):
-    def test_every_chapter2_place_gets_the_chapter2_party_lines(self):
-        # 2장 일행이 걸어 들어가는 곳(이 검사의 FC 그룹)의 맵 그룹마다 2장 일행 줄을 덮어야 한다. 엔돌(3장 그룹 40)이
-        # 빠져 대회장에서 일행이 1장 색으로 그려졌다
-        import dq4groupbuild
-        import dq4people
-        fc_group = {m['fc']: g for g, maps in dq4groupbuild.LINKS.items() for m in maps}
-        places = (fw.CASTLE, fw.TEMPE, fw.FRENOL, fw.BAZAAR, fw.SARAN, fw.ENDOR, fw.SHRINE, fw.SHRINE_FAR, fw.TOWER,
-                  fw.CAVE)
-        maps = dq4people.flag_maps(dq4people.CHAPTER2)
-        for fc in places:
-            self.assertIn(f'{fc_group[fc]:02X}/FF', maps, f'FC 그룹 {fc:02X}')
-
-
 @unittest.skipUnless(ROM.exists(), 'rom/dq4.nes')
 class TableTests(unittest.TestCase):
     @classmethod

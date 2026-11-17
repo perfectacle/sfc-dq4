@@ -746,47 +746,6 @@ class UsageTests(unittest.TestCase):
             self.assertEqual(P.chapter_groups(3), [0x40])
             self.assertEqual(P.chapter_groups(9), [])
 
-    def test_chapter2_party_lines_cover_every_map_group_the_chapter2_events_use(self):
-        # 엔돌 무술 대회는 3장 그룹 40 의 맵이다. 그 그룹이 빠지면 대회장·대기실·엔돌 마을에서 아리나·브라이·크리프트가
-        # 1장 일행 줄 색(초록·파랑)으로 그려졌다
-        import importlib
-        maps = P.flag_maps(P.CHAPTER2)
-        modules = [importlib.import_module(n) for n in
-                   ('dq4ch2event', 'dq4ch2endor', 'dq4ch2frenol', 'dq4ch2king', 'dq4ch2ending')]
-        used = {v for m in modules for k, v in vars(m).items()
-                if k.isupper() and isinstance(v, str) and len(v) == 5 and v[2] == '/'}
-        self.assertIn('40/07', used)
-        for m in sorted(used):
-            self.assertIn(f'{m[:2]}/FF', maps, m)
-        self.assertEqual(maps[-3:], ['FE/00', 'FE/01', 'FE/02'])
-        # 3장 톨네코 줄은 2장 그룹을 덮지 않는다
-        self.assertNotIn('3D/FF', P.flag_maps(P.CHAPTER3))
-
-    def test_party_lines_are_not_shared_in_any_group_the_party_walks(self):
-        # 서장·1장·2장 일행의 전용 줄이 그 일행이 들어가는 모든 맵 그룹에서 공용 인물(배치 표)·빌린 줄에 쓰이지 않는지 본다
-        # 2장 일행이 걸어 들어가는 곳 전부가 flag_maps(CHAPTER2) 에 드는지는 test_dq4ch2fieldwalkcheck 가 본다
-        import dq4groupbuild
-        ch2 = {int(m[:2], 16) for m in P.flag_maps(P.CHAPTER2) if not m.startswith('FE')}
-        ch1 = {g for g, maps in dq4groupbuild.LINKS.items() if all(m.get('chapter') is None for m in maps)} - {
-            P.PROLOGUE}
-        parties = {
-            '서장': ({p.palette for p in P.PEOPLE if p.main and p.palette is not None and p.group == P.PROLOGUE}, {P.PROLOGUE}, None),
-            '1장': ({p.palette for p in P.PEOPLE if p.main and p.palette is not None and p.group is None
-                    and p.flag is None}, ch1, None),
-            '2장': ({p.palette for p in P.PEOPLE if p.flag == P.CHAPTER2}, ch2, P.CHAPTER2),
-        }
-        self.assertEqual(parties['서장'][0], {7})
-        self.assertEqual(parties['1장'][0], {5, 6})
-        self.assertEqual(parties['2장'][0], {5, 6, 7})
-        self.assertEqual(parties['2장'][1], {0x3D, 0x40, 0x45})
-        import tomllib
-        pins =tomllib.loads(P.PINS.read_text())['person']
-        for name, (lines, groups, flag) in parties.items():
-            for g in sorted(groups):
-                shared = {p['line'] for p in pins.values() if f'{g:02X}' in p['groups']}
-                self.assertFalse(lines & shared, f'{name} 그룹 {g:02X}')
-                self.assertFalse(lines & set(P.LENT_LINES.get(g, ())), f'{name} 그룹 {g:02X}')
-
 
 class RecolorTests(unittest.TestCase):
     def test_recolor_moves_a_colour_before_the_touches(self):
@@ -1524,7 +1483,7 @@ class BuildFlowTests(unittest.TestCase):
         self.assertEqual([(m['map'], m['line']) for m in plain], [('36/FF', '09'), ('36/FF', '0A'), ('37/FF', '09'),
                                                                    ('37/FF', '0A')])
         flagged = [m for m in maps if m['flag'] != 'FF']
-        every = [f'{g:02X}/FF' for g in P.chapter_groups(2)] + ['FE/00', 'FE/01', 'FE/02']
+        every = [f'{g:02X}/FF' for g in P.party_groups(2)] + ['FE/00', 'FE/01', 'FE/02']
         self.assertEqual([m['map'] for m in flagged], every)
         self.assertTrue(all((m['line'], m['flag'], m['mask']) == ('0C', '12', '40') for m in flagged))
         self.assertEqual(flagged[0]['colors'][:2], [31, 0])

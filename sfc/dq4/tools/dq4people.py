@@ -48,6 +48,9 @@ FLAG_CHAPTERS = {CHAPTER2: 2, CHAPTER3: 3}
 # 그 장 일행이 들르는 다른 장의 그룹. 2장 엔돌(무술 대회)은 3장 그룹 40 이라, 빠지면 대회장·대기실·마을에서 일행 줄이
 # 1장 색으로 남는다(dq4ch2endor 의 맵)
 FLAG_VISITS = {CHAPTER2: (0x40,)}
+# 장(0 은 서장)마다 일행 전용 OBJ 줄(Person.palette)을 쓰는 인물. 새 장·새 일행을 넣으면 여기에 더한다. 빠지면
+# test_dq4partylines 가 실패한다
+PARTIES = {0: ('천공의 용사',), 1: ('라이언', '호이민'), 2: ('아리나', '크리프트', '브라이'), 3: ('톨네코',)}
 from dq4chapter1 import apply_writes, lorom  # noqa: E402
 from dq4romassets import set_checksum  # noqa: E402
 import dq5npcrecord  # noqa: E402
@@ -1209,14 +1212,26 @@ def tiles(path, layout):
 
 def chapter_groups(chapter):
     import dq4groupbuild
+    if chapter is None:
+        return sorted(g for g, maps in dq4groupbuild.LINKS.items() if all(m.get('chapter') is None for m in maps))
     return sorted(g for g, maps in dq4groupbuild.LINKS.items() if any(m.get('chapter') == chapter for m in maps))
 
 
+def party_groups(chapter):
+    """그 장(0 은 서장) 일행이 서는 DQ4 맵 그룹: 서장은 서장 마을, 1장은 dq4groupbuild.LINKS 에 장이 없는 나머지 그룹,
+    2장부터는 LINKS 의 그 장 그룹과 그 장 깃발의 FLAG_VISITS."""
+    if chapter == 0:
+        return [PROLOGUE]
+    if chapter == 1:
+        return [g for g in chapter_groups(None) if g != PROLOGUE]
+    visits = {g for flag, c in FLAG_CHAPTERS.items() if c == chapter for g in FLAG_VISITS.get(flag, ())}
+    return sorted({*chapter_groups(chapter), *visits})
+
+
 def flag_maps(flag):
-    """깃발이 붙은 전용 줄(2장 일행·3장 톨네코)을 그 깃발이 켜졌을 때 덮는 맵: 그 장의 그룹, 그 장 일행이 들르는 다른 장의
-    그룹(FLAG_VISITS), 필드 세계 셋."""
-    groups = sorted({*chapter_groups(FLAG_CHAPTERS.get(flag, 2)), *FLAG_VISITS.get(flag, ())})
-    return [f'{g:02X}/FF' for g in groups] + [f'FE/{w:02X}' for w in range(3)]
+    """깃발이 붙은 전용 줄(2장 일행·3장 톨네코)을 그 깃발이 켜졌을 때 덮는 맵: 그 장 일행이 서는 그룹(party_groups),
+    필드 세계 셋."""
+    return [f'{g:02X}/FF' for g in party_groups(FLAG_CHAPTERS.get(flag, 2))] + [f'FE/{w:02X}' for w in range(3)]
 
 
 def usage(base):
