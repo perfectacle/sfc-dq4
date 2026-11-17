@@ -27,7 +27,8 @@
   시작한다. 묶음 앞 구간들이 켰을 깃발·호이민·물건을 SET·PARTY 로 직접 두므로 묶음끼리 기다리지 않고 함께 돈다.
   --base 는 서장 끝 세이브스테이트를 주어 서장을 건너뛴다(같은 롬으로 만든 것만), --only 는 그 묶음만 돈다.
   여러 시드면 시드마다 --out 아래 seed-N/ 에 구간 폴더를 둔다.
-구간마다 걷는 동안 뜬 메시지 번호(24:8BAF)의 처음 나온 차례를 기준 파일 sfc/dq4/ch1-walk-messages.toml 과 견준다.
+구간마다 걷는 동안 뜬 메시지(24:8BAF)의 처음 나온 차례를 이름표(dq4msglabels, 롬 폴더의 messages.json)로 바꿔 기준 파일
+sfc/dq4/ch1-walk-messages.toml 과 견준다.
 대사가 빠지거나 바뀌거나 늘면 그 구간이 실패한다. 기준은 --write-messages "까닭" 으로 다시 만든다(바뀐 구간에 까닭이
 남는다). 기준에 없는 변형(--chapter2)·시드는 견주지 않는다.
 형식은 sfc/dq4/docs/dq4-chapter1-format.md 「검증」.
@@ -711,9 +712,20 @@ def message_problems(variant, seed, result, baseline):
             + (f' (빠짐 {" ".join(lost)})' if lost else '') + (f' (더함 {" ".join(new)})' if new else '')]
 
 
-def write_messages(rows, reason, path=MESSAGES):
+def message_labeler(rom):
+    """롬과 같은 폴더의 messages.json 으로 번호 목록 → 이름표 목록(dq4msglabels)."""
+    import dq4msglabels
+    path = Path(rom).resolve().parent / 'messages.json'
+    if not path.exists():
+        raise SystemExit(f'{path} 가 없음: 메시지 기준은 롬을 만든 빌드 폴더의 messages.json 으로 이름표를 정한다')
+    table = dq4msglabels.table(dq4msglabels.load(path))
+    return lambda ids: dq4msglabels.labels(ids, table)
+
+
+def write_messages(rows, reason, path=MESSAGES, keep_reasons=False):
     """rows [(변형, 시드, 구간, 메시지 목록)] 로 기준 파일을 고친다. 차례가 바뀐 구간과 새 구간은 reason 을, 같은 구간은
-    앞 reason 을 둔다. rows 에 없는 기준은 그대로 둔다."""
+    앞 reason 을 둔다(keep_reasons 면 앞 항목이 있는 구간은 모두 앞 reason: 같은 메시지를 다른 꼴로 적을 때). rows 에 없는
+    기준은 그대로 둔다."""
     if not reason.strip():
         raise ValueError('까닭이 비어 있음')
     # 손으로 고친 기준도 다시 만들 수 있게 표지를 보지 않고 읽는다. 표지가 맞지 않는 항목은 앞 항목이 없는 것으로 친다
@@ -725,8 +737,10 @@ def write_messages(rows, reason, path=MESSAGES):
         order = message_order(messages)
         prev = old.get((variant, seed, name))
         new[variant, seed, name] = {'messages': order,
-                                    'reason': prev['reason'] if prev and prev['messages'] == order else reason.strip()}
-    lines = ['# 1장 걷기 검사(dq4ch1walkcheck.py)가 구간마다 견주는 메시지 번호(24:8BAF 가 받은 A)의 처음 나온 차례.',
+                                    'reason': prev['reason'] if prev and (keep_reasons or prev['messages'] == order)
+                                    else reason.strip()}
+    lines = ['# 1장 걷기 검사(dq4ch1walkcheck.py)가 구간마다 견주는 메시지(24:8BAF 가 받은 A)의 처음 나온 차례. 번호가 아니라',
+             '# 이름표(dq4msglabels: 사건 메시지는 「장.이름@글」, 그 밖은 「@글」)라 번호가 밀려도 같고 글이 바뀌면 다르다.',
              '# 손으로 고치지 않는다. dq4ch1walkcheck.py --units --write-messages "까닭" 으로 다시 만든다. 차례가 바뀐 구간에만',
              '# 그 까닭이 reason 으로 남는다. check 는 실수로 손댄 것을 알아채는 표지일 뿐 공개된 셈이라 고의 위조는 막지 않는다.',
              '']
@@ -826,13 +840,19 @@ def main():
                     state = dest / seg[0] / 'end.mss'
         expected = max(0, last + 1 - first)
     variant = 'chapter2' if args.chapter2 else 'chapter1'
-    rows = ([(variant, 0, pro['name'], pro['messages'])] if pro and 'messages' in pro else [])
-    rows += [(variant, sd, r['name'], r['messages']) for sd, rs in runs.items() for r in rs if 'messages' in r]
+    # 기준은 번호 대신 이름표로 견준다(앞 장·앞 모듈이 메시지를 더해 번호가 밀려도 같음, 글이 바뀌면 다름). 이름표는 롬과
+    # 같은 빌드 폴더의 messages.json 으로 정한다(dq4msglabels)
+    tag = message_labeler(args.rom)
+    for r in ([pro] if pro else []) + [r for rs in runs.values() for r in rs]:
+        if 'messages' in r:
+            r['labels'] = tag(r['messages'])
+    rows = ([(variant, 0, pro['name'], pro['labels'])] if pro and 'labels' in pro else [])
+    rows += [(variant, sd, r['name'], r['labels']) for sd, rs in runs.items() for r in rs if 'labels' in r]
     # 기준을 고치는 실행은 메시지를 견주지 않는다(메시지 밖 판정만으로 통과해야 고친다)
     baseline = None if args.write_messages is not None else load_messages()
     for sd, r in ([(0, pro)] if pro else []) + [(sd, r) for sd, rs in runs.items() for r in rs]:
         if baseline is not None:
-            bad = message_problems(variant, sd, r, baseline)
+            bad = message_problems(variant, sd, {**r, 'messages': r['labels']} if 'labels' in r else r, baseline)
         else:
             # 기준을 고치는 실행도 잘린 기록은 실패로 친다(그 결과는 기준으로 쓸 수 없다)
             bad = [f'메시지 기록이 {MSG_LIMIT}개를 넘어 잘림'] if 'truncated' in r.get('messages', []) else []
