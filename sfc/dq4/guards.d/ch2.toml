@@ -1,0 +1,243 @@
+# 2장 검사. 형식은 tools/guards.py(트랙 sfc/dq4 의 조각), 규칙은 guards 스킬
+
+[[check]]
+name = "dq4-ch2-walk"
+why = "2장 사건 처음부터 끝까지(첫머리~텐페·프레놀·왕 병·사당·엔돌 대회·빈 성·장 끝 상자)를 묶음마다 따로 걸어 flag·끝 맵·끝 셀·바이트를 본다. 엔돌 쪽 사당 → 엔돌, 사란 → 성문 → 장 끝은 필드를 걷고, 장 끝 서술 동안 지금 곡이 엔딩 곡 13 인지 본다. 두 번 걸어 기록이 같아야 하고(운으로 통과 금지), 걸어 다니는 브라이를 묶지 않으면 시드 5·9 에서 말 상대가 비켜 섰다"
+paths = [
+  "sfc/dq4/tools/dq4ch2*.py",
+  "sfc/dq4/tools/dq4chapterwalk.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/lua/dq4walkstate.lua",
+  "sfc/dq4/tools/lua/dq4warpmsg.lua",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/ch2walk && uv run --locked python sfc/dq4/tools/dq4ch2walkcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/ch2walk --repeat 2"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
+name = "dq4-ch2-field-walk"
+tier = "release"
+why = "2장 사건 사이 필드 길을 순간이동 없이 걷는다(산트하임 성 → 사란 → 텐페 → 프레놀 → 남쪽 동굴 → 프레놀 → 바자 → 텐페 → 성 → 이쪽 사당 → 서쪽 탑 → 성 → 사당, 엔돌 → 엔돌 쪽 사당 → 여행의 문 → 텐페 → 성, 그리고 2장 걷기 검사의 사당 → 엔돌·사란 → 성문 묶음). 길마다 그 앞 사건까지의 flag 로 출발지 도착 칸에 내려, 나가는 길로 필드의 나오는 칸에 서는지, FC 필드 속성으로 찾은 길을 걸어 다음 곳의 입구에서 그 FC 그룹의 도착 맵·칸에 드는지 본다. 텐페 블록이 산트하임 쪽과 프레놀 쪽을 잇는 유일한 칸이라, 텐페 위 가장자리로 나가면 북쪽에 서야 한다(dq4groupbuild LINKS leave_rows). 두 번 걸어 기록이 같아야 한다"
+paths = [
+  "sfc/dq4/tools/dq4ch2fieldwalkcheck.py",
+  "sfc/dq4/tools/dq4ch2walkcheck.py",
+  "sfc/dq4/tools/dq4chapterwalk.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/ch2field && uv run --locked python sfc/dq4/tools/dq4ch2fieldwalkcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/ch2field --repeat 2"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(2장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
+name = "dq4-ch2-partytalk"
+why = "2장 동료 대화: 동료 대화 줄이 있는 맵 28곳 × 2장 진행 단계 12 × 낮밤마다 「はなす」를 골라, 롬 표에서 맞는 한글 대사(없으면 원래의 129) 하나가 뜨고 창이 닫혀 다음 「はなす」가 되는지 본다(672번). 짝 표(dq4ch2partytalk-people.tsv)의 인물마다 옆 칸에서 말을 걸고 돌아서서 「はなす」를 골라, 대화 시작 훅(06:AF6A)이 적은 「말 건 인물」 값과 그 값으로 고른 대사를 본다. 「はなす」 갈래 훅(05:D5B9·받침 05:FEE8), 대화 시작 훅, 조건 평가 루틴, 줄 표·짝 표·대사·메시지 셋째 자리(71:A000~)를 바꾸면 깨진다"
+paths = [
+  "sfc/dq4/tools/dq4ch2partytalk.py",
+  "sfc/dq4/tools/dq4ch2partytalk.tsv",
+  "sfc/dq4/tools/dq4ch2partytalk-text.tsv",
+  "sfc/dq4/tools/dq4ch2partytalk-people.tsv",
+  "sfc/dq4/tools/dq4ch2partytalkcheck.py",
+  "sfc/dq4/tools/lua/dq4partytalk.lua",
+  "sfc/dq4/tools/dq4menumsg.py",
+  "sfc/dq4/tools/dq4ch2walkcheck.py",
+  "sfc/dq4/tools/dq4chapterwalk.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/lua/dq4walkstate.lua",
+  "sfc/dq4/tools/lua/dq4warpmsg.lua",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4npccheck.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/lua/dq4holdwalk.lua",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/dq5npcrecordcheck.py",
+  "sfc/dq5/tools/lua/dq5npcrecordcheck.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
+  "tools/mesence_settings.py",
+  # 3장 사건 모듈은 기본 인물 목록(2장에도 쓰임)의 대화 번호를 바꿀 수 있다
+  "sfc/dq4/tools/dq4ch3*.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/ch2talk && uv run --locked python sfc/dq4/tools/dq4ch2partytalkcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/ch2talk"
+parts = 6
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
+name = "dq4-ch2-npc"
+why = "2장 그룹(3D·45) 인물을 2장 flag 를 켠 채 말 걸어 첫 메시지·가게 품목·인물 표를 보고, 사건 뒤 상태(왕이 아픔·나음·우승, --states)의 flag 를 더 켜 말이 바뀐 인물을 본다. 순간이동은 TO 한 셀 아래에 내려, 위에서 말 거는 장면과 맨 아래 줄 인물 장면 23개가 「그 방향에는 아무도 없다」·필드로 나감으로 실패했었다"
+paths = [
+  "sfc/dq4/tools/dq4npccheck.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4ch2*.py",
+  "sfc/dq4/tools/dq4ch1event.py",
+  "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "sfc/dq4/tools/dq4shopport.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq5/tools/lua/dq5npcrecordcheck.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
+  "sfc/dq4/tools/lua/dq4holdwalk.lua",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/dq5npcrecordcheck.py",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4chapter1.py build --rom work/ch2/menu.sfc --keep work/ch2/keep --chapter2 --out work/ch2/npc.sfc && rm -rf work/ch2npc && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter2 --rom work/ch2/npc.sfc --build work/ch2/keep/groups --layout work/ch2/keep/npc-layout.json --texts work/ch2/messages.json --out work/ch2npc --jobs 4 && rm -rf work/ch2npc-states && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter2 --states king_ill,king_cured,champion --rom work/ch2/npc.sfc --build work/ch2/keep/groups --layout work/ch2/keep/npc-layout.json --texts work/ch2/messages.json --out work/ch2npc-states --jobs 4"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
+name = "dq4-ch2-heroblock"
+why = "2장 사건이 주인공이 선 칸에 따라 멈추거나 엇나가지 않게: 벽 앞 셀에 왼쪽·위·아래에서 들어서기, 벽 앞 물음에 아니요 뒤 다시 묻기, 필드 네 걸음 합류(아래·왼쪽·오른쪽), 텐페 신부에게 세 쪽에서 말 걸어 제단 앞 셀로"
+paths = [
+  "sfc/dq4/tools/dq4heroblockcheck.py",
+  "sfc/dq4/tools/dq4ch3checks.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
+  "sfc/dq4/tools/dq4ch3walkparts.py",
+  "sfc/dq4/tools/dq4ch3*_checks.py",
+  "sfc/dq4/tools/dq4chapterwalk.py",
+  "sfc/dq4/tools/dq4ch2*.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/lua/dq4heroblock.lua",
+  "sfc/dq4/tools/lua/dq4walkstate.lua",
+  "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4ch3safe.py",
+  "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
+  "sfc/dq4/tools/dq4ch3endor.py",
+  "sfc/dq4/tools/dq4mercenary.py",
+  "sfc/dq4/tools/dq4ch3bonmalmo.py",
+  "sfc/dq4/tools/dq4ch3tunnel.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/ch2heroblock && uv run --locked python sfc/dq4/tools/dq4heroblockcheck.py --chapter2 --rom work/ch2/dq4-ch1-full.sfc --out work/ch2heroblock --jobs 6"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk", "ch3-modules"]
+
+[[check]]
+name = "dq4-ch2-compat-walk"
+why = "2장 길을 MesenCE 밖에서도 걷는지: libretro bsnes·snes9x 에서 서장 → 1장 왕 보고 → 2장 첫머리를 잇고, 2장 사건 묶음을 2장 출발 상태에서 걷는다"
+paths = [
+  "sfc/dq4/tools/dq4*event.py",
+  "sfc/dq4/tools/dq4chapter*.py",
+  "sfc/dq4/tools/*.asm",
+  "sfc/dq4/tools/dq4compatcheck.py",
+  "sfc/dq4/tools/dq4chapterwalk.py",
+  "sfc/dq4/tools/dq4ch2*.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4pins.py",
+  "sfc/dq4/tools/dq4prologuecheck.py",
+  "sfc/dq4/tools/dq4brkscan.py",
+  "sfc/dq4/tools/dq4ch3safe.py",
+  "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
+  "sfc/dq4/tools/dq4ch3endor.py",
+  "sfc/dq4/tools/dq4mercenary.py",
+  "sfc/dq4/tools/dq4ch3bonmalmo.py",
+  "sfc/dq4/tools/dq4ch3tunnel.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/ch2compat && uv run --locked python sfc/dq4/tools/dq4compatcheck.py walk --chapter2 --rom work/ch2/dq4-ch1-full.sfc --out work/ch2compat --jobs 4"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]
+groups = ["ch1-build", "ch1-walk", "ch3-modules"]
+
+[[check]]
+name = "dq4-door-open-ch2"
+why = "2장 롬에서 2장에 닿는 그룹(3D 산트하임·텐페·프레놀, 40 엔돌, 45 사란·바자·서쪽 탑·남쪽 동굴)의 문도 같은 규칙이어야 한다. DQ5 의 잠금 1 판정(01:DCFC)은 カギの技法 flag 2199.1 만 보아, FC 의 도적의 열쇠(B7)를 가져도 걸어 들어가거나 「문」 으로는 산트하임 성 (16,3)·사란 (8,53) 등의 잠금 1 문이 열리지 않았다. 잠금 2 문은 도적의 열쇠로 열리면 안 된다"
+paths = [
+  "sfc/dq4/tools/dq4environmentrom.py",
+  "sfc/dq4/tools/dq4door.py",
+  "sfc/dq4/tools/dq4doorcheck.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/dq4pins.py",
+  "sfc/dq4/tools/dq4groupcheck.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "fc/dq4/tools/dq4block.py",
+  "sfc/dq4/tools/lua/dq4doorwalk.lua",
+  "sfc/dq5/tools/lua/dq5warp.lua",
+  "sfc/dq4/tools/dq4readset.py",
+  "sfc/dq4/tools/lua/dq4readset.lua",
+  "tools/mesence_settings.py",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/dq5progresscheck.py",
+  "sfc/dq5/tools/lua/dq5battle.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "sfc/dq5/tools/lua/dq5warptrace.lua",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/doorcheck2 && uv run --locked python sfc/dq4/tools/dq4doorcheck.py --rom work/ch2/dq4-ch1-full.sfc --groups 3D,40,45 --out work/doorcheck2"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
+name = "dq4-ch2-monster-art"
+why = "2장 전투 몬스터 NDS 그림(dq4monport 의 PORT·EVENT 번호)이 빌드 롬에서 dq4monport.doc 의 기대 PNG·색과 픽셀·색까지 같은지(정적), 그리고 snes9x 전투 화면(한 마리 무리와 빌드 롬 무리 조합의 2~3종 무리)의 OAM·VRAM·CGRAM 이 같은 그림·팔레트 색인지. 조우에 아직 없어 빌드가 뺀 번호는 원래 DQ5 그림 그대로인지 보고, 기대와도 원래와도 다르면 실패. 대회 상대·사건 몬스터도 무리로 강제해 본다"
+paths = [
+  "sfc/dq4/tools/dq4monport.py",
+  "sfc/dq4/tools/dq4monart.py",
+  "sfc/dq4/tools/dq4monartcheck.py",
+  "sfc/dq4/tools/test_dq4monartcheck.py",
+  "sfc/dq4/tools/dq4battlescene.py",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
+  "sfc/dq5/tools/dq5mongfx.py",
+  "sfc/dq5/tools/dq5monwrite.py",
+  "sfc/dq4/tools/dq4brkscan.py",
+  "sfc/dq4/tools/dq4compatcheck.py",
+  "sfc/dq4/tools/dq4chapterwalk.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4savefixture.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq5/tools/dq5sram.py",
+  "sfc/dq5/tools/dq5monlimits.py",
+  "sfc/dq4/tools/dq4ch3safe.py",
+  "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
+  "sfc/dq4/tools/dq4ch3endor.py",
+  "sfc/dq4/tools/dq4mercenary.py",
+  "sfc/dq4/tools/dq4ch3bonmalmo.py",
+  "sfc/dq4/tools/dq4ch3tunnel.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4monartcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/monartcheck"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk", "ch3-modules"]
+
+[[check]]
+name = "dq4-ch2-monster-actions"
+why = "2장 전투 몬스터(dq4monport 의 PORT·EVENT 번호)가 빌드 롬 레코드의 행동마다 그 행동을 실제로 쓰고(7E:10F5 몬스터·7E:10F7 행동) 다음 차례나 전투 끝까지 가는지. FC 주문을 일행 주문 번호로 옮기면 몬스터가 쓸 때 전투가 멈추고, 조건 표에 걸리면 행동을 쓰지 않는다. MP 를 쓰는 주문은 FC 횟수(레코드 MP // FC 주문 MP)만큼 외우고 외울 때마다 몬스터 칸 MP 가 FC 주문 MP 만큼 주는지. snes9x 헤드리스, 난수 고정, 한 마리 무리에 행동 여섯 칸을 한 행동으로"
+paths = [
+  "sfc/dq4/tools/dq4monport.py",
+  "sfc/dq4/tools/dq4monactcheck.py",
+  "sfc/dq4/tools/test_dq4monactcheck.py",
+  "sfc/dq4/tools/test_dq4monport.py",
+  "sfc/dq4/tools/dq4ch1event.py",
+  "sfc/dq4/tools/dq4ch2tempe.py",
+  "sfc/dq4/tools/dq4ch2endor.py",
+  "sfc/dq4/tools/dq4fieldencounter.py",
+  "sfc/dq4/tools/dq4battlescene.py",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
+  "sfc/dq4/tools/dq4brkscan.py",
+  "sfc/dq4/tools/dq4compatcheck.py",
+  "sfc/dq4/tools/dq4chapterwalk.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4savefixture.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq5/tools/dq5tables.py",
+  "sfc/dq5/tools/dq5spell.py",
+  "sfc/dq5/tools/dq5sram.py",
+  "sfc/dq4/tools/dq4ch3safe.py",
+  "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
+  "sfc/dq4/tools/dq4ch3endor.py",
+  "sfc/dq4/tools/dq4mercenary.py",
+  "sfc/dq4/tools/dq4ch3bonmalmo.py",
+  "sfc/dq4/tools/dq4ch3tunnel.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4monactcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/monactcheck"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk", "ch3-modules"]

@@ -25,11 +25,11 @@ sfc/dq4/guards.toml 은 [cache] key = "paths" 라 검사 결과 캐시 키가 �
 
 3장 사건 모듈은 dq4ch3event 가 dq4ch3slots.SLOTS 의 이름으로 들이므로(importlib) 위 길로 닿지 않고, 빌드 묶음이 덮어도
 묶음은 PR 에서 검사를 걸지 않는다. 그래서 모듈이 바꾸는 롬 내용(인물 목록·그림·메시지·훅)을 보는 검사(dq4-ch3-* 와
-CH3_CONTENT_CHECKS)는 모듈 파일(ch3_module_files)을 paths 에 직접 덮어야 하고, dq4-ch3-* 는 3장 맵·인물 목록을
-만드는 CH3_SCENE_FILES 도 덮어야 한다(ch3_missing).
+CH3_CONTENT_CHECKS)는 모듈 파일(ch3_module_files)을 paths 에 덮어야 하고(guards.d/ch3.toml 의 묶음 ch3-modules 를
+"@ch3-modules" 로), dq4-ch3-* 는 3장 맵·인물 목록을 만드는 CH3_SCENE_FILES 도 덮어야 한다(ch3_missing).
 
-많은 검사가 함께 닿는 묶음은 guards.toml 의 [groups] 에 둔다. 묶음마다 뿌리를 GROUP_ROOTS 에 적고(이름이 같아야
-함), 묶음은 그 뿌리에서 위 길로 닿는 파일을 덮어야 한다.
+많은 검사가 함께 닿는 묶음은 guards.toml 의 [groups] 에 둔다. groups 키로 쓰는 묶음마다 뿌리를 GROUP_ROOTS 에 적고
+(이름이 같아야 함), 묶음은 그 뿌리에서 위 길로 닿는 파일을 덮어야 한다. 검사 목록은 guards.toml 과 guards.d 조각이다.
 
   uv run --locked python sfc/dq4/tools/dq4guardpaths.py            # 빠진 것을 검사·묶음마다 찍음
   uv run --locked python sfc/dq4/tools/dq4guardpaths.py --group ch1-build   # 그 묶음이 덮어야 할 파일
@@ -44,6 +44,9 @@ import tomllib
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / 'tools'))
+import guards  # noqa: E402
+
 GUARDS = 'sfc/dq4/guards.toml'
 TOOL_DIRS = ('sfc/dq4/tools', 'sfc/dq5/tools', 'fc/dq4/tools', 'tools')
 LUA_DIRS = ('tools/lua', 'sfc/dq4/tools/lua', 'sfc/dq5/tools/lua')
@@ -54,6 +57,8 @@ GROUP_ROOTS = {
 }
 # dq4-ch3-* 밖에서 3장 모듈이 롬에 싣는 것을 보는 검사
 CH3_CONTENT_CHECKS = ('dq4-people-match', 'dq4-people-event-lines', 'dq4-wrap-routine', 'dq4-msg-banks', 'dq4-rom-ledger')
+# 뿌리 closure 대신 정한 목록(ch3_module_files, test_dq4guardpaths)으로 지키는 묶음
+LISTED_GROUPS = ('ch3-modules',)
 # 등록 장치를 따라 importlib 로 들이는 파일: 그 모듈에 닿으면 이 glob 에 맞는 추적 파일에 닿는다
 REGISTRIES = {
     'sfc/dq4/tools/dq4ch3checks.py': ('sfc/dq4/tools/dq4ch3*_checks.py',),
@@ -190,14 +195,19 @@ def covered(path, patterns):
     return any(PurePosixPath(path).full_match(p) for p in patterns)
 
 
-def load(text=None):
-    data = tomllib.loads(text if text is not None else (ROOT / GUARDS).read_text(encoding='utf-8'))
-    groups = data.get('groups', {})
-    checks = []
-    for c in data.get('check', []):
-        pats = [*c.get('paths', []), *(p for g in c.get('groups', []) for p in groups.get(g, []))]
-        checks.append({**c, 'all_paths': pats})
-    return checks, groups
+def load():
+    """(dq4 검사들, 묶음). 검사는 tools/guards.load 로 읽은 것(guards.toml 과 guards.d 조각, paths 의 "@묶음" 을 푼 것)에
+    all_paths(paths 와 groups 키 묶음)를 단다. 묶음은 트랙 파일마다 적은 것을 합친 {이름: [glob…]}."""
+    files = sorted(tracked())
+    checks, problems = guards.load(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8'))
+    if problems:
+        raise SystemExit('\n'.join(problems))
+    mine = [{**c, 'all_paths': c['paths']} for c in checks if guards.track_of(c['file']) == GUARDS]
+    groups = {}
+    for f in [GUARDS, *(f for f in files if guards.fragment_owner(f) == GUARDS)]:
+        for g, pats in tomllib.loads((ROOT / f).read_text(encoding='utf-8')).get('groups', {}).items():
+            groups.setdefault(g, []).extend(pats)
+    return mine, groups
 
 
 def missing(checks, groups):
@@ -223,6 +233,15 @@ def ch3_module_files():
     event = 'sfc/dq4/tools/dq4ch3event.py'
     mods = [f for f in (f'sfc/dq4/tools/{s.module}.py' for s in dq4ch3slots.SLOTS.values()) if f in tracked()]
     return sorted(set(mods) | (closure(mods) - closure([event])) | {event, 'sfc/dq4/tools/dq4ch3slots.py'})
+
+
+def raw_paths():
+    """{검사 이름: 적은 그대로의 paths}("@묶음" 을 풀기 전). guards.toml 과 조각."""
+    out = {}
+    for f in [GUARDS, *(f for f in sorted(tracked()) if guards.fragment_owner(f) == GUARDS)]:
+        for c in tomllib.loads((ROOT / f).read_text(encoding='utf-8')).get('check', []):
+            out[c['name']] = c.get('paths', [])
+    return out
 
 
 def ch3_missing(checks):

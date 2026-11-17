@@ -1,0 +1,17 @@
+# 3장 굴 공사·장 끝(dq4ch3tunnel) 사건 모듈의 검사. 형식은 tools/guards.py(트랙 sfc/dq4 의 조각), 규칙은 guards 스킬
+
+[[check]]
+name = "dq4-ch3-tunnel"
+why = "3장 굴(dq4ch3tunnel)을 두 롬과 견준다: FC 42/00·42/01 인물 칸과 대화 번호, 이주민·나그네의 FC 걷기 블록 목표 칸, 계단과 동쪽 끝 열(장 끝 판정), 빌린 DQ5 05:996C 스크립트 칸과 그 길이, 맵 도착 예외 2A:F29D 의 원래 바이트. 롬이 없으면 건너뛰는 시험이라 롬을 두고 돈다. 공사비·재개·뚫린 입구·장 끝 서술·엔딩 곡·끝 상자는 dq4-ch3-walk, 이주민과 주인공 겹침은 dq4-ch3-heroblock, 인물 첫 말은 dq4-ch3-npc 가 본다"
+paths = [
+  "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4eventchecks.py",
+  "sfc/dq4/tools/test_dq4ch3tunnel.py",
+  "sfc/dq4/tools/dq4chapterbox.py",
+  "@ch3-modules",
+  "sfc/dq4/tools/dq4npcport.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+]
+run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4ch3tunnel.py 2>&1 | tee work/ch3-tunnel.log | tail -1 | grep -qx OK"
+needs = ["rom"]
+groups = ["ch1-walk"]

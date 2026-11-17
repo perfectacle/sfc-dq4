@@ -61,7 +61,7 @@
 
 1. `sfc/dq4/tools/<SLOTS 의 module>.py` 를 만듭니다. 쓰는 flag 를 `FLAGS` 에 적고, 아래 표에서 필요한 것만 둡니다.
 2. 자원이 모자라면 `dq4ch3slots.py` 의 자기 줄만 고칩니다(예비 `SPARE` 에서 가져옴).
-3. 이 문서의 자기 절(아래 「레이크나바」~「마을 사람」)에 인터페이스를 적고, `sfc/dq4/guards.toml` 에 `dq4-ch3-<이름>` 검사를 더합니다.
+3. 이 문서의 자기 절(아래 「레이크나바」~「마을 사람」)에 인터페이스를 적고, 자기 조각 `sfc/dq4/guards.d/ch3-<이름>.toml` 에 `dq4-ch3-<이름>` 검사를 둡니다. 모듈 파일은 다른 검사들이 `"@ch3-modules"` 묶음으로 이미 잡으므로 그 검사들의 `paths` 는 고치지 않습니다. 걷기·주인공 막기 표는 옆 `<module>_checks.py` 에 둡니다(아래 「검사」).
 
 ### 모듈이 내놓는 것
 
@@ -395,7 +395,7 @@ FC 실측(`rom/dq4.nes`, 1장 왕좌의 방 상태에서 `$615A` = 2, 금화 100
 
 ## 검사
 
-3장 사건이 늘 때마다 아래 검사에 그 사건의 구간·사례를 붙입니다. 모두 `dq4build.py --chapter3` 롬으로 돌고, 난수·시각·조우를 묶어 같은 입력이면 같은 기록을 냅니다([2장 검사](dq4-chapter2-format.md#검사에-구간-붙이기)와 같은 틀). 가드는 [`guards.toml`](../guards.toml) 의 `dq4-ch3-*` 이고 `paths` 에 `sfc/dq4/tools/dq4ch3*.py` 가 있어 3장 사건 모듈을 새로 만들어도 걸립니다. 빌드가 모듈을 이름으로 들여(importlib) import 길로는 닿지 않으므로, `dq4-ch3-*` 와 3장 모듈이 싣는 롬 내용을 보는 검사(`dq4guardpaths.CH3_CONTENT_CHECKS`: 인물 그림·사건 중 팔레트 줄·줄바꿈 루틴·메시지 뱅크·롬 장부)는 모듈 파일과 모듈만 닿는 파일(`dq4boulder.py` 등)을 `paths` 에 직접 적고, `dq4-ch3-*` 는 3장 맵·인물 목록 파일(`dq4npcport.py`·`dq4groupbuild.py`)도 적습니다. `test_dq4guardpaths` 가 지키고, 빠진 것은 `dq4guardpaths.py` 가 찍습니다. 롬 장부 가드 `dq4-rom-ledger` 는 3장 롬 장부도 봅니다.
+3장 사건이 늘 때마다 아래 검사에 그 사건의 구간·사례를 붙입니다. 모두 `dq4build.py --chapter3` 롬으로 돌고, 난수·시각·조우를 묶어 같은 입력이면 같은 기록을 냅니다([2장 검사](dq4-chapter2-format.md#검사에-구간-붙이기)와 같은 틀). 가드는 `dq4-ch3-*` 이고, 장 단위 검사는 [`guards.d/ch3.toml`](../guards.d/ch3.toml), 사건 모듈마다의 검사는 `guards.d/ch3-<모듈>.toml` 조각에 둡니다. 빌드가 모듈을 이름으로 들여(importlib) import 길로는 닿지 않으므로, `dq4-ch3-*` 와 3장 모듈이 싣는 롬 내용을 보는 검사(`dq4guardpaths.CH3_CONTENT_CHECKS`: 인물 그림·사건 중 팔레트 줄·줄바꿈 루틴·메시지 뱅크·롬 장부), `paths` 에 `"@ch3-modules"`(`guards.d/ch3.toml` 의 묶음: `dq4ch3*.py` 에서 검사 도구·검사 표를 뺀 것과 모듈만 닿는 `dq4boulder.py` 등)를 적고(모듈 `_checks` 표를 거쳐 import 로만 닿는 장면 검사는 `groups` 키에 같은 묶음, 배포 관문 몫), `dq4-ch3-*` 는 3장 맵·인물 목록 파일(`dq4npcport.py`·`dq4groupbuild.py`)도 적습니다. 새 모듈 파일 `dq4ch3<이름>.py` 는 묶음 glob 에 들어, 모듈 PR 이 다른 검사의 `paths` 를 고치지 않습니다. 모듈만 닿는 다른 이름의 도우미는 자기 조각에 `[groups]` `ch3-modules = ["…"]` 로 더합니다(같은 이름 묶음은 합쳐짐). `test_dq4guardpaths` 가 지키고, 빠진 것은 `dq4guardpaths.py` 가 찍습니다. 롬 장부 가드 `dq4-rom-ledger` 는 3장 롬 장부도 봅니다.
 
 | 검사 | 보는 것 | 가드 |
 | --- | --- | --- |
