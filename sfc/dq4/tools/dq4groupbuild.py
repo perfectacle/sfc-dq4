@@ -888,7 +888,7 @@ def _build(pool, dq5, dq4, out, with_people):
         "writes": [dq4fieldencounter.terrain_rates(prg, dq5.read_bytes()), *dq4fieldencounter.grid_hook_writes(),
                    *dq4wellswitch.writes(WELL_SWITCH_AT, prg, placement(prg)),
                    *dq4dungeonrate.writes(DUNGEON_RATE_AT, prg, placement(prg), dq5_zone, fc_zones),
-                   *dq4balance.writes()]}))
+                   *dq4balance.writes(), *dq4fieldencounter.ch3_writes(prg, dq5.read_bytes(), zone_report)]}))
 
     import dq4sleepertalk
     manifests.append(_save(out / "sleeper-talk.dq5patch.json", {

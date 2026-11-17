@@ -115,6 +115,16 @@ MONSTERS = {
 PLACEHOLDERS = dict(MONSTERS)
 import dq4monport  # noqa: E402
 MONSTERS.update(dq4monport.PORT)
+# FC 3장의 구역(dq4encounter.ch3_reach 로 닿는 필드 구역과 그 입구 던전의 구역). 3장에만 FC 값을 넣은 종(dq4monport.CH3)은
+# 이 구역에서만 그 번호를 쓴다. 같은 종이 1장 던전·필드에도 대역으로 나오는데, 1장 롬의 전투를 바꾸지 않으려고 그쪽은 둔다
+CH3_FIELD, CH3_DUNGEON = (0x14, 0x15, 0x16, 0x17), (0x48, 0x49, 0x4A, 0x4B)
+CH3_ZONES = CH3_FIELD + CH3_DUNGEON
+CHAPTER3_MONSTERS = {**MONSTERS, **{fc: m for fc, (m, _) in dq4monport.CH3.items()}}
+
+
+def monsters_of(z):
+    """FC 구역 z 의 몬스터를 옮기는 표."""
+    return CHAPTER3_MONSTERS if z in CH3_ZONES else MONSTERS
 # FC slots: 0-4 a group plus more groups (DQ5 slots 0-4, several species), 6-10 one group of a count code (DQ5
 # slots 5-9, codes 0-7 of the same meaning but 4 and 5: FC 1-3 and 2-4, DQ5 2-3 and 3-4), 5 and 11 one monster (a
 # free DQ5 slot of 5-9 with code 0), 12-13 FC formations (in a dungeon zone, slot 12 is DQ5 slot 10's fixed group,
@@ -383,18 +393,33 @@ def _lorom(addr):
     return (addr >> 16 & 0x7F) * 0x8000 + (addr & 0x7FFF)
 
 
-def dungeon_fixed(prg, fc):
-    """{FC formation: DQ5 fixed group} of the slot-12 formations of the FC dungeon zones `fc`, in formation order."""
+def _formations(prg, zones):
     enc = _fc(prg)
-    found = sorted({enc.zone(prg, z)["slots"][FORMATION_SLOT] for z in set(fc)} - {0xFF})
+    return {enc.zone(prg, z)["slots"][FORMATION_SLOT] for z in set(zones)} - {0xFF}
+
+
+def dungeon_fixed(prg, fc, field=()):
+    """{FC formation: DQ5 fixed group} of the slot-12 formations of the FC dungeon zones `fc`, in formation order,
+    then those only the FC field zones `field` have (field_formations), in formation order: a field formation added
+    later leaves the dungeon groups' numbers as they were."""
+    found = sorted(_formations(prg, fc))
+    found += sorted(_formations(prg, field) - set(found))
     if len(found) > FIXED_GROUPS:
         raise ValueError(f"{len(found)} FC formations, {FIXED_GROUPS} DQ5 fixed groups")
     return {f: k for k, f in enumerate(found)}
 
 
-def fixed_groups(prg, dq5, fixed):
+def field_formations(prg):
+    """The FC field zones whose slot-12 formation becomes DQ5 slot 10 on the field: chapter 3's (CH3_FIELD), so
+    the zones chapters 1 and 2 walk keep their records."""
+    enc = _fc(prg)
+    return [z for z in CH3_FIELD if enc.zone(prg, z)["slots"][FORMATION_SLOT] != 0xFF
+            and enc.weights(prg, enc.zone(prg, z)["row"])[FORMATION_SLOT]]
+
+
+def fixed_groups(prg, dq5, fixed, chapter3=()):
     """dq5encounter/1 fixed_groups of the FC formations `fixed` (dungeon_fixed): each member's monster through
-    MONSTERS and the DQ5 count code of the same range."""
+    MONSTERS (CHAPTER3_MONSTERS for the formations in `chapter3`) and the DQ5 count code of the same range."""
     enc = _fc(prg)
     base, width = (dq5[_lorom(t):_lorom(t) + COUNT_CODES] for t in (COUNT_BASE, COUNT_WIDTH))
     codes = {(base[c], base[c] + max(width[c], 1) - 1): c for c in reversed(range(COUNT_CODES))}
@@ -405,16 +430,18 @@ def fixed_groups(prg, dq5, fixed):
             raise ValueError(f"FC formation {f:02X}: {len(members)} groups, a DQ5 fixed group holds {FIXED_MEMBERS}")
         if any((lo, hi) not in codes for _, lo, hi in members):
             raise ValueError(f"FC formation {f:02X}: a count range no DQ5 count code has")
-        out.append({"index": k, "members": [{"monster": MONSTERS[m], "count_code": codes[lo, hi]}
+        table = CHAPTER3_MONSTERS if f in chapter3 else MONSTERS
+        out.append({"index": k, "members": [{"monster": table[m], "count_code": codes[lo, hi]}
                                             for m, lo, hi in members]})
     return out
 
 
-def record(prg, dq5, z, dungeon=None, kinds=LAND_KINDS):
-    """dq5progress/1 encounter fields of FC zone z (without its index) and the FC slots left out. `dungeon` is
-    dungeon_fixed for a dungeon zone (None on the field): the rate is dungeon_rate_index, and slot 12 becomes DQ5
-    slot 10. On the field the rate is field_rate_index on the FC kinds `kinds`."""
+def placed(prg, z, dungeon=None, field_fixed=None, monsters=None):
+    """(DQ5 slots 0-9, fixed slot, {DQ5 slot 0-10: FC slot}, FC slots left out) of FC zone z, as record() lays them.
+    The fixed slot (DQ5 10) takes slot 12's formation through `dungeon` (dungeon_fixed) in a dungeon zone, or through
+    `field_fixed` on the field; else it is empty."""
     enc = _fc(prg)
+    monsters = monsters_of(z) if monsters is None else monsters
     rec = enc.zone(prg, z)
     s, w = rec["slots"], enc.weights(prg, rec["row"])
     code16 = w[16] | w[17] << 8
@@ -425,17 +452,22 @@ def record(prg, dq5, z, dungeon=None, kinds=LAND_KINDS):
         return max(1, round(DQ5_WEIGHT * w[i] / top)) if w[i] else 0
 
     slots = {k: {"index": k, "weight": 0, "count_code": 0, "monster": 0} for k in range(10)}
+    origin = {}
     for i in GROUP_SLOTS:
         if s[i] != 0xFF:
-            slots[i].update(weight=weight(i), count_code=GROUP_COUNT, monster=MONSTERS[s[i]])
+            slots[i].update(weight=weight(i), count_code=GROUP_COUNT, monster=monsters[s[i]])
+            origin[i] = i
     for i in SOLO_SLOTS:
         if s[i] != 0xFF:
-            slots[i - 1].update(weight=weight(i), count_code=code16 >> 3 * (i - 6) & 7, monster=MONSTERS[s[i]])
+            slots[i - 1].update(weight=weight(i), count_code=code16 >> 3 * (i - 6) & 7, monster=monsters[s[i]])
+            origin[i - 1] = i
     dropped = [i for i in (12, 13) if s[i] != 0xFF]
     fixed_slot = {"weight": 0, "group": 0}
-    if dungeon is not None and s[FORMATION_SLOT] != 0xFF and w[FORMATION_SLOT]:
-        fixed_slot = {"weight": weight(FORMATION_SLOT), "group": dungeon[s[FORMATION_SLOT]]}
+    groups = dungeon if dungeon is not None else field_fixed
+    if groups is not None and s[FORMATION_SLOT] in groups and w[FORMATION_SLOT]:
+        fixed_slot = {"weight": weight(FORMATION_SLOT), "group": groups[s[FORMATION_SLOT]]}
         dropped.remove(FORMATION_SLOT)
+        origin[10] = FORMATION_SLOT
     for i in ONE_SLOTS:
         if s[i] == 0xFF:
             continue
@@ -443,9 +475,22 @@ def record(prg, dq5, z, dungeon=None, kinds=LAND_KINDS):
         if not free or not w[i]:
             dropped.append(i)
             continue
-        slots[free[0]].update(weight=weight(i), count_code=0, monster=MONSTERS[s[i]])
+        slots[free[0]].update(weight=weight(i), count_code=0, monster=monsters[s[i]])
+        origin[free[0]] = i
+    return list(slots.values()), fixed_slot, origin, dropped
+
+
+def record(prg, dq5, z, dungeon=None, kinds=LAND_KINDS, field_fixed=None):
+    """dq5progress/1 encounter fields of FC zone z (without its index) and the FC slots left out. `dungeon` is
+    dungeon_fixed for a dungeon zone (None on the field): the rate is dungeon_rate_index, and slot 12 becomes DQ5
+    slot 10. On the field the rate is field_rate_index on the FC kinds `kinds`, and slot 12 becomes slot 10 only
+    through `field_fixed` (the formations of field_formations). Monsters go through monsters_of(z)."""
+    enc = _fc(prg)
+    rec = enc.zone(prg, z)
+    w = enc.weights(prg, rec["row"])
+    slots, fixed_slot, _, dropped = placed(prg, z, dungeon, field_fixed)
     rate = field_rate_index(prg, dq5, rec["rate"], kinds) if dungeon is None else dungeon_rate_index(prg, dq5, rec["rate"])
-    return {"level": rec["b1"], "slots": list(slots.values()), "fixed": fixed_slot,
+    return {"level": rec["b1"], "slots": slots, "fixed": fixed_slot,
             "species_weights": [3, 1 if w[14] else 0, 1 if w[15] else 0], "rate_index": rate,
             "flag_1000": 0, "flag_1010": False, "fixed_night_only": False}, dropped
 
@@ -455,13 +500,18 @@ def docs(prg, dq5, enc, dungeon=()):
     dungeon zones `dungeon` (dungeon_zones). The terrain rates are terrain_rates; the grid hook is grid_hook_writes."""
     assign = zones(prg, enc)
     late = chapter3_assign(prg, enc, dungeon)
-    fixed = dungeon_fixed(prg, dungeon)
-    groups = fixed_groups(prg, dq5, fixed)
+    field = field_formations(prg)
+    fixed = dungeon_fixed(prg, dungeon, field)
+    # 3장 구역만 쓰는 편성이어야 3장 번호로 옮긴다(1·2장 구역과 함께 쓰는 고정 무리는 그 장 롬의 전투가 바뀌므로 대역 그대로)
+    chapter3 = _formations(prg, [z for z in [*dungeon, *field] if z in CH3_ZONES]) - \
+        _formations(prg, [z for z in dungeon if z not in CH3_ZONES])
+    groups = fixed_groups(prg, dq5, fixed, chapter3)
     records, report = [], {}
     found_dungeon = dungeon_zones(prg, enc, dungeon)
     for kind, found in (("field", {**assign, **late}), ("dungeon", found_dungeon)):
         for fc, area in found.items():
-            fields, dropped = record(prg, dq5, fc, fixed if kind == "dungeon" else None)
+            fields, dropped = record(prg, dq5, fc, fixed if kind == "dungeon" else None,
+                                     field_fixed=fixed if fc in field else None)
             records.append({"index": area, **fields})
             monsters = {sl["monster"] for sl in fields["slots"] if sl["weight"]}
             if fields["fixed"]["weight"]:
@@ -525,6 +575,210 @@ def zone_monsters(prg, zones):
     """FC 구역(필드·던전 번호) 레코드 칸에 나오는 몬스터 ID."""
     enc = _fc(prg)
     return sorted({m for z in zones for m in enc.zone(prg, z)["slots"] if m not in (0, 0xFF)})
+
+
+# ---- 3장 밤·낮 칸과 전투 뒤 물건 ----
+#
+# 형식 문서 sfc/dq4/docs/dq4-ch3-monsters-format.md.
+#
+# 밤·낮 칸: FC 필드는 첫 무리를 고를 때 낮이면 칸 4·10·13, 밤이면 칸 0·6 을 빼고(dq4encounter.MASK_FIRST), 둘째 무리부터는
+# 칸 0~3(낮)·1~4(밤)에서 고른다(MASK_SECOND). 둘째 마스크는 첫 마스크를 칸 0~4 로 자른 것과 같아, 빠진 칸의 무게를 0 으로
+# 두면 두 단계 모두 FC 와 같다. DQ5 는 칸 무게를 두 곳(23:E904 첫 무리, 23:EAAD 둘째 종부터)에서 읽으므로 둘 다 훅을 건다.
+# 마스크는 3장 flag(chapter3_flag)가 켜진 동안 3장 필드 구역(CH3_FIELD)에만 건다: 1·2장 롬의 조우는
+# 그대로다. 밤은 DQ5 의 밤 판정 21:8000(carry 면 밤, 고정 무리의 밤 칸이 쓰는 것)이다.
+#
+#   23:E8EE  LDY #$FFFF / STY $1001 → JSL night:  구역(X = 구역 × 22)이 표에 있고 3장 flag 면 그 낮·밤 마스크를 MASK 에,
+#            아니면 0. 원래 두 명령을 하고 돌아온다
+#   23:E907·23:EAB0  AND #$07 / STA $0000,Y → JSL weight:  칸 Y 의 MASK 비트가 켜져 있으면 무게 0
+#
+# 전투 뒤 물건: FC 3장(12:$91DE, $615A = 2)은 몬스터 떨어뜨림 대신 16칸 표를 rand(16) 칸부터 차례로 돌며 rand(256) < 문턱이면
+# 그 물건을 얻는다. 문턱 0 인 칸(はがねのつるぎ·てつのよろい)은 톨네코 레벨이다(fc/dq4/docs/dq4-chapter3-format.md
+# 「전투 뒤 물건」). 몬스터를 하나라도 쓰러뜨렸을 때만 돈다(FC $7200 은 쓰러뜨린 몬스터, 처음 FF; DQ5 는 쓰러뜨린 수
+# $111A 가 처음 FF).
+#
+#   25:8966  LDA $1116 / CMP #$FF / BNE → JSL drop / BNE:  3장 flag 가 아니면 원래 판정(Z = 후보 없음). 3장이면 위 표를 굴려
+#            못 얻으면 Z = 1(떨어뜨림 없음), 얻으면 $46 = 물건, $42 = 마지막으로 쓰러뜨린 종류($111C)의 칸으로 두고 돌아갈
+#            곳을 25:89AA(떨어뜨릴 물건을 $46 에서 읽는 곳)로 바꾼다. 메시지는 DQ5 의 떨어뜨림 그대로(FC 3장은 「もっていた」)
+
+# 코드와 표. 뱅크 4E 는 다른 도구가 쓰지 않는다
+CH3_CODE_AT = 0x4E8000
+# 23:E8EE 에서 정한 이번 조우의 칸 마스크(16비트, bit k = DQ5 칸 k 를 뺌). 7E:1A86~1A97 은 전원부터 배·필드·전투까지
+# 아무도 읽지 않는 자리이고(dq4dungeonrate.RAM), 1A86~1A91 은 던전 걸음 훅, 1A94~1A97 은 소리 패치가 쓴다
+MASK = 0x7E1A92
+NIGHT_SITE, NIGHT_ORIG = 0x23E8EE, bytes((0xA0, 0xFF, 0xFF, 0x8C, 0x01, 0x10))
+WEIGHT_SITES = (0x23E907, 0x23EAB0)
+WEIGHT_ORIG = bytes((0x29, 0x07, 0x99, 0x00, 0x00))
+IS_NIGHT = 0x218000
+CH3_ZONE_RECORD = 22            # 23:96F3 + 구역 × 22
+FC_FIXED_SLOT = 12
+
+DROP_SITE, DROP_ORIG = 0x258966, bytes((0xAD, 0x16, 0x11, 0xC9, 0xFF, 0xD0, 0x03))
+DROP_ITEM = 0x2589AA        # LDA $46 / CMP #$FF: 떨어뜨릴 물건
+RANDOM = 0x00953E           # A(16비트) = n → 0~n-1
+CANDIDATE, KILLS, LAST_KIND = 0x7E1116, 0x7E111A, 0x7E111C
+TORNEKO_LEVEL = 0x7E2052    # 일행 기록 0(7E:2040) + 12. 3장 일행 기록 0 은 톨네코
+BATTLE_FIELD = 0x88         # BRK 88 n: 칸 $42 의 전투 필드 n → $46
+KIND_FIELD = 0x78
+MONSTER_SLOTS = 0x10
+
+# FC 3장 전용 표(12:$91DE): 문턱 12:$928E, 물건 12:$929E 의 16칸
+FC_BANK, FC_THRESHOLDS, FC_ITEMS, DROP_SLOTS = 0x12, 0x928E, 0x929E, 16
+
+
+def _rd(prg, bank, addr, n):
+    o = bank * 0x4000 + (addr & 0x3FFF)
+    return list(prg[o:o + n])
+
+
+def fc_drop_table(prg):
+    """[(문턱, FC 물건)] 16칸. 문턱 0 은 톨네코 레벨."""
+    return list(zip(_rd(prg, FC_BANK, FC_THRESHOLDS, DROP_SLOTS), _rd(prg, FC_BANK, FC_ITEMS, DROP_SLOTS)))
+
+
+def drop_roll(table, level, start, rolls):
+    """FC 3장 전용 표를 start 칸부터 굴린 칸(못 얻으면 None). rolls 는 칸마다 쓰는 rand(256) 값(앞에서부터)."""
+    for k in range(DROP_SLOTS):
+        x = (start + k) % DROP_SLOTS
+        threshold = table[x][0] or level
+        if rolls[k] < threshold:
+            return x
+    return None
+
+
+def drop_chance(table, level):
+    """한 번 굴려 무엇이든 얻을 확률(시작 칸 고르게)."""
+    total = 0.0
+    for start in range(DROP_SLOTS):
+        miss = 1.0
+        for k in range(DROP_SLOTS):
+            miss *= 1 - (table[(start + k) % DROP_SLOTS][0] or level) / 256
+        total += 1 - miss
+    return total / DROP_SLOTS
+
+
+def dq5_drop_items(prg, dq5):
+    """FC 표의 물건 16칸 → DQ5 물건 번호(가게·상자와 같은 짝, dq4monport.drop_items). 짝이 없으면 ValueError."""
+    import dq4monport
+    of = dq4monport.drop_items(prg, dq5)
+    out = []
+    for _, item in fc_drop_table(prg):
+        m = of(item)
+        if m is None:
+            raise ValueError(f'FC 물건 {item:02X} 에 DQ5 짝이 없음')
+        out.append(m)
+    return out
+
+
+def ch3_masks(prg, z):
+    """FC 필드 구역 z 의 (낮 마스크, 밤 마스크): FC 첫 무리 마스크에서 빠지는 FC 칸이 놓인 DQ5 칸의 비트
+    (placed 의 짝). 필드의 고정 편성 칸 12 는 낮·밤 모두 남아 고정 무리 칸 10 은 보지 않는다."""
+    import dq4encounter
+    _, _, origin, _ = placed(prg, z)
+    out = []
+    for mode in ('day', 'night'):
+        keep = dq4encounter.MASK_FIRST[mode]
+        out.append(sum(1 << k for k, fc in origin.items() if not keep >> fc & 1))
+    return tuple(out)
+
+
+def ch3_zone_masks(prg, report):
+    """[(DQ5 구역, 낮 마스크, 밤 마스크)]: 3장 필드 구역(CH3_FIELD) 가운데 마스크가 있는 것. report 는
+    docs 의 보고(FC 구역 → zone)."""
+    out = []
+    for z in CH3_FIELD:
+        day, night = ch3_masks(prg, z)
+        if day or night:
+            out.append((report[f'{z:02X}']['zone'], day, night))
+    return out
+
+
+def _long(v):
+    return v.to_bytes(3, 'little')
+
+
+def ch3_code(rows, items, at=CH3_CODE_AT):
+    from dq4environmentrom import _Asm
+    """(코드, 라벨). rows 는 zone_masks, items 는 DQ5 물건 16칸(dq5_drop_items)."""
+    flag, bit = chapter3_flag()
+    a = _Asm(at)
+    # 23:E8EE 에서: M 8비트, X 16비트, DB 23, X = 구역 × 22
+    a.label('night').b(0x08, 0x48, 0xDA)                                     # PHP PHA PHX
+    a.b(0xC2, 0x20, 0xA9, 0x00, 0x00, 0x8F, *_long(MASK))                    # REP #$20 / LDA #0 / STA MASK
+    a.b(0xE2, 0x20, 0xAF, *_long(flag), 0x29, bit).rel(0xF0, 'night_out')     # SEP #$20 / LDA flag / AND / BEQ
+    a.b(0xC2, 0x20, 0x8A, 0xA2, 0x00, 0x00)                                  # REP #$20 / TXA / LDX #0
+    a.label('zone').long(0xDF, 'zones').rel(0xF0, 'found')                  # CMP zones,X / BEQ
+    a.b(0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8)                                  # INX ×6
+    a.b(0xE0, *(6 * len(rows)).to_bytes(2, 'little')).rel(0x90, 'zone')      # CPX #n / BCC
+    a.rel(0x80, 'night_16')
+    a.label('found').b(0x22, *_long(IS_NIGHT)).rel(0xB0, 'dark')            # JSL 21:8000 / BCS
+    a.long(0xBF, 'zones', 2).rel(0x80, 'store')                             # LDA zones+2,X (낮)
+    a.label('dark').long(0xBF, 'zones', 4)                                  # LDA zones+4,X (밤)
+    a.label('store').b(0x8F, *_long(MASK))
+    a.label('night_16').b(0xE2, 0x20)
+    a.label('night_out').b(0xFA, 0x68, 0x28)                                 # PLX PLA PLP
+    a.b(*NIGHT_ORIG, 0x6B)                                                   # LDY #$FFFF / STY $1001 / RTL
+    # 23:E907·23:EAB0 에서: M 8비트, X·Y 16비트, Y = 칸
+    a.label('weight').b(0x29, 0x07).rel(0xF0, 'weight_store')               # AND #7 / BEQ
+    a.b(0x48, 0x5A, 0xC2, 0x20, 0xAF, *_long(MASK))                         # PHA PHY REP #$20 LDA MASK
+    a.b(0xC0, 0x00, 0x00).rel(0xF0, 'test')                                 # CPY #0 / BEQ
+    a.label('shift').b(0x4A, 0x88).rel(0xD0, 'shift')                       # LSR / DEY / BNE
+    a.label('test').b(0xE2, 0x20, 0x4A, 0x7A, 0x68).rel(0x90, 'weight_store')  # SEP LSR PLY PLA BCC
+    a.b(0xA9, 0x00)                                                          # LDA #0
+    a.label('weight_store').b(0x99, 0x00, 0x00, 0x6B)                        # STA $0000,Y / RTL
+    # 25:8966 에서: M·X 8비트
+    a.label('drop').b(0xAF, *_long(flag), 0x29, bit).rel(0xD0, 'ch3')
+    a.b(0xAF, *_long(CANDIDATE), 0xC9, 0xFF, 0x6B)                           # 원래 판정
+    a.label('ch3').b(0xAF, *_long(KILLS), 0xC9, 0xFF).rel(0xD0, 'roll')
+    a.label('none').b(0xA9, 0x00, 0x6B)                                      # Z = 1: 떨어뜨림 없음
+    a.label('roll').b(0xC2, 0x20, 0xA9, DROP_SLOTS, 0x00, 0x22, *_long(RANDOM))  # rand(16)
+    a.label('start').b(0xE2, 0x20, 0xAA, 0xA0, DROP_SLOTS)                        # SEP / TAX / LDY #16
+    a.label('slot').long(0xBF, 'thresholds').rel(0xD0, 'have')               # LDA thresholds,X / BNE
+    a.b(0xAF, *_long(TORNEKO_LEVEL))
+    a.label('have').b(0x85, 0x46, 0x5A)                                       # STA $46 / PHY
+    a.b(0xC2, 0x20, 0xA9, 0x00, 0x01, 0x22, *_long(RANDOM))                 # rand(256)
+    a.label('rolled').b(0xE2, 0x20, 0x7A, 0xC5, 0x46).rel(0x90, 'hit')       # SEP / PLY / CMP $46 / BCC
+    a.b(0xE8, 0x8A, 0x29, DROP_SLOTS - 1, 0xAA, 0x88).rel(0xD0, 'slot')           # INX TXA AND TAX DEY BNE
+    a.rel(0x80, 'none')
+    a.label('hit').long(0xBF, 'items').b(0x48, 0x64, 0x42)                   # LDA items,X / PHA / STZ $42
+    a.label('find').b(0x00, BATTLE_FIELD, KIND_FIELD, 0xA5, 0x46)            # BRK 88 78 / LDA $46
+    a.b(0xCF, *_long(LAST_KIND)).rel(0xF0, 'found_kind')                     # CMP $111C / BEQ
+    a.b(0xE6, 0x42, 0xA5, 0x42, 0xC9, MONSTER_SLOTS).rel(0x90, 'find')        # INC LDA CMP BCC
+    a.b(0x64, 0x42)
+    a.label('found_kind').b(0x68, 0x85, 0x46)                                # PLA / STA $46
+    back = DROP_ITEM - 1
+    a.b(0xC2, 0x20, 0xA9, back & 0xFF, back >> 8 & 0xFF, 0x83, 0x01, 0xE2, 0x20, 0x6B)  # 돌아갈 곳 / RTL
+    a.label('zones')
+    for zone, day, night in rows:
+        a.b(*(zone * CH3_ZONE_RECORD).to_bytes(2, 'little'), *day.to_bytes(2, 'little'), *night.to_bytes(2, 'little'))
+    a.label('thresholds')
+    a.b(*(t for t, _ in items))
+    a.label('items')
+    a.b(*(m for _, m in items))
+    return a.assemble()
+
+
+def ch3_writes(prg, dq5, report, at=CH3_CODE_AT):
+    """dq5patch/1 쓰기: 코드·표와 훅 네 곳. report 는 docs 의 보고."""
+    table = fc_drop_table(prg)
+    items = list(zip((t for t, _ in table), dq5_drop_items(prg, dq5)))
+    rows = ch3_zone_masks(prg, report)
+    if not rows:
+        raise ValueError('밤·낮 마스크가 있는 3장 필드 구역이 없음')
+    blob, labels = ch3_code(rows, items, at)
+
+    def put(addr, new, orig, note):
+        return {'at': f'{addr >> 16:02X}:{addr & 0xFFFF:04X}', 'hex': new.hex(' ').upper(), 'orig': orig.hex(' ').upper(),
+                'note': note}
+
+    def jsl(label):
+        return bytes((0x22, *_long(labels[label])))
+    out = [{'at': f'{at >> 16:02X}:{at & 0xFFFF:04X}', 'hex': blob.hex(' ').upper(),
+            'note': '3장 몬스터: 밤·낮 칸 마스크와 3장 전용 전투 뒤 물건'},
+           put(NIGHT_SITE, jsl('night') + b'\xEA\xEA', NIGHT_ORIG, '조우마다 3장 필드 구역의 밤·낮 칸 마스크를 정함')]
+    out += [put(site, jsl('weight') + b'\xEA', WEIGHT_ORIG, '칸 무게를 읽을 때 마스크로 뺀 칸은 0')
+            for site in WEIGHT_SITES]
+    out.append(put(DROP_SITE, jsl('drop') + bytes((0xD0, 0x04, 0xEA)), DROP_ORIG, '3장이면 전투 뒤 물건을 FC 3장 표로'))
+    return out
 
 
 def main():

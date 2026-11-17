@@ -3,7 +3,8 @@ dq5warp.lua FIELD with dq5warptrace.lua).
 
   zone   stand in an FC zone (ZONES) on two walkable FC blocks side by side and walk right and left with every
          DQ5 rate coefficient at FF (23:EA44, so nearly every step fights): every step 23:E7C2 gets the DQ5 zone
-         of that FC zone, and every group 23:E7C2 picks is made of the monsters that zone's record weighs. The
+         of that FC zone, and every group 23:E7C2 picks is made of the monsters that zone's record weighs (a fixed
+         group only where the record weighs slot 10: chapter 3's field formation, dq4fieldencounter.field_formations). The
          walk stops at the first fight, so each zone is walked after three different waits (DELAYS)
   rate   the same walk at the ROM's own rates: every step 23:E7C2's Y is the day or night FC terrain factor of
          the FC block times dq4balance.ENCOUNTER, the zone's coefficient is the one dq4fieldencounter.field_rate_index picks, and the chance
@@ -162,7 +163,8 @@ def main():
         allowed = set(want["monsters"])
         return scene, {**base, "zones": zones_seen, "fights": fights,
                        "ok": zones_seen == [want["zone"]] and bool(fights)
-                       and all(kind != "fixed" and {m for m, _ in g} <= allowed for kind, g in fights)}
+                       and all((kind != "fixed" or want["fixed"]["weight"]) and {m for m, _ in g} <= allowed
+                               for kind, g in fights)}
 
     def rate_report(data, prg, grid, fc, zone, rows):
         """Per walked FC block kind: 23:E7C2's Y and FC's day and night factors, the steps, and the mean cells to a

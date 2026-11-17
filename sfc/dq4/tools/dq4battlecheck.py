@@ -89,7 +89,8 @@ def name_problems(names, want):
 
 
 def name_table_problems(data, dq5):
-    """필드 조우의 DQ5 몬스터·1장 보스가 전투 글 이름 표와 창 이름 표(표 4)에 모두 있는지. dq5 는 원래 DQ5 롬(이름 바이트)."""
+    """필드 조우의 DQ5 몬스터(3장 구역 것 포함)·1장 보스가 전투 글 이름 표와 창 이름 표(표 4)에 모두 있는지. dq5 는 원래
+    DQ5 롬(이름 바이트)."""
     import dq4battlemsg as bm
     import dq4ch1event
     import dq4fieldencounter
@@ -103,7 +104,8 @@ def name_table_problems(data, dq5):
         o += 1 + n + 1 + 2 * data[o + 1 + n]
     index = bm.lorom(wt.TEXT_BANK << 16 | wt.INDEX + 4 * 0x200)
     out = []
-    for m in sorted(set(dq4fieldencounter.MONSTERS.values()) | set(dq4ch1event.BOSS_MONSTERS)):
+    for m in sorted(set(dq4fieldencounter.MONSTERS.values()) | set(dq4fieldencounter.CHAPTER3_MONSTERS.values())
+                    | set(dq4ch1event.BOSS_MONSTERS)):
         if bytes(names[m]) not in entries:
             out.append(f'몬스터 {m:02X} 가 전투 글 이름 표에 없음')
         if not int.from_bytes(data[index + 2 * m:index + 2 * m + 2], 'little'):

@@ -700,7 +700,7 @@ class SyntheticBuildTest(unittest.TestCase):
             mock.patch.object(dq4door, "writes", empty),
             mock.patch.multiple(dq4outside, writes=empty, rows=empty),
             mock.patch.multiple(dq4fieldencounter, dungeon_zones=lambda *a: {}, docs=lambda *a: ({}, {}, {}),
-                                terrain_rates=lambda *a: {"at": "00:0000", "hex": "00"}),
+                                terrain_rates=lambda *a: {"at": "00:0000", "hex": "00"}, ch3_writes=empty),
             mock.patch.multiple(dq4npcport, port=lambda *a: ([{"map": "36/00", "entries": []}, {"name": "alt", "entries": []}],
                                                             [{"id": dq4npcport.FIRST_MESSAGE, "codes": [1]}], {}),
                                 nothing_codes=lambda: [0], talk_doc=lambda m: {"format": "dq5talk/1"}),
