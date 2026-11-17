@@ -59,6 +59,9 @@ NIGHT_TEST = 0x218000          # 캐리 = 밤(7E:075E >= F0)
 ALENA, KIRYL, BREY = 0x00, ch2.RECRUITS[0]['person'], ch2.RECRUITS[1]['person']
 FIELD = 'field'                # 필드(7E:00BE bit7 꺼짐). 필드에서도 7E:00BC·00BD 는 떠난 맵 번호라 따로 둔다
 FIELD_KEY = (0xFE, 0xFE)
+# 맵을 가리지 않는 줄(NDS 가 맞는 줄이 없을 때 띄우는 일행의 기본 문장). 지금 맵의 목록에서 맞는 줄이 없을 때만 본다
+ANY = 'any'
+ANY_KEY = (0xFD, 0xFD)
 TIMES = {'any': 0, 'day': 1, 'night': 2}
 # 조건 종류(3바이트: 종류, 값 1, 값 2). HAVE·LACK 은 값 1 의 물건을 일행(7E:201D 명)의 가진 물건이나 맡긴 물건에
 # 누가 가짐·아무도 안 가짐, VAR 는 3장 변수 칸(dq4ch3slots.VARS_AT + 값 1)의 바이트 = 값 2
@@ -272,6 +275,8 @@ def talk_tables(talks=None, lines=None):
 def _key(mp):
     if mp == FIELD:
         return FIELD_KEY
+    if mp == ANY:
+        return ANY_KEY
     g, m = mp.split('/')
     return int(g, 16), int(m, 16)
 
@@ -316,6 +321,8 @@ def _code(origin):
     def lt(op, off=0):              # op long,X 로 이 뱅크의 줄 바이트(X = 줄 첫 주소의 아래 16비트)
         return a.b(op, *(T + off).to_bytes(3, 'little'))
     a.label('talk').b(0x08, 0xC2, 0x30, 0x48, 0xDA, 0x5A, 0x0B, 0xA9, 0x00, 0x00, 0x5B, 0xE2, 0x20)
+    # 표지 바이트(0 = 지금 맵, 1 = 맵 무관 목록을 봄). 지금 맵에서 맞는 줄이 없으면 한 번만 ANY_KEY 목록을 본다
+    a.b(0xA9, 0x00, 0x48)
     # 지금 맵의 열쇠: 필드면 FE FE, 아니면 7E:00BC·00BD
     a.b(0xAF, 0xBE, 0x00, 0x7E).rel(0x30, 'room').b(0xA9, 0xFE, 0xEB, 0xA9, 0xFE).rel(0x80, 'key')
     a.label('room').b(0xAF, 0xBD, 0x00, 0x7E, 0xEB, 0xAF, 0xBC, 0x00, 0x7E)
@@ -323,7 +330,7 @@ def _code(origin):
     a.label('m_loop')
     lt(0xBF).b(0xC9, 0xFF, 0xFF).rel(0xF0, 'm_none').b(0xC3, 0x01).rel(0xF0, 'm_found').b(0xE8, 0xE8, 0xE8, 0xE8)
     a.rel(0x80, 'm_loop')
-    a.label('m_none').b(0x68).word(0x4C, 'nobody')
+    a.label('m_none').b(0x68).word(0x4C, 'fallback')
     a.label('m_found').b(0x68)
     lt(0xBF, 2).b(0xAA, 0xE2, 0x20)
     # 틀: 5·6,S 목록 첫 주소, 4,S 지난번 고른 차례 + 1, 3,S 고른 차례, 2,S 맞는 첫 차례, 1,S 그 우선순위(FF 없음)
@@ -347,9 +354,11 @@ def _code(origin):
     a.label('at').b(0xC2, 0x30)
     lt(0xBF, 4).b(0xA8, 0xFA, 0xFA, 0xFA, 0x98).rel(0x80, 'show')
     a.label('none').b(0xC2, 0x30, 0xFA, 0xFA, 0xFA)
+    a.label('fallback').b(0xE2, 0x20, 0xA3, 0x01).rel(0xD0, 'nobody')
+    a.b(0xA9, 0x01, 0x83, 0x01, 0xC2, 0x20, 0xA9, ANY_KEY[0], ANY_KEY[1]).word(0x4C, 'key')
     a.label('nobody').b(0xC2, 0x30, 0xA9, NOBODY & 0xFF, NOBODY >> 8)
     a.label('show').b(0x22, *MESSAGE_AT.to_bytes(3, 'little'))
-    a.b(0xC2, 0x30, 0x2B, 0x7A, 0xFA, 0x68, 0x28, 0x6B)
+    a.b(0xE2, 0x20, 0x68, 0xC2, 0x30, 0x2B, 0x7A, 0xFA, 0x68, 0x28, 0x6B)
 
     # next: X 를 다음 줄로(X += 길이)
     a.label('next').b(0xC2, 0x20)
