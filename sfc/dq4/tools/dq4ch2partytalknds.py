@@ -1,15 +1,18 @@
-"""NDS 2장 동료 대화 표(PARAM/param_player_talk2.dat)에서 SFC 로 옮길 줄과 그 조건을 고른다.
+"""NDS 동료 대화 표(PARAM/param_player_talkN.dat)에서 SFC 로 옮길 줄과 그 조건을 고른다(2장·3장).
 
 NDS 표의 형식은 nds/dq4/docs/param-format.md 「동료 대화 표」. 레코드마다 SFC 맵과 SFC flag 조건으로 옮길 수 있으면
-줄(dq4ch2partytalk.tsv 의 한 줄)로, 아니면 뺀 까닭을 낸다. 번역문은 이 도구가 만들지 않는다(dq4ch2partytalk-text.tsv).
+줄(dq4ch2partytalk.tsv·dq4ch3partytalk.tsv 의 한 줄)로, 아니면 뺀 까닭을 낸다. 번역문은 이 도구가 만들지 않는다
+(dq4ch2partytalk-text.tsv·dq4ch3partytalk-text.tsv).
 
   uv run --locked python sfc/dq4/tools/dq4ch2partytalknds.py lines JPROOT > sfc/dq4/tools/dq4ch2partytalk.tsv
   uv run --locked python sfc/dq4/tools/dq4ch2partytalknds.py range JPROOT       # 진행 단계 × 장소 범위 표(마크다운)
   uv run --locked python sfc/dq4/tools/dq4ch2partytalknds.py source JPROOT [--kr KRROOT] > work/talk2src.json
   uv run --locked python sfc/dq4/tools/dq4ch2partytalknds.py people JPROOT > sfc/dq4/tools/dq4ch2partytalk-people.tsv
+  uv run --locked python sfc/dq4/tools/dq4ch2partytalknds.py --chapter 3 lines JPROOT > sfc/dq4/tools/dq4ch3partytalk.tsv
 
 `people` 는 「방금 말을 건 마을 사람」 조건의 NDS 인물을 SFC 인물(맵·칸·낮밤)과 짝짓는다(rom/dq5.sfc·rom/dq4.nes 를 읽음).
-`lines` 는 커밋한 짝 표(PEOPLE_TSV)를 읽는다.
+`lines` 는 커밋한 짝 표(PEOPLE_TSV)를 읽는다. 3장은 말 상대가 사건 모듈의 대화라 글 견줌 대신 손으로 정한 짝(OBJECTS3)을
+쓰고 `people` 이 없다(--chapter 3 은 lines·range·source).
 
 JPROOT/KRROOT 는 `krpatch nds unpack` 으로 푼 일본판·한글 팬패치 폴더(그 아래 data/data/).
 """
@@ -77,11 +80,11 @@ def _nds():
     return ndsparam, ndstext
 
 
-def records(jp):
+def records(jp, chapter=2):
     ndsparam, ndstext = _nds()
     maps = ndsparam.map_list(jp)
     people = ndsparam.names(jp, 'b1001000')
-    for k, r in enumerate(ndsparam.records(ndsparam.param(jp, 'param_player_talk2'), 44)):
+    for k, r in enumerate(ndsparam.records(ndsparam.param(jp, f'param_player_talk{chapter}'), 44)):
         f = ndsparam.talk_fields(r)
         f['k'] = k
         f['mapname'] = maps[f['map']] if f['map'] < len(maps) else f"#{f['map']}"
@@ -223,22 +226,22 @@ def similarity(a, b):
     return len(ga & gb) / min(len(ga), len(gb)) if ga and gb else 0.0
 
 
-def _script_talks(jp, msgs):
-    """(NDS 맵, 오브젝트 번호, @a 인물 번호, 메시지 번호): 2장 그룹 오브젝트의 대사 명령마다."""
+def _script_talks(jp, msgs, group=CHAPTER_GROUP, maps=None):
+    """(NDS 맵, 오브젝트 번호, @a 인물 번호, 메시지 번호): 장 그룹(기본 2장) 오브젝트의 대사 명령마다."""
     import ndsscript
-    for mp in sorted(set(MAPS) | set(UNMAPPED)):
+    for mp in sorted(maps if maps is not None else set(MAPS) | set(UNMAPPED)):
         path = Path(jp, 'data', 'data', 'SCRIPT', mp + '.bin')
         if not path.exists():
             continue
         d = path.read_bytes()
         code = {o: ins for _n, o, ins in ndsscript.functions(d)}
-        group = obj = -1
+        seen = obj = -1
         for _depth, name, o, _secs in ndsscript.blocks(d):
             if name == 'scriptgroup':
-                group, obj = group + 1, -1
+                seen, obj = seen + 1, -1
             elif name == 'scriptobject':
                 obj += 1
-            elif name in ndsscript.FUNCS and group == CHAPTER_GROUP:
+            elif name in ndsscript.FUNCS and seen == group:
                 for _d, w in code.get(o, ()):
                     if (w[0] & 0xFFFF) in TALK_OPS and len(w) > 1 and w[1] in msgs:
                         who = _PERSON.match(msgs[w[1]])
@@ -274,10 +277,10 @@ def heard_messages(jp, msgs):
     return out
 
 
-def script_people(jp, msgs):
+def script_people(jp, msgs, group=CHAPTER_GROUP, maps=None):
     """{(NDS 맵, 오브젝트 번호): [인물 번호]}."""
     out = {}
-    for mp, obj, who, _m in _script_talks(jp, msgs):
+    for mp, obj, who, _m in _script_talks(jp, msgs, group, maps):
         ids = out.setdefault((mp, obj), [])
         if who not in ids:
             ids.append(who)
@@ -393,14 +396,217 @@ def cmd_people(jp, dq5, dq4):
         print('\t'.join(','.join(map(str, r[k])) if isinstance(r[k], tuple) else str(r[k]) for k in PEOPLE_HEAD))
 
 
+# ---- 3장 ----
+
+# NDS 맵 → SFC 맵(여럿이면 그 모두에 같은 줄). 레이크나바 그룹 3E(FC 16·3D), 본몰 3F(FC 05), 엔돌 40(FC 04, 건물 1층은
+# 마을 맵), 굴 47(FC 42), 여우 마을·여신상 동굴 48(FC 18·40). 북쪽 동굴은 층마다 같은 한 줄뿐이라 SFC 일곱 층 모두에 둔다.
+# 여신상 동굴 deb2a·deb3a 는 단추 앞뒤로 SFC 맵이 둘이다(48/03·04, 48/05·06, dq4ch3endor.CAVE_*)
+NORTH_CAVE = tuple(f'3E/{m:02X}' for m in range(0x03, 0x0A))
+MAPS3 = {
+    'mfout': ('3E/00',), 'mfk1f1': ('3E/00',), 'mfm1f1': ('3E/01',),
+    'mgout1': ('48/00',), 'mgout3': ('48/01',),
+    'cdout': ('3F/01',), 'cdf1': ('3F/01',), 'cdy1f1': ('3F/01',),
+    **{m: NORTH_CAVE for m in ('ddb1a', 'ddb1b', 'ddb2', 'ddb3', 'ddb4', 'ddb5a', 'ddb5b')},
+    'deb1': ('48/02',), 'deb2a': ('48/03', '48/04'), 'deb3a': ('48/05', '48/06'), 'deb4': ('48/07',),
+    'dfb1a': ('47/00',), 'dfb1b': ('47/01',),
+    'hcout': ('40/00',), 'hcm2f1': ('40/00',), 'hcm1f2': ('40/0A',), 'hcm2f2': ('40/08',), 'hcy1b1': ('40/01',),
+    'hcy1f2': ('40/0B',), 'ccf1a': ('40/02',), 'ccf2': ('40/06',), 'ccb1a': ('40/05',),
+    'saf1': ('45/0E',), '#544': ('field',),
+}
+# NDS 이야기 flag(param_player_flag 의 3장 프리셋 59~92 가 켜는 번호) → SFC flag 이름(dq4ch3partytalk.CONDITIONS)
+STORY3 = {
+    137: 'SON_FREED',   # 톰 아들이 돌아옴(프리셋 67)
+    140: 'FOXED',       # 여우를 물리침(71)
+    142: 'SCOTT', 143: 'LAWRENCE',      # 용병을 고용함(필드 줄, 날수 조건과 함께)
+    145: 'LETTER2',     # 본몰 왕에게 엔돌 왕의 편지를 보임(78)
+    146: 'ALLOWED',     # 가게를 살 수 있음(80): 엔돌 왕이 「よくぞ もどった」
+    149: 'SHOP',        # 가게를 삼(86)
+    150: 'ORDER',       # 왕에게 무기 주문을 받음(88)
+    151: 'PAID', 152: 'PAID',           # 굴 공사 시작(90): 공사비를 냄
+    153: 'RESUMED', 154: 'RESUMED',     # 노인의 소식을 기다림(91): 공사 재개
+    156: 'OPENED',      # 굴이 뚫림(92)
+}
+ORDER3 = ('CHAPTER3', 'SON_FREED', 'FOXED', 'LETTER2', 'ALLOWED', 'SHOP', 'ORDER', 'DELIVERED', 'PAID', 'RESUMED',
+          'OPENED')
+NAMES3 = {'スコット': 'SCOTT', 'ロレンス': 'LAWRENCE', 'トルネコ': 'TORNEKO', 'トーマス': 'THOMAS'}
+ITEMS3 = {140: 'STATUE'}                # NDS 물건 번호 → SFC 물건 이름(dq4ch3partytalk.ITEMS)
+DAYS3 = {13: 'SCOTT_DAYS', 14: 'LAWRENCE_DAYS'}     # 조건 13·14: 고용 뒤 지난 날수
+# 직전 대화 값 v 는 3장 그룹 오브젝트 v + 1 이다. (NDS 맵, 오브젝트) → SFC 말 상대(dq4ch3partytalk 이 대화 번호로 푸는
+# 이름): 「키.대화」 는 3장 사건 모듈 키(dq4ch3slots)와 그 TALKS 이름, 「맵:x-y:낮밤」 은 옮긴 FC 인물(FC 칸)
+OBJECTS3 = {
+    ('ccb1a', 5): ('40/05:5-2:night',),             # 하녀 「デスピサロが いなくなったのは」
+    ('ccb1a', 6): ('W.pizarro_fan',),               # 아주머니 「デスピサロさまが ぜったいに 優勝」
+    ('ccf1a', 5): ('E.deliver',),                   # 병사장(납품)
+    ('ccf1a', 6): ('W.pizarro_gone',),              # 남자 「デスピサロという男が 優勝しかけた」
+    ('ccf2', 3): ('E.king',),
+    ('cdf1', 4): ('B.king',),
+    ('cdf1', 7): ('3F/01:6-6:day', '3F/01:6-7:day'),   # 왕자 방의 유모 「武器商人ふぜいの 来てよい所では」
+    ('cdy1f1', 2): ('3F/01:6-28:day', '3F/01:6-28:night'),  # 학자 「人を化かす きつねが でるそうだな」
+    ('deb3a', 1): ('48/05:19-20:day', '48/05:19-20:night'),   # 거친 사내 「宝箱が 取れねえ」
+    ('deb3a', 2): ('48/06:27-9:day', '48/06:27-9:night'),     # 거친 사내 「上から 水が あふれて」
+    ('dfb1a', 1): ('T.old_man',),
+    **{('hcm1f2', o): ('E.collector',) for o in (1, 3, 4, 5)},
+    ('hcm2f1', 1): ('E.nene',), ('hcm2f1', 2): ('E.nene',),
+    ('hcm2f2', 1): ('E.seller',), ('hcm2f2', 2): ('E.seller',),
+    ('hcout', 9): ('E.scott',),
+    ('hcy1b1', 1): ('W.ryan',),
+    ('hcy1f2', 3): ('40/0B:11-3:night',),           # 전사 「サントハイムから 人々が 消えた」
+    ('mfk1f1', 1): ('W.nun',),
+    ('mfm1f1', 3): ('L.nene',), ('mfm1f1', 4): ('L.nene',),
+    ('mfout', 10): ('L.son',),
+}
+# 레코드마다 손으로 옮긴 것: 최근 이벤트 값(v0)이 그 말 상대의 대사면 직전 대화 값과 같게 보고(on·off 를 더함), 맵 안
+# 임시 flag 가 SFC 의 다른 맵이면 그 맵으로(flag_c). 근거는 그 레코드의 v0 메시지(NDS 대사)
+FIXES3 = {
+    5: {'v0': True, 'on': ('DELIVERED',)}, 6: {'v0': True, 'on': ('DELIVERED',)},     # 병사장 「代金を支払おう」
+    56: {'v0': True, 'off': ('PAID',)}, 57: {'v0': True, 'off': ('PAID',)},           # 노인 「まず 自分の店を」
+    58: {'v0': True, 'on': ('PAID',)}, 59: {'v0': True, 'on': ('PAID',)},             # 노인 「６００００Ｇ 受け取った」
+    74: {'v0': True}, 75: {'v0': True}, 76: {'v0': True}, 77: {'v0': True},          # 수집가 「ダメなのか」
+    84: {'v0': True, 'on': ('DOG',)}, 88: {'v0': True, 'on': ('DOG',)},               # 스콧 「犬が きらいなのだ」
+    85: {'v0': True, 'talked': ('E.scott',)}, 89: {'v0': True, 'talked': ('E.scott',)},   # 스콧 「やとってくれるか」
+    96: {'v0': True, 'talked': ('E.lawrence',)}, 99: {'v0': True, 'talked': ('E.lawrence',)},
+    108: {'v0': True},                                                                  # 톰 아들 「返したくなったら」
+    40: {'flag_c': {60: ('48/04',)}}, 41: {'flag_c': {60: ('48/04',)}},               # 물이 빠짐: 단추 뒤의 맵
+}
+# 옮기지 않는 레코드와 까닭(조건은 옮길 수 있으나 SFC 장면과 맞지 않음)
+SKIP3 = {
+    113: 'SFC 3장의 여행의 문 사당 병사는 2장 대사(「姫さまを 通すな」) 그대로라 「よそ者は 通さない」 에 답하는 말이 맞지 않음',
+    114: 'SFC 3장의 여행의 문 사당 병사는 2장 대사(「姫さまを 通すな」) 그대로라 「よそ者は 通さない」 에 답하는 말이 맞지 않음',
+}
+
+
+def convert3(f, msgs):
+    """3장 레코드 하나: (줄 dict, None) 또는 (None, 뺀 까닭). 줄은 2장 줄에 have·lack(물건 이름)·days(「이름=값」)가 더해지고
+    map 이 SFC 맵 묶음(maps)이다. 토마스(개)는 일행 기록이 아니라 말하는 이를 톨네코로 두고 DOG flag 를 조건에 더한다."""
+    k, mp = f['k'], f['mapname']
+    if k in SKIP3:
+        return None, SKIP3[k]
+    fix = FIXES3.get(k, {})
+    talked = []
+    if f['place'][0] != 0xFF:
+        for v in f['place']:
+            if v != 0xFF:
+                talked += [t for t in OBJECTS3.get((mp, v + 1), ()) if t not in talked]
+        if not talked:
+            return None, '방금 말을 건 마을 사람(SFC 말 상대 짝 없음)'
+    if f['v0'] and not fix.get('v0'):
+        return None, '방금 본 사건 대사(최근 이벤트 값)'
+    talked = list(fix.get('talked', talked))
+    on, off, have, lack, days = ['CHAPTER3', *fix.get('on', ())], list(fix.get('off', ())), [], [], []
+    maps = MAPS3.get(mp)
+    for c, v in zip(f['codes'], f['vals']):
+        if not c:
+            continue
+        if c in (1, 2):
+            (on if c == 1 else off).append(v)
+        elif c == 5 and v in fix.get('flag_c', {}):
+            maps = fix['flag_c'][v]
+        elif c in (7, 8) and v in ITEMS3:
+            (have if c == 7 else lack).append(ITEMS3[v])
+        elif c in DAYS3:
+            days.append(f'{DAYS3[c]}={v}')
+        else:
+            kinds = {3: '맵 안 임시 flag', 4: '맵 안 임시 flag', 5: '맵 안 임시 flag', 6: '맵 안 임시 flag',
+                     7: '물건을 가짐', 8: '물건을 가짐', 12: '들어온 입구', 18: '방금 얻은 열쇠 물건'}
+            return None, kinds.get(c, f'조건 종류 {c}')
+    ids = message_ids(f)
+    if ids is None:
+        return None, '예/아니오 물음'
+    if maps is None:
+        raise SystemExit(f"{k}: NDS 맵 {mp} 의 SFC 짝이 없음")
+    story_on, story_off = f['story']
+    on.append(story_on)
+    if story_off != 0xFFFF:
+        off.append(story_off)
+    for n in [n for n in on + off if isinstance(n, int)]:
+        if n not in STORY3:
+            return None, f'SFC 에 짝이 없는 NDS 이야기 flag({n})'
+    on = [STORY3.get(n, n) if isinstance(n, int) else n for n in on]
+    off = [STORY3.get(n, n) if isinstance(n, int) else n for n in off]
+    speakers = []
+    for m in ids:
+        found = SPEAKER.match(msgs.get(m, ''))
+        if not found or found[1] not in NAMES3:
+            raise SystemExit(f"{k}: 메시지 {m} 의 말하는 이를 모름")
+        speakers.append(NAMES3[found[1]])
+    if f['speaker'] not in NAMES3 or NAMES3[f['speaker']] != speakers[0]:
+        raise SystemExit(f"{k}: 말하는 인물 {f['speaker']} 와 첫 메시지가 다름")
+    if any(mode != 1 for _, mode in f['slots']):
+        return None, '일행 칸 조건(걷는 줄 밖·쓰러짐)'
+    if 'THOMAS' in speakers:
+        on.append('DOG')
+    who = ['TORNEKO' if s == 'THOMAS' else s for s in speakers]
+    with_ = sorted(set(who[1:]) - {who[0], 'TORNEKO'})
+    rank = {n: i for i, n in enumerate(ORDER3)}
+    on = sorted(set(on), key=lambda n: (rank.get(n, len(rank)), n))
+    off = sorted(set(off), key=lambda n: (rank.get(n, len(rank)), n))
+    ordered_on, ordered_off = [rank[n] for n in on if n in rank], [rank[n] for n in off if n in rank]
+    if ordered_off and max(ordered_on) >= min(ordered_off):
+        return None, 'SFC 에 없는 진행 사이'
+    return {'nds': k, 'maps': maps, 'speaker': who[0], 'priority': f['prio'], 'time': TIMES[f['time']],
+            'on': on, 'off': off, 'with': with_, 'talked': talked, 'have': have, 'lack': lack, 'days': days,
+            'messages': ids, 'speakers': speakers}, None
+
+
+def lines3(jp):
+    """([줄], [(레코드, 뺀 까닭)]). 줄은 SFC 맵마다 하나(maps 를 펼침)이고, 같은 맵에 겹친 같은 줄은 하나만."""
+    _, ndstext = _nds()
+    msgs = ndstext.messages(jp)
+    kept, dropped, seen = [], [], set()
+    for f in records(jp, 3):
+        line, why = convert3(f, msgs)
+        if line is None:
+            dropped.append((f, why))
+            continue
+        for mp in line['maps']:
+            one = {**line, 'map': mp}
+            key = (mp, one['speaker'], one['priority'], one['time'], tuple(one['on']), tuple(one['off']),
+                   tuple(one['with']), tuple(one['talked']), tuple(one['have']), tuple(one['lack']), tuple(one['days']),
+                   tuple(one['messages']))
+            if key in seen:
+                continue
+            seen.add(key)
+            kept.append(one)
+    return kept, dropped
+
+
+HEAD3 = ('nds', 'map', 'speaker', 'priority', 'time', 'on', 'off', 'with', 'talked', 'have', 'lack', 'days',
+         'messages')
+
+
 HEAD = ('nds', 'map', 'speaker', 'priority', 'time', 'on', 'off', 'with', 'talked', 'messages')
 
 
-def cmd_lines(jp):
-    kept, _ = lines(jp)
-    print('\t'.join(HEAD))
+def cmd_lines(jp, chapter=2):
+    kept, _ = lines3(jp) if chapter == 3 else lines(jp)
+    head = HEAD3 if chapter == 3 else HEAD
+    print('\t'.join(head))
     for ln in kept:
-        print('\t'.join(str(ln[k]) if not isinstance(ln[k], list) else ','.join(map(str, ln[k])) for k in HEAD))
+        print('\t'.join(str(ln[k]) if not isinstance(ln[k], list) else ','.join(map(str, ln[k])) for k in head))
+
+
+def cmd_range3(jp):
+    """3장: 뺀 까닭별 레코드 수와 뺀 레코드 목록, 맵별 옮긴 줄 수(마크다운)."""
+    kept, dropped = lines3(jp)
+    why = collections.Counter(w for _, w in dropped)
+    print('| 뺀 까닭 | 레코드 |')
+    print('| --- | --- |')
+    for w, n in why.most_common():
+        print(f'| {w} | {n} |')
+    print()
+    print('| 레코드 | NDS 맵 | 말하는 이 | 첫 메시지 | 뺀 까닭 |')
+    print('| --- | --- | --- | --- | --- |')
+    for f, w in dropped:
+        print(f"| {f['k']} | {f['mapname']} | {f['speaker']} | {f['msg']} | {w} |")
+    print()
+    per = collections.Counter(ln['map'] for ln in kept)
+    print('| SFC 맵 | 줄 |')
+    print('| --- | --- |')
+    for mp in sorted(per, key=lambda m: (m == 'field', m)):
+        print(f'| {mp} | {per[mp]} |')
+    total = sum(1 for _ in records(jp, 3))
+    print(f'\nNDS 레코드 {total}: 옮긴 레코드 {total - len(dropped)}(SFC 줄 {len(kept)}, 같은 맵에 겹친 줄 제외), '
+          f'뺀 레코드 {len(dropped)}')
 
 
 def cmd_range(jp):
@@ -434,13 +640,13 @@ def cmd_range(jp):
     print(f'\n옮긴 줄 {len(kept)}, 뺀 레코드 {len(dropped)}, NDS 레코드 {len(kept) + len(dropped)}(SFC 맵 하나에 겹친 줄 제외)')
 
 
-def cmd_source(jp, kr):
+def cmd_source(jp, kr, chapter=2):
     """번역할 메시지: {번호: {'speaker', 'jp', 'kr'}}(일본어 원문과 한글 팬패치 문장, 작업용)."""
     _, ndstext = _nds()
     msgs = ndstext.messages(jp)
     ko = ndstext.messages(kr) if kr else {}
     table = ndstext.kr_table() if kr else {}
-    kept, _ = lines(jp)
+    kept, _ = lines3(jp) if chapter == 3 else lines(jp)
     out = {}
     for ln in kept:
         for m, sp in zip(ln['messages'], ln['speakers']):
@@ -452,20 +658,23 @@ def cmd_source(jp, kr):
 def main():
     sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--chapter', type=int, choices=(2, 3), default=2)
     ap.add_argument('cmd', choices=('lines', 'range', 'source', 'people'))
     ap.add_argument('jp')
     ap.add_argument('--kr')
     ap.add_argument('--dq5', default='rom/dq5.sfc')
     ap.add_argument('--dq4', default='rom/dq4.nes')
     a = ap.parse_args()
+    if a.chapter == 3 and a.cmd == 'people':
+        raise SystemExit('3장 말 상대 짝은 손으로 정한 표(OBJECTS3)')
     if a.cmd == 'people':
         cmd_people(a.jp, a.dq5, a.dq4)
     elif a.cmd == 'lines':
-        cmd_lines(a.jp)
+        cmd_lines(a.jp, a.chapter)
     elif a.cmd == 'range':
-        cmd_range(a.jp)
+        cmd_range3(a.jp) if a.chapter == 3 else cmd_range(a.jp)
     else:
-        cmd_source(a.jp, a.kr)
+        cmd_source(a.jp, a.kr, a.chapter)
 
 
 if __name__ == '__main__':

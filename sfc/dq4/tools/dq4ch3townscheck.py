@@ -10,6 +10,7 @@
     쪽당 줄 수(PAGE_LINES)를 넘는지 본다.
 
 FC 가 사람을 닿지 않는 곳에 세운 칸(dq4npccheck.staged)은 뺀다. ALLOW 는 아직 다른 모듈이 맡을 사람이다(이유를 적음).
+3장 동료 대화(dq4ch3partytalk, 「はなす」로 일행이 하는 말)의 메시지도 같은 둘을 본다(한글이 아니면 일본어로 셈).
 
   uv run --locked python sfc/dq4/tools/dq4ch3townscheck.py --keep work/ch3/keep --texts work/ch3/messages.json
 """
@@ -155,6 +156,18 @@ def window_problems(parts):
     return out
 
 
+def party_talk_messages(dq5, dq4):
+    """{메시지 번호: 이름}: 3장 동료 대화(dq4ch3partytalk) 메시지. 빌드와 같은 셈(옮긴 인물 메시지 뒤 1장·2장 사건 메시지,
+    그 뒤 3장 모듈 차례)."""
+    import dq4ch3event
+    import dq4ch3partytalk
+    import dq4npcport
+    _, ported, _ = dq4npcport.port(dq5, dq4)
+    first = ch1.chapter3_message(dq4npcport.FIRST_MESSAGE + len(ported))
+    ctx = next(c for c in dq4ch3event.contexts(first) if c.module is dq4ch3partytalk)
+    return {mid: name for name, mid in ctx.msg.items()}
+
+
 def check(keep, texts, dq4):
     import dq4npccheck
     from kr_patch.fc import ines
@@ -196,7 +209,17 @@ def check(keep, texts, dq4):
                     elif (mid, 'w') not in seen and any(isinstance(c, str) for c in parts):
                         seen.add((mid, 'w'))
                         window += [(who, mid, *w) for w in window_problems(parts)]
-    return {'people': people, 'japanese': japanese, 'window': window, 'kept': kept}
+    # 동료 대화(「はなす」): 말 상대가 아니라 일행이 띄우는 메시지라 맵·칸 대신 동료 대화로 적는다
+    party = party_talk_messages(dq4.parent / 'dq5.sfc', dq4)
+    for mid, name in sorted(party.items()):
+        who = ('동료 대화', name, None)
+        parts = msgs.get(mid, [])
+        bad = sum(1 for c in parts if isinstance(c, int) and c in jp)
+        if bad or not any(isinstance(c, str) for c in parts):
+            japanese.append((who, '동료 대화', mid, bad))
+        else:
+            window += [(who, mid, *w) for w in window_problems(parts)]
+    return {'people': people, 'party_talk': len(party), 'japanese': japanese, 'window': window, 'kept': kept}
 
 
 def main():
@@ -213,7 +236,8 @@ def main():
     for who, mid, why in r['kept']:
         print(f'남겨 둠: {who[0]} {who[1]} 셀 {who[2]} 메시지 {mid:03X} — {why}')
     ok = not r['japanese'] and not r['window']
-    print(json.dumps({'status': 'passed' if ok else 'failed', 'people': r['people'], 'japanese': len(r['japanese']),
+    print(json.dumps({'status': 'passed' if ok else 'failed', 'people': r['people'], 'party_talk': r['party_talk'],
+                      'japanese': len(r['japanese']),
                       'window': len(r['window']), 'kept': len(r['kept'])}, ensure_ascii=False))
     raise SystemExit(0 if ok else 1)
 

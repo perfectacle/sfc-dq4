@@ -463,7 +463,7 @@ class Context(ch2.Context):
     def __init__(self, key, module, message=None, talk=None, original=None, points=None):
         self.key, self.module, self.slot, self.original = key, module, SLOTS[key], original
         self.points = points
-        self.code_at = self.slot.code[0]
+        self.code_at = self.slot.code[0] if self.slot.code else None
         self.vars_at = VARS_AT + self.slot.vars[0] if self.slot.vars else None
         self.msg = None if message is None else {n: message + k for k, n in enumerate(getattr(module, 'MESSAGES', {}))}
         self.talk = None if talk is None else {n: talk + k for k, n in enumerate(getattr(module, 'TALKS', ()))}

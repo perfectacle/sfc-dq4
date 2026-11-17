@@ -42,6 +42,9 @@ SLOTS = {
               scripts=(('05:996C', (0, 1, 2, 3, 4, 5, 7, 14)),), lists='ch3_tunnel_'),
     'W': Slot('마을 사람 진행별 대사', 'dq4ch3towns', (0x5FF800, 0x600000), flags=(0x79,),
               scripts=(('10:B135', (3, 4, *range(6, 11))), ('10:CFF4', (2, 5, 7, 10, 11, 12))), lists='ch3_towns_'),
+    # 코드·flag 없음: 줄은 2장 동료 대화(dq4ch2slots 'P')의 표에 합쳐 그 몫에 들어간다. 다른 모듈이 만든 목록에서 말 상대의
+    # 대화 번호를 찾으므로 맨 끝 차례여야 한다
+    'P': Slot('동료 대화(はなす) 3장 줄', 'dq4ch3partytalk', (), flags=(), lists='ch3_party_'),
 }
 
 # 공용 장치(dq4ch3event)의 몫: flag 바이트 6F(대화 호출 결과·동행 비트), 변수 칸 +0~+3(날수 둘·시계)
