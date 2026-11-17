@@ -70,7 +70,9 @@ PEOPLE = [
     ('scott', '40/00', (0x05, 0x13), 'below', '여우', (), False, 'none', 'scott', ()),   # 고용 대사 뒤
     ('lawrence', '40/0B', (0x07, 0x08), 'below', '여우', (), False, 'none', 'lawrence', ()),
     ('bonmalmo_king', '3F/01', (0x11, 0x07), 'below', '여우', (), False, 'both', 'both', ()),
-    ('nanny', '3F/01', (0x06, 0x07), 'below', '여우', (), False, 'both', 'both', ()),    # 왕자 방의 유모
+    # 왕자 방의 유모: 제자리 (06,06). 둘째 유모 (06,07)은 FC 가 싣지 않는 사람이라 목록에 없고(dq4ch3bonmalmo
+    # .SECOND_NANNY), 왕자가 처음 말을 마치기(NANNY_GO) 전에는 걷지 않는다
+    ('nanny', '3F/01', (0x06, 0x06), 'below', '여우', (), False, 'both', 'both', ()),
     ('scholar', '3F/01', (0x06, 0x1C), 'below', '톰 아들', ('DOG',), False, 'none', 'none', ()),   # 개 토마스
     ('nun', '3E/00', (0x0D, 0x07), 'below', '톰 아들', ('DOG',), False, 'none', 'none', ()),       # 개 토마스
     ('tom_son', '3E/00', (0x17, 0x03), 'below', '톰 아들', ('DOG',), False, 'none', 'none', ()),   # 개 토마스
