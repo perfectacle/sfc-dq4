@@ -89,7 +89,7 @@ def segment(mesence, rom, state, dest, seg, seed, flags):
         return {**wc.ending(mesence, rom, state, dest, seed, toks.split(':', 1)[1]), 'name': name}
     rng = wc.rng_for(seed)
     if 'rng_fixed' in opt:
-        # 시드와 상관없이 정한 난수(떠돌이 상인을 만나는 값)를 구간 내내 묶는다
+        # 시드와 상관없이 정한 난수(떠돌이 상인을 만나는 값, 스콧이 걸음 도중에 멈추지 않는 값)를 구간 내내 묶는다
         rng = ';'.join(f'{a:04X}={v:02X}' for a, v in zip((0x075B, 0x075C, 0x075D), opt['rng_fixed']))
     start = ';'.join(v for v in (rng, story.writes_set(opt)) if v)
     poke = ';'.join(f'7E{v}' for v in rng.split(';')) if opt.get('rng') or 'rng_fixed' in opt else ''

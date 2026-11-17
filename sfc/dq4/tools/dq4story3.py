@@ -66,6 +66,8 @@ TOM_PATH = ';'.join(f'push:{TOM_SLOT},{x},{y}' for x, y in ((48, 35), (40, 35), 
 MERCHANT_RNG = (0x00, 0x00, 0xE1)
 # 엔돌 마을 낮의 용병 스콧(FC (05,13), 걸어 다님)의 인물 칸
 SCOTT_SLOT = '0F'
+# 스콧에게 말을 거는 동안 묶는 난수. 시드 5·9 의 값으로 묶으면 스콧이 걸음 도중(X 홀수)에 멈춰 옆에 설 수 없었다
+SCOTT_RNG = (0x00, 0x00, 0x00)
 # 엔돌 FC 04: 마을 도착 칸 (17,20) → 여관(FC (12,18), 카운터 아래) / 여관 아래 → 왕좌의 방 왕 아래 칸 (0B,0B)
 E_TO_INN = '46,63;42,63;42,53;36,53'
 E_INN_TO_KING = '42,53;42,27;46,27;46,19;map:40/02;24,67;24,59;26,59;26,49;map:40/06;24,39;24,31;22,31;22,23'
@@ -176,7 +178,7 @@ SEGMENTS = [
      {'map': endor.TOWN, 'bytes': {'TIME': 0x50}}),
     # 개가 따라오는 동안 용병 스콧은 개가 싫다며 거절(0854)
     ('scott_dog', f'42,53;42,45;20,45;20,43;12,43;near:{SCOTT_SLOT};talk;yes*',
-     {'map': endor.TOWN, 'off': ['SCOTT'], 'want': ['DOG'], 'rng': True}),
+     {'map': endor.TOWN, 'off': ['SCOTT'], 'want': ['DOG'], 'rng_fixed': SCOTT_RNG}),
     ('endor_king_first', f'{E_SCOTT_TO_KING};face:up;talk;yes*', {'map': endor.THRONE, 'off': ['ENDOR_ALLOWED']}),
     ('endor_monica', '22,25;28,25;28,23;30,23;face:up;talk;yes*',
      {'map': endor.THRONE, 'want': ['BM_LETTER1'], 'items': [bm.KING_LETTER]}),
@@ -227,7 +229,7 @@ SEGMENTS = [
      f'map:{endor.SHOP_UP};2,15;2,13;6,13;6,9;face:up;talk;yes*',
      {'map': endor.TOWN, 'cell': endor.NENE_SIDE[1], 'bytes': {'LAWRENCE_DAYS': 1}}),
     ('scott', f'6,57;6,47;8,47;8,41;12,41;near:{SCOTT_SLOT};talk;yes*',
-     {'map': endor.TOWN, 'want': ['SCOTT'], 'bytes': {'SCOTT_DAYS': 0, 'PARTY_N': 3}, 'rng': True}),
+     {'map': endor.TOWN, 'want': ['SCOTT'], 'bytes': {'SCOTT_DAYS': 0, 'PARTY_N': 3}, 'rng_fixed': SCOTT_RNG}),
     ('order', f'{E_SCOTT_TO_KING};face:up;talk;yes*', {'map': endor.THRONE, 'want': ['ENDOR_ORDER']}),
     # 납품: 소지품 칸이 모자라 두 번에 나눠 낸다
     ('deliver1', f'22,31;24,31;24,39;26,39;map:{endor.CASTLE_HALL};26,49;26,57;32,57;32,45;36,45;36,41;34,41;face:up;talk;yes*',
