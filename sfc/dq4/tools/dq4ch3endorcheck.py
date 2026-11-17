@@ -18,6 +18,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 
 import dq4ch1walkcheck as wc  # noqa: E402
 import dq4ch3endor as endor  # noqa: E402
+import dq4neneshop as shop  # noqa: E402
 import dq4ch3tunnel as tunnel  # noqa: E402
 import dq4ch3event as ch3  # noqa: E402
 import dq4ch3endor_checks as endor_checks  # noqa: E402
@@ -50,11 +51,30 @@ def COUNT_SET(v):
 # 맡긴 물건(7E:2250 + 물건 번호)에만 칼·갑옷 하나씩
 BAG_SET = f'{(ch3.BAG & 0xFFFF) + endor.STEEL_SWORD:04X}=01;{(ch3.BAG & 0xFFFF) + endor.IRON_ARMOR:04X}=01'
 RNG_PIN = '7E075B=00;7E075C=00;7E075D=00'
+UNSOLD_PIN = '7E075B=C0;7E075C=C0;7E075D=C0'
 SELLER_NIGHT = endor.SELLER[1][2]                     # 밤의 가게 주인(05,02). 그 아래에서 말을 건다
 NENE_NIGHT = endor.NENE[1][2]                          # 밤의 네네(04/08 (03,03))
 SON_NIGHT = endor.SON[1][2]
 GUIDE = endor.GUIDE[2]
 COLLECTOR_NIGHT = endor.COLLECTORS[1][2]
+NENE_DAY = endor.cell(*endor.NENE[0][2])
+COPPER_SWORD = 0x01
+
+
+def sales_set(n):
+    """네네 매상(둘째 변수 칸, 3바이트)을 n 으로 두는 SET 조각."""
+    at = ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + shop.SALES
+    return ';'.join(f'{(at + k) & 0xFFFF:04X}={n >> 8 * k & 0xFF:02X}' for k in range(3))
+
+
+# 가게 칸 0~2 에 강철 검(2000G) 둘·구리 검
+STOCK_SET = ';'.join(f'{(ch3.VARS2_AT + ch3.SLOTS["E"].vars2[0] + shop.STOCK + k) & 0xFFFF:04X}={item + 1:02X}'
+                     for k, item in enumerate((endor.STEEL_SWORD, endor.STEEL_SWORD, COPPER_SWORD)))
+# 물음(036B)에 「예」, 매상 첫 쪽을 넘기면 물건 창. 첫 커서는 장비하지 않은 첫 칸(칸 1 도시락)이라 아래로 한 칸(강철 검),
+# 값 안내에 「예」, 「더?」 에 「아니요」
+COUNTER_WALK = ('down:8;wait:30;a:8;wait:60;a:8;wait:60;a:8;wait:120;a:8;wait:150;'
+                'down:8;wait:30;a:8;wait:150;a:8;wait:150;down:8;wait:30;a:8;wait:120;'
+                f'{wc.taps(2, 90)};{CLOSE}')
 
 # (이름, 방법, 인자, 선택): dq4ch3walkcheck.SEGMENTS 와 같은 꼴. 순간이동 구간마다 묶음이고, 묶음 첫 구간 set 이 flag 를 둔다
 SEGMENTS = [
@@ -87,6 +107,26 @@ SEGMENTS = [
     ('nene_nonews_side', 'warp', f'{endor.TOWN},{endor.NENE_SIDE[1][0]},{endor.NENE_SIDE[1][1] - 1}',
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(f'{0x2190 + tunnel.IDX:04X}=00', _set(tunnel.RESUMED)))}),
     ('nene_nonews', 'walk', talk('right', 3), {'map': endor.TOWN, 'off': ['TUNNEL_OPENED']}),
+    # 네네 가게(dq4neneshop): 카운터 너머(위)에서 말을 걸면 어제 매상을 건네고, 고른 물건을 가게 칸에
+    ('nene_counter_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
+     {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(_items(endor.STEEL_SWORD), _gold(0), sales_set(1000)))}),
+    ('nene_counter', 'walk', COUNTER_WALK,
+     {'map': endor.TOWN, 'bytes': {'GOLD0': 0xE8, 'GOLD1': 0x03, 'NENE_SALES0': 0, 'NENE_SALES1': 0,
+                                   'NENE_STOCK0': endor.STEEL_SWORD + 1}}),
+    # 잠으로 날이 바뀌면 가게 칸마다 rand < C0 이면 값 × (96 + ⌊r × 33/256⌋)/64 가 매상으로. 난수를 고정하면 셋 다 팔려
+    # 8043(4000 + 4000 + 200 이하, 1.5배 6150 이상)
+    ('nene_day_side', 'warp', f'{endor.TOWN},{endor.NENE_SIDE[1][0]},{endor.NENE_SIDE[1][1] - 1}',
+     {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(STOCK_SET, sales_set(0))),
+      'poke': RNG_PIN}),
+    ('nene_day', 'walk', talk('right', 8),
+     {'map': endor.TOWN, 'poke': RNG_PIN, 'changes': 1, 'after': 600,
+      'bytes': {'NENE_SALES0': 0x6B, 'NENE_SALES1': 0x1F, 'NENE_SALES2': 0, 'NENE_STOCK0': 0}}),
+    # 안 팔린 날: 강철 검 하나를 두고 난수를 C0 으로 고정하면 굴림이 3/4 밖이라 칸에 남고 매상은 0(00·40·80·FF 는 팔림)
+    ('nene_unsold_side', 'warp', f'{endor.TOWN},{endor.NENE_SIDE[1][0]},{endor.NENE_SIDE[1][1] - 1}',
+     {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(STOCK_SET.split(';')[0], sales_set(0))), 'poke': UNSOLD_PIN}),
+    ('nene_unsold', 'walk', talk('right', 8),
+     {'map': endor.TOWN, 'poke': UNSOLD_PIN, 'changes': 1, 'after': 600,
+      'bytes': {'NENE_SALES0': 0, 'NENE_SALES1': 0, 'NENE_SALES2': 0, 'NENE_STOCK0': endor.STEEL_SWORD + 1}}),
     # 납품: 주문 전·「아니요」·다 채운 뒤. 안내하는 옆 사람도 셋
     ('deliver_idle_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
      {'map': endor.CASTLE_HALL, 'set': sets()}),
@@ -168,6 +208,10 @@ MESSAGES = {
     'seller_no': ['seller_old', 'seller_offer', 'seller_pity'],
     'son_night': ['son_home'], 'nene_night': ['nene_late', 'nene_night', 'nene_morning', 'nene_bento'],
     'nene_no': ['nene_rest', 'nene_shopkeep'], 'nene_lie': ['news', 'news_no', 'news_farewell'], 'nene_nonews': ['no_news'],
+    'nene_day': ['nene_rest', 'nene_night'],
+    'nene_unsold': ['nene_rest', 'nene_night'],
+    'nene_counter': ['nene_counter_ask', 'nene_sales', 'nene_pick', 'nene_item', 'nene_offer', 'nene_put', 'nene_more',
+                     'nene_done', 'nene_cheer'],
     'deliver_idle': ['deliver_idle'], 'deliver_done': ['deliver_thanks'],
     'deliver_empty': ['deliver_ask', 'deliver_take', 'deliver_none', 'deliver_left', 'left_swords', 'left_armors',
                       'deliver_more'],

@@ -14,6 +14,8 @@ from dq4ch2slots import Slot as _Slot
 @dataclass(frozen=True)
 class Slot(_Slot):
     vars: tuple = ()               # 변수 칸(VARS_AT + 오프셋)의 (시작, 끝) 오프셋. 끝은 들지 않음
+    vars2: tuple = ()              # 둘째 변수 칸(VARS2_AT + 오프셋)의 (시작, 끝)
+    far: tuple = ()                # 다른 뱅크의 코드 자리 (시작, 끝). 모듈의 far_native(ctx) 가 쓴다(JSL·RTL 로 부름)
 
 
 # 저장되는 변수 칸: DQ5 맡긴 몬스터 칸(7E:2332, 26바이트 × 56)의 49번 칸 +1~+25. 3장 넘김이 50~55 에 아리나 일행을
@@ -23,6 +25,11 @@ class Slot(_Slot):
 VARS_SLOT = 49
 VARS_AT = 0x7E2332 + VARS_SLOT * 26 + 1
 VARS_SIZE = 25
+# 둘째 변수 칸: 같은 꼴로 맡긴 몬스터 칸 48번 +1~+25(7E:2813~282B). 3장 출발 상태에서 0(헤드리스 실측), 저장 기록
+# 7E:2000~2A9F 안
+VARS2_SLOT = 48
+VARS2_AT = 0x7E2332 + VARS2_SLOT * 26 + 1
+VARS2_SIZE = 25
 
 # 빌릴 인물 스크립트는 이 해킹이 가지 않는 DQ5 맵 목록에서 스크립트가 있고 한 시간대(낮 또는 밤)에만 놓이는 칸이다.
 # 낮·밤 두 벌 레코드를 빌리면 dq5npcrelocate 가 받지 않는다.
@@ -37,7 +44,8 @@ SLOTS = {
     'B': Slot('본몰 왕자·감옥·여우 마을·다리·개 토마스', 'dq4ch3bonmalmo', (0x5CE800, 0x5CF000), flags=(0x73, 0x74),
               scripts=(('10:BEE5', (2, *range(4, 10))),), lists='ch3_bonmalmo_'),
     'E': Slot('엔돌: 편지·여신상 동굴·여신상 팔기·가게 사기·납품·용병', 'dq4ch3endor', (0x5CF000, 0x5CFC00),
-              flags=(0x75, 0x76), scripts=(('10:8E0D', tuple(range(1, 8))), ('05:A8AE', (0, 1, 2, 3, 4, 6, 7))), lists='ch3_endor_', vars=(10, 14)),
+              flags=(0x75, 0x76), scripts=(('10:8E0D', tuple(range(1, 8))), ('05:A8AE', (0, 1, 2, 3, 4, 6, 7))), lists='ch3_endor_', vars=(10, 14),
+              vars2=(0, 20), far=(0x4EC000, 0x4ED000)),
     'T': Slot('굴 공사·개통·장 끝', 'dq4ch3tunnel', (0x5CFC00, 0x5D0000), flags=(0x77,),
               scripts=(('05:996C', (0, 1, 2, 3, 4, 5, 7, 14)),), lists='ch3_tunnel_'),
     'W': Slot('마을 사람 진행별 대사', 'dq4ch3towns', (0x5FF800, 0x600000), flags=(0x79,),
@@ -55,10 +63,17 @@ COMMON_VARS = (0, 4)
 SPARE = {
     'flags': (0x7B, 0x7C),
     'vars': (),
-    'code': (),
+    'vars2': (20, 25),
+    'code': ((0x4ED000, 0x4F0000),),
 }
 # 여신상 동굴의 배(dq4raft, S 가 hooks 로 둠). S 몫 코드 자리가 차서 따로 둔다. 5D:8000~ 은 dq4windowtext 몬스터 자료
 RAFT_CODE = (0x5DF000, 0x5DF800)
+# 뱅크 4E 의 몫: 3장 몬스터·떠돌이 상인(dq4fieldencounter.CH3_CODE_AT 부터, 사건 모듈 밖), 엔돌(E 의 far), 나머지 예비(SPARE).
+# 4E 처럼 40 이상 뱅크의 코드는 BRK 를 바로 쓰지 못한다: BRK 처리기가 놓인 뱅크를 DB 로 두어 낮은 WRAM 대신 롬을 읽는다
+# (실측: 4E 에서 BRK 95 34 가 04:DADA 에서 끝없이 돎). 낮은 뱅크 받침(LOW_STUBS 같은 BRK … / RTL)으로 부른다
+MONSTERS_CODE = (0x4E8000, 0x4EC000)
+# 엔돌(E) 몫의 낮은 뱅크 BRK 받침(dq4neneshop.BRKS). 원래 롬 빈 자리(dq5build free) 가운데 아무 도구도 쓰지 않던 곳
+LOW_STUBS = (0x29FF80, 0x2A0000)
 # 3장 넘김·공용 장치 코드(dq4ch3event.CODE_AT~TABLE_AT)와 대화 호출 표(TABLE_AT~CODE_END)
 BASE_CODE = (0x5CC000, 0x5CD000)
 

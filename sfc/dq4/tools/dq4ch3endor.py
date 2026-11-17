@@ -31,6 +31,7 @@ import dq4ch3event as ch3  # noqa: E402
 from dq4chapterbox import ENTER, LEAVE  # noqa: E402
 from dq4itemport import BENTO, STATUE  # noqa: E402
 import dq4mercenary as merc  # noqa: E402
+import dq4neneshop as shop  # noqa: E402
 
 say, narrate = ch1.say, ch1.narrate
 pages = ch2._speaker_pages
@@ -219,10 +220,11 @@ MESSAGES = {
     'button': narrate('단추가 있다./눌러 보겠습니까?'),
 }
 MESSAGES.update(merc.MESSAGES)
+MESSAGES.update(shop.MESSAGES)
 TALKS = ('king', 'seller', 'son', 'nene', 'deliver', 'guide', 'collector', 'button') + merc.TALKS
 CALLS = {'pay_shop': ('pay', SHOP_PRICE), 'earn_statue': ('earn', STATUE_PRICE), 'take_statue': ('take', STATUE),
          'earn_delivery': ('earn', DELIVERY_PAY), 'move_in': ('move_in', 0), 'sleep': ('sleep', 0),
-         'deliver': ('deliver', 0), 'count': ('deliver', 1),
+         'deliver': ('deliver', 0), 'count': ('deliver', 1), **shop.CALLS,
          **merc.CALLS, 'show_swords': ('show', GAVE_SWORD), 'show_armors': ('show', GAVE_ARMOR),
          'left_swords': ('left', 0), 'left_armors': ('left', 4)}
 
@@ -467,6 +469,19 @@ def native(ctx):
 
 # dq4brkscan: PHP 로 시작하지 않는 진입점. exit 는 P 를 부른 쪽이 PLP 로 되돌리는 훅, *_event 는 이벤트 스크립트 자료
 CODE_ENTRIES = ('exit',) + merc.CODE_ENTRIES
+DAY_HOOK = True                # 날이 바뀌면(dq4ch3event.next_day) far 몫 첫 루틴 nene_day 를 부른다
+
+
+def far_native(ctx):
+    """(바이트, {이름: 주소}): 다른 뱅크 몫(dq4ch3slots E 의 far)의 코드. 첫 루틴이 날 바뀜(DAY_HOOK)."""
+    out = bytearray()
+    at = {}
+
+    def put(name, code):
+        at[name] = ctx.far_at + len(out)
+        out.extend(code)
+    shop.far_natives(ctx, put)
+    return bytes(out), at
 DATA_ENTRIES = ('move_in_event', 'sleep_event', 'button_event') + merc.DATA_ENTRIES
 
 
@@ -478,7 +493,7 @@ def hooks(ctx):
     """금고 동굴 모듈이 2A:F7AB 에 둔 JSL 의 대상을 이 모듈의 출구 루틴으로 바꾼다(그 루틴이 금고 동굴 루틴을 먼저 부름)."""
     import dq4ch3safe as safe
     old = next(new for site, _, new in safe.hooks(_safe_ctx(ctx)) if site == safe.EXIT_SITE)
-    return [(safe.EXIT_SITE, old, bytes((0x22, *_al(ctx.at['exit']))) + old[4:])] + merc.hooks(ctx)
+    return [(safe.EXIT_SITE, old, bytes((0x22, *_al(ctx.at['exit']))) + old[4:])] + merc.hooks(ctx) + shop.hooks(ctx)
 
 
 # 빌린 인물 스크립트(DQ5 01/09 대체 목록 10:8E0D, dq4ch3slots E 칸 1): 단추를 묻는 보이지 않는 인물
@@ -535,7 +550,8 @@ def talk_scripts(ctx):
     # 개통 알림(NOTICE 면 08A0~08A3)과 공사 재개 뒤 「소식 없음」(08A1)은 굴 모듈의 갈래·메시지
     import dq4ch3tunnel
     nene, = dq4ch3tunnel.news_talk(ctx, NOTICE, [
-        when(DAY, [say_('nene_rest'), when(YES, sleep, [say_('nene_shopkeep')])], [say_('nene_late'), *sleep])])
+        when(DAY, shop.counter_talk(ctx, [say_('nene_rest'), when(YES, sleep, [say_('nene_shopkeep')])]),
+             [say_('nene_late'), *sleep])])
     # FC 15:$A118 실측: 「예」 면 받을 것이 없어도 0874 부터. 받은 수·남은 수 줄은 그 종류가 0 이면 빠진다
     tally = [say_('deliver_left'), when(flag(LEFT_SWORDS), [call('left_swords'), say_('left_swords')]),
              when(flag(LEFT_ARMORS), [call('left_armors'), say_('left_armors')]), say_('deliver_more')]
