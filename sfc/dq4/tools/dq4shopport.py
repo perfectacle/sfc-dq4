@@ -57,6 +57,11 @@ INN_BANK_OPERAND = 0x06F568
 INN_ADDR_OPERAND = 0x06F56E
 # dq5progresswrite takes 1-6 items: the 7th row is under the comparison window (dq5-build-format 「성장·조우·상점」).
 MAX_ITEMS = 6
+# FC 3장 떠돌이 상인(18:$9D12 의 たびのしょうにん)의 도구점·여관은 가게 그룹 FE/FE(15:$BEF4). 필드에서 상인이 여는 DQ5
+# 가게·여관은 필드의 $BC/$BD(01/00, 실측)로 키를 찾으므로 그 맵 줄에 상인 키를 준다. 이 해킹은 DQ5 01 그룹 맵에 가지
+# 않고 필드에서 다른 가게를 열지 않는다. 키는 그룹 줄 뒤에 붙여 앞 키 번호가 그대로다
+MERCHANT = (0xFE, 0xFE)
+MERCHANT_MAP = (0x01, 0x00)
 # Sellers who come only with a chapter's event (dq4shop.npc_lists 「목록 플래그 n&m」): FC map -> the person list that
 # brings them. The event that switches the map to that list puts the seller; here its shop list goes under the map's
 # key so that the seller's talk number (event_sellers) opens it. テンペ's shop opens once the monster is beaten
@@ -268,6 +273,20 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
                     raise ValueError(f"{key:02X}: inn prices {inns[key]} and {price} ({fc_group:02X}/{fc_number:02X})")
                 inns[key] = price
                 report["inns"][f"{group:02X}/{number:02X}"] = price
+    key = max((k for *_, k in rows), default=dq4shopkey.KEY_FIRST - 1) + 1
+    rows.append((*MERCHANT_MAP, MERCHANT_MAP[1], key))
+    picked = []
+    for i in dq4shop.lookup(prg, 2, *MERCHANT):
+        item = names[i & 0x7F]
+        if dq4shop.price(prg, *MERCHANT, i & 0x7F) != own_prices.get(i & 0x7F) or _fold(item) not in items:
+            raise ValueError(f"떠돌이 상인 {item}: 장소별 값이거나 DQ5 짝이 없음")
+        picked.append(items[_fold(item)])
+        if prices.setdefault(picked[-1], own_prices[i & 0x7F]) != own_prices[i & 0x7F]:
+            raise ValueError(f"{item}: FC prices {prices[picked[-1]]} and {own_prices[i & 0x7F]}")
+    shops.append({"kind": LIST_KIND[2], "index": counts[LIST_KIND[2]], "key": key, "items": picked})
+    counts[LIST_KIND[2]] += 1
+    inns[key] = dq4shop.inn_price(prg, *MERCHANT)
+    report["merchant"] = {"key": f"{key:02X}", "items": picked, "inn": inns[key]}
     report["keys"] = {f"{g:02X}/{first:02X}-{last:02X}": f"{k:02X}" for g, first, last, k in rows}
     report["event_sellers"] = {m: {f"{x},{y},{'night' if n else 'day'}": SERVICE[k] for (x, y, n), k in e.items()}
                                for m, e in events.items()}

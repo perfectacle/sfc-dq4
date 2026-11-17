@@ -17,6 +17,10 @@
            물건(7E:2056~)에 그만큼 있어야 한다
   drop-sure  문턱 16칸을 FF 로 덮은 롬 사본: 이길 때마다 시작 칸의 물건을 얻는다
   drop-off  3장 flag 를 끄면 훅이 표를 굴리지 않는다(원래 떨어뜨림 판정)
+  merchant-roll  롬 그대로 걸음마다 싸우게 하고, 조우마다 rand(10) 이 0 일 때만 떠돌이 상인 갈래로 간다
+  merchant-shop·inn  rand(10) 을 늘 0 으로(·여관 문턱을 00·FF 로) 덮은 롬 사본: 싸우지 않고 도구점(06:E01F)에서 약초를 산
+           만큼 금화가 줄고 가방에 들거나, 여관(06:E384)에서 1인 10G 를 내고 HP 가 차며 필드에 남는다
+  merchant-off  3장 flag 없이는 rand(10) 을 덮어도 상인 갈래에 오지 않고 싸운다
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4ch3monstercheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3monsters
 결과: OUT/results.json.
@@ -60,7 +64,20 @@ DROP_LEVELS = (0x01, 0x28, 0x63)
 SURE = 0xFF                                  # drop-sure 가 문턱 16칸을 덮는 값: rand(256) 이 FF 일 때만 못 얻음
 GIVE = '2589B3'                              # STA $10F7: 떨어뜨린 물건
 BAG, BAG_SLOTS = 0x2056, 12                  # 일행 기록 0(7E:2040)의 가진 물건 +16~
-FIXED_GROUPS = 0x23B04B                      # 고정 무리 6바이트씩(dq5encounterwrite fixed_groups)
+FIXED_GROUPS = 0x23B04B
+# 떠돌이 상인 장면: 장면마다 A 를 누르는 횟수(가게는 「사기」·약초·개수·확인, 여관은 한 밤), 시작 금화·HP
+MERCHANT_PRESSES = {'shop': 25, 'inn': 12, 'roll': 20, 'off': 12}
+# 대화가 다 끝나게(가게는 금화를 먼저 빼고 「자, 여기요」 뒤에 물건을 넣음) B 로 닫고 기다림
+MERCHANT_CLOSE = ','.join(['wait:90,b:2'] * 4) + ',wait:120'
+# merchant-roll 은 걷기·전투(주인공 HP 고정)를 되풀이해 rand(10) 을 여러 번 본다
+MERCHANT_ROUNDS = 7
+MERCHANT_FRAMES = 4000
+MERCHANT_GOLD = 1000
+MERCHANT_SET = '2019=E8;201A=03;201B=00;2042=05'
+MERCHANT_ITEMS = ((0xA1, 8),)                # 도구점 첫 줄 やくそう(DQ5 A1, 8G)
+MERCHANT_INN_PRICE = 10
+SHOP_PC, INN_PC = '06E01F', '06E384'         # 특수 기능 도구점·여관(06:DBD2 의 02·06)
+BATTLE_PC = '01860D'                         # 걸음 전투가 걸림(dq4battlecheck)                      # 고정 무리 6바이트씩(dq5encounterwrite fixed_groups)
 # 한 걸음에 전투가 하나 걸리고(조우를 덮음) A 로 이기고 메시지를 넘긴 뒤, B 로 필드에서 열린 명령 창을 닫고 다음 걸음
 FIGHT = ','.join(['a:2,wait:14'] * 26 + ['b:2,wait:10'] * 6)
 DROP_WALK = 'idle:16,' + ','.join(f'{d}:12,{FIGHT}' for d in ('right', 'left') * 4)
@@ -218,6 +235,47 @@ def judge_drops(rolls, table, items, sure=False, off=False):
     return problems
 
 
+def judge_merchant(mode, events, spent, bag, hp, max_hp, be):
+    """떠돌이 상인 장면 판정. events 는 [(무엇, A)]."""
+    kinds = [k for k, _ in events]
+    problems = []
+    if mode == 'roll':
+        rolls = [(k, a) for k, a in enumerate(events) if a[0] == 'rolled10']
+        if len(rolls) < 3:
+            problems.append(f'rand(10) {len(rolls)}번(3번 이상이어야 함)')
+        for k, (_, a) in rolls:
+            nxt = kinds[k + 1] if k + 1 < len(kinds) else None
+            if (a == 0) != (nxt == 'merchant'):
+                problems.append(f'rand(10) = {a} 뒤 {nxt}')
+        return problems
+    if mode == 'off':
+        if 'merchant' in kinds or 'rolled10' in kinds:
+            problems.append('3장 flag 없이 상인 갈래에 옴')
+        if 'battle' not in kinds:
+            problems.append('싸우지 않음')
+        return problems
+    first = kinds.index('merchant') if 'merchant' in kinds else None
+    if first is None:
+        return ['상인이 나오지 않음']
+    if 'battle' in kinds[first:]:
+        problems.append('상인 뒤 전투가 걸림')
+    want = 'shop' if mode == 'shop' else 'inn'
+    if want not in kinds:
+        problems.append(f'{want} 처리기에 오지 않음')
+    if be & 0x80:
+        problems.append(f'끝에 실내($BE {be:02X})')
+    if mode == 'shop':
+        price = MERCHANT_ITEMS[0][1]
+        if spent <= 0 or spent % price or bag.count(MERCHANT_ITEMS[0][0]) != spent // price:
+            problems.append(f'쓴 금화 {spent}, 약초 {bag.count(MERCHANT_ITEMS[0][0])}개')
+    else:
+        if spent <= 0 or spent % MERCHANT_INN_PRICE:
+            problems.append(f'쓴 금화 {spent}(1인 {MERCHANT_INN_PRICE}G)')
+        if hp != max_hp:
+            problems.append(f'자고 난 HP {hp}/{max_hp}')
+    return problems
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--rom', required=True, type=Path)
@@ -331,7 +389,33 @@ def main():
                          if bag.count(m) < (n := sum(r['given'] == m for r in rolls))]
         return name, {'level': level, 'battles': len(rolls), 'rolls': rolls, 'problems': problems, 'ok': not problems}
 
+    def merchant_scene(name, mode):
+        field = stand(0x14)
+        patch = [dq4fieldport.warp_patch(data, *field), fec.RATES]
+        if mode != 'roll':
+            patch.append(f"{lorom(labels['found']) + 1:X}=01")              # rand(10) 를 rand(1) 로: 늘 상인
+        if mode in ('shop', 'inn'):
+            patch.append(f"{lorom(labels['rolled256']) + 1:X}={'FF' if mode == 'inn' else '00'}")
+        pcs = {f'{labels[k]:06X}': k for k in ('rolled10', 'merchant', 'rolled256')}
+        pcs.update({f'{dq4fieldencounter.TALK:06X}': 'talk', SHOP_PC: 'shop', INN_PC: 'inn', BATTLE_PC: 'battle'})
+        presses = ','.join(['wait:60,a:2'] * MERCHANT_PRESSES[mode]) + ',' + MERCHANT_CLOSE
+        rounds = MERCHANT_ROUNDS if mode == 'roll' else 1
+        test = 'idle:16,' + ','.join(['right:40,left:40,right:40,left:40,right:40,left:40,' + presses] * rounds)
+        got = dq4groupcheck.scene(mesence, rom, state, out, name, FIELD='{},{}'.format(*field), ROMPATCH=';'.join(patch),
+                                  TEST=test, MAXF=str(MERCHANT_FRAMES * rounds), TRACE=','.join(pcs), LOG='7E2019',
+                                  SET=('' if mode == 'off' else f'{ch3_set};') + MERCHANT_SET,
+                                  POKE=f"{CLOCK['day']} {wc.HERO_HP if mode in ('roll', 'off') else ''}")
+        trace = list(fec.lines(out / name / 'trace.txt')) if (out / name / 'trace.txt').exists() else []
+        events = [(pcs[at], int(kv['A'], 16)) for _, at, kv in trace]
+        wram = (out / name / 'final.wram').read_bytes() if (out / name / 'final.wram').exists() else bytes(0x10000)
+        gold = int.from_bytes(wram[0x2019:0x201C], 'little')
+        bag = list(wram[BAG:BAG + BAG_SLOTS])
+        problems = [got['error']] if 'error' in got else []
+        problems += judge_merchant(mode, events, MERCHANT_GOLD - gold, bag, wram[0x2042], wram[0x204E], wram[0xBE])
+        return name, {'events': events[:40], 'spent': MERCHANT_GOLD - gold, 'problems': problems, 'ok': not problems}
+
     jobs = [(zone_scene, z, mode, d) for z in dq4fieldencounter.CH3_FIELD for mode in ('day', 'night') for d in DELAYS]
+    jobs += [(merchant_scene, f'merchant-{m}', m) for m in MERCHANT_PRESSES]
     jobs += [(drop_scene, f'drop-{lv:02X}', lv) for lv in DROP_LEVELS]
     jobs += [(drop_scene, 'drop-sure', 1, True), (drop_scene, 'drop-off', 1, False, True)]
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:

@@ -87,9 +87,11 @@ class SyntheticPortTest(unittest.TestCase):
                 mock.patch.object(shopport.dq5item, "item_name", lambda rom, i: f"item{i:02X}"), \
                 mock.patch.object(shopport.dq4shop, "item_names",
                                   lambda prg: (self.NAMES, {i: 10 * i + 5 for i in range(len(self.NAMES))})), \
-                mock.patch.object(shopport.dq4shop, "lookup", lambda prg, k, g, n: lookup[k, g, n]), \
+                mock.patch.object(shopport.dq4shop, "lookup",
+                                  lambda prg, k, g, n: [0x00] if (g, n) == shopport.MERCHANT else lookup[k, g, n]), \
                 mock.patch.object(shopport.dq4shop, "price", lambda prg, g, n, i: prices.get((g, n, i), 10 * i + 5)), \
-                mock.patch.object(shopport.dq4shop, "inn_price", lambda prg, g, n: inn.get((g, n))), \
+                mock.patch.object(shopport.dq4shop, "inn_price",
+                                  lambda prg, g, n: 10 if (g, n) == shopport.MERCHANT else inn.get((g, n))), \
                 mock.patch.object(shopport.dq4itemport, "writes", self.itemwrites):
             dq5, dq4 = Path(t) / "dq5.sfc", Path(t) / "dq4.nes"
             dq5.write_bytes(b"")
@@ -99,11 +101,14 @@ class SyntheticPortTest(unittest.TestCase):
     def test_lists_follow_the_existing_ones_of_their_kind(self):
         services, shops, writes, report = self.run_port()
         first = shopport.dq4shopkey.KEY_FIRST
-        self.assertEqual(report["keys"], {"36/00-01": f"{first:02X}", "37/00-00": f"{first + 1:02X}"})
+        # 떠돌이 상인(필드 01/00)은 그룹 키 뒤의 키와 도구 목록
+        self.assertEqual(report["keys"], {"36/00-01": f"{first:02X}", "37/00-00": f"{first + 1:02X}",
+                                          "01/00-00": f"{first + 2:02X}"})
         # DQ5 의 무기 목록 둘 뒤에 이어 붙고(index 2), 갑옷·도구도 제 종류의 개수부터
-        self.assertEqual(shops, [{"kind": 2, "index": 2, "key": first, "items": [0x02, 0x06]},
-                                 {"kind": 1, "index": 0, "key": first, "items": [0x40]},
-                                 {"kind": 0, "index": 1, "key": first + 1, "items": [0x60, 0x61]}])
+        self.assertEqual(shops[:3], [{"kind": 2, "index": 2, "key": first, "items": [0x02, 0x06]},
+                                     {"kind": 1, "index": 0, "key": first, "items": [0x40]},
+                                     {"kind": 0, "index": 1, "key": first + 1, "items": [0x60, 0x61]}])
+        self.assertEqual({k: shops[3][k] for k in ("kind", "index", "key")}, {"kind": 0, "index": 2, "key": first + 2})
         # bit7 이 붙은 FC 항목 번호는 그 아래 7비트의 이름이고, DQ5 에 없는 うまのふん 은 빠진 것으로 남긴다
         self.assertEqual(report["missing_items"], ["36/00 うまのふん"])
         self.assertEqual(services["36/00"][1, 1, True], 1)
@@ -114,7 +119,7 @@ class SyntheticPortTest(unittest.TestCase):
         table, bank, addr = writes[:3]
         data = bytes.fromhex(table["hex"])
         self.assertEqual(data[:shopport.INN_ENTRIES * 2], bytes(range(shopport.INN_ENTRIES * 2)))
-        self.assertEqual(data[shopport.INN_ENTRIES * 2:], bytes((first, 4, first + 1, 6)))
+        self.assertEqual(data[shopport.INN_ENTRIES * 2:], bytes((first, 4, first + 1, 6, first + 2, 10)))
         self.assertEqual((table["at"], bank["at"], addr["at"]), ("3C:F123", "06:F568", "06:F56E"))
         # 06:F56D 의 LDA 피연산자는 낮은 바이트부터
         self.assertEqual((bank["hex"], addr["hex"]), ("3C", "23 F1"))
@@ -124,8 +129,10 @@ class SyntheticPortTest(unittest.TestCase):
         services = {(0x10, 0): {(2, 2, False): 6}, (0x10, 1): {(3, 3, False): 6}}
         _, _, writes, report = self.run_port(services=services, inn={(0x10, 0): 4, (0x10, 1): 5})
         first = shopport.dq4shopkey.KEY_FIRST
-        self.assertEqual(report["keys"], {"36/00-00": f"{first:02X}", "36/01-01": f"{first + 1:02X}"})
-        self.assertEqual(bytes.fromhex(writes[0]["hex"])[shopport.INN_ENTRIES * 2:], bytes((first, 4, first + 1, 5)))
+        self.assertEqual(report["keys"], {"36/00-00": f"{first:02X}", "36/01-01": f"{first + 1:02X}",
+                                          "01/00-00": f"{first + 2:02X}"})
+        self.assertEqual(bytes.fromhex(writes[0]["hex"])[shopport.INN_ENTRIES * 2:],
+                         bytes((first, 4, first + 1, 5, first + 2, 10)))
 
     def test_item_prices_go_to_the_item_writes(self):
         _, _, writes, report = self.run_port()
@@ -214,7 +221,8 @@ class PortTest(unittest.TestCase):
                                                "3E/00-02": "64", "3F/00-01": "65", "40/00-08": "66", "40/09-0E": "67",
                                                "41/00-03": "68", "42/00-01": "69", "43/00-05": "6A",
                                                "45/05-05": "6B", "45/00-02": "6C", "45/03-04": "6D", "45/0F-0F": "6E",
-                                               "45/06-0B": "6F", "46/00-03": "70", "48/00-01": "71"})
+                                               "45/06-0B": "6F", "46/00-03": "70", "48/00-01": "71",
+                                               "01/00-00": "72"})
         weapons = next(s for s in self.shops if s["key"] == 0x60 and s["kind"] == 2)
         self.assertEqual(weapons["items"], [0x02, 0x06, 0x1C, 0x07])  # いばらのむち = DQ5 いばらのムチ
         # てつのやり sells in DQ5 slot 01 (dq4itemport.BORROWED), after くさりがま as in FC.
@@ -233,10 +241,12 @@ class PortTest(unittest.TestCase):
     def test_inn_table_and_operands(self):
         table, bank, addr, _, shop_site, inn_site = self.writes[:6]
         data = bytes.fromhex(table["hex"].replace(" ", ""))
-        self.assertEqual(len(data), (shopport.INN_ENTRIES + 14) * 2)
-        # フレノール(키 63)은 처음 상태에 여관이 없고 사건 목록(목록 플래그 00&40)의 여관 주인만 있다
-        self.assertEqual(data[-28:], bytes((0x60, 4, 0x61, 6, 0x62, 3, 0x63, 4, 0x65, 10, 0x66, 6, 0x67, 8, 0x68, 3,
-                                            0x6A, 6, 0x6B, 6, 0x6C, 2, 0x6E, 8, 0x6F, 6, 0x70, 3)))
+        self.assertEqual(len(data), (shopport.INN_ENTRIES + 15) * 2)
+        # フレノール(키 63)은 처음 상태에 여관이 없고 사건 목록(목록 플래그 00&40)의 여관 주인만 있다. 끝은 3장 떠돌이
+        # 상인(필드 01/00, 키 72, 1인 10G)
+        self.assertEqual(data[-30:], bytes((0x60, 4, 0x61, 6, 0x62, 3, 0x63, 4, 0x65, 10, 0x66, 6, 0x67, 8, 0x68, 3,
+                                            0x6A, 6, 0x6B, 6, 0x6C, 2, 0x6E, 8, 0x6F, 6, 0x70, 3, 0x72, 10)))
+        self.assertEqual(self.report["merchant"], {"key": "72", "items": [0xA1, 0xA2, 0xA3, 0xA4], "inn": 10})
         self.assertEqual(self.report["inns"], {"36/00": 4, "37/00": 6, "3D/03": 3, "3D/04": 4, "3F/01": 10, "40/00": 6,
                                                "40/0E": 8,
                                                "41/00": 3, "43/00": 6,
