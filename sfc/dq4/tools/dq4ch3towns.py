@@ -252,12 +252,9 @@ MESSAGES = {
     'jail_out': say('여기는 감옥이다! 죄수와 이야기하는 것은 허락할 수 없다! 자, 나가시오!'),       # 034A
     'night_out': say('이런 한밤중에 성에 들어오다니!', '내 눈에 띈 이상 가만있을 수는 없다. 자, 물러가시오!'),  # 038E
     # 열린 카지노(공사 재개 뒤)의 코인·교환·슬롯·포커 사람. 놀이는 옮기지 않았다(코인을 살 수 없음)
-    'coin_exchange': say('여기는 코인을 물건으로 바꾸는 교환소입니다.'),                    # 0350
-    'coin_none': say('@ 님은 지금……', '어머, 코인이 한 장도 없네요.', '코인이 모이면 언제든 또 오세요.'),   # 03CF
-    'coin_seller': say('어서 오세요. 여기는 코인 판매소입니다.'),                           # 0355
-    'coin_closed': say('죄송하지만 지금은 코인을 팔지 않습니다.'),                          # FC 에 없는 말(판매를 옮기지 않음)
-    'slots_ask': say('슬롯머신이 있습니다. 해 보시겠습니까?'),                              # 038A
-    'no_coins': say('코인이 없으시네요. 코인을 사신 뒤 다시 오세요!'),                       # 047C
+    'arena_hall': say('고금동서의 몬스터들이 기술을 겨루는 손에 땀을 쥐는 격투장은 이쪽!',     # 0480
+                      '어느 몬스터가 이길까? 딱 맞혀서 한몫 단단히 챙기세요!'),
+    'arena_later': say('그만두시는군요. 또 오시기를 기다리겠습니다!'),                       # 0485
     'poker_ask': say('여기는 포커 테이블입니다. 즐기시겠습니까?'),                           # 07F6
     'poker_short': say('어이쿠 손님, 코인이 모자라시네요. 코인을 사신 뒤 다시 오세요!'),      # 0482
     'poker_later': say('그럼 마음이 내키시면 언제든 오세요.'),                               # 07F7
@@ -273,8 +270,7 @@ SIMPLE = ('profit', 'clouds', 'monsters_back', 'tournament_over', 'shop_permit',
           'arena_closed', 'pizarro_gone', 'emperor_rumor2', 'hero_rumor', 'kitchen', 'gaade_bridges', 'pizarro_fan',
           'sky_sword', 'king_meets_all', 'empty_shop')
 TALKS = ('safe_man', 'nun', 'warrior', 'neighbor', 'prisoner', 'castle_man', 'bridge', 'jail',
-         'armor_buyer', 'gate', 'drunk', 'statue_merchant', 'jail_guard', 'night_guard', 'nanny', 'coin_exchange',
-         'coin_seller', 'slots', 'poker') + SIMPLE
+         'armor_buyer', 'gate', 'drunk', 'statue_merchant', 'jail_guard', 'night_guard', 'nanny', 'arena', 'poker') + SIMPLE
 
 
 def talk_scripts(ctx):
@@ -300,9 +296,8 @@ def talk_scripts(ctx):
         'jail_guard': [s('jail_out'), ctx.call('jail_out')],
         'nanny': [when(flag(NANNY_SCOLDED), [s('nanny_out')], [s('nanny_room')])],
         'night_guard': [s('night_out'), ctx.call('night_out')],
-        'coin_exchange': [s('coin_exchange'), s('coin_none')],
-        'coin_seller': [s('coin_seller'), s('coin_closed')],
-        'slots': [s('slots_ask'), when(YES, [s('no_coins')])],
+        # 걸기는 아직 옮기지 않았다: 맞이한 뒤 그만두는 갈래(FC 0485)
+        'arena': [s('arena_hall'), s('arena_later')],
         'poker': [s('poker_ask'), when(YES, [s('poker_short')], [s('poker_later')])],
     }
     bodies.update({name: [s(name)] for name in SIMPLE})
@@ -382,8 +377,11 @@ CASINO_PEOPLE = ((0x04, 0x0C), (0x08, 0x0A), (0x0C, 0x03), (0x0F, 0x07), (0x10, 
 # 3장 동안 다른 모듈의 3장 목록이 없으면 이 모듈이 기본 목록을 베껴 거는 엔돌 맵. 2장 끝의 우승 목록(dq4ch2ending,
 # 빈 성 flag 가 3장에도 켜져 있음)이 3장에 걸리지 않게 한다. 04/07·04/0B 는 FC 3장도 기본 목록이다
 # 열린 카지노의 장치 사람(FC 칸 → 대화): 교환소(046)·코인 판매(047)·슬롯(048)·포커(049)
-CASINO_DEVICES = {(0x1C, 0x08): 'coin_exchange', (0x18, 0x02): 'coin_seller', (0x08, 0x0A): 'slots',
-                  (0x13, 0x0B): 'poker'}
+CASINO_DEVICES = {(0x08, 0x0A): 'arena', (0x13, 0x0B): 'poker'}
+# DQ5 가게 처리기를 그대로 부르는 사람(FC 칸 → DQ5 대화 번호): 코인 판매 0B(FC 047, 06:EE34)·코인 교환 0C(FC 046).
+# 경품 목록·코인 값·한 장 값은 dq4shopport(COIN_KEY·COIN_PRICES·COIN_SALE), 말은 dq4sysmsg 461~46F
+CASINO_SERVICES = {(0x18, 0x02): 0x0B, (0x1C, 0x08): 0x0C}
+COIN_SALE_FIRST, COIN_EXCHANGE_FIRST = 0x468, 0x461
 ENDOR_MAPS = (ENDOR_TOWN, ENDOR_HALL, KITCHEN, THRONE, ARENA, INN)
 
 
@@ -470,8 +468,9 @@ def npc_lists(lists, ctx):
             over.append(on(m, name))
     # 공사 재개(굴 모듈 RESUMED, FC $6287&80) 뒤에는 FC 처럼 기본 목록의 열린 카지노. 닫힌 목록보다 앞 줄이어야 한다
     import dq4ch3tunnel as tunnel
-    devices = {(t, cell(*fc)): talk for fc, talk in CASINO_DEVICES.items() for t in ('day', 'night')}
-    opened = [{**e, "fields": {**e["fields"], "talk": t[devices[(e["time"], _at(e))]]}}
+    devices = {(tm, cell(*fc)): t[talk] for fc, talk in CASINO_DEVICES.items() for tm in ('day', 'night')}
+    devices.update({(tm, cell(*fc)): service for fc, service in CASINO_SERVICES.items() for tm in ('day', 'night')})
+    opened = [{**e, "fields": {**e["fields"], "talk": devices[(e["time"], _at(e))]}}
               if (e["time"], _at(e)) in devices else e for e in copy.deepcopy(lists[CASINO]["entries"])]
     if sum(1 for e in opened if (e["time"], _at(e)) in devices) != len(devices):
         raise SystemExit(f'마을 사람: {CASINO} 에 카지노 장치 사람이 모자람')
@@ -537,9 +536,9 @@ def state_messages(ctx):
         'towns_chased': ('', {(BONMALMO, (0x06, 0x06), False): m['nanny_out'],
                               (BONMALMO, (0x06, 0x07), False): m['nanny_out']}, _set(PRINCE_MET, NANNY_SCOLDED)),
         'towns_shop': (_set(SHOP), {(HOUSE, (0x02, 0x04), True): m['neighbor_proud']}),
-        'towns_casino': (_set(_resumed()), {(CASINO, fc, night): m[first] for fc, first in (
-            ((0x1C, 0x08), 'coin_exchange'), ((0x18, 0x02), 'coin_seller'), ((0x08, 0x0A), 'slots_ask'),
-            ((0x13, 0x0B), 'poker_ask')) for night in (False, True)}),
+        'towns_casino': (_set(_resumed()), {(CASINO, fc, night): first for fc, first in (
+            ((0x1C, 0x08), COIN_EXCHANGE_FIRST), ((0x18, 0x02), COIN_SALE_FIRST), ((0x08, 0x0A), m['arena_hall']),
+            ((0x13, 0x0B), m['poker_ask'])) for night in (False, True)}),
     }
 
 

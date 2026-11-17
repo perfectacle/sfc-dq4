@@ -162,6 +162,8 @@ class ListTest(unittest.TestCase):
                   for e in names['ch3_towns_4001_open']["entries"]}
         for fc, name in W.CASINO_DEVICES.items():
             self.assertEqual(opened[('night', W.cell(*fc))], t[name])
+        for fc, service in W.CASINO_SERVICES.items():
+            self.assertEqual(opened[('day', W.cell(*fc))], service)
         # 엔돌 밤 사람 한 칸 옮김, 왕좌의 방 대신은 섬
         town = {(e["time"], (e["fields"]["x"], e["fields"]["y"])): e for e in names['ch3_towns_4000']["entries"]}
         self.assertIn(('night', W.cell(0x17, 0x1E)), town)

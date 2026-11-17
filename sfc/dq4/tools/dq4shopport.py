@@ -67,6 +67,14 @@ MERCHANT_MAP = (0x01, 0x00)
 # 0 이 아닌 품목을 STOCK 차례로 하나씩 붙인다(15:$B26B, 개수만큼 붙이지 않음. 헤드리스 실측). 재고 조합 비트(STOCK 의
 # 순번 k 가 bit k)마다 목록 하나를 한 번 쓰는 키 ONE_SHOT.start + 비트로 두고, 주인 대화(dq4ch3lakanaba)가 고른다
 LAKANABA = (0x16, 0x00)
+# 엔돌 카지노(FC 04/01)의 경품 6줄(15:$B375, 물건·코인 2바이트)을 DQ5 코인 교환(대화 0C)이 띄우는 よろず屋 목록(종류 3,
+# 키 15)과 그 코인 값 표(04:FD5B, 목록 차례로 3바이트)에 둔다. DQ5 에 짝이 없는 경품은 뺀다(report missing_items).
+# 코인 판매(대화 0B, 06:EE34)의 한 장 값은 06:EEDB LDA #$0014 의 즉값이고, FC 는 3장이면 200(15:$A884: $615A = 2
+# 이면 C8, 1 이면 0A, 그 밖 14). 이 해킹에서 카지노가 열리는 것은 3장뿐이라 200 으로 둔다
+CASINO = (0x04, 0x01)
+COIN_KIND, COIN_KEY = 3, 0x15
+COIN_PRICES = 0x04FD5B
+COIN_SALE, COIN_SALE_ORIG, COIN_SALE_PRICE = 0x06EEDC, 0x14, 200
 LAKANABA_STOCK = (0x0B, 0x04, 0x23)
 ONE_SHOT_AT = _CH3_VARS2 + _CH3_SLOTS['L'].vars2[0]     # 한 번 쓰는 키 바이트(레이크나바 몫)
 # Sellers who come only with a chapter's event (dq4shop.npc_lists 「목록 플래그 n&m」): FC map -> the person list that
@@ -315,6 +323,21 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
                       "items": picked})
         counts[LIST_KIND[1]] += 1
         lakanaba[f"{dq4shopkey.ONE_SHOT.start + bits:02X}"] = picked
+    # DQ5 롬에 코인 교환 목록이 없으면(목록을 바꿔 끼운 시험) 카지노를 옮기지 않는다
+    coin = next((s for s in progress["shops"] if s.get("kind") == COIN_KIND and s.get("key") == COIN_KEY), None)
+    picked, coins = [], []
+    for k in range(dq4shop.CASINO_ROWS if coin else 0):
+        at = dq4shop.CASINO_TABLE + 3 * k
+        i = dq4shop.rd(prg, dq4shop.CODE_BANK, at)
+        value = dq4shop.rd(prg, dq4shop.CODE_BANK, at + 1) | dq4shop.rd(prg, dq4shop.CODE_BANK, at + 2) << 8
+        if _fold(names[i]) in items:
+            picked.append(items[_fold(names[i])])
+            coins.append(value)
+        else:
+            report["missing_items"].append(f"카지노 경품 {names[i]}")
+    if coin:
+        shops.append({"kind": COIN_KIND, "index": coin["index"], "key": COIN_KEY, "items": picked})
+        report["casino"] = {"items": picked, "coins": coins, "coin_price": COIN_SALE_PRICE}
     report["keys"] = {f"{g:02X}/{first:02X}-{last:02X}": f"{k:02X}" for g, first, last, k in rows}
     report["event_sellers"] = {m: {f"{x},{y},{'night' if n else 'day'}": SERVICE[k] for (x, y, n), k in e.items()}
                                for m, e in events.items()}
@@ -329,6 +352,13 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
         *dq4shopkey.writes(key_at, rows, ONE_SHOT_AT),
         *dq4itemport.writes(rom, prg, prices),
     ]
+    if coin:
+        writes += [
+            {"at": _cpu(COIN_PRICES), "hex": b"".join(v.to_bytes(3, "little") for v in coins).hex(" ").upper(),
+             "orig": bytes(rom.u8(COIN_PRICES + k) for k in range(3 * len(coins))).hex(" ").upper(),
+             "note": "카지노 경품 코인 값(FC 04/01)"},
+            {"at": _cpu(COIN_SALE), "hex": f"{COIN_SALE_PRICE:02X}", "orig": f"{COIN_SALE_ORIG:02X}",
+             "note": "코인 한 장 값(FC 3장)"}]
     report["prices"] = {f"{i:02X} {dq4itemport.fc_name(rom, i)}": p
                         for i, p in sorted(prices.items())}
     return services, shops, writes, report
