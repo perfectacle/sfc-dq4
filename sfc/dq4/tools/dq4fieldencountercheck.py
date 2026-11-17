@@ -5,7 +5,10 @@ dq5warp.lua FIELD with dq5warptrace.lua).
          DQ5 rate coefficient at FF (23:EA44, so nearly every step fights): every step 23:E7C2 gets the DQ5 zone
          of that FC zone, and every group 23:E7C2 picks is made of the monsters that zone's record weighs (a fixed
          group only where the record weighs slot 10: chapter 3's field formation, dq4fieldencounter.field_formations). The
-         walk stops at the first fight, so each zone is walked after three different waits (DELAYS)
+         walk stops at the first fight, so each zone is walked after three different waits (DELAYS). The group
+         picking hooks (dq4fieldencounter.ch3_code pick·count·pick2) are traced with the random state 23:EAFD steps
+         ($0993~$0996) and the clock ($075E): every first slot, species count and further slot is the one
+         dq4fieldencounter.fc_pick and the bytes 14·15 give from that state (pick_problems)
   rate   the same walk at the ROM's own rates: every step 23:E7C2's Y is the day or night FC terrain factor of
          the FC block times dq4balance.ENCOUNTER, the zone's coefficient is the one dq4fieldencounter.field_rate_index picks, and the chance
          23:E8B7 gets is dq4fieldencounter.dq5_chance of the coefficient, Y and the steps since the last fight
@@ -87,6 +90,62 @@ def stand(grid, props, cell):
     return best[1]
 
 
+PICK_LOG = "7E0993,7E0995,7E075E,7E000C"
+PICK_LABELS = ("pick", "pick_slot", "pick_none", "count", "count_done", "pick2", "pick2_done")
+NIGHT_CLOCK = 0xF0      # 21:8000: $075E 가 이 값 이상이면 밤
+
+
+def pick_trace(labels):
+    """무리 고르기 훅 자리(TRACE 에 붙임)."""
+    return ",".join(f"{labels[k]:06X}" for k in PICK_LABELS)
+
+
+def pick_problems(rows, labels, picks):
+    """(고른 횟수 {pick, count, pick2}, 문제): 훅에 들어올 때의 난수 상태로 dq4fieldencounter 모형이 낸 칸·종 수와
+    훅이 낸 것이 다른 곳. picks 는 dq4fieldencounter.pick_rows."""
+    at = {f"{labels[k]:06X}": k for k in PICK_LABELS}
+    table = {zone: (third, fourth, modes) for zone, _, third, fourth, modes in picks}
+    seen, problems = {"pick": 0, "count": 0, "pick2": 0}, []
+    entry = lists = want = None
+    for _, pc, kv in rows:
+        k = at.get(pc)
+        if k is None:
+            continue
+        state = int(kv["7E0995"], 16) << 16 | int(kv["7E0993"], 16)
+        if k == "pick":
+            zone = (int(kv["X"], 16) & 0xFFFF) // dq4fieldencounter.CH3_ZONE_RECORD
+            entry = table.get(zone)
+            if entry is None:
+                problems.append(f"구역 {zone} 이 표에 없음")
+                continue
+            lists = entry[2]["night" if int(kv["7E075E"], 16) >= NIGHT_CLOCK else "day"]
+            want = dq4fieldencounter.fc_pick(lists[0], dq4fieldencounter.rng_next(state)[1])
+        elif entry is None:
+            continue
+        elif k in ("pick_slot", "pick_none"):
+            got = int(kv["A"], 16) & 0xFF if k == "pick_slot" else None
+            seen["pick"] += 1
+            if got != want:
+                problems.append(f"첫 칸 {got}, 기대 {want}")
+        elif k == "count":
+            state, r = dq4fieldencounter.rng_next(state)
+            want = 0
+            if r < entry[0]:
+                state, r = dq4fieldencounter.rng_next(state)
+                want = 1 + (r < entry[1])
+        elif k == "count_done":
+            seen["count"] += 1
+            if int(kv["7E000C"], 16) & 0xFF != want:
+                problems.append(f"종 수 {2 + (int(kv['7E000C'], 16) & 0xFF)}, 기대 {2 + want}")
+        elif k == "pick2":
+            want = dq4fieldencounter.fc_pick(lists[1], dq4fieldencounter.rng_next(state)[1])
+        elif k == "pick2_done":
+            seen["pick2"] += 1
+            if int(kv["A"], 16) & 0xFF != want:
+                problems.append(f"둘째부터 칸 {int(kv['A'], 16) & 0xFF}, 기대 {want}")
+    return seen, problems
+
+
 def lines(path):
     for line in path.read_text().splitlines():
         f = line.split()
@@ -125,6 +184,8 @@ def main():
                                           json.loads((out / "encounter-orig.json").read_text(encoding="utf-8")),
                                           dq4groupbuild.dungeon_zones(prg).values())
     dq4groupcheck.WARP = DQ5_TOOLS / "lua" / "dq5warptrace.lua"
+    labels = dq4fieldencounter.ch3_labels(prg, args.dq5.read_bytes(), report)
+    picks = dq4fieldencounter.pick_rows(prg, report)
 
     def place(field, cell, key=dq4fieldencounter.FC_MAP):
         grid, props = dq4fieldport.fc_field(prg, field)
@@ -152,7 +213,8 @@ def main():
         scene = f"{name}-rate" if rates else f"{name}-zone{delay}"
         got = dq4groupcheck.scene(mesence, rom, state, out, scene, FIELD="{},{}".format(*dq4fieldport.stand(x, y)),
                                   ROMPATCH=patch if rates else f"{patch};{RATES}", TEST=f"wait:{delay},{WALK}" if delay else WALK, MAXF="2600",
-                                  TRACE=RATE_TRACE if rates else TRACE, LOG=LOG, **extra)
+                                  TRACE=RATE_TRACE if rates else f"{TRACE},{pick_trace(labels)}",
+                                  LOG=LOG if rates else f"{LOG},{PICK_LOG}", **extra)
         ram = (out / scene / "final.wram").read_bytes()
         want = report[f"{fc:02X}"]
         rows = list(lines(out / scene / "trace.txt"))
@@ -163,8 +225,9 @@ def main():
         zones_seen = sorted({int(kv["A"], 16) & 0xFF for _, pc, kv in rows if pc == "23E7C2"})
         fights = [(EXITS[pc], groups(kv)) for _, pc, kv in rows if pc in EXITS]
         allowed = set(want["monsters"])
-        return scene, {**base, "zones": zones_seen, "fights": fights,
-                       "ok": zones_seen == [want["zone"]] and bool(fights)
+        seen, problems = pick_problems(rows, labels, picks)
+        return scene, {**base, "zones": zones_seen, "fights": fights, "picks": seen, "pick_problems": problems,
+                       "ok": zones_seen == [want["zone"]] and bool(fights) and seen["pick"] > 0 and not problems
                        and all((kind != "fixed" or want["fixed"]["weight"]) and {m for m, _ in g} <= allowed
                                for kind, g in fights)}
 

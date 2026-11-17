@@ -503,13 +503,14 @@ def docs(prg, dq5, enc, dungeon=()):
         for fc, area in found.items():
             fields, dropped = record(prg, dq5, fc, fixed if kind == "dungeon" else None,
                                      field_fixed=fixed if fc in field else None)
+            _, _, origin, _ = placed(prg, fc, fixed if kind == "dungeon" else None, fixed if fc in field else None)
             records.append({"index": area, **fields})
             monsters = {sl["monster"] for sl in fields["slots"] if sl["weight"]}
             if fields["fixed"]["weight"]:
                 monsters |= {m["monster"] for m in groups[fields["fixed"]["group"]]["members"]}
             report[f"{fc:02X}"] = {"zone": area, "kind": kind, "level": fields["level"], "dropped_slots": dropped,
                                    "rate_index": fields["rate_index"], "fixed": fields["fixed"],
-                                   "monsters": sorted(monsters)}
+                                   "monsters": sorted(monsters), "origin": sorted(origin.items())}
     sea, _ = record(prg, dq5, SEA_ZONE, kinds=SEA_KINDS)
     taken = {*assign.values(), *late.values(), *found_dungeon.values()}
     records += [{"index": area, **sea} for area in SEA_AREAS if area not in taken]
@@ -568,19 +569,24 @@ def zone_monsters(prg, zones):
     return sorted({m for z in zones for m in enc.zone(prg, z)["slots"] if m not in (0, 0xFF)})
 
 
-# ---- 3장 밤·낮 칸과 전투 뒤 물건 ----
+# ---- FC 무리 고르기, 3장 떠돌이 상인과 전투 뒤 물건 ----
 #
 # 형식 문서 sfc/dq4/docs/dq4-ch3-monsters-format.md.
 #
-# 밤·낮 칸: FC 필드는 첫 무리를 고를 때 낮이면 칸 4·10·13, 밤이면 칸 0·6 을 빼고(dq4encounter.MASK_FIRST), 둘째 무리부터는
-# 칸 0~3(낮)·1~4(밤)에서 고른다(MASK_SECOND). 둘째 마스크는 첫 마스크를 칸 0~4 로 자른 것과 같아, 빠진 칸의 무게를 0 으로
-# 두면 두 단계 모두 FC 와 같다. DQ5 는 칸 무게를 두 곳(23:E904 첫 무리, 23:EAAD 둘째 종부터)에서 읽으므로 둘 다 훅을 건다.
-# 마스크는 3장 flag(chapter3_flag)가 켜진 동안 3장 필드 구역(CH3_FIELD)에만 건다: 1·2장 롬의 조우는
-# 그대로다. 밤은 DQ5 의 밤 판정 21:8000(carry 면 밤, 고정 무리의 밤 칸이 쓰는 것)이다.
+# 무리 고르기(1~3장 모든 구역): DQ5 는 칸 무게를 3비트로, 여러 종 무리의 종 수를 2비트 무게로 고른다. FC 대로 고르려고
+# 구역마다 FC 칸 차례의 (DQ5 칸, FC 무게) 목록을 두고 FC 식(18:$9DDE)으로 뽑는다: FF 칸과 마스크(낮 칸 4·10·13, 밤 칸 0·6
+# 을 뺌, 둘째 무리부터는 칸 0~3/1~4, 던전은 모두)로 빠진 칸을 빼고 무게 합 S, r = S × 난수 >> 8(S = FF 면 난수 그대로),
+# 누적 무게가 r 이상이 되는 첫 칸. 여러 종 무리는 첫 무리 + 둘째 무리에 난수 < 무게 줄 바이트 14 면 셋째, 그다음 난수 <
+# 바이트 15 면 넷째(18:$9ED8). 난수는 DQ5 조우의 난수(23:EAFD, $0993~$0996 의 32비트 ×3 + 15AD, 위 16비트의 아래 바이트)를
+# 그대로 돌린다. 밤은 DQ5 의 밤 판정 21:8000(carry 면 밤)이다. 표에 없는 구역은 DQ5 원래 고르기다.
 #
-#   23:E8EE  LDY #$FFFF / STY $1001 → JSL night:  구역(X = 구역 × 22)이 표에 있고 3장 flag 면 그 낮·밤 마스크를 MASK 에,
-#            아니면 0. 원래 두 명령을 하고 돌아온다
-#   23:E907·23:EAB0  AND #$07 / STA $0000,Y → JSL weight:  칸 Y 의 MASK 비트가 켜져 있으면 무게 0
+#   23:E8FE  PHX / LDY #0 / STZ $0F → JML pick:  구역(X = 구역 × 22)을 표에서 찾아 낮·밤 칸 묶음 주소를 PICK 에 두고 첫 무리
+#            칸을 Y 로 23:E93F 에. 고를 칸이 없으면 23:E91D(조우 없음). 표에 없으면 PICK = FFFF, 원래 명령을 하고 23:E904
+#   23:E9B4  STY $0A / LDY #0 → JSL count:  PICK 이 있으면 셋째·넷째를 굴려 $0C(0~2) 로 23:E9E8 에, 없으면 원래 명령
+#   23:EAA7  PHX / LDY #0 → JSL pick2 / RTS:  PICK 이 있으면 둘째 무리부터의 칸(A, carry), 없으면 원래 23:EAAD
+#
+# 떠돌이 상인: 23:E8EE  LDY #$FFFF / STY $1001 → JSL merchant:  3장 flag 이고 구역이 3장 필드(CH3_FIELD)면 rand(10) = 0 일 때
+# 싸우지 않고 상인(아래). 아니면 원래 두 명령을 하고 돌아온다
 #
 # 전투 뒤 물건: FC 3장(12:$91DE, $615A = 2)은 몬스터 떨어뜨림 대신 16칸 표를 rand(16) 칸부터 차례로 돌며 rand(256) < 문턱이면
 # 그 물건을 얻는다. 문턱 0 인 칸(はがねのつるぎ·てつのよろい)은 톨네코 레벨이다(fc/dq4/docs/dq4-chapter3-format.md
@@ -594,12 +600,17 @@ def zone_monsters(prg, zones):
 # 코드와 표. 뱅크 4E 는 다른 도구가 쓰지 않는다
 CH3_CODE_AT = 0x4E8000
 CH3_CODE_END = 0x4EC000     # 몬스터·상인 몫의 끝. 4E:C000~ 은 3장 엔돌 몫(dq4ch3slots)
-# 23:E8EE 에서 정한 이번 조우의 칸 마스크(16비트, bit k = DQ5 칸 k 를 뺌). 7E:1A86~1A97 은 전원부터 배·필드·전투까지
-# 아무도 읽지 않는 자리이고(dq4dungeonrate.RAM), 1A86~1A91 은 던전 걸음 훅, 1A94~1A97 은 소리 패치가 쓴다
-MASK = 0x7E1A92
+# 23:E8FE 에서 고른 이번 조우의 낮·밤 칸 묶음 주소(16비트, 뱅크 CH3_CODE_AT, FFFF = 표에 없는 구역). 7E:1A86~1A97 은 전원부터
+# 배·필드·전투까지 아무도 읽지 않는 자리이고(dq4dungeonrate.RAM), 1A86~1A91 은 던전 걸음 훅, 1A94~1A97 은 소리 패치가 쓴다
+PICK = 0x7E1A92
 NIGHT_SITE, NIGHT_ORIG = 0x23E8EE, bytes((0xA0, 0xFF, 0xFF, 0x8C, 0x01, 0x10))
-WEIGHT_SITES = (0x23E907, 0x23EAB0)
-WEIGHT_ORIG = bytes((0x29, 0x07, 0x99, 0x00, 0x00))
+PICK_SITE, PICK_ORIG = 0x23E8FE, bytes((0xDA, 0xA0, 0x00, 0x00, 0x64, 0x0F))
+COUNT_SITE, COUNT_ORIG = 0x23E9B4, bytes((0x84, 0x0A, 0xA0, 0x00, 0x00))
+SECOND_SITE, SECOND_ORIG = 0x23EAA7, bytes((0xDA, 0xA0, 0x00, 0x00, 0x64, 0x0F))
+FIRST_LOOP, FIRST_CHOSEN, NO_ENCOUNTER = 0x23E904, 0x23E93F, 0x23E91D
+COUNT_CHOSEN, SECOND_LOOP = 0x23E9E8, 0x23EAAD
+RNG_LOW, RNG_HIGH = 0x0993, 0x0995     # 23:EAFD 의 32비트 난수(뱅크 23 의 WRAM 거울로 읽음)
+RNG_ADD = 0x15AD
 IS_NIGHT = 0x218000
 CH3_ZONE_RECORD = 22            # 23:96F3 + 구역 × 22
 FC_FIXED_SLOT = 12
@@ -672,51 +683,157 @@ def dq5_drop_items(prg, dq5):
     return out
 
 
-def ch3_masks(prg, z):
-    """FC 필드 구역 z 의 (낮 마스크, 밤 마스크): FC 첫 무리 마스크에서 빠지는 FC 칸이 놓인 DQ5 칸의 비트
-    (placed 의 짝). 필드의 고정 편성 칸 12 는 낮·밤 모두 남아 고정 무리 칸 10 은 보지 않는다."""
-    import dq4encounter
-    _, _, origin, _ = placed(prg, z)
+def merchant_zones(report):
+    """떠돌이 상인이 나오는 DQ5 구역: 3장 필드 구역(CH3_FIELD). report 는 docs 의 보고(FC 구역 → zone)."""
+    return [report[f'{z:02X}']['zone'] for z in CH3_FIELD]
+
+
+def pick_lists(prg, z, origin, mode):
+    """FC 구역 z 의 (첫 무리 목록, 둘째 무리부터의 목록): FC 칸 차례로 [(DQ5 칸, FC 무게)]. mode 의 FC 마스크
+    (dq4encounter.MASK_FIRST·MASK_SECOND)와 FF 칸, DQ5 에 놓이지 않은 FC 칸(origin 에 없음)을 뺀다."""
+    enc = _fc(prg)
+    rec = enc.zone(prg, z)
+    s, w = rec['slots'], enc.weights(prg, rec['row'])
+    at = {fc: k for k, fc in origin.items()}
+
+    def live(mask, n):
+        return [(at[i], w[i]) for i in range(n) if mask >> i & 1 and s[i] != 0xFF and i in at]
+    return live(enc.MASK_FIRST[mode], 14), live(enc.MASK_SECOND[mode], 5)
+
+
+def fc_pick(entries, rnd):
+    """FC 18:$9DDE 로 entries([(칸, 무게)])에서 난수 바이트 rnd 일 때 고르는 칸(없으면 None)."""
+    total = sum(w for _, w in entries)
+    if total > 0xFF:
+        raise ValueError(f'무게 합 {total} 이 FF 를 넘음(FC 는 8비트로 더함)')
+    r = rnd if total == 0xFF else total * rnd >> 8
+    cum = 0
+    for k, w in entries:
+        cum += w
+        if cum >= r:
+            return k
+    return None
+
+
+def fc_pick_odds(entries):
+    """{칸: 256 경우 중 몇 번}: 난수 바이트가 고르다고 볼 때 fc_pick 의 분포."""
+    out = {}
+    for rnd in range(256):
+        k = fc_pick(entries, rnd)
+        out[k] = out.get(k, 0) + 1
+    return out
+
+
+def species_odds(third, fourth):
+    """여러 종 무리의 {종 수: 확률}: FC 무게 줄 바이트 14·15(/256, 18:$9ED8)."""
+    p3, p4 = third / 256, fourth / 256
+    return {2: 1 - p3, 3: p3 * (1 - p4), 4: p3 * p4}
+
+
+def rng_next(state):
+    """23:EAFD: 32비트 난수 state 의 다음 값과 그 난수 바이트(위 16비트의 아래 바이트)."""
+    state = (state * 3 + RNG_ADD) & 0xFFFFFFFF
+    return state, state >> 16 & 0xFF
+
+
+def pick_rows(prg, report):
+    """[(DQ5 구역, FC 구역, 셋째 /256, 넷째 /256, {낮·밤: (첫 목록, 둘째 목록)})]: docs 가 레코드를 쓰는 구역 모두(필드·
+    던전·바다). 필드·바다는 FC 낮·밤 마스크, 던전은 dungeon 마스크를 낮·밤 모두에. report 는 docs 의 보고."""
+    enc = _fc(prg)
+    zones = [(r['zone'], int(fc, 16), dict(r['origin']), r['kind'] == 'dungeon') for fc, r in report.items()]
+    sea = dict(placed(prg, SEA_ZONE)[2])
+    taken = {r['zone'] for r in report.values()}
+    zones += [(area, SEA_ZONE, sea, False) for area in SEA_AREAS if area not in taken]
     out = []
-    for mode in ('day', 'night'):
-        keep = dq4encounter.MASK_FIRST[mode]
-        out.append(sum(1 << k for k, fc in origin.items() if not keep >> fc & 1))
-    return tuple(out)
-
-
-def ch3_zone_masks(prg, report):
-    """[(DQ5 구역, 낮 마스크, 밤 마스크)]: 3장 필드 구역(CH3_FIELD) 모두. 마스크가 없는 구역도 떠돌이 상인이 나오는
-    구역이라 둔다. report 는 docs 의 보고(FC 구역 → zone)."""
-    return [(report[f'{z:02X}']['zone'], *ch3_masks(prg, z)) for z in CH3_FIELD]
+    for area, z, origin, dungeon in sorted(zones):
+        w = enc.weights(prg, enc.zone(prg, z)['row'])
+        modes = ('dungeon', 'dungeon') if dungeon else ('day', 'night')
+        out.append((area, z, w[14], w[15], {k: pick_lists(prg, z, origin, m) for k, m in zip(('day', 'night'), modes)}))
+    return out
 
 
 def _long(v):
     return v.to_bytes(3, 'little')
 
 
-def ch3_code(rows, items, at=CH3_CODE_AT):
+PICK_BLOCK = 6     # 낮·밤 묶음: 셋째 /256, 넷째 /256, 첫 목록 주소, 둘째 목록 주소
+
+
+def ch3_code(merchant, picks, items, at=CH3_CODE_AT):
+    """(코드, 라벨). merchant 는 merchant_zones, picks 는 pick_rows, items 는 DQ5 물건 16칸(dq5_drop_items)."""
     from dq4environmentrom import _Asm
-    """(코드, 라벨). rows 는 zone_masks, items 는 DQ5 물건 16칸(dq5_drop_items)."""
     flag, bit = chapter3_flag()
     a = _Asm(at)
+    bank = at >> 16
     # 23:E8EE 에서: M 8비트, X 16비트, DB 23, X = 구역 × 22
-    a.label('night').b(0x08, 0x48, 0xDA)                                     # PHP PHA PHX
-    a.b(0xC2, 0x20, 0xA9, 0x00, 0x00, 0x8F, *_long(MASK))                    # REP #$20 / LDA #0 / STA MASK
-    a.b(0xE2, 0x20, 0xAF, *_long(flag), 0x29, bit).rel(0xF0, 'night_out')     # SEP #$20 / LDA flag / AND / BEQ
+    a.label('encounter').b(0x08, 0x48, 0xDA)                                 # PHP PHA PHX
+    a.b(0xAF, *_long(flag), 0x29, bit).rel(0xF0, 'encounter_out')            # LDA flag / AND / BEQ
     a.b(0xC2, 0x20, 0x8A, 0xA2, 0x00, 0x00)                                  # REP #$20 / TXA / LDX #0
     a.label('zone').long(0xDF, 'zones').rel(0xF0, 'found')                  # CMP zones,X / BEQ
-    a.b(0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8)                                  # INX ×6
-    a.b(0xE0, *(6 * len(rows)).to_bytes(2, 'little')).rel(0x90, 'zone')      # CPX #n / BCC
-    a.rel(0x80, 'night_16')
+    a.b(0xE8, 0xE8)                                                          # INX ×2
+    a.b(0xE0, *(2 * len(merchant)).to_bytes(2, 'little')).rel(0x90, 'zone')  # CPX #n / BCC
+    a.rel(0x80, 'encounter_16')
     a.label('found').b(0xA9, MERCHANT_RATE, 0x00, 0x22, *_long(RANDOM))    # rand(10)
-    a.label('rolled10').b(0xC9, 0x00, 0x00).rel(0xF0, 'merchant')            # CMP #0 / BEQ
-    a.b(0x22, *_long(IS_NIGHT)).rel(0xB0, 'dark')                            # JSL 21:8000 / BCS
-    a.long(0xBF, 'zones', 2).rel(0x80, 'store')                             # LDA zones+2,X (낮)
-    a.label('dark').long(0xBF, 'zones', 4)                                  # LDA zones+4,X (밤)
-    a.label('store').b(0x8F, *_long(MASK))
-    a.label('night_16').b(0xE2, 0x20)
-    a.label('night_out').b(0xFA, 0x68, 0x28)                                 # PLX PLA PLP
+    a.label('rolled10').b(0xC9, 0x00, 0x00).rel(0xF0, 'to_merchant')         # CMP #0 / BEQ
+    a.label('encounter_16').b(0xE2, 0x20)
+    a.label('encounter_out').b(0xFA, 0x68, 0x28)                             # PLX PLA PLP
     a.b(*NIGHT_ORIG, 0x6B)                                                   # LDY #$FFFF / STY $1001 / RTL
+    a.label('to_merchant').word(0x4C, 'merchant')                            # JMP merchant
+    # 23:E8FE 에서: M 8비트, X 16비트, DB 23, X = 구역 × 22. 원래 길은 스택 맨 위의 돌아갈 곳을 버리고 JML 로 잇는다
+    row = 2 + 2 * PICK_BLOCK
+    a.label('pick').b(0xDA, 0xC2, 0x20, 0x8A, 0xA2, 0x00, 0x00)              # PHX / REP #$20 / TXA / LDX #0
+    a.label('pick_zone').long(0xDF, 'picks').rel(0xF0, 'pick_found')        # CMP picks,X / BEQ
+    a.b(0x48, 0x8A, 0x18, 0x69, row, 0x00, 0xAA, 0x68)                      # PHA / TXA / CLC / ADC #row / TAX / PLA
+    a.b(0xE0, *(row * len(picks)).to_bytes(2, 'little')).rel(0x90, 'pick_zone')  # CPX #n / BCC
+    a.b(0xA9, 0xFF, 0xFF, 0x8F, *_long(PICK), 0xE2, 0x20)                   # PICK = FFFF / SEP #$20
+    a.b(0xFA, 0x68, 0x68, 0x68, *PICK_ORIG, 0x5C, *_long(FIRST_LOOP))        # PLX / 버림 / 원래 명령 / JML 23:E904
+    a.label('pick_found').b(0x8A, 0x18).word(0x69, 'picks', 2)              # TXA / CLC / ADC #picks+2
+    a.b(0x22, *_long(IS_NIGHT)).rel(0x90, 'pick_mode')                       # JSL 21:8000 / BCC(낮)
+    a.b(0x18, 0x69, PICK_BLOCK, 0x00)                                        # CLC / ADC #묶음(밤)
+    a.label('pick_mode').b(0x8F, *_long(PICK), 0xAA)                         # STA PICK / TAX
+    a.b(0xBF, 0x02, 0x00, bank, 0xAA, 0xE2, 0x20)                           # LDA 첫 목록 / TAX / SEP #$20
+    a.word(0x20, 'pickl').rel(0x90, 'pick_none')                            # JSR pickl / BCC
+    a.label('pick_slot').b(0xC2, 0x20, 0x29, 0xFF, 0x00, 0xA8, 0xE2, 0x20)   # Y = 칸
+    a.b(0xFA, 0x68, 0x68, 0x68, 0x5C, *_long(FIRST_CHOSEN))                  # PLX / 버림 / JML 23:E93F
+    a.label('pick_none').b(0xFA, 0x68, 0x68, 0x68, 0x5C, *_long(NO_ENCOUNTER))
+    # 23:E9B4 에서(첫 무리가 칸 0~4): Y = 첫 칸. 셋째는 난수 < 바이트 14, 그다음 넷째는 난수 < 바이트 15
+    a.label('count').b(0x84, 0x0A, 0xDA, 0xC2, 0x20, 0xAF, *_long(PICK), 0xAA, 0xE2, 0x20)  # STY $0A / PHX / X = PICK
+    a.b(0xE0, 0xFF, 0xFF).rel(0xF0, 'count_orig')                           # CPX #FFFF / BEQ
+    a.b(0x64, 0x0C).word(0x20, 'rnd').b(0xDF, 0x00, 0x00, bank).rel(0xB0, 'count_done')  # STZ $0C / 난수 < 셋째
+    a.b(0xE6, 0x0C).word(0x20, 'rnd').b(0xDF, 0x01, 0x00, bank).rel(0xB0, 'count_done')  # INC $0C / 난수 < 넷째
+    a.b(0xE6, 0x0C)
+    a.label('count_done').b(0x64, 0x0D, 0xFA, 0x68, 0x68, 0x68, 0x5C, *_long(COUNT_CHOSEN))  # STZ $0D / PLX / 버림
+    a.label('count_orig').b(0xFA, 0xA0, 0x00, 0x00, 0x6B)                    # PLX / LDY #0 / RTL
+    # 23:EAA7 에서(JSR 로 불림, 돌아가면 23:EAAB 의 RTS): A = 칸·carry, 고를 칸이 없으면 CLC
+    a.label('pick2').b(0xDA, 0xC2, 0x20, 0xAF, *_long(PICK), 0xAA)           # PHX / REP #$20 / X = PICK
+    a.b(0xE0, 0xFF, 0xFF).rel(0xF0, 'pick2_orig')
+    a.b(0xBF, 0x04, 0x00, bank, 0xAA, 0xE2, 0x20)                           # LDA 둘째 목록 / TAX / SEP #$20
+    a.word(0x20, 'pickl')
+    a.label('pick2_done').b(0xFA, 0x6B)                                      # PLX / RTL
+    a.label('pick2_orig').b(0xE2, 0x20, 0xFA, 0x68, 0x68, 0x68, *SECOND_ORIG, 0x5C, *_long(SECOND_LOOP))
+    # 목록 X([개수][칸 무게]…)에서 FC 18:$9DDE 로 고른 칸(A, SEC). DP $00~$03 은 원래 고르기도 덮어쓰는 자리
+    a.label('pickl').b(0xBF, 0x00, 0x00, bank).rel(0xF0, 'pickl_none')     # LDA 개수 / BEQ
+    a.b(0x85, 0x03, 0x64, 0x00, 0xDA)                                        # STA $03 / STZ $00 / PHX
+    a.label('pickl_sum').b(0xE8, 0xE8, 0xBF, 0x00, 0x00, bank, 0x18, 0x65, 0x00, 0x85, 0x00, 0xC6, 0x03)
+    a.rel(0xD0, 'pickl_sum')                                                 # $00 = S
+    a.b(0xFA).word(0x20, 'rnd').b(0x85, 0x01)                               # PLX / $01 = 난수
+    a.b(0xA5, 0x00, 0xC9, 0xFF).rel(0xF0, 'pickl_raw')                      # S = FF 면 난수 그대로
+    a.b(0x8D, 0x02, 0x42, 0xA5, 0x01, 0x8D, 0x03, 0x42, 0xEA, 0xEA, 0xEA, 0xEA)  # S × 난수(4202·4203)
+    a.b(0xAD, 0x17, 0x42, 0x85, 0x01)                                        # $01 = 위 바이트
+    a.label('pickl_raw').b(0xBF, 0x00, 0x00, bank, 0x85, 0x03, 0x64, 0x02)  # $03 = 개수 / $02 = 누적
+    a.label('pickl_walk').b(0xE8, 0xE8, 0xBF, 0x00, 0x00, bank, 0x18, 0x65, 0x02, 0x85, 0x02, 0xC5, 0x01)
+    a.rel(0xB0, 'pickl_hit')                                                 # 누적 >= r
+    a.b(0xC6, 0x03).rel(0xD0, 'pickl_walk')
+    a.label('pickl_none').b(0x18, 0x60)                                      # CLC / RTS
+    a.label('pickl_hit').b(0xCA, 0xBF, 0x00, 0x00, bank, 0x38, 0x60)        # DEX / LDA 칸 / SEC / RTS
+    # 23:EAFD 그대로(JSR 이라 뱅크 23 밖에서 부르지 못해 옮김): A = 난수 바이트. DB 23 의 WRAM 거울로 읽고 쓴다
+    a.label('rnd').b(0xC2, 0x20, 0xAD, *RNG_HIGH.to_bytes(2, 'little'), 0x48, 0xAD, *RNG_LOW.to_bytes(2, 'little'))
+    a.b(0x0E, *RNG_LOW.to_bytes(2, 'little'), 0x2E, *RNG_HIGH.to_bytes(2, 'little'), 0x18)
+    a.b(0x6D, *RNG_LOW.to_bytes(2, 'little'), 0x8D, *RNG_LOW.to_bytes(2, 'little'))
+    a.b(0x68, 0x6D, *RNG_HIGH.to_bytes(2, 'little'), 0x8D, *RNG_HIGH.to_bytes(2, 'little'))
+    a.b(0xAD, *RNG_LOW.to_bytes(2, 'little'), 0x18, 0x69, *RNG_ADD.to_bytes(2, 'little'))
+    a.b(0x8D, *RNG_LOW.to_bytes(2, 'little'), 0xAD, *RNG_HIGH.to_bytes(2, 'little'), 0x69, 0x00, 0x00)
+    a.b(0x8D, *RNG_HIGH.to_bytes(2, 'little'), 0xE2, 0x20, 0xAD, *RNG_HIGH.to_bytes(2, 'little'), 0x60)
     # 떠돌이 상인: 이벤트 스크립트를 걸고(23:E2F4 와 같이 $19B3~$19B5·$19AE bit7) 걸음 수를 처음부터, 23:E7C2 는 조우 없음
     # (23:E91C 의 PLB / PLP / CLC / RTL)으로 끝낸다. 여기는 M 16비트, X 16비트
     a.label('merchant').word(0xA9, 'script').b(0x8F, *_long(EVENT_SCRIPT))   # LDA #script / STA $19B3
@@ -750,14 +867,6 @@ def ch3_code(rows, items, at=CH3_CODE_AT):
     a.b(0xA9, WAKE_RTS >> 16, 0x48, 0xC2, 0x20, 0xA9, back & 0xFF, back >> 8 & 0xFF, 0x48, 0xE2, 0x20)
     a.b(0x08, 0x8B, 0xA9, WAKE_RTS >> 16, 0x48, 0xAB, 0xE2, 0x30)            # PHP PHB / DB 06 / SEP #$30
     a.b(0x5C, *_long(FIELD_REDRAW))                                           # JML 06:D98E
-    # 23:E907·23:EAB0 에서: M 8비트, X·Y 16비트, Y = 칸
-    a.label('weight').b(0x29, 0x07).rel(0xF0, 'weight_store')               # AND #7 / BEQ
-    a.b(0x48, 0x5A, 0xC2, 0x20, 0xAF, *_long(MASK))                         # PHA PHY REP #$20 LDA MASK
-    a.b(0xC0, 0x00, 0x00).rel(0xF0, 'test')                                 # CPY #0 / BEQ
-    a.label('shift').b(0x4A, 0x88).rel(0xD0, 'shift')                       # LSR / DEY / BNE
-    a.label('test').b(0xE2, 0x20, 0x4A, 0x7A, 0x68).rel(0x90, 'weight_store')  # SEP LSR PLY PLA BCC
-    a.b(0xA9, 0x00)                                                          # LDA #0
-    a.label('weight_store').b(0x99, 0x00, 0x00, 0x6B)                        # STA $0000,Y / RTL
     # 25:8966 에서: M·X 8비트
     a.label('drop').b(0xAF, *_long(flag), 0x29, bit).rel(0xD0, 'ch3')
     a.b(0xAF, *_long(CANDIDATE), 0xC9, 0xFF, 0x6B)                           # 원래 판정
@@ -777,19 +886,38 @@ def ch3_code(rows, items, at=CH3_CODE_AT):
     back = DROP_ITEM - 1
     a.b(0xC2, 0x20, 0xA9, back & 0xFF, back >> 8 & 0xFF, 0x83, 0x01, 0xE2, 0x20, 0x6B)  # 돌아갈 곳 / RTL
     a.label('zones')
-    for zone, day, night in rows:
-        a.b(*(zone * CH3_ZONE_RECORD).to_bytes(2, 'little'), *day.to_bytes(2, 'little'), *night.to_bytes(2, 'little'))
+    for zone in merchant:
+        a.b(*(zone * CH3_ZONE_RECORD).to_bytes(2, 'little'))
     a.label('thresholds')
     a.b(*(t for t, _ in items))
     a.label('items')
     a.b(*(m for _, m in items))
+    # 구역마다 [구역 × 22][낮 묶음][밤 묶음], 묶음은 [셋째][넷째][첫 목록][둘째 목록]. 같은 목록은 한 벌
+    lists = {}
+    for *_, modes in picks:
+        for first, second in modes.values():
+            for entries in (first, second):
+                lists.setdefault(tuple(entries), f'list{len(lists)}')
+    a.label('picks')
+    for zone, _, third, fourth, modes in picks:
+        a.b(*(zone * CH3_ZONE_RECORD).to_bytes(2, 'little'))
+        for mode in ('day', 'night'):
+            first, second = modes[mode]
+            a.b(third, fourth).word(None, lists[tuple(first)]).word(None, lists[tuple(second)])
+    for entries, name in lists.items():
+        a.label(name).b(len(entries), *(v for pair in entries for v in pair))
     return a.assemble()
+
+
+def ch3_inputs(prg, dq5, report):
+    """ch3_code 의 (merchant, picks, items)."""
+    table = fc_drop_table(prg)
+    return merchant_zones(report), pick_rows(prg, report), list(zip((t for t, _ in table), dq5_drop_items(prg, dq5)))
 
 
 def ch3_labels(prg, dq5, report, at=CH3_CODE_AT):
     """ch3_writes 가 쓰는 코드의 라벨(검사가 훅 안 자리를 고를 때)."""
-    table = fc_drop_table(prg)
-    return ch3_code(ch3_zone_masks(prg, report), list(zip((t for t, _ in table), dq5_drop_items(prg, dq5))), at)[1]
+    return ch3_code(*ch3_inputs(prg, dq5, report), at)[1]
 
 
 def no_merchant_patch(prg, dq5, report):
@@ -800,13 +928,8 @@ def no_merchant_patch(prg, dq5, report):
 
 
 def ch3_writes(prg, dq5, report, at=CH3_CODE_AT):
-    """dq5patch/1 쓰기: 코드·표와 훅 네 곳. report 는 docs 의 보고."""
-    table = fc_drop_table(prg)
-    items = list(zip((t for t, _ in table), dq5_drop_items(prg, dq5)))
-    rows = ch3_zone_masks(prg, report)
-    if not rows:
-        raise ValueError('밤·낮 마스크가 있는 3장 필드 구역이 없음')
-    blob, labels = ch3_code(rows, items, at)
+    """dq5patch/1 쓰기: 코드·표와 훅 여섯 곳. report 는 docs 의 보고."""
+    blob, labels = ch3_code(*ch3_inputs(prg, dq5, report), at)
     if at + len(blob) > CH3_CODE_END:
         raise ValueError(f'3장 몬스터 코드 {len(blob)}바이트가 {at:06X}~{CH3_CODE_END - 1:06X} 를 넘음')
 
@@ -817,10 +940,11 @@ def ch3_writes(prg, dq5, report, at=CH3_CODE_AT):
     def jsl(label):
         return bytes((0x22, *_long(labels[label])))
     out = [{'at': f'{at >> 16:02X}:{at & 0xFFFF:04X}', 'hex': blob.hex(' ').upper(),
-            'note': '3장 몬스터: 밤·낮 칸 마스크와 3장 전용 전투 뒤 물건'},
-           put(NIGHT_SITE, jsl('night') + b'\xEA\xEA', NIGHT_ORIG, '조우마다 3장 필드 구역의 밤·낮 칸 마스크를 정함')]
-    out += [put(site, jsl('weight') + b'\xEA', WEIGHT_ORIG, '칸 무게를 읽을 때 마스크로 뺀 칸은 0')
-            for site in WEIGHT_SITES]
+            'note': 'FC 무리 고르기 표, 3장 떠돌이 상인과 3장 전용 전투 뒤 물건'},
+           put(NIGHT_SITE, jsl('encounter') + b'\xEA\xEA', NIGHT_ORIG, '3장 필드 조우의 1/10 은 떠돌이 상인'),
+           put(PICK_SITE, jsl('pick') + b'\xEA\xEA', PICK_ORIG, '첫 무리 칸을 FC 무게·마스크로'),
+           put(COUNT_SITE, jsl('count') + b'\xEA', COUNT_ORIG, '여러 종 무리의 셋째·넷째를 FC 확률로'),
+           put(SECOND_SITE, jsl('pick2') + b'\x60\xEA', SECOND_ORIG, '둘째 무리부터의 칸을 FC 무게·마스크로')]
     out.append(put(DROP_SITE, jsl('drop') + bytes((0xD0, 0x04, 0xEA)), DROP_ORIG, '3장이면 전투 뒤 물건을 FC 3장 표로'))
     out.append(put(WAKE_SITE, jsl('wake'), WAKE_ORIG, '필드 여관(떠돌이 상인)에서 깨면 그룹 01 갈래로 가지 않음'))
     return out

@@ -1542,7 +1542,7 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-groups-scenes"
-why = "그룹 롬(groups.sfc)의 상자·필드·필드 조우·ルーラ 장면이 그 롬으로 만든 배 선실 출발 상태(dq4freshstate)에서 통과해야 한다. 2장 キメラのつばさ 목록·ルーラ 목록 FC 차례(dq4fieldtravelcheck kimera2·ruler2)"
+why = "그룹 롬(groups.sfc)의 상자·필드·필드 조우·ルーラ 장면이 그 롬으로 만든 배 선실 출발 상태(dq4freshstate)에서 통과해야 한다. 필드 조우 장면마다 무리 고르기 훅이 고른 칸·종 수가 난수 상태로 낸 FC 모형과 같음(1·2·3장 구역). 2장 キメラのつばさ 목록·ルーラ 목록 FC 차례(dq4fieldtravelcheck kimera2·ruler2)"
 paths = [
   "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4freshstate.py",
