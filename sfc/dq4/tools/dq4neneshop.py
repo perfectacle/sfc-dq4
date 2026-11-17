@@ -8,8 +8,8 @@ FC(fc/dq4/docs/dq4-chapter3-format.md 「무기점 일」 끝, 15:$9E99·$9F79, 
           뺀다. どうのつるぎ(100) 넷: 세 번 재어 셋 514·넷 700·둘 360(한 개 150~200).
 
 FC 3장에는 맡기는 곳이 없어 맡긴 물건 목록이 곧 네네의 가게 물건이다. 이 롬은 DQ5 ふくろ(7E:2250)를 메뉴에서 늘 쓰므로
-가게 물건은 둘째 변수 칸(dq4ch3slots.VARS2)의 12칸에 따로 둔다. 물건 고르기는 DQ5 팔기의 물건 창(06:DEC1)을 같은 BRK 로
-열고, 안내·되묻기는 네네 메시지로 바꾼 루프(nene_stock)가 한다. FC 0374 「예」 의 가게 물건 창(이름만, 15:$9F5C)은 DQ5 필드
+가게 물건은 둘째 변수 칸(dq4ch3slots.VARS2)의 12칸에 따로 둔다. 물건 고르기는 DQ5 필드 도구 창(BRK 95 0F, 05:DA56 과
+같이 $E8 이 고른 칸)으로 열어 FC 처럼 값이 보이지 않고, 안내·되묻기는 네네 메시지로 바꾼 루프(nene_stock)가 한다. FC 0374 「예」 의 가게 물건 창(이름만, 15:$9F5C)은 DQ5 필드
 도구 창에 가게 칸을 잠시 맞바꿔 넣어 보인다(nene_view).
 """
 from pathlib import Path
@@ -146,7 +146,7 @@ def _show(a, msg):
 
 
 def _stock(vars2, m, brk):
-    """대화 호출: FC 036E~0372 되풀이. 톨네코(일행 칸 0)의 물건을 DQ5 팔기 창(06:DEC1 과 같은 BRK 95 37)으로 골라,
+    """대화 호출: FC 036E~0372 되풀이. 톨네코(일행 칸 0)의 물건을 DQ5 필드 도구 창(BRK 95 0F)으로 골라,
     팔 수 있으면(BRK 94 06, 06:DEF2) 값 × 1.5 를 안내하고 「예」 면 빈 가게 칸에 넣고 소지품에서 뺀다(BRK 89 80 32,
     06:DF3F). 고르기를 그만두거나 가게 칸이 다 차면 끝. 끝 무렵 칸이 찼으면 결과 flag 켬."""
     from dq4ch2endor import BCC, BEQ, BNE, lda, sta
@@ -167,7 +167,7 @@ def _stock(vars2, m, brk):
     a.brl('end')
     a.label('has')
     _show(a, m['nene_pick'])
-    a(0x22, *_al(PICKER_RESET), 0x64, 0xE4, j('pick'), 0xA5, 0xE8).br(0x10, 'picked').brl('quit').label('picked')
+    a(0x22, *_al(PICKER_RESET), 0x64, 0xE4, j('items'), 0xA5, 0xE8).br(0x10, 'picked').brl('quit').label('picked')
     a(0x85, 0x43, 0x8D, *((PICK + 1) & 0xFFFF).to_bytes(2, 'little'), 0x64, 0x42, j('item'))
     a(0xA5, 0x46, 0x48, j('close'), 0x68, 0x8D, *((PICK + 2) & 0xFFFF).to_bytes(2, 'little'), 0x85, 0xF5)
     a(j('sellable')).br(0x90, 'sellable')
