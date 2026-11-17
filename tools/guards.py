@@ -14,6 +14,12 @@
 
     [groups]
     ch1-build = ["sfc/dq4/tools/dq4build.py", ...]   # 여러 검사가 함께 쓰는 paths 묶음
+    ch3-modules = ["sfc/dq4/tools/dq4ch3*.py", "!sfc/dq4/tools/dq4ch3*check.py"]   # 앞에 ! 를 붙인 glob 은 뺀다
+    # 검사 paths 에 "@ch3-modules" 라고 적으면 그 묶음을 자기 paths 로 넣는다(PR 에서 검사를 건다. groups 키와 다름).
+    # 빼기가 든 묶음은 추적 파일로 풀어 낱낱 경로가 되므로, 새 파일도 glob 에 맞으면 손대지 않고 든다
+
+트랙의 검사 목록은 guards.toml 과 그 옆 guards.d/*.toml 조각이다(차례: guards.toml, 조각 이름 차례). 조각에는
+[[check]] 와 [groups] 만 두고, 같은 이름의 묶음은 파일마다 적은 것을 합친다. [cache]·[full] 은 guards.toml 에만 둔다.
 
     [cache]
     key = "paths"                       # (골라 씀) 검사 결과 캐시 키에 넣을 추적 파일. "all"(기본) 또는 "paths"
@@ -21,8 +27,8 @@
     [full]
     paths = ["sfc/dq4/tools/dq4build.py", ...]   # (골라 씀) 바뀌면 이 트랙의 검사를 전체 모드로 고르는 파일
 
-PR 에서는 바뀐 파일이 그 검사의 paths 에 바로 맞을 때, 또는 guards.toml 에서 그 검사의 run·needs 가 바뀌었을 때(새 검사
-포함) 걸린다. 묶음으로만 맞는 검사와 tier = "release" 인 검사는 빠지고 배포 관문(tools/release_check.py)이 돌린다.
+PR 에서는 바뀐 파일이 그 검사의 paths 에 바로 맞을 때, 또는 검사 목록에서 그 검사의 run·needs 가 바뀌었을 때(새 검사
+포함. 트랙 전체로 견주므로 검사를 다른 조각으로 옮기기만 한 것은 바뀐 것이 아니다) 걸린다. 묶음으로만 맞는 검사와 tier = "release" 인 검사는 빠지고 배포 관문(tools/release_check.py)이 돌린다.
 바뀐 파일이 트랙의 [full] paths 에 맞으면 그 트랙은 전체 모드라 그 트랙의 검사가 등급과 상관없이 모두 걸린다(CI 와
 로컬이 같은 판정). PR 본문의 `가드: 전체` 줄이나 --full 은 모든 트랙을 전체 모드로 넓히기만 하고 좁히지는 못한다.
 본문의 `가드: 더함 이름, 이름` 줄은 그 검사들을 걸린 목록에 더한다(guards.py 를 바꾼 PR 의 대표 셋을 CI 에서 돌릴 때).
@@ -138,18 +144,65 @@ def matches(path, pattern):
     return bool(glob_regex((pattern,)).match(path))
 
 
+FRAGMENTS = 'guards.d'
+MAIN_KEYS = ('check', 'groups', 'cache', 'full')
+FRAGMENT_KEYS = ('check', 'groups')
+
+
+def fragment_owner(path):
+    """조각 파일(<트랙>/guards.d/*.toml)이면 그 트랙의 guards.toml 경로, 아니면 None."""
+    p = PurePosixPath(path)
+    if p.suffix == '.toml' and p.parent.name == FRAGMENTS and len(p.parts) >= 2:
+        return str(p.parent.parent / 'guards.toml')
+    return None
+
+
+def track_of(path):
+    """검사 목록 파일(guards.toml 또는 그 조각)이면 그 트랙의 guards.toml 경로, 아니면 None."""
+    return path if PurePosixPath(path).name == 'guards.toml' else fragment_owner(path)
+
+
+def group_match(patterns, path):
+    """묶음 항목들에 맞는가: 앞에 ! 가 없는 glob 가운데 하나에 맞고, ! 를 붙인 glob 어느 것에도 맞지 않는다."""
+    pos = tuple(p for p in patterns if not p.startswith('!'))
+    neg = tuple(p[1:] for p in patterns if p.startswith('!'))
+    return bool(glob_regex(pos).match(path)) and not glob_regex(neg).match(path)
+
+
+def group_paths(patterns, files):
+    """묶음을 검사 paths 에 넣을 꼴로. ! 빼기가 없으면 적은 glob 그대로(낱낱이 적은 것과 같은 뜻), 있으면 지금 추적 파일
+    가운데 맞는 것을 낱낱 경로로 푼다(PR 에서 새로 생긴 파일도 추적 파일이라 든다)."""
+    if not any(p.startswith('!') for p in patterns):
+        return list(patterns)
+    return sorted(f for f in files if group_match(patterns, f))
+
+
 def load(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
-    """(검사 목록, 문제 목록). 검사는 {'file': guards.toml, **항목}. files 는 추적 파일 목록."""
+    """(검사 목록, 문제 목록). 검사는 {'file': 그 검사를 적은 파일, **항목}. files 는 추적 파일 목록.
+
+    트랙은 guards.toml 하나와 그 옆 guards.d/*.toml 조각들이다. 조각은 [[check]] 와 [groups] 만 갖고, 같은 이름의
+    묶음은 파일마다 적은 것을 합친다([cache]·[full] 은 guards.toml 에만). 검사 paths 의 "@이름" 은 그 트랙 묶음을
+    자기 paths 로 넣는다(PR 에서 검사를 건다). groups 키로 더한 묶음은 PR 에서 걸지 않는다."""
     checks, problems = [], []
-    for toml in sorted(f for f in files if PurePosixPath(f).name == 'guards.toml'):
-        try:
-            data = tomllib.loads(read(toml))
-        except tomllib.TOMLDecodeError as e:
-            problems.append(f'{toml}: TOML 오류 {e}')
+    mains = sorted(f for f in files if PurePosixPath(f).name == 'guards.toml')
+    frags = sorted(f for f in files if fragment_owner(f))
+    for f in frags:
+        if fragment_owner(f) not in mains:
+            problems.append(f'{f}: 조각은 guards.toml 이 있는 폴더의 {FRAGMENTS}/ 에만')
+    for toml in mains:
+        parts = []
+        for part in [toml] + [f for f in frags if fragment_owner(f) == toml]:
+            try:
+                parts.append((part, tomllib.loads(read(part))))
+            except tomllib.TOMLDecodeError as e:
+                problems.append(f'{part}: TOML 오류 {e}')
+        if not parts or parts[0][0] != toml:
             continue
-        for key in data:
-            if key not in ('check', 'groups', 'cache', 'full'):
-                problems.append(f'{toml}: 모르는 키 {key}')
+        for part, data in parts:
+            for key in data:
+                if key not in (MAIN_KEYS if part == toml else FRAGMENT_KEYS):
+                    problems.append(f'{part}: 모르는 키 {key}')
+        data = parts[0][1]
         full = data.get('full', {})
         if not isinstance(full, dict) or set(full) - {'paths'} or not isinstance(full.get('paths', []), list):
             problems.append(f'{toml}: [full] 는 paths = [glob, …] 만')
@@ -163,56 +216,77 @@ def load(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
             problems.append(f'{toml}: [cache] 는 key = {" 또는 ".join(map(repr, CACHE_KEYS))} 만')
             cache = {}
         mine = []
-        groups = data.get('groups', {})
-        if not isinstance(groups, dict):
-            problems.append(f'{toml}: groups 는 [groups] 표여야 함')
-            groups = {}
+        groups = {}
+        for part, pdata in parts:
+            pgroups = pdata.get('groups', {})
+            if not isinstance(pgroups, dict):
+                problems.append(f'{part}: groups 는 [groups] 표여야 함')
+                continue
+            for gname, pats in pgroups.items():
+                if not NAME.match(gname):
+                    problems.append(f'{part} groups.{gname}: 이름은 소문자·숫자·- 만')
+                if not isinstance(pats, list) or not pats:
+                    problems.append(f'{part} groups.{gname}: 비어 있지 않은 목록이어야 함')
+                    continue
+                for pattern in pats:
+                    if not isinstance(pattern, str) or pattern.startswith('@'):
+                        problems.append(f'{part} groups.{gname}: {pattern!r} 는 glob(앞에 ! 면 빼기)이어야 함')
+                    elif not any(matches(f, pattern.removeprefix('!')) for f in files):
+                        problems.append(f'{part} groups.{gname}: {pattern!r} 에 맞는 추적 파일이 없음')
+                groups.setdefault(gname, []).extend(p for p in pats if isinstance(p, str) and not p.startswith('@'))
+        resolved = {}
         for gname, pats in groups.items():
-            if not NAME.match(gname):
-                problems.append(f'{toml} groups.{gname}: 이름은 소문자·숫자·- 만')
-            if not isinstance(pats, list) or not pats:
-                problems.append(f'{toml} groups.{gname}: 비어 있지 않은 목록이어야 함')
+            resolved[gname] = group_paths(pats, files)
+            if pats and not resolved[gname]:
+                problems.append(f'{toml} groups.{gname}: 빼고 나면 맞는 추적 파일이 없음')
+        for part, pdata in parts:
+            items = pdata.get('check', [])
+            if not isinstance(items, list):
+                problems.append(f'{part}: check 는 [[check]] 배열이어야 함')
                 continue
-            for pattern in pats:
-                if not isinstance(pattern, str) or not any(matches(f, pattern) for f in files):
-                    problems.append(f'{toml} groups.{gname}: {pattern!r} 에 맞는 추적 파일이 없음')
-        items = data.get('check', [])
-        if not isinstance(items, list):
-            problems.append(f'{toml}: check 는 [[check]] 배열이어야 함')
-            continue
-        for i, item in enumerate(items):
-            where = f'{toml} check[{i}]'
-            if not isinstance(item, dict):
-                problems.append(f'{where}: 표가 아님')
-                continue
-            for key, kind in FIELDS.items():
-                if not isinstance(item.get(key), kind):
-                    problems.append(f'{where}: {key} 가 없거나 {kind.__name__} 가 아님')
-            for key in item:
-                if key not in FIELDS and key not in OPTIONAL:
-                    problems.append(f'{where}: 모르는 키 {key}')
-            used = item.get('groups', [])
-            if not isinstance(used, list):
-                problems.append(f'{where}: groups 가 list 가 아님')
-                used = []
-            for g in used:
-                if g not in groups or not isinstance(groups.get(g), list):
-                    problems.append(f'{where}: 묶음 {g!r} 이 {toml} 의 [groups] 에 없음')
-            if 'parts' in item and (type(item['parts']) is not int or not 2 <= item['parts'] <= PARTS_MAX):
-                problems.append(f'{where}: parts 는 2~{PARTS_MAX} 정수')
-            if item.get('tier', 'pr') not in TIERS:
-                problems.append(f'{where}: tier 는 {" 또는 ".join(map(repr, TIERS))}')
-            if isinstance(item.get('name'), str) and not NAME.match(item['name']):
-                problems.append(f'{where}: 이름 {item["name"]!r} 은 소문자·숫자·- 만')
-            if isinstance(item.get('paths'), list):
-                if not item['paths'] and not used:
-                    problems.append(f'{where}: paths 가 비어 있음')
-                for pattern in item['paths']:
-                    if not isinstance(pattern, str) or not any(matches(f, pattern) for f in files):
-                        problems.append(f'{where}: paths {pattern!r} 에 맞는 추적 파일이 없음')
-            if all(isinstance(item.get(k), kind) for k, kind in FIELDS.items()):
-                extra = [p for g in used if isinstance(groups.get(g), list) for p in groups[g] if isinstance(p, str)]
-                mine.append({'file': toml, **item, 'own_paths': item['paths'], 'paths': [*item['paths'], *extra]})
+            for i, item in enumerate(items):
+                where = f'{part} check[{i}]'
+                if not isinstance(item, dict):
+                    problems.append(f'{where}: 표가 아님')
+                    continue
+                for key, kind in FIELDS.items():
+                    if not isinstance(item.get(key), kind):
+                        problems.append(f'{where}: {key} 가 없거나 {kind.__name__} 가 아님')
+                for key in item:
+                    if key not in FIELDS and key not in OPTIONAL:
+                        problems.append(f'{where}: 모르는 키 {key}')
+                used = item.get('groups', [])
+                if not isinstance(used, list):
+                    problems.append(f'{where}: groups 가 list 가 아님')
+                    used = []
+                for g in used:
+                    if g not in resolved:
+                        problems.append(f'{where}: 묶음 {g!r} 이 {toml} 트랙의 [groups] 에 없음')
+                if 'parts' in item and (type(item['parts']) is not int or not 2 <= item['parts'] <= PARTS_MAX):
+                    problems.append(f'{where}: parts 는 2~{PARTS_MAX} 정수')
+                if item.get('tier', 'pr') not in TIERS:
+                    problems.append(f'{where}: tier 는 {" 또는 ".join(map(repr, TIERS))}')
+                if isinstance(item.get('name'), str) and not NAME.match(item['name']):
+                    problems.append(f'{where}: 이름 {item["name"]!r} 은 소문자·숫자·- 만')
+                own = []
+                if isinstance(item.get('paths'), list):
+                    if not item['paths'] and not used:
+                        problems.append(f'{where}: paths 가 비어 있음')
+                    for pattern in item['paths']:
+                        if isinstance(pattern, str) and pattern.startswith('@'):
+                            if pattern[1:] in resolved:
+                                own += resolved[pattern[1:]]
+                            else:
+                                problems.append(f'{where}: paths {pattern!r} 의 묶음이 {toml} 트랙의 [groups] 에 없음')
+                        elif not isinstance(pattern, str) or pattern.startswith('!'):
+                            problems.append(f'{where}: paths {pattern!r} 는 glob 또는 "@묶음"(! 빼기는 [groups] 에만)')
+                        elif not any(matches(f, pattern) for f in files):
+                            problems.append(f'{where}: paths {pattern!r} 에 맞는 추적 파일이 없음')
+                        else:
+                            own.append(pattern)
+                if all(isinstance(item.get(k), kind) for k, kind in FIELDS.items()):
+                    extra = [p for g in used if g in resolved for p in resolved[g]]
+                    mine.append({'file': part, **item, 'own_paths': own, 'paths': [*own, *extra]})
         if cache.get('key') == 'paths':
             # 자료 파일의 주인은 낱낱이 적은 경로로만 친다(sfc/dq4/tools/** 같은 glob 은 읽는다는 뜻이 아니다)
             claimed = sorted({p for c in mine for p in c['paths'] if not glob.has_magic(p)})
@@ -316,8 +390,8 @@ def env_names(needs):
 
 
 # 검사 명령이 읽거나 실행하지 않는 추적 파일. 키에서 빼도 결과가 같다(뺀 것이 결과에 닿는다고 의심되면 넣어 둔다)
-#   .md: 문서. guards.toml: 검사 목록(그 검사의 명령과 needs 는 따로 키에 든다). 에이전트·CI 설정, 해킹 일지
-NOT_INPUT = re.compile(r'(\.md$|(^|/)guards\.toml$|^\.agents/|^\.github/|^\.claude/|(^|/)journal/)')
+#   .md: 문서. guards.toml·guards.d/*.toml: 검사 목록(그 검사의 명령과 needs 는 따로 키에 든다). 에이전트·CI 설정, 해킹 일지
+NOT_INPUT = re.compile(r'(\.md$|(^|/)guards\.toml$|(^|/)guards\.d/[^/]+\.toml$|^\.agents/|^\.github/|^\.claude/|(^|/)journal/)')
 # 단위 테스트 파일
 TEST_FILE = re.compile(r'((^|/)test_[^/]*\.py$|(^|/)tests/)')
 
@@ -1372,31 +1446,51 @@ def pr_shards(checks, weights, per=PR_SHARD_SECONDS, most=PR_SHARDS_MAX):
 
 
 def edited_checks(base_text, head_text):
-    """guards.toml 두 판에서 run·needs 가 다르거나 새로 생긴 검사 이름. 읽지 못하는 판은 빈 것으로 본다."""
-    def blocks(text):
-        try:
-            data = tomllib.loads(text) if text else {}
-        except tomllib.TOMLDecodeError:
-            return {}
-        items = data.get('check', [])
-        return {c['name']: tuple(repr(c.get(k)) for k in RESULT_FIELDS)
-                for c in (items if isinstance(items, list) else []) if isinstance(c, dict) and isinstance(c.get('name'), str)}
+    """검사 목록 두 판에서 run·needs 가 다르거나 새로 생긴 검사 이름. 판은 글 하나 또는 한 트랙 파일들의 글 목록
+    (guards.toml 과 조각: 검사를 다른 파일로 옮기기만 한 것은 바뀐 것이 아니다). 읽지 못하는 글은 빈 것으로 본다."""
+    def blocks(texts):
+        out = {}
+        for text in [texts] if isinstance(texts, str) else texts:
+            try:
+                data = tomllib.loads(text) if text else {}
+            except tomllib.TOMLDecodeError:
+                continue
+            items = data.get('check', [])
+            out.update({c['name']: tuple(repr(c.get(k)) for k in RESULT_FIELDS)
+                        for c in (items if isinstance(items, list) else [])
+                        if isinstance(c, dict) and isinstance(c.get('name'), str)})
+        return out
     old, new = blocks(base_text), blocks(head_text)
     return {name for name, v in new.items() if old.get(name) != v}
 
 
-def edited_in(base, head, changed):
-    """base…head 에서 바뀐 guards.toml 마다 run·needs 가 바뀐 검사(merge-base 의 판과 견줌)."""
-    mb = git('merge-base', base, head).strip()
+def edited_between(changed, show, listing, old, new):
+    """changed 가운데 검사 목록 파일이 있는 트랙마다 old·new 두 판의 트랙 전체(guards.toml 과 조각)를 견줘 run·needs 가
+    바뀐 검사. show(rev, path) 는 그 판의 글(없으면 ''), listing(rev, folder) 는 그 판에서 그 폴더의 파일 경로들."""
     names = set()
-    for f in changed:
-        if PurePosixPath(f).name != 'guards.toml':
-            continue
-        def show(rev):
-            r = subprocess.run(['git', 'show', f'{rev}:{f}'], cwd=ROOT, capture_output=True, text=True)
-            return r.stdout if r.returncode == 0 else ''
-        names |= edited_checks(show(mb), show(head))
+    for toml in sorted({t for t in map(track_of, changed) if t}):
+        folder = str(PurePosixPath(toml).parent / FRAGMENTS)
+
+        def texts(rev):
+            frags = sorted(f for f in listing(rev, folder) if fragment_owner(f) == toml)
+            return [show(rev, f) for f in [toml, *frags]]
+        names |= edited_checks(texts(old), texts(new))
     return names
+
+
+def edited_in(base, head, changed):
+    """base…head 에서 검사 목록 파일이 바뀐 트랙마다 run·needs 가 바뀐 검사(merge-base 의 판과 견줌)."""
+    mb = git('merge-base', base, head).strip()
+
+    def show(rev, f):
+        r = subprocess.run(['git', 'show', f'{rev}:{f}'], cwd=ROOT, capture_output=True, text=True)
+        return r.stdout if r.returncode == 0 else ''
+
+    def listing(rev, folder):
+        r = subprocess.run(['git', 'ls-tree', '--name-only', f'{rev}', f'{folder}/'], cwd=ROOT, capture_output=True,
+                           text=True)
+        return r.stdout.split() if r.returncode == 0 else []
+    return edited_between(changed, show, listing, mb, head)
 
 
 # 「통과」 다음은 줄 끝·괄호·대시만(「통과하지 못함」「통과 못 함」을 통과로 읽지 않게)

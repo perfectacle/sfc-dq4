@@ -301,7 +301,7 @@ def touches(check, files):
 
 def guards_to_run(hit, stored, touched, edited=()):
     """다시 돌릴 가드 이름. 앞서 가드를 돈 HEAD 뒤로 바뀐 파일(touched)이 걸린 가드의 paths·묶음·[full] 에 맞거나
-    guards.toml 에서 run·needs 가 바뀐 가드는 다시, 앞 결과가 없거나 통과가 아닌 가드도 다시. 나머지(.md·목록만
+    검사 목록(guards.toml·조각)에서 run·needs 가 바뀐 가드는 다시, 앞 결과가 없거나 통과가 아닌 가드도 다시. 나머지(.md·목록만
     바뀐 rebase)는 앞 결과를 쓴다."""
     return [c['name'] for c in hit
             if c['name'] not in stored or not passed(stored[c['name']]) or c['name'] in edited or touches(c, touched)]
@@ -610,13 +610,15 @@ class Ship:
 
     def edited(self, base, head, changed, merge_base=False):
         mb = self.git('merge-base', base, head).strip() if merge_base else base
-        names = set()
-        for f in changed:
-            if PurePosixPath(f).name != 'guards.toml':
-                continue
-            show = [self.git('show', f'{rev}:{f}', check=False) for rev in (mb, head)]
-            names |= guards.edited_checks(*(r.stdout if r.returncode == 0 else '' for r in show))
-        return names
+
+        def show(rev, f):
+            r = self.git('show', f'{rev}:{f}', check=False)
+            return r.stdout if r.returncode == 0 else ''
+
+        def listing(rev, folder):
+            r = self.git('ls-tree', '--name-only', rev, f'{folder}/', check=False)
+            return r.stdout.split() if r.returncode == 0 else []
+        return guards.edited_between(changed, show, listing, mb, head)
 
     def full(self):
         return self.args.full or bool(guards.FULL_LINE.search(self.args.body.read_text(encoding='utf-8')))

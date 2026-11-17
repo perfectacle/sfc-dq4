@@ -66,6 +66,76 @@ class GuardsTest(unittest.TestCase):
         _, problems = load(text.replace('groups = ["events"]', ''))
         self.assertTrue(any('paths 가 비어 있음' in p for p in problems), problems)
 
+    def test_fragments_join_their_track(self):
+        """guards.d/*.toml 조각은 옆 guards.toml 트랙에 든다: 검사를 잇고, 같은 이름 묶음은 합치고, [cache]·[full] 은
+        guards.toml 에만. 조각만 있고 guards.toml 이 없으면 문제."""
+        main = '[cache]\nkey = "paths"\n[groups]\nevents = ["sfc/dq4/tools/dq4ch1event.py"]\n'
+        frag = (GOOD.replace('dq4-walk', 'dq4-frag').replace('paths = ["sfc/dq4/tools/dq4ch*event.py"]',
+                                                            'paths = []\ngroups = ["events"]')
+                + '\n[groups]\nevents = ["sfc/dq4/tools/dq4ch2event.py"]\n')
+        files = FILES + ['sfc/dq4/guards.d/ch2.toml']
+        texts = {'sfc/dq4/guards.toml': main + GOOD, 'sfc/dq4/guards.d/ch2.toml': frag}
+        checks, problems = guards.load(files, read=texts.get)
+        self.assertEqual(problems, [])
+        self.assertEqual([(c['name'], c['file']) for c in checks],
+                         [('dq4-walk', 'sfc/dq4/guards.toml'), ('dq4-frag', 'sfc/dq4/guards.d/ch2.toml')])
+        self.assertEqual(checks[1]['paths'], ['sfc/dq4/tools/dq4ch1event.py', 'sfc/dq4/tools/dq4ch2event.py'])
+        self.assertIn('key_claimed', checks[1])
+        _, problems = guards.load(files, read={**texts, 'sfc/dq4/guards.d/ch2.toml': '[cache]\nkey = "all"\n' + frag}.get)
+        self.assertTrue(any('모르는 키 cache' in p for p in problems), problems)
+        _, problems = guards.load(['sfc/dq5/guards.d/x.toml', *FILES], read=lambda f: GOOD)
+        self.assertTrue(any('조각은' in p for p in problems), problems)
+        _, problems = guards.load(files, read={**texts, 'sfc/dq4/guards.d/ch2.toml': GOOD}.get)
+        self.assertTrue(any('에도 있음' in p for p in problems), problems)
+
+    def test_at_group_in_paths_triggers_and_minus_excludes(self):
+        """paths 의 "@묶음" 은 그 묶음을 자기 paths 로 넣어 PR 에서 검사를 건다. 묶음의 "!glob" 은 빼고, 빼기가 든 묶음은
+        추적 파일로 풀린다(새 파일도 glob 에 맞으면 든다)."""
+        files = FILES + ['sfc/dq4/tools/dq4ch3safe.py', 'sfc/dq4/tools/dq4ch3safecheck.py', 'sfc/dq4/tools/dq4boulder.py']
+        text = (GOOD.replace('paths = ["sfc/dq4/tools/dq4ch*event.py"]', 'paths = ["@ch3", "README.md"]')
+                + '\n[groups]\nch3 = ["sfc/dq4/tools/dq4ch3*.py", "!sfc/dq4/tools/dq4ch3*check.py", '
+                  '"sfc/dq4/tools/dq4boulder.py"]\n')
+        checks, problems = load(text, files)
+        self.assertEqual(problems, [])
+        self.assertEqual(checks[0]['own_paths'],
+                         ['sfc/dq4/tools/dq4boulder.py', 'sfc/dq4/tools/dq4ch3safe.py', 'README.md'])
+        self.assertEqual(len(guards.triggered(checks, ['sfc/dq4/tools/dq4ch3safe.py'])), 1)
+        self.assertEqual(guards.triggered(checks, ['sfc/dq4/tools/dq4ch3safecheck.py']), [])
+        checks, _ = load(text, files + ['sfc/dq4/tools/dq4ch3tunnel.py'])
+        self.assertEqual(len(guards.triggered(checks, ['sfc/dq4/tools/dq4ch3tunnel.py'])), 1)
+        self.assertTrue(guards.group_match(['a/*.py', '!a/*check.py'], 'a/new.py'))
+        self.assertFalse(guards.group_match(['a/*.py', '!a/*check.py'], 'a/newcheck.py'))
+        # 빼기 없는 묶음은 적은 glob 그대로(지금 낱낱이 적는 것과 같은 뜻)
+        checks, _ = load(text.replace(', "!sfc/dq4/tools/dq4ch3*check.py"', ''), files)
+        self.assertEqual(checks[0]['own_paths'][:2], ['sfc/dq4/tools/dq4ch3*.py', 'sfc/dq4/tools/dq4boulder.py'])
+        for bad, word in (('"@nope"', 'nope'), ('"!README.md"', '! 빼기')):
+            _, problems = load(text.replace('"@ch3"', bad), files)
+            self.assertTrue(any(word in p for p in problems), (bad, problems))
+        _, problems = load(text.replace('"sfc/dq4/tools/dq4boulder.py"]', '"@x"]'), files)
+        self.assertTrue(any('glob' in p for p in problems), problems)
+        _, problems = load(GOOD + '\n[groups]\nnone = ["sfc/dq4/tools/*.py", "!sfc/dq4/tools/*.py"]\n', files)
+        self.assertTrue(any('빼고 나면' in p for p in problems), problems)
+
+    def test_edited_compares_the_whole_track(self):
+        """검사를 guards.toml 에서 조각으로 옮기기만 하면 바뀐 것이 아니다. 조각에서 run 을 바꾸면 바뀐 것이다."""
+        other = GOOD.replace('dq4-walk', 'dq4-other')
+        old = {'sfc/dq4/guards.toml': GOOD + other}
+        new = {'sfc/dq4/guards.toml': GOOD, 'sfc/dq4/guards.d/a.toml': other}
+
+        def show(rev, f):
+            return (old if rev == 'old' else new).get(f, '')
+
+        def listing(rev, folder):
+            return [f for f in (old if rev == 'old' else new) if f.startswith(folder + '/')]
+        changed = ['sfc/dq4/guards.toml', 'sfc/dq4/guards.d/a.toml']
+        self.assertEqual(guards.edited_between(changed, show, listing, 'old', 'new'), set())
+        new['sfc/dq4/guards.d/a.toml'] = other.replace('x.py', 'y.py')
+        self.assertEqual(guards.edited_between(changed[1:], show, listing, 'old', 'new'), {'dq4-other'})
+        self.assertEqual(guards.edited_between(['README.md'], show, listing, 'old', 'new'), set())
+        self.assertEqual(guards.track_of('sfc/dq4/guards.d/a.toml'), 'sfc/dq4/guards.toml')
+        self.assertIsNone(guards.track_of('sfc/dq4/guards.d/a.json'))
+        self.assertFalse(guards.is_input('sfc/dq4/guards.d/a.toml', 'uv run python x.py'))
+
     def test_edited_run_or_needs_triggers_the_check(self):
         """guards.toml 에서 그 검사의 run·needs 가 바뀌거나 새로 생기면 paths 와 상관없이 걸린다. why 만 바뀌면 걸리지 않는다."""
         other = GOOD.replace('dq4-walk', 'dq4-other')
@@ -400,14 +470,13 @@ class RunTest(unittest.TestCase):
     def test_mesence_checks_watch_the_settings_module(self):
         """needs 에 MESENCE 가 있는 실행 검사는 paths 에 tools/mesence_settings.py 가 있다. 그 파일만 고친 PR 도 그 검사들을
         고르게 한다(설정 자리를 잘못 고치면 키가 설정을 놓친다)."""
-        import tomllib
-        root = Path(__file__).resolve().parents[2]
+        checks, problems = guards.load(guards.tracked())
+        self.assertEqual(problems, [])
         found = 0
-        for toml in sorted(root.glob('*/*/guards.toml')):
-            for c in tomllib.loads(toml.read_text(encoding='utf-8'))['check']:
-                if 'MESENCE' in guards.env_names(c.get('needs', [])):
-                    found += 1
-                    self.assertIn('tools/mesence_settings.py', c['paths'], f'{toml}: {c["name"]}')
+        for c in checks:
+            if 'MESENCE' in guards.env_names(c.get('needs', [])):
+                found += 1
+                self.assertIn('tools/mesence_settings.py', c['own_paths'], f'{c["file"]}: {c["name"]}')
         self.assertGreater(found, 0)
 
     def test_prebuilt_swaps_only_the_ship_build(self):
