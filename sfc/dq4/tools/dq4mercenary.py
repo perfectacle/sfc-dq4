@@ -181,12 +181,14 @@ def _dismiss(who):
 
 
 SCRATCH_HURT, SCRATCH_MP = ch1e.SCRATCH + 0x0E, ch1e.SCRATCH + 0x0F     # 1장 손님 AI 가 쓰지 않는 바로 뒤 칸
+MONSTER_SLOTS = 0x7E07C0                   # DQ5 전투 몬스터 칸 16개(16바이트씩)
 
 
 def _ai(ch1_entry):
     """21:AF1B 의 JML 대상(1장 손님 AI 앞): 행동자 $7B 의 일행 기록 +0 이 몬스터 손님(C0)이고 용병 종류면 행동을 골라
     21:AF3B 로, 아니면 1장 손님 AI(그다음 원래 고르기)로. 스콧은 늘 공격. 로렌스는 같은 편이 HP 절반 미만이고 MP 가 되면
-    143/255 로 ホイミ(그 사람에게, 1장 대상 훅이 읽음), 아니면 ギラ 47·ラリホー 37·공격 28 에서(MP 가 모자라면 공격)."""
+    ホイミ(그 사람에게, 1장 대상 훅이 읽음)·ギラ·ラリホー·공격 가운데 FC 처럼 쓸 수 있는 칸만 남겨(ホイミ 는 다친 사람이
+    있을 때, 주문은 MP 가 될 때, ラリホー 는 깨어 있는 몬스터가 있을 때) 그 가중치 합으로 고른다."""
     from dq4ch2endor import BCC, BCS, BEQ, BNE, BRA, lda, sta
     a = _asm()(0x08, 0xE2, 0x30, 0xA5, 0x7B, 0x00, 0x8B, 0x80, 0x2A, 0xA5, 0x46, 0x29, 0xC0, 0xC9, GUEST)
     a.br(BEQ, 'guest').label('other')(0x28, 0x5C, *_al(ch1_entry))
@@ -203,19 +205,31 @@ def _ai(ch1_entry):
         a(0x0A, 0xDF, *_al(PARTY_AT + 0x0E)).br(BCS, f'skip{k}')
         a(0xE2, 0x20, lda(SCRATCH_HURT)).br(BNE, f'skip{k}')(0xA9, k + 1, sta(SCRATCH_HURT))
         a.label(f'skip{k}')(0xE2, 0x20)
-    a(lda(SCRATCH_HURT)).br(BEQ, 'calm')(lda(SCRATCH_MP), 0xC9, SPELL_MP[HEAL]).br(BCC, 'calm')
-    a(0xA9, 0xFF, 0x22, *_al(RANDOM), 0xC9, HEAL_WEIGHT).br(BCS, 'calm')
-    a(lda(SCRATCH_HURT), sta(TARGET), 0xA9, HEAL).br(BRA, 'done')
-    total = sum(w for _, w in OTHER_WEIGHTS)
-    a.label('calm')(0xA9, total, 0x22, *_al(RANDOM))
-    acc = 0
-    for act, w in OTHER_WEIGHTS[:-1]:
-        acc += w
-        a(0xC9, acc).br(BCC, f'act{act:02X}')
-    a.br(BRA, 'attack')
-    for act, _ in OTHER_WEIGHTS[:-1]:
-        a.label(f'act{act:02X}')(lda(SCRATCH_MP), 0xC9, SPELL_MP[act]).br(BCC, 'attack')(0xA9, act).br(BRA, 'done')
-    a.label('attack')(0xA9, ATTACK)
+    # 쓸 수 있는 칸(FC 10:$AF70 이 지우지 않는 칸)을 스택 마스크로: 1 ホイミ, 2 ギラ, 4 ラリホー. 공격은 늘 남는다
+    acc = SCRATCH_MP
+    a(0xA9, 0x00, 0x48, lda(SCRATCH_HURT)).br(BEQ, 'noheal')(lda(SCRATCH_MP), 0xC9, SPELL_MP[HEAL]).br(BCC, 'noheal')
+    a(0xA3, 0x01, 0x09, 0x01, 0x83, 0x01).label('noheal')
+    a(lda(SCRATCH_MP), 0xC9, SPELL_MP[GIRA]).br(BCC, 'nogira')(0xA3, 0x01, 0x09, 0x02, 0x83, 0x01).label('nogira')
+    a(lda(SCRATCH_MP), 0xC9, SPELL_MP[RARIHO]).br(BCC, 'norari')(0xA2, 0x00, 0x00)
+    # 몬스터 칸 7E:07C0 + 16 × 칸: +A bit7 있는 칸, +B bit7 잠. 깨어 있는 몬스터가 하나라도 있어야 ラリホー
+    a.label('scan')(0xBF, *_al(MONSTER_SLOTS + 0x0A)).br(0x10, 'next')(0xBF, *_al(MONSTER_SLOTS + 0x0B)).br(0x10, 'awake')
+    a.label('next')(0xC2, 0x20, 0x8A, 0x18, 0x69, 0x10, 0x00, 0xAA, 0xE2, 0x20, 0xE0, 0x00, 0x01).br(BCC, 'scan')
+    a.br(BRA, 'norari')
+    a.label('awake')(0xA3, 0x01, 0x09, 0x04, 0x83, 0x01).label('norari')
+    # 남은 칸 가중치 합으로 r 을 뽑아(00:953A = (난수 × A) >> 8) 누적이 r 보다 커지는 칸(FC 10:$B12B)
+    weights = dict(OTHER_WEIGHTS)
+    picks = ((0x01, HEAL, HEAL_WEIGHT), (0x02, GIRA, weights[GIRA]), (0x04, RARIHO, weights[RARIHO]))
+    a(0xA9, weights[ATTACK], sta(acc))
+    for bit, act, w in picks:
+        a(0xA3, 0x01, 0x29, bit).br(BEQ, f'sum{act:02X}')(lda(acc), 0x18, 0x69, w, sta(acc)).label(f'sum{act:02X}')
+    a(lda(acc), 0x22, *_al(RANDOM), sta(acc))
+    for bit, act, w in picks:
+        a(0xA3, 0x01, 0x29, bit).br(BEQ, f'skip{act:02X}')(lda(acc), 0xC9, w).br(BCC, f'act{act:02X}')
+        a(0xE9, w, sta(acc)).label(f'skip{act:02X}')
+    a(0x68, 0xA9, ATTACK).br(BRA, 'done')
+    a.label(f'act{HEAL:02X}')(0x68, lda(SCRATCH_HURT), sta(TARGET), 0xA9, HEAL).br(BRA, 'done')
+    for _, act, _ in picks[1:]:
+        a.label(f'act{act:02X}')(0x68, 0xA9, act).br(BRA, 'done')
     a.label('done')(0x28, 0x5C, *_al(AI_DONE))
     return a.bytes()
 
