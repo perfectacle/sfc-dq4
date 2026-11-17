@@ -324,3 +324,22 @@ class RunFailureTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class WalkDriverTests(unittest.TestCase):
+    """창 상태 토큰(until·cursor)이 든 걷기만 dq4walk.lua 로, 그 밖은 공유 walk.lua 그대로(기록이 전과 같게)."""
+    def test_driver_follows_the_tokens(self):
+        self.assertEqual(wc.walk_driver('up:40;wait:200;a:8'), wc.WALK)
+        self.assertEqual(wc.walk_driver('up:16;until:300;until:300;cursor:0;a:8'), wc.DQ4_WALK)
+        self.assertEqual(wc.walk_driver('cursor:1'), wc.DQ4_WALK)
+        self.assertEqual(wc.walk_driver('12,40;untilx:3'), wc.WALK)
+        self.assertTrue(wc.DQ4_WALK.is_file())
+
+    def test_dq4_walk_is_walk_plus_two_tokens(self):
+        """dq4walk.lua 는 walk.lua 의 줄을 모두 지닌다(갈라진 판이 공유 걷기의 고침을 놓치지 않게)."""
+        shared = [line for line in wc.WALK.read_text(encoding='utf-8').splitlines()
+                  if line.strip() and not line.startswith('--')]
+        mine = wc.DQ4_WALK.read_text(encoding='utf-8')
+        changed = {'local n, pi, left, wi, stuck, last, press = 0, 1, nil, 1, 0, nil, nil',
+                   '    pts[#pts + 1] = {b, tonumber(f)}', '    if type(p[1]) == "string" then'}
+        self.assertEqual([line for line in shared if line not in mine and line not in changed], [])

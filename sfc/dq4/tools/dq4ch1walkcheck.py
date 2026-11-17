@@ -61,6 +61,14 @@ from dq4pins import RNG  # noqa: E402
 
 WALK = ROOT / 'tools' / 'lua' / 'walk.lua'
 WALK_STATE = HERE / 'lua' / 'dq4walkstate.lua'
+# 창 상태를 보고 넘기는 경유점 토큰(until:N·cursor:K)이 든 걷기는 dq4 판 걷기(walk.lua 에 그 둘을 더한 것)로 돈다
+DQ4_WALK = HERE / 'lua' / 'dq4walk.lua'
+WINDOW_TOKEN = re.compile(r'(^|;)(until|cursor):\d+(;|$)')
+
+
+def walk_driver(waypoints):
+    """경유점 글에 맞는 걷기 Lua: 창 상태 토큰이 있으면 DQ4_WALK, 없으면 공유 walk.lua(기록이 전과 같게)."""
+    return DQ4_WALK if WINDOW_TOKEN.search(waypoints) else WALK
 WARP = DQ5_TOOLS / 'lua' / 'dq5warp.lua'
 WARP_MSG = HERE / 'lua' / 'dq4warpmsg.lua'
 # 구간마다 적는 메시지 번호 수의 상한(lua LIMIT). 넘으면 'truncated' 로 그 구간이 실패한다. 상한 분기를 실측할 때만
@@ -544,7 +552,7 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
     else:
         maxf = opt.get('maxf', frames(arg))
         # PRE: 앞 구간이 끝날 때 남은 A 가 연 명령 창을 닫는다. 창이 없을 때의 B 는 아무것도 열지 않는다
-        why = run(mesence, rom, WALK_STATE, dest, {'STATE': str(state), 'WALK': str(WALK), 'WAYPOINTS': arg,
+        why = run(mesence, rom, WALK_STATE, dest, {'STATE': str(state), 'WALK': str(walk_driver(arg)), 'WAYPOINTS': arg,
                                                    'LIMIT': str(MSG_LIMIT),
                                                    'PRE': pc.CLOSE.replace(';', ','),
                                                    'SAVE': 'end.mss', 'MAXF': str(maxf),

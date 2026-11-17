@@ -17,6 +17,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3walkcheck.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
   "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/lua/dq4walk.lua",
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4npccheck.py",
   "sfc/dq4/tools/dq4groupbuild.py",

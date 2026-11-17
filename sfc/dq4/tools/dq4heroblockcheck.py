@@ -262,7 +262,7 @@ def run_case(mesence, rom, base, out, name, case, exit_at, seed=0):
                                  ';'.join(slot(n) for n in case.get('at', {})),
                                  ';'.join(f'{k}=7E{0x2190 + i:04X}:1' for k, (i, _) in
                                           case.get('want', []) + case.get('not', []))) if v)
-    env = {'STATE': str(state), 'WALK': str(wc.WALK), 'WALK_STATE': str(wc.WALK_STATE), 'WAYPOINTS': walk,
+    env = {'STATE': str(state), 'WALK': str(wc.walk_driver(walk)), 'WALK_STATE': str(wc.WALK_STATE), 'WAYPOINTS': walk,
            'MAXF': str(case.get('maxf', wc.frames(walk))), 'CHANGES': str(case.get('changes', 99)), 'AFTER': '30',
            'WATCH': watch, 'ROMPATCH': rompatch(rom, case), 'SET': rng}
     if 'snap' in case:
