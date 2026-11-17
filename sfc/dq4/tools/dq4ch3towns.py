@@ -31,13 +31,13 @@ pages = ch2._speaker_pages
 FLAGS = ()
 FOXED = (0x73, 0x01)           # 본몰 B: 여우를 쫓음(FC $6280&02)
 PRINCE_MET = (0x73, 0x02)      # 본몰 B: 낮에 왕자를 만나 유모에게 쫓겨남(FC $6280&08)
-# 7E:21A3 bit7(맵을 옮기면 지워짐): 3F/01 에 들 때 이미 PRINCE_MET 였음. 유모는 쫓겨난 그 방문에만 03B1 이다(FC
-# $6289&40 은 필드로 나가면 지워짐. 여기서는 3F/01 을 떠나면)
-MET_BEFORE = (0x13, 0x80)
+# 본몰 B: 왕자 낮 첫 만남에서 쫓겨남(7E:21A3 bit4, 맵을 옮기면 지워짐). 유모는 그 방문에만 03B1(FC $6289&40 은
+# 필드로 나가야 지워지고, 여기서는 3F/01 을 떠나면 — 감옥 3F/00 을 다녀와도 — 지워진다)
+NANNY_SCOLDED = (0x13, 0x10)
 SON_FREED = (0x73, 0x04)       # 본몰 B: 톰 아들에게 키메라의 날개를 줌(FC $6280&04)
 LETTER1 = (0x73, 0x10)         # 본몰 B: 왕자의 편지를 모니카에게 전함(FC $6280&01)
 SHOP = (0x75, 0x02)            # 엔돌 E: 가게를 삼(FC $6286&20)
-OWNERS = {'dq4ch3bonmalmo': ('FOXED', 'PRINCE_MET', 'SON_FREED', 'LETTER1'), 'dq4ch3endor': ('SHOP',)}
+OWNERS = {'dq4ch3bonmalmo': ('FOXED', 'PRINCE_MET', 'NANNY_SCOLDED', 'SON_FREED', 'LETTER1'), 'dq4ch3endor': ('SHOP',)}
 
 YES = {"code": "05"}
 DAY = {"code": "14"}
@@ -288,8 +288,7 @@ def talk_scripts(ctx):
         'drunk': [s('drunk_ask'), when(YES, [s('drunk_yes')], [s('drunk_no')])],
         'statue_merchant': [s('statue_ask'), when(YES, [s('statue_me_too')], [s('statue_oops')])],
         'jail_guard': [s('jail_out'), ctx.call('jail_out')],
-        'nanny': [when(flag(PRINCE_MET), [when(flag(MET_BEFORE), [s('nanny_room')], [s('nanny_out')])],
-                       [s('nanny_room')])],
+        'nanny': [when(flag(NANNY_SCOLDED), [s('nanny_out')], [s('nanny_room')])],
         'night_guard': [s('night_out'), ctx.call('night_out')],
         'coin_exchange': [s('coin_exchange'), s('coin_none')],
         'coin_seller': [s('coin_seller'), s('coin_closed')],
@@ -447,10 +446,6 @@ def npc_lists(lists, ctx):
                 hit += 1
         if hit != 1:
             raise SystemExit(f'마을 사람: {m} {fc} 의 빈 가게 사람이 {hit}명')
-    # 3F/01 에 들 때 PRINCE_MET 를 MET_BEFORE 에 옮겨 두는 보이지 않는 사람. 그림은 이 그룹에 이미 있는 병사(6):
-    # 그룹에 새 그림을 더하면 dq4people 의 그림 배치가 바뀌어 다른 장 화면이 달라진다
-    lists[BONMALMO]["entries"] += [{**e, "fields": {**e["fields"], "gfx": HELPER_GFX, "x": HELPER_CELL[0], "y": HELPER_CELL[1]}}
-                                   for e in ch2._invisible(_src('met_before'), t['nanny'])]
     new, over = [], []
 
     def on(m, name):
@@ -528,9 +523,9 @@ def state_messages(ctx):
         # 왕자를 만난 뒤 다시 들어온 방문: 들 때 이미 켜져 있어 유모는 0836
         'towns_prince': (_set(PRINCE_MET), {(BONMALMO, (0x06, 0x06), False): m['nanny_room'],
                                             (BONMALMO, (0x06, 0x07), False): m['nanny_room']}),
-        # 쫓겨난 그 방문: 맵에 든 뒤에 켜면(셋째 값 LATESET) 03B1
+        # 쫓겨난 그 방문: 맵 안 임시 비트라 맵에 든 뒤에 켠다(셋째 값 LATESET)
         'towns_chased': ('', {(BONMALMO, (0x06, 0x06), False): m['nanny_out'],
-                              (BONMALMO, (0x06, 0x07), False): m['nanny_out']}, _set(PRINCE_MET)),
+                              (BONMALMO, (0x06, 0x07), False): m['nanny_out']}, _set(PRINCE_MET, NANNY_SCOLDED)),
         'towns_shop': (_set(SHOP), {(HOUSE, (0x02, 0x04), True): m['neighbor_proud']}),
         'towns_casino': (_set(_resumed()), {(CASINO, fc, night): m[first] for fc, first in (
             ((0x1C, 0x08), 'coin_exchange'), ((0x18, 0x02), 'coin_seller'), ((0x08, 0x0A), 'slots_ask'),
@@ -538,26 +533,13 @@ def state_messages(ctx):
     }
 
 
-SCRIPT_LIST = '10:B135'
-SCRIPTS = {'met_before': (6, '10:B171', 21)}       # 이름: (목록 칸, 스크립트 주소, 자리 바이트)
-HELPER_GFX = 0x06
-# 왕자 방(FC X 01~08, Y 05~0E) 왼쪽 벽 칸. 이동 간격 1 로 스크립트만 돈다(간격 0 이면 차례를 받지 못함)
-HELPER_CELL = cell(0x00, 0x08)
-
-
-def _src(name):
-    return {"list": SCRIPT_LIST, "index": SCRIPTS[name][0]}
-
-
-def _cmd(op, *args, **kw):
-    return {"op": op, "args": list(args), **kw}
-
-
-def scripts(ctx):
-    """빌린 인물 스크립트: 3F/01 에 들 때 PRINCE_MET 면 MET_BEFORE 를 켠다."""
-    met = [_cmd('28'), _cmd('52'), _cmd('06', 0x80 | PRINCE_MET[0], PRINCE_MET[1], target='end'),
-           _cmd('10', *MET_BEFORE), _cmd('16', label='end')]
-    return [{"address": SCRIPTS['met_before'][1], "commands": met}]
+# 본몰 방어구 매입(FC 대화 060, 15:$A54C)의 값. 물건 고르는 창을 옮기지 않아 아직 쓰지 않는다(문서 「남은 것」).
+# FC 실측: かわのよろい(값 180)를 판 금화가 180·163·222·191 — 모두 248/256 갈래의 값 × (54 + ⌊r × 27/256⌋)/64
+def armor_buy_price(value, r1, r2):
+    """r1·r2: 난수 0~255. r1 < F8 이면 값 × (54 + ⌊r2 × 27/256⌋)/64, 아니면 값 × (96 + ⌊r2 × 33/256⌋)/64(코드 읽기)."""
+    if r1 < 0xF8:
+        return value * (54 + r2 * 27 // 256) // 64
+    return value * (96 + r2 * 33 // 256) // 64
 
 
 def _resumed():

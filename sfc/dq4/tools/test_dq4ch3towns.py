@@ -65,6 +65,8 @@ class RegisterTest(unittest.TestCase):
         for module, names in W.OWNERS.items():
             key = next(k for k, s in ev.SLOTS.items() if s.module == module)
             for name in names:
+                if getattr(W, name)[0] in (0x13, 0x14):
+                    continue            # 맵을 옮기면 지워지는 7E:21A3·21A4(예약 몫 밖, 그 모듈의 맵 안에서만 뜻이 있음)
                 self.assertIn(getattr(W, name)[0], ev.SLOTS[key].flags, name)
 
 
@@ -193,9 +195,8 @@ class ListTest(unittest.TestCase):
         states = W.state_messages(c)
         for name, (sets, table, *late) in states.items():
             # 맵에 들 때 켜거나(SET) 든 뒤에 켠다(셋째 값 LATESET)
-            self.assertRegex(late[0] if late else sets, r'^[0-9A-F]{4}\|[0-9A-F]{2}$', name)
+            self.assertRegex(late[0] if late else sets, r'^[0-9A-F]{4}\|[0-9A-F]{2}(;[0-9A-F]{4}\|[0-9A-F]{2})*$', name)
             self.assertTrue(table)
-        self.assertEqual(states['towns_chased'][2], states['towns_prince'][0])
 
 
 class WindowTest(unittest.TestCase):
@@ -239,19 +240,12 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(check.candidate_lists(doc, ["40/05"])["40/05"], [("b", ["b"]), ("기본", ["base"])])
 
 
-@unittest.skipUnless((ROOT / 'rom' / 'dq5.sfc').is_file(), 'local source ROM not present')
-class BorrowedTest(unittest.TestCase):
-    def test_borrowed_record_has_the_script_and_room(self):
-        import dq5npc
-        from dq5map import Rom
-        rom = Rom((ROOT / 'rom' / 'dq5.sfc').read_bytes())
-        entries = dq5npc.list_entries(rom, int(W.SCRIPT_LIST.replace(':', ''), 16))
-        for index, address, room in W.SCRIPTS.values():
-            self.assertIn(index, dict(ev.SLOTS['W'].scripts)[W.SCRIPT_LIST])
-            a = int(address.replace(':', ''), 16)
-            e, _ = entries[index]
-            self.assertIn(a, (dq5npc.script_address(rom, e, False), dq5npc.script_address(rom, e, True)))
-            self.assertEqual(rom.u8(a), room)
+class ArmorBuyTest(unittest.TestCase):
+    def test_fc_samples_fit_the_common_branch(self):
+        # FC 실측: かわのよろい(180)의 매입 값
+        reachable = {W.armor_buy_price(180, 0, r) for r in range(256)}
+        self.assertLessEqual({180, 163, 222, 191}, reachable)
+        self.assertEqual((min(reachable), max(reachable)), (151, 225))
 
 
 @unittest.skipUnless(DQ4.is_file(), 'local source ROM not present')
