@@ -13,7 +13,7 @@ description: 포팅용 인물·몬스터 스프라이트를 넣거나 고칠 때
    완료: 실측 표가 형식 문서에 있다.
 2. **NDS 그림을 골라 줄인다** — 인물은 `sfc/dq4/tools/dq4people.py` 의 인물 표에 NDS 시트와 그림 번호를 넣고 `--plan --assets "$DQ4_ASSETS"` 로 세트·타일 한도·팔레트 줄을 본다. 몬스터는 `sfc/dq4/tools/dq4monart.py`·`dq4monport.py` 다. 시트 고르기·줄이는 규칙·규칙만으로 어색한 얼굴의 `touch` 는 형식 문서의 「NDS 시트에서 줄인 서장·1장 인물」·「2장 전투 몬스터 그림」 이 정본이다. NDS 에 없는 것만 직접 그리고, 그때는 제작 방식을 먼저 사용자와 정한다([SPRITE-01](#sprite-01--nds-그림을-dq5-실측-규격으로-줄이고-없는-것만-그린다)).
    완료: `--plan` 이 타일 한도 안이고 `test_dq4people.py`(몬스터는 `test_dq4monport.py`·`test_dq4monartcheck.py`)가 통과한다.
-   새 장·새 일행(전용 OBJ 줄을 쓰는 동료)을 넣으면 일행 팔레트 표 `dq4people.PARTIES` 에 그 장의 일행을 더하고, 그 일행이 다른 장의 맵 그룹에도 서면 `FLAG_VISITS` 에 그 그룹을 더한다. 빠지면 `test_dq4partylines.py` 가 실패하고, 헤드리스 실측은 배포 관문 가드 `dq4-party-palette` 가 한다.
+   새 장·새 일행(전용 OBJ 줄을 쓰는 동료)을 넣으면 일행 팔레트 표 `dq4people.PARTIES` 에 그 장의 일행을 더하고, 그 일행이 다른 장의 맵 그룹에도 서면 `FLAG_VISITS` 에 그 그룹을 더한다. 선두 밖 동료와 일행 뒤를 따라 걷는 그림(개 등, 전용 줄 없음은 `dq4partypalcheck.FOLLOWERS`)은 `dq4partypalcheck.JOINS` 에 그 그림과 세우는 기록을 더한다. 빠지면 `test_dq4partylines.py` 가 실패하고, 헤드리스 실측은 배포 관문 가드 `dq4-party-palette` 가 한다.
 3. **같은 배경·같은 배율로 견준다** — 직접 그린 것은 `sfc/dq4/tools/dq4spritelab.py compare <이름>` 으로 원작 인물 옆에 놓고 8배 그림을 본다. 머리·몸 비율, 눈·콧수염이 분리되는지, 발이 땅에 붙는지를 본다.
 4. **MesenCE 헤드리스로 확인한다** — 빌드 롬을 `sfc/dq4/tools/dq4peoplecheck.py` 로 맵마다 워프해 인물이 제 세트·팔레트로 실렸는지 VRAM·OAM·CGRAM 으로 보고, 얼굴·색이 의심스러우면 그 장면 화면을 헤드리스로 찍어 직접 본다. GUI 를 띄워 사용자에게 확인을 넘기지 않는다.
 5. **직접 그린 것은 사용자 확인 뒤에 넓힌다** — NDS 에 없어 새로 그리는 인물은 정면이 확인되기 전에는 측면·후면·보행·다른 인물로 넓히지 않는다([SPRITE-02](#sprite-02--직접-그린-것은-정면-한-장을-원작-옆에서-확인한-뒤-넓힌다)).
