@@ -11,6 +11,8 @@ FLAGS = {
     'ENDOR_COUNT': (ch3.VARS_AT + ch3.SLOTS['E'].vars[0] + endor.VARS, 0xFF),
     **{f'NENE_SALES{k}': (ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + shop.SALES + k, 0xFF) for k in range(3)},
     'NENE_STOCK0': (ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + shop.STOCK, 0xFF),
+    # 따라 걷는 첫 칸의 그림 번호(인물 표 7E:3220 + 슬롯 1). 용병은 dq4people 이 NDS 병사·시인을 싣는 그림
+    'FOLLOWER1': (0x7E3221, 0xFF),
 }
 
 # 엔돌: 사람 바로 아래 셀(FC 칸 한 칸 아래). 순간이동은 TO 의 한 셀 아래에 내린다
@@ -85,7 +87,8 @@ SEGMENTS = [
     ('endor_lawrence', 'warp', below(endor.BARD_HALL, endor.LAWRENCE[0][2]), {'map': endor.BARD_HALL}),
     ('endor_lawrence_hire', 'walk', talk('up', 8),
      {'map': endor.BARD_HALL, 'set': ';'.join((gold(600), f'{ch3.LAWRENCE_DAYS & 0xFFFF:04X}=03')), 'want': ['LAWRENCE'],
-      'bytes': {'PARTY_N': 2, 'PARTY1': 0xE9, 'LAWRENCE_DAYS': 0, 'GOLD0': 0, 'GOLD1': 0}}),
+      'bytes': {'PARTY_N': 2, 'PARTY1': 0xE9, 'LAWRENCE_DAYS': 0, 'GOLD0': 0, 'GOLD1': 0,
+                'FOLLOWER1': ch3.LAWRENCE_PICTURE}}),
     # 날수: 시간이 01FF 인 필드 걸음에 하루가 지나고(3 → 4), 날수 5 인 필드 걸음에 0379 뒤 일행에서 빠진다
     ('endor_day_side', 'warp', TOWN_WEST, {'map': TOWN, 'set': f'{ch3.LAWRENCE_DAYS & 0xFFFF:04X}=03'}),
     ('endor_day', 'walk', 'left:64;wait:60;down:16', {'field': True, 'cell': (FIELD_OUT[0], FIELD_OUT[1] + 2),

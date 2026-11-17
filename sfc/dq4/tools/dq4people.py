@@ -41,7 +41,7 @@ sys.path[:0] = [str(HERE), str(DQ5_TOOLS)]
 
 import dq4chapterbox  # noqa: E402
 from dq4ch2event import ALENA_PICTURE, BREY_PICTURE, CHAPTER2, KIRYL_PICTURE  # noqa: E402
-from dq4ch3event import CHAPTER3, TORNEKO_PICTURE  # noqa: E402
+from dq4ch3event import CHAPTER3, LAWRENCE_PICTURE, SCOTT_PICTURE, TORNEKO_PICTURE  # noqa: E402
 
 # 전용 줄 깃발 → 그 줄을 덮는 장(dq4groupbuild.LINKS 의 chapter). 표에 없는 깃발은 2장
 FLAG_CHAPTERS = {CHAPTER2: 2, CHAPTER3: 3}
@@ -50,7 +50,9 @@ FLAG_CHAPTERS = {CHAPTER2: 2, CHAPTER3: 3}
 FLAG_VISITS = {CHAPTER2: (0x40,)}
 # 장(0 은 서장)마다 일행 전용 OBJ 줄(Person.palette)을 쓰는 인물. 새 장·새 일행을 넣으면 여기에 더한다. 빠지면
 # test_dq4partylines 가 실패한다
-PARTIES = {0: ('천공의 용사',), 1: ('라이언', '호이민'), 2: ('아리나', '크리프트', '브라이'), 3: ('톨네코',)}
+PARTIES = {0: ('천공의 용사',), 1: ('라이언', '호이민'), 2: ('아리나', '크리프트', '브라이'), 3: ('톨네코', '스콧', '로렌스')}
+# 새 세트를 받는 인물의 타일 한도: 호이민(세트 20, 41타일)이 1장에 따라 걷는 크기
+FOLLOWER_TILES = 41
 from dq4chapter1 import apply_writes, lorom  # noqa: E402
 from dq4romassets import set_checksum  # noqa: E402
 import dq5npcrecord  # noqa: E402
@@ -247,6 +249,9 @@ PEOPLE = (
            copy=('left', 'right')),                   # 오른쪽 보기는 흰 눈썹에 눈이 가려 왼쪽을 뒤집어 쓴다
     # 3장 주인공. 마을 사람 톨네코(그림 36)와 같은 시트를 일행 그림으로 따로 싣는다(팔레트 줄 7 을 3장 flag 로)
     Person((TORNEKO_PICTURE,), None, 'h118', '톨네코', main=True, palette=7, flag=CHAPTER3, leader=True),
+    # 3장 용병. NDS 엔돌 스크립트의 모습 번호: 스콧 0F(兵士), 로렌스 1F(詩人). 3장에는 2장 일행 줄 5·6 이 빈다
+    Person((SCOTT_PICTURE,), None, 'h015', '스콧', main=True, palette=6, flag=CHAPTER3, new_set=0x72),
+    Person((LAWRENCE_PICTURE,), None, 'h031', '로렌스', main=True, palette=5, flag=CHAPTER3, new_set=0x73),
     # 2장 그룹(3D·45)의 인물. 시트는 NDS 스크립트 오브젝트의 모습 번호(= 시트 번호)와 그 대사의 화자 이름으로 골랐다
     Person((0x0E,), None, 'h035', '공주', main=True),
     Person((0x3D,), None, 'h013', '죄수', spare=0x9E),
@@ -1197,10 +1202,13 @@ def swap_patch(rom):
 
 def target(person, rom):
     """(세트, 배치, 타일 한도). 장 주인공은 새 6타일 세트(한도는 2B·2E 의 원래 세트 중 작은 쪽), 나머지는 그림
-    번호(spare 가 있으면 spare)의 원래 세트를 그 자리에서 바꾸고 한도는 그 세트의 타일 수."""
+    번호(spare 가 있으면 spare)의 원래 세트를 그 자리에서 바꾸고 한도는 그 세트의 타일 수. 새 세트를 받은 다른
+    인물(3장 용병: 32타일 넘게 비는 세트가 없음)은 FOLLOWER_TILES 까지."""
     if person.pictures == LEADER_PICTURES:
         limit = min(S.set_record(rom, S.gfx_set(rom, g))['tiles'] for g in LEADER_PICTURES)
         return person.new_set, 'simple', limit
+    if person.new_set is not None:
+        return person.new_set, 'simple', FOLLOWER_TILES
     s = S.gfx_set(rom, person.spare if person.spare is not None else person.pictures[0])
     return s, 'overlap' if s & 0x80 else 'simple', S.set_record(rom, s)['tiles']
 
@@ -1423,7 +1431,10 @@ def assemble(base, dq5, assets, out, work, squeeze):
             doc['sets'].append({'set': f'{s:02X}', 'image': f'{s:02X}.png'})
             continue
         doc['new_sets'].append({'set': f'{s:02X}', 'image': f'{s:02X}.png', 'palette': 0})
-        leader_sets.append(s)
+        if p.pictures == LEADER_PICTURES:
+            leader_sets.append(s)
+        else:
+            doc['gfx'] += [{'gfx': f'{g:02X}', 'set': f'{s:02X}'} for g in p.pictures]
     # 장 주인공 두 세트는 그림 2B·2E 에 하나씩 잇는다(훅이 앞서므로 표 값은 쓰이지 않는다)
     doc['gfx'] += [{'gfx': f'{g:02X}', 'set': f'{s:02X}'} for g, s in zip(LEADER_PICTURES, leader_sets)]
     (work / 'sprite.json').write_text(json.dumps(doc, indent=1) + '\n')

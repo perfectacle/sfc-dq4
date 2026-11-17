@@ -213,7 +213,8 @@ SEGMENTS = [
     ('scott_dog', 'walk', talk('up', 4), {'map': endor.TOWN, 'off': ['SCOTT'], 'bytes': {'GOLD0': 0x90, 'GOLD1': 0x01}}),
     ('scott_side', 'warp', _below(endor.TOWN, endor.SCOTT[2]), {'map': endor.TOWN, 'set': sets(more=(_gold(400),))}),
     ('scott_hire', 'walk', talk('up', 6), {'map': endor.TOWN, 'want': ['SCOTT'],
-                                           'bytes': {'PARTY_N': 2, 'PARTY1': 0xE8, 'GOLD0': 0, 'GOLD1': 0}}),
+                                           'bytes': {'PARTY_N': 2, 'PARTY1': 0xE8, 'GOLD0': 0, 'GOLD1': 0,
+                                                     'FOLLOWER1': ch3.SCOTT_PICTURE}}),
     # 단추에 「아니요」: 그대로 48/03, 칸을 떠났다가 다시 서야 또 묻는다
     ('button_no_side', 'warp', f'{endor.CAVE_WET},{endor_checks.BUTTON_CELL[0]},{endor_checks.BUTTON_CELL[1] + 1}',
      {'map': endor.CAVE_WET, 'set': sets()}),

@@ -145,8 +145,6 @@ class GroupTests(unittest.TestCase):
                     found[name] = '배치 표 그룹에 없음 ' + ','.join(f'{g:02X}' for g in sorted(missing))
         known = {
             '개': '배치 표 그룹에 없음 3F,40,47,48',
-            '스콧': 'NDS 인물이 아님(DQ5 세트 그대로 공용 줄)',
-            '로렌스': '브라이 의 다른 장 전용 줄 5',
         }
         self.assertEqual(found, known)
 

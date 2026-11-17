@@ -26,9 +26,9 @@ from dq4chapterbox import ENTER, LEAVE  # noqa: E402
 say, narrate = ch1.say, ch1.narrate
 GUEST = 0xC0                   # 일행 기록 +0: bit7 몬스터 동료, bit6 손님(명령 창 없이 스스로 싸움)
 SCOTT_KIND, LAWRENCE_KIND = 0x28, 0x29          # 이 해킹에서 동료가 되지 않는 DQ5 동료 종류(00~29 의 끝 둘)
-# 걷는 그림(05:D9E1 + 종류): DQ5 사람 그림 표(05:D9D5 + 인물 번호 − 1)의 ピピン(병사)·パパス
+# 걷는 그림(05:D9E1 + 종류)의 칸을 dq4people 이 NDS 병사·시인을 싣는 그림으로(엔돌 3장 목록의 서 있는 용병도 같은 그림)
 PICTURE_TABLE = 0x05D9E1
-PICTURES = {'scott': 0x18, 'lawrence': 0x2C}
+PICTURES = {'scott': ch3.SCOTT_PICTURE, 'lawrence': ch3.LAWRENCE_PICTURE}
 DAYS = 5
 PRICES = {'scott': 400, 'lawrence': 600}
 # FC 손님 레코드(15:$9FF8·$A002): 스콧 HP 82, 로렌스 HP 58·MP 68. 공격·수비·민첩은 AI 레코드 C8·C7(코드 읽기)
