@@ -29,6 +29,9 @@ REUNITED = (0x57, 0x04)         # 7E:21E7 bit2  감옥에서 재회함(FC $627E&
 HOIMIN = (0x57, 0x10)           # 7E:21E7 bit4  호이민이 동료가 됨(FC $6281&40)
 KIDNAPPED = (0x57, 0x20)        # 7E:21E7 bit5  탑 입구에서 마물이 아이를 끌고 감(FC $627E&01)
 BOSS_WON = (0x57, 0x40)         # 7E:21E7 bit6  탑 위 보스를 이김(FC $6283&80)
+# 3장 개 토마스가 따라옴(dq4ch3event.DOG, FC $6286&04). 1·2장에는 쓰지 않는 바이트(dq4ch3slots 공용 몫)
+DOG = (0x6F, 0x02)
+FC_DOG_PICTURE = 0x24
 KIDS_FOLLOW = (0x57, 0x80)      # 7E:21E7 bit7  구한 아이들이 따라옴(FC $6283&20). 이무르에 데려다주면 끈다
 # 아래는 DQ5 레ヌール城 04/05 의 인물 스크립트만 읽는 비트(이 해킹은 04/05 에 가지 않음, dq5flags.py)
 SOLDIER_LEFT = (0x06, 0x01)     # 7E:2196 bit0  탑의 병사가 먼저 돌아감(FC $6280&80)
@@ -1018,8 +1021,9 @@ def native(data=None):
 
 
 def _followers(origin):
-    """02:C634 끝에서 M·X 8 로 부른다. 프레아(따라옴, 재회 전, 감옥 안이 아님)와 구한 아이들(따라옴)의 그림을 걷는 그림
-    7E:196F~ 끝에 더하고 7E:1967 을 늘린다. 1978 은 0(보이는 그림, 02:C6F2 가 bit7 을 관 그림 35 로 보냄)."""
+    """02:C634 끝에서 M·X 8 로 부른다. 프레아(따라옴, 재회 전, 감옥 안이 아님)와 구한 아이들(따라옴), 3장 개 토마스(따라옴)의
+    그림을 걷는 그림 7E:196F~ 끝에 더하고 7E:1967 을 늘린다. 1978 은 0(보이는 그림, 02:C6F2 가 bit7 을 관 그림 35 로 보냄).
+    일행 기록이 아니라 그림만 더하므로 전투에는 들지 않는다."""
     import dq4environmentrom
     from dq4npcport import PICTURES
     jail_bc, jail_bd = (int(v, 16) for v in JAIL.split('/'))
@@ -1032,13 +1036,17 @@ def _followers(origin):
     a.b(0xAF, 0xBC, 0x00, 0x7E, 0xC9, jail_bc).rel(0xD0, 'add_flare')
     a.b(0xAF, 0xBD, 0x00, 0x7E, 0xC9, jail_bd).rel(0xF0, 'kids')
     a.label('add_flare').b(0xA9, PICTURES[FC_FLARE_PICTURE]).word(0x20, 'add')
-    a.label('kids').long(0xAF, 'kids_flag').b(0x29, KIDS_FOLLOW[1]).rel(0xF0, 'done')
+    a.label('kids').long(0xAF, 'kids_flag').b(0x29, KIDS_FOLLOW[1]).rel(0xF0, 'dog')
     for _ in range(KIDS_WALKING):
         a.b(0xA9, PICTURES[FC_CHILD_PICTURE]).word(0x20, 'add')
+    # FC 는 개를 걷는 줄 칸으로 그린다(1E:$AAFF, 용병이 있으면 그 뒤). 일행 뒤에 붙으므로 용병 뒤가 된다
+    a.label('dog').long(0xAF, 'dog_flag').b(0x29, DOG[1]).rel(0xF0, 'done')
+    a.b(0xA9, PICTURES[FC_DOG_PICTURE]).word(0x20, 'add')
     a.label('done').b(0x28, 0x6B)
     a.label('add').b(0x48, 0xAF, 0x67, 0x19, 0x7E, 0xAA, 0x68, 0x9F, 0x6F, 0x19, 0x7E, 0xA9, 0x00, 0x9F, 0x78, 0x19, 0x7E,
                      0xE8, 0x8A, 0x8F, 0x67, 0x19, 0x7E, 0x60)
-    code, _ = a.assemble({'flare': flag(FLARE_FOLLOWS), 'reunited': flag(REUNITED), 'kids_flag': flag(KIDS_FOLLOW)})
+    code, _ = a.assemble({'flare': flag(FLARE_FOLLOWS), 'reunited': flag(REUNITED), 'kids_flag': flag(KIDS_FOLLOW),
+                          'dog_flag': flag(DOG)})
     return code
 
 
