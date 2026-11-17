@@ -142,6 +142,11 @@ SON = cell(0x17, 0x03)                                  # FC 16/00 슬롯 2, 대
 # 빌려주지 않았을 때만 선다. 빌려주면 슬롯 09 가 아들에게 걸어가 줄에 붙는다
 DOG = cell(0x1B, 0x04)
 DOG_HOME = cell(0x1B, 0x03)
+# 빌릴 때 개가 걷는 길(FC (1B,03)→(18,03), 아들 (17,03) 옆에서 멈춤). 돌려줄 때는 줄 끝 자리 FC (17,05)에 나타나 아들을
+# 비켜 (18,05)→(18,03)→(1B,03) 으로 우리에 돌아간다(FC 는 아들이 비키고 (17,04)→(17,03)→… 을 지남)
+LEND_PATH = (cell(0x18, 0x03),)
+RETURN_FROM = cell(0x17, 0x05)
+RETURN_PATH = (cell(0x18, 0x05), cell(0x18, 0x03), DOG_HOME)
 NENE = {'day': ch3.NENE_CELL, 'night': cell(0x1D, 0x03)}     # FC 16/01 대화 057
 NENE_FC_STEP = 8                                         # FC 슬롯 07 의 걸음 간격(차례, 머리 바이트 80 = 128프레임)
 # FC 16/01 낮 목록의 둘째 네네(슬롯 07, 돌아다님). FC 는 첫머리 뒤 이쪽만 두지만, 첫머리 자리 (1B,04) 의 네네를 남기고 이쪽을
@@ -170,7 +175,7 @@ SCRIPTS = {'customer': (DAY_LIST, 0, '10:9B88'), 'first_master': (DAY_LIST, 1, '
            'helper_night': (NIGHT_LIST, 0, '10:A038'), 'dog_night': (NIGHT_LIST, 1, '10:A04F'),
            'son': (DAY_LIST, 12, '10:9DD2'), 'cellar': (DAY_LIST, 13, '10:9E21'),
            'son_night': (NIGHT_LIST, 2, '10:A07B'), 'dog_home': (NIGHT_LIST, 3, '10:A08A'),
-           'dog_home_night': (NIGHT_LIST, 4, '10:A099')}
+           'dog_home_night': (NIGHT_LIST, 4, '10:A099'), 'nene_walk': (NIGHT_LIST, 5, '10:A0AE')}
 
 
 def _mark(*pieces):
@@ -276,12 +281,18 @@ MESSAGES = {
                      '지금쯤 어디서/뭘 하고 있는지.'),
     'tom_night': pages('톰', '뒤에 있는 건/아들 녀석이 기르던/개인데, 아들 말밖에/안 들어서 말이지……',  # 0822
                        '불쌍하지만/우리에 넣어/두었다네.'),
+    # 아들이 돌아온 뒤(본몰 SON_FREED, FC $6280&04)
+    'tom_glad': pages('톰', '오오, 톨네코!/덕분에 아들 녀석이/돌아왔다네!/기뻐서 기뻐서……'),             # 0844
+    'tom_thanks': pages('톰', '이거 참/고맙구먼.', '자네가 아들을/만난 것도/하느님의 인도일지/모르겠구먼.'),  # 0845
+    'tom_son_back': pages('톰', '아들 녀석이 돌아와서/착실하게 일하겠다지/뭔가! 이거 참/기쁘구먼!',     # 084A
+                          '아들 말인가?/그 녀석이라면/뒤쪽 개집에 있다네.'),
     'tom_church': _join(pages('톰', '아이고, 교회에/다 왔구먼./미안했네./이걸 받아 주게.'), _gain()),  # 03AE
     # 톰의 아들(FC 대화 055)
     'son_lend': say('톨네코 씨!/나야, 톰의 아들!/덕분에 돌아올 수/있었어.', '맞다, 사례를/해야지.',   # 084B
                     '응? 사례는 됐고/개 토마스를/빌려 달라고?/그거야 쉽지!',
                     '여우 사냥이/특기인 개라/분명 쓸모가/있을 거야.'),
     'son_dog': say('토마스,/톨네코 씨 말을/잘 들어야 한다!'),                                   # 03AD
+    'dog_bark': say('멍멍멍!'),                                                                  # 02F1
     'son_return': say('여어, 톨네코 씨./개를 돌려주러/와 준 건가?'),                            # 0899
     'son_thanks': say('좋아, 토마스/수고했다./자, 우리로/돌아가렴!'),                           # 089A
     'son_luck': say('톨네코 씨/당신의 성공을/빌게!'),                                           # 089B
@@ -296,7 +307,7 @@ TALKS = ('nene', 'popolo_day', 'popolo_night', 'late', 'master', 'quit', 'buyer_
 # 첫 칸(표 칸 0)은 네네의 잠: dq4ch3opencheck 의 공용 장치 시험이 이 칸을 바꿔 네네 대화로 부른다
 CALLS = {'sleep': ('sleep', 0), 'where': ('where', 0), 'prep': ('prep', 0), 'result': ('result', 0),
          'haggle': ('haggle', 0), 'sell': ('sell', 0),
-         'buy_in': ('buy_in', 0), 'pay_wage': ('pay_wage', 0), 'shop_key': ('shop_key', 0)}
+         'buy_in': ('buy_in', 0), 'pay_wage': ('pay_wage', 0), 'shop_key': ('shop_key', 0), 'lock': ('lock', 0)}
 
 
 def _flag_addr(flag):
@@ -603,6 +614,9 @@ def native(ctx):
     put('looks', bytes(LOOKS))
     put('look', _look(at))
     put('shop_key', _shop_key())
+    # 대화 호출: 인물 명령 3F 와 같이 주인공 조작을 막는다(7E:19AE bit0). 대화가 끝난 뒤 인물 스크립트가 차례를 받기까지
+    # 조작이 풀린 프레임이 생기지 않게 대화 안에서 막는다
+    put('lock', ENTER + lda(0x7E19AE) + bytes((0x09, 0x01)) + sta(0x7E19AE) + LEAVE)
     put('pace', _pace())
     import dq4ch1event
     put('refresh', ENTER + dq4ch1event.REFRESH + LEAVE)
@@ -710,18 +724,20 @@ def talk_scripts(ctx, flip_buy=False):
                                  served])],
                    [say_('angry')]),
               done]
-    tom = [when(DAY, [when(flag(TOM_DONE), [say_('tom_son')],
+    # 아들이 돌아온 뒤(SON_FREED)는 첫마디(0844)·교회 뒤(0845)·밤(084A)이 바뀐다(FC 15:$860D, 실측). 미는 중(0819)은 같다
+    back = flag(SON_FREED)
+    tom = [when(DAY, [when(flag(TOM_DONE), [when(back, [say_('tom_thanks')], [say_('tom_son')])],
                            [when(flag(TOM_PUSH), [say_('tom_push')],
-                                 [say_('tom_hello'), say_('tom_ask'),
+                                 [when(back, [say_('tom_glad')], [say_('tom_hello')]), say_('tom_ask'),
                                   when(YES, [say_('tom_go'), on(TOM_PUSH)], [say_('tom_no')])])])],
-                [say_('tom_night')])]
+                [when(back, [say_('tom_son_back')], [say_('tom_night')])])]
     # 여우를 쫓은 뒤(본몰 모듈의 FOXED, FC $6280&02)에는 개를 돌려받는 갈래(FC 대화 055)
-    lend = [when(flag(ch3.DOG), [say_('son_dog')], [say_('son_lend'), on(ch3.DOG)])]
+    lend = [when(flag(ch3.DOG), [say_('son_dog')], [say_('son_lend'), on(ch3.DOG), call('lock')])]
     son = [when(flag(FOXED),
                 [when(flag(DOG_BACK), [say_('son_luck')],
                       [when(flag(ch3.DOG), [say_('son_return'),
                                             when(YES, [say_('son_thanks'), say_('son_luck'), _flag_off(ch3.DOG),
-                                                       on(DOG_BACK)],
+                                                       on(DOG_BACK), call('lock')],
                                                  [say_('son_later')])],
                             lend)])],
                 lend)]
@@ -813,24 +829,27 @@ def scripts(ctx):
               call(at['tom_pay']), msg('tom_church'), _cmd('40'), _cmd('16', label='end')]
     helper_night = [_cmd('07', *FIELD_ARRIVAL, target='field'), _cmd('16'),
                     _and_off(BENTO_TODAY, SHIFT, label='field'), _cmd('16')]
-    # 우리의 개: 빌려준 동안은 숨고 걷는 줄 끝에 선다(dq4ch1event 따라 걷는 그림). 맵 안에서 DOG 가 바뀌면 줄을 다시
-    # 그린다(맵을 불러올 때는 저절로). 돌려준 뒤(DOG_BACK)는 우리에 선다
     # 아들이 풀려나기 전의 개(FC 슬롯 06)
     dog = [_if_on(SON_FREED, 'hide'), _cmd('16'), *hide]
-    # 풀려난 뒤의 개(FC 슬롯 09): 빌려준 동안은 줄 끝에 선다(dq4ch1event 따라 걷는 그림). 맵 안에서 빌려주면 줄을 다시
-    # 그리고(02:C7E4) 맵 구석으로 옮긴다. 다시 그리기가 숨긴 인물(28·52)을 되살려 우리 안에 개가 남았다(실측). 돌려주면
-    # 다시 그리기만 한다. 돌려준 뒤(DOG_BACK)는 우리에 선다
-    dog_home = [_if_off(SON_FREED, 'hide'), _if_on(DOG_BACK, 'stay'), _if_on(ch3.DOG, 'gone'), _wait_on(ch3.DOG),
-                call(at['refresh']), _cmd('2B', *PARK),
-                _cmd('09', ch3.DOG[0], ch3.DOG[1], label='back'), call(at['refresh']), _cmd('16'),
-                _cmd('28', label='gone'), _cmd('52'), _cmd('03', target='back'),
+    # 풀려난 뒤의 개(FC 슬롯 09). 빌려주면 FC 이벤트 07 처럼 우리에서 아들 옆 칸까지 걸어가 짖고(02F1) 아들이 03AD 를 한
+    # 뒤 걷는 줄 끝에 붙는다(dq4ch1event 따라 걷는 그림, 줄을 다시 그림 02:C7E4). FC 는 아들이 한 칸 비켜 개가 아들 칸까지
+    # 오지만 아들은 그대로 두고 옆 칸에서 멈춘다. 돌려주면 FC 이벤트 08 처럼 줄 끝 자리에 나타나 우리로 걸어 돌아간다.
+    # 줄에서 빠진 동안은 맵 구석에 둔다: 다시 그리기가 숨긴 인물(28·52)을 되살렸다(실측)
+    dog_home = [_if_off(SON_FREED, 'hide'), _if_on(DOG_BACK, 'stay'), _cmd('1E', WALK_SPEED), _cmd('1C'),
+                _if_on(ch3.DOG, 'gone'), _wait_on(ch3.DOG), _cmd('3F'),
+                *[c for x, y in LEND_PATH for c in (_cmd('13', x, y), _cmd('14'))], _cmd('2F', 0x22),
+                msg('dog_bark'), msg('son_dog'), call(at['refresh']), _cmd('2B', *PARK), _cmd('40'),
+                _cmd('09', ch3.DOG[0], ch3.DOG[1], label='back'), _cmd('3F'), call(at['refresh']),
+                _cmd('2B', *RETURN_FROM), *[c for x, y in RETURN_PATH for c in (_cmd('13', x, y), _cmd('14'))],
+                _cmd('2F', 0x22), _cmd('40'), _cmd('16'),
+                _cmd('2B', *PARK, label='gone'), _cmd('03', target='back'),
                 _cmd('16', label='stay'), *hide]
     # 아들은 본몰 감옥에서 풀려난 뒤에만(FC 1C:$A29A 가 $6280&04 로 목록을 고침), 아래층 주인은 출근 중에만(1C:$A326)
     son = [_if_off(SON_FREED, 'hide'), _cmd('16'), *hide]
     cellar = [_if_off(SHIFT, 'hide'), _if_on(DONE, 'hide'), _cmd('16'), *hide]
     bodies = {'customer': customer, 'first_master': first, 'master': master, 'tom': tom, 'helper': helper,
               'dog': dog, 'helper_night': helper_night, 'dog_night': list(dog), 'son': son, 'son_night': list(son),
-              'dog_home': dog_home, 'dog_home_night': list(dog_home),
+              'dog_home': dog_home, 'dog_home_night': list(dog_home), 'nene_walk': [_cmd('18')],
               'cellar': cellar}
     return [{"address": SCRIPTS[name][2], "commands": bodies[name]} for name in SCRIPTS]
 
@@ -906,12 +925,13 @@ def npc_lists(lists, ctx):
                 lst["entries"][:] = [e for e in lst["entries"] if (e["time"], _at(e)) != NENE_WALKER[1:]]
         for time, c in NENE.items():
             ctx.retalk(lists, HOUSE, c, t['nene'], time=time)
-        # 낮 네네는 FC 슬롯 07 처럼 집 안을 돌아다닌다(128프레임마다 한 걸음, 실측). 첫머리는 따로 목록(dq4ch3event
-        # ch3_opening)이라 서 있는 연출 그대로다
+        # 낮 네네는 FC 슬롯 07 처럼 범위 없이 집 안을 돌아다닌다(128프레임마다 한 걸음, 벽에만 막힘, 실측). DQ5 의
+        # 돌아다니는 틀(19 03 03)은 시작 칸 둘레 3×3 이라 범위 없는 18 을 쓰는 빌린 스크립트로 한다. 첫머리는 따로
+        # 목록(dq4ch3event ch3_opening)이라 서 있는 연출 그대로다
         import dq4npcport
         for e in house:
             if (e["time"], _at(e)) == ('day', NENE['day']):
-                e["from"] = dq4npcport.WALK
+                e["from"] = _src('nene_walk')
                 e["fields"] = {**e["fields"], "interval": dq4npcport.dq5_interval(NENE_FC_STEP)}
         for time, cells in POPOLO.items():
             for c in cells:

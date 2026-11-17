@@ -99,11 +99,12 @@ local function hold(b) local t = {}; for k in b:gmatch("[^+]+") do t[k] = true e
 local function tap(b) if st.t % 17 < 2 then hold(b) end end
 local function stable(w) return win == w and winSince >= STABLE end
 local function locked() return rd(0x7E19AE) & 1 ~= 0 end
--- 인물 표(칸 1 부터 7E:1982 앞까지)에 그 셀(또는 한 셀 위아래, 걸음 도중)에 선 사람이 있는지
--- 주인공과 겹쳐 함께 움직이는 것(탄 배)은 빼고 본다
+-- 인물 표(걷는 줄 뒤 칸부터 7E:1982 앞까지)에 그 셀(또는 한 셀 위아래, 걸음 도중)에 선 사람이 있는지
+-- 주인공과 겹쳐 함께 움직이는 것(탄 배)은 빼고 본다. 걷는 줄(칸 0 ~ 7E:1967 - 1: 일행·따라 걷는 개)은 주인공을 따라와
+-- 길을 막지 않는다(따라 걷는 개가 출구 칸에 서 있으면 영영 기다렸다)
 local function personAt(cx, cy)
   local hx, hy = rd(0x7E3020), rd(0x7E3080)
-  for k = 1, rd(0x7E1982) - 1 do
+  for k = math.max(1, rd(0x7E1967)), rd(0x7E1982) - 1 do
     local px, py = rd(0x7E3020 + k), rd(0x7E3080 + k)
     if px == cx and math.abs(py - cy) <= 1 and (math.abs(px - hx) > 1 or math.abs(py - hy) > 1) then return true end
   end
