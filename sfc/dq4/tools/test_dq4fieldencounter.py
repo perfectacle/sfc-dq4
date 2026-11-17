@@ -293,7 +293,7 @@ class FixedGroupTests(PatchedFC):
     def test_members_take_placeholder_monster_and_matching_count_code(self):
         out = enc.fixed_groups(PRG, dq5_tables(), {0x20: 0})
         self.assertEqual(out, [{"index": 0, "members": [{"monster": enc.MONSTERS[0x00], "count_code": 0},
-                                                        {"monster": 0x09, "count_code": 1}]}])
+                                                        {"monster": enc.MONSTERS[0x0A], "count_code": 1}]}])
 
     def test_formation_with_too_many_groups_is_an_error(self):
         with mock.patch.dict(FORMATIONS, {0x21: [(0, 1, 1)] * 4}):
@@ -312,7 +312,7 @@ class RecordTests(PatchedFC):
         by_index = {s["index"]: s for s in rec["slots"]}
         # 가중치 최대 8 → 7. 8→7, 4→round(3.5)=4, 2→round(1.75)=2, 1→round(0.875)=1
         self.assertEqual(by_index[0], {"index": 0, "weight": 7, "count_code": enc.GROUP_COUNT, "monster": enc.MONSTERS[0x00]})
-        self.assertEqual(by_index[1], {"index": 1, "weight": 4, "count_code": enc.GROUP_COUNT, "monster": 0x09})
+        self.assertEqual(by_index[1], {"index": 1, "weight": 4, "count_code": enc.GROUP_COUNT, "monster": enc.MONSTERS[0x0A]})
         self.assertEqual(by_index[5], {"index": 5, "weight": 2, "count_code": 2, "monster": enc.MONSTERS[0x0C]})
         self.assertEqual(by_index[6], {"index": 6, "weight": 1, "count_code": 0, "monster": enc.MONSTERS[0x04]})
         self.assertEqual(len(rec["slots"]), 10)
@@ -345,12 +345,12 @@ class DocsTests(PatchedFC):
         self.assertEqual(grid["format"], "dq5encounter/1")
         self.assertEqual(len(grid["field_grids"]), 5)
         self.assertEqual(grid["fixed_groups"], [{"index": 0, "members": [{"monster": enc.MONSTERS[0x00], "count_code": 0},
-                                                                         {"monster": 9, "count_code": 1}]}])
+                                                                         {"monster": enc.MONSTERS[0x0A], "count_code": 1}]}])
         self.assertEqual(sorted(report), ["00", "03", "04", "34", "35", "36", "50"])
         self.assertEqual((report["03"]["kind"], report["03"]["zone"]), ("field", 6))
         self.assertEqual((report["50"]["kind"], report["50"]["zone"]), ("dungeon", 11))
         self.assertEqual(report["50"]["fixed"], {"weight": 2, "group": 0})
-        self.assertEqual(report["50"]["monsters"], sorted({enc.MONSTERS[0x04], 9, enc.MONSTERS[0x00], enc.MONSTERS[0x0C]} - {0x0B}))
+        self.assertEqual(report["50"]["monsters"], sorted({enc.MONSTERS[0x04], enc.MONSTERS[0x0A], enc.MONSTERS[0x00], enc.MONSTERS[0x0C]} - {0x0B}))
         self.assertEqual(report["03"]["dropped_slots"], [12])
 
 
@@ -420,18 +420,19 @@ class RomTest(unittest.TestCase):
         self.assertEqual(ch3[5][5:10], [78, 78, 35, 35, 35])      # 3장 지도 줄 5: 16 16 17 17 17
 
     def test_chapter3_species_and_field_formation(self):
-        # 3장 구역은 3장에만 FC 값을 넣은 번호(dq4monport.CH3)를, 같은 종이 나오는 1장 구역은 대역을 쓴다. FC 17 의 필드
-        # 편성 0B(ひとくいそう·ダックスビル)는 던전 편성 뒤의 고정 무리로 붙어 던전 무리 번호가 그대로다.
+        # 1·3장에 처음 FC 값으로 넣은 종(dq4monport.NUMBERED)은 어느 구역에서나 그 번호를 쓴다(1장 던전 42 의 킬러 스콥도).
+        # FC 17 의 필드 편성 0B(ひとくいそう·ダックスビル)는 던전 편성 뒤의 고정 무리로 붙어 던전 무리 번호가 그대로다.
         import dq4groupbuild
         import dq4monport
         fc = dq4groupbuild.dungeon_zones(self.prg).values()
         _, grids, report = enc.docs(self.prg, self.dq5, self.orig, fc)
-        ch3 = {m for m, _ in dq4monport.CH3.values()}
+        ch3 = {m for m, _ in dq4monport.NUMBERED.values()}
         self.assertEqual(enc.field_formations(self.prg), [0x17])
         self.assertTrue(ch3 & set(report["16"]["monsters"]))
         self.assertTrue(ch3 & set(report["4A"]["monsters"]))
-        self.assertFalse(ch3 & set(report["42"]["monsters"]) | ch3 & set(report["04"]["monsters"]))
-        self.assertIn(enc.PLACEHOLDERS[0x13], report["42"]["monsters"])
+        self.assertIn(dq4monport.CH3[0x13][0], report["42"]["monsters"])
+        self.assertIn(dq4monport.CH3[0x0A][0], report["04"]["monsters"])
+        self.assertNotIn(enc.PLACEHOLDERS[0x13], report["42"]["monsters"])
         dungeon_only = enc.dungeon_fixed(self.prg, fc)
         fixed = enc.dungeon_fixed(self.prg, fc, [0x17])
         self.assertEqual({k: v for k, v in fixed.items() if k in dungeon_only}, dungeon_only)
@@ -439,8 +440,8 @@ class RomTest(unittest.TestCase):
         self.assertEqual(report["17"]["fixed"]["group"], fixed[0x0B])
         self.assertTrue(report["17"]["fixed"]["weight"])
         groups = {g["index"]: [m["monster"] for m in g["members"]] for g in grids["fixed_groups"]}
-        self.assertEqual(groups[fixed[0x0B]], [enc.CHAPTER3_MONSTERS[0x1A], dq4monport.CH3[0x19][0]])
-        self.assertEqual(groups[0], [enc.PLACEHOLDERS[0x13], enc.PLACEHOLDERS[0x19], enc.PLACEHOLDERS[0x1E]])
+        self.assertEqual(groups[fixed[0x0B]], [enc.MONSTERS[0x1A], dq4monport.CH3[0x19][0]])
+        self.assertEqual(groups[0], [dq4monport.CH3[0x13][0], dq4monport.CH3[0x19][0], dq4monport.CH3[0x1E][0]])
         for z in ("14", "15", "16", "04", "42"):
             self.assertEqual(report[z]["fixed"]["weight"] > 0, z == "42")
 
@@ -452,7 +453,7 @@ class RomTest(unittest.TestCase):
             fc = dq4encounter.zone(self.prg, z)["slots"]
             for k, i in origin.items():
                 if k < 10:
-                    self.assertEqual(slots[k]["monster"], enc.CHAPTER3_MONSTERS[fc[i]], (z, k))
+                    self.assertEqual(slots[k]["monster"], enc.MONSTERS[fc[i]], (z, k))
             self.assertEqual({k for k in range(10) if slots[k]["weight"]}, {k for k in origin if k < 10})
 
     def test_every_monster_has_a_placeholder(self):
@@ -524,12 +525,12 @@ class RomTest(unittest.TestCase):
         self.assertNotIn(12, self.report["42"]["dropped_slots"])
 
     def test_castle_zone(self):
-        # FC zone 04 around バトランド: level 1, base rate 16 -> coefficient 10, スライム·バブルスライム kept.
+        # FC zone 04 around バトランド: level 1, base rate 16 -> coefficient 10, with スライム and バブルスライム.
         rec = next(r for r in self.progress["encounters"] if r["index"] == self.report["04"]["zone"])
         self.assertEqual(rec["level"], 1)
         self.assertEqual(rec["rate_index"], 0)
         self.assertIn(enc.MONSTERS[0x00], self.report["04"]["monsters"])
-        self.assertIn(0x09, self.report["04"]["monsters"])
+        self.assertIn(enc.MONSTERS[0x0A], self.report["04"]["monsters"])
         grid0 = self.grids["field_grids"][0]["rows"]
         self.assertEqual(grid0[2][10], self.report["04"]["zone"])
 

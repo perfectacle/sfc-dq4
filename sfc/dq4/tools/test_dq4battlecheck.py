@@ -62,8 +62,7 @@ class BattleCheckTests(unittest.TestCase):
         import dq4fieldencounter
         import dq4windowtext as wt
         import dq5namewrite
-        want = sorted(set(dq4fieldencounter.MONSTERS.values()) | set(dq4fieldencounter.CHAPTER3_MONSTERS.values())
-                      | set(dq4ch1event.BOSS_MONSTERS))
+        want = sorted(set(dq4fieldencounter.MONSTERS.values()) | set(dq4ch1event.BOSS_MONSTERS))
         names = [bytes((0x10 + n % 0x60, n)) for n in range(256)]
         data = bytearray(0x400000)
         o = bm.lorom(bm.NAMES_AT)

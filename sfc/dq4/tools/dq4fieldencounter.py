@@ -115,16 +115,11 @@ MONSTERS = {
 PLACEHOLDERS = dict(MONSTERS)
 import dq4monport  # noqa: E402
 MONSTERS.update(dq4monport.PORT)
-# FC 3장의 구역(dq4encounter.ch3_reach 로 닿는 필드 구역과 그 입구 던전의 구역). 3장에만 FC 값을 넣은 종(dq4monport.CH3)은
-# 이 구역에서만 그 번호를 쓴다. 같은 종이 1장 던전·필드에도 대역으로 나오는데, 1장 롬의 전투를 바꾸지 않으려고 그쪽은 둔다
+# 1·3장 구역에 처음 FC 값으로 넣은 종(dq4monport.NUMBERED: 그림은 대역의 그림 레코드)
+MONSTERS.update({fc: m for fc, (m, _) in dq4monport.NUMBERED.items()})
+# FC 3장의 구역(dq4encounter.ch3_reach 로 닿는 필드 구역과 그 입구 던전의 구역)
 CH3_FIELD, CH3_DUNGEON = (0x14, 0x15, 0x16, 0x17), (0x48, 0x49, 0x4A, 0x4B)
 CH3_ZONES = CH3_FIELD + CH3_DUNGEON
-CHAPTER3_MONSTERS = {**MONSTERS, **{fc: m for fc, (m, _) in dq4monport.CH3.items()}}
-
-
-def monsters_of(z):
-    """FC 구역 z 의 몬스터를 옮기는 표."""
-    return CHAPTER3_MONSTERS if z in CH3_ZONES else MONSTERS
 # FC slots: 0-4 a group plus more groups (DQ5 slots 0-4, several species), 6-10 one group of a count code (DQ5
 # slots 5-9, codes 0-7 of the same meaning but 4 and 5: FC 1-3 and 2-4, DQ5 2-3 and 3-4), 5 and 11 one monster (a
 # free DQ5 slot of 5-9 with code 0), 12-13 FC formations (in a dungeon zone, slot 12 is DQ5 slot 10's fixed group,
@@ -417,9 +412,9 @@ def field_formations(prg):
             and enc.weights(prg, enc.zone(prg, z)["row"])[FORMATION_SLOT]]
 
 
-def fixed_groups(prg, dq5, fixed, chapter3=()):
+def fixed_groups(prg, dq5, fixed):
     """dq5encounter/1 fixed_groups of the FC formations `fixed` (dungeon_fixed): each member's monster through
-    MONSTERS (CHAPTER3_MONSTERS for the formations in `chapter3`) and the DQ5 count code of the same range."""
+    MONSTERS and the DQ5 count code of the same range."""
     enc = _fc(prg)
     base, width = (dq5[_lorom(t):_lorom(t) + COUNT_CODES] for t in (COUNT_BASE, COUNT_WIDTH))
     codes = {(base[c], base[c] + max(width[c], 1) - 1): c for c in reversed(range(COUNT_CODES))}
@@ -430,8 +425,7 @@ def fixed_groups(prg, dq5, fixed, chapter3=()):
             raise ValueError(f"FC formation {f:02X}: {len(members)} groups, a DQ5 fixed group holds {FIXED_MEMBERS}")
         if any((lo, hi) not in codes for _, lo, hi in members):
             raise ValueError(f"FC formation {f:02X}: a count range no DQ5 count code has")
-        table = CHAPTER3_MONSTERS if f in chapter3 else MONSTERS
-        out.append({"index": k, "members": [{"monster": table[m], "count_code": codes[lo, hi]}
+        out.append({"index": k, "members": [{"monster": MONSTERS[m], "count_code": codes[lo, hi]}
                                             for m, lo, hi in members]})
     return out
 
@@ -441,7 +435,7 @@ def placed(prg, z, dungeon=None, field_fixed=None, monsters=None):
     The fixed slot (DQ5 10) takes slot 12's formation through `dungeon` (dungeon_fixed) in a dungeon zone, or through
     `field_fixed` on the field; else it is empty."""
     enc = _fc(prg)
-    monsters = monsters_of(z) if monsters is None else monsters
+    monsters = MONSTERS if monsters is None else monsters
     rec = enc.zone(prg, z)
     s, w = rec["slots"], enc.weights(prg, rec["row"])
     code16 = w[16] | w[17] << 8
@@ -484,7 +478,7 @@ def record(prg, dq5, z, dungeon=None, kinds=LAND_KINDS, field_fixed=None):
     """dq5progress/1 encounter fields of FC zone z (without its index) and the FC slots left out. `dungeon` is
     dungeon_fixed for a dungeon zone (None on the field): the rate is dungeon_rate_index, and slot 12 becomes DQ5
     slot 10. On the field the rate is field_rate_index on the FC kinds `kinds`, and slot 12 becomes slot 10 only
-    through `field_fixed` (the formations of field_formations). Monsters go through monsters_of(z)."""
+    through `field_fixed` (the formations of field_formations). Monsters go through MONSTERS."""
     enc = _fc(prg)
     rec = enc.zone(prg, z)
     w = enc.weights(prg, rec["row"])
@@ -502,10 +496,7 @@ def docs(prg, dq5, enc, dungeon=()):
     late = chapter3_assign(prg, enc, dungeon)
     field = field_formations(prg)
     fixed = dungeon_fixed(prg, dungeon, field)
-    # 3장 구역만 쓰는 편성이어야 3장 번호로 옮긴다(1·2장 구역과 함께 쓰는 고정 무리는 그 장 롬의 전투가 바뀌므로 대역 그대로)
-    chapter3 = _formations(prg, [z for z in [*dungeon, *field] if z in CH3_ZONES]) - \
-        _formations(prg, [z for z in dungeon if z not in CH3_ZONES])
-    groups = fixed_groups(prg, dq5, fixed, chapter3)
+    groups = fixed_groups(prg, dq5, fixed)
     records, report = [], {}
     found_dungeon = dungeon_zones(prg, enc, dungeon)
     for kind, found in (("field", {**assign, **late}), ("dungeon", found_dungeon)):
