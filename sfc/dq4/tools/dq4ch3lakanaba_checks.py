@@ -2,10 +2,14 @@
 import dq4ch1walkcheck as wc
 import dq4ch3event as ch3
 import dq4ch3lakanaba as lakanaba
-from dq4ch3walkparts import CLOSE, HOP, TOWN, talk, taps
+from dq4ch3walkparts import CLOSE, HOP, TOWN, gold, talk, taps
 
 FLAGS = {'BENTO': wc.flag(lakanaba.BENTO_TODAY), 'SEEN': wc.flag(lakanaba.SEEN), 'SHIFT': wc.flag(lakanaba.SHIFT),
-         'TOM_PUSH': wc.flag(lakanaba.TOM_PUSH)}
+         'TOM_PUSH': wc.flag(lakanaba.TOM_PUSH), 'DONE': wc.flag(lakanaba.DONE)}
+
+# 명령 창 → 「문」(왼쪽 열 넷째 줄). 무기점의 두 문(FC 16/00 (03,17)·16/02 (05,05), 블록 속성 94)은 DQ5 문 물체라 FC
+# 「とびら」 처럼 문 쪽을 보고 이 명령으로 연다. 걸어 들어가기만 하면 열리지 않는다
+DOOR = ('wait:20;a:8;wait:40;down:4;wait:15;down:4;wait:15;down:4;wait:15;a:8;wait:90;b:8;wait:30;b:8;wait:30')
 
 # 네네: 오늘 도시락 전이라 잠 → 아침(날수 + 1) → 오늘 도시락. 손님 갈래·톰을 교회까지 미는 길은 dq4ch3lakanabacheck 가
 # 롬 사본·톰 자리로 본다
@@ -21,6 +25,20 @@ SEGMENTS = [
     # 꾸지람 뒤 주인이 비키고 주인공이 걷는 동안 누른 A 는 버려지므로 넉넉히 누른다
     ('shop_first', 'walk', f'16,53;{taps(12)};{CLOSE}',
      {'map': TOWN, 'cell': lakanaba.COUNTER_IN, 'want': ['SEEN', 'SHIFT'], 'maxf': 2400}),
+    # 카운터 안 → 문(FC (03,17))을 열고 가게 바닥 → 길. 순간이동은 카운터 안 방 위쪽에 내릴 뿐 그 뒤는 걷는다
+    ('counter_room', 'warp', f'{TOWN},4,50', {'map': TOWN}),
+    ('counter_out', 'walk', f'4,47;right:8;{DOOR};10,47;10,49;10,53;20,53', {'map': TOWN, 'cell': (20, 53), 'maxf': 2000}),
+    # 출근 중(일삯 50) 가게 바닥에서 문을 열고 카운터 안 → 계단(FC (01,1B)) → 아래층 도착 (4,13) → 문(FC (05,05))을 열고
+    # 주인(FC (07,04)) 아래에서 위로 말을 걸어 일찍 그만둔다(087F 「예」 → 0880). 손님이 들어오는 카운터 칸 (4,53)은 밟지 않는다
+    ('shop_floor', 'warp', f'{TOWN},10,48', {'map': TOWN, 'set': f'{gold(0)};{(lakanaba.WAGE_AT & 0xFFFF):04X}=32'}),
+    ('cellar_quit', 'walk', f'8,47;left:8;{DOOR};4,47;2,47;2,53;down:16;wait:150;8,13;8,11;right:8;{DOOR};14,11;'
+     f'{talk("up", 6)}',
+     {'map': lakanaba.CELLAR, 'cell': (14, 11), 'want': ['DONE'], 'bytes': {'GOLD0': 50}, 'changes': 1, 'after': 1800,
+      'maxf': 4000}),
+    # 일찍 그만둔 뒤(출근 중·오늘 일 마침) 아래층 계단(FC (04,06))으로 낮 마을 카운터 안에 올라와도 마을이 멈추지 않고
+    # 걷는다
+    ('after_quit', 'walk', f'8,11;down:16;wait:150;4,47;right:8;{DOOR};10,47;10,49;10,53;20,53',
+     {'map': TOWN, 'cell': (20, 53), 'maxf': 3200}),
 ]
 
 # 레이크나바 무기점 첫 출근: 문 칸이나 문 밖 칸에 들어서면 꾸지람(02F3) 뒤 카운터 안 (4,53)으로 걸려 들어가 031D. 문 밖
