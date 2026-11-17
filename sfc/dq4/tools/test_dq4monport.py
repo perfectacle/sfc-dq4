@@ -118,9 +118,19 @@ class RecordTests(unittest.TestCase):
         e = self.entry(dq4monport.PORT[0x04])
         self.assertEqual((e['HP'], e['MP'], e['공격'], e['수비'], e['민첩'], e['경험치'], e['금화']),
                          (40, 0, 0, 30, 15, 3, 1))
-        # なかまをよぶ 둘은 같은 몬스터 부르기(B5), がったい 넷은 메시지만 나오는 ようすをみる
-        self.assertEqual([e[f'행동{k}'] for k in range(1, 7)], ['B5'] * 2 + ['66'] * 4)
+        # なかまをよぶ 둘은 같은 몬스터 부르기(B5), がったい 넷은 DQ5 がったいだ(6F)
+        self.assertEqual([e[f'행동{k}'] for k in range(1, 7)], ['B5'] * 2 + ['6F'] * 4)
         self.assertEqual(e['내성'][:15], '111121100200000')
+
+    def test_merged_king_slime_takes_fc_values(self):
+        # 합체로 나오는 FC 30 キングスライム 은 DQ5 6F 가 바꾸는 6B 에 FC 값(대역 없이 제 레코드 바탕)
+        import dq4fieldencounter
+        king = dq4monport.MERGED[0x30][0]
+        self.assertEqual(king, self.dq5[0x20 * 0x8000 + (0xCC49 & 0x7FFF)])     # 20:CC48 LDA #6B
+        writes = dq4monport.record_writes(self.dq5, dq4fieldencounter.PLACEHOLDERS, self.prg)
+        self.assertTrue(any(w['at'] == f'23:{0x8000 + king * 25:04X}' for w in writes))
+        e = dq4monport.fc_entry(self.prg, 0x30, dq4monport.drop_items(self.prg, self.dq5))
+        self.assertEqual((e['HP'], e['공격'], e['수비']), (150, 40, 24))
 
     def test_drops_follow_fc(self):
         slime = self.entry(dq4monport.PORT[0x00])
