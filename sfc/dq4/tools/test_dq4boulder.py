@@ -106,6 +106,30 @@ class NativeTest(unittest.TestCase):
         self.assertEqual(self.run_step((3, 0x10, 0xC2), [(0x0B, 0x15), (3, 0x12), (5, 5), (6, 6), (7, 7)]),
                          (3, 0x10, 0xE2))
 
+    def run_ctl(self, state, cnt, hero):
+        w = bytearray(0x20000)
+        w[V(b.BX) & 0xFFFF], w[V(b.BY) & 0xFFFF], w[V(b.ST) & 0xFFFF] = state
+        w[V(b.CNT) & 0xFFFF] = cnt
+        w[b.SLOT_X], w[b.SLOT_Y] = 2 * hero[0], 2 * hero[1] + 1
+        c = self.Cpu(self.rom, w)
+        c.pbr = BASE >> 16
+
+        def rtl(cpu):
+            lo, hi, bank = cpu.pull(), cpu.pull(), cpu.pull()
+            cpu.pbr, cpu.pc = bank, ((hi << 8 | lo) + 1) & 0xFFFF
+            return True
+        c.hooks[self.at['copy_block']] = rtl
+        c.jsl(self.at['ctl'], max_steps=20000)
+        return c.wram[V(b.ST) & 0xFFFF]
+
+    def test_release_is_seen_on_every_call(self):
+        # 풀림 판정은 TICK 번째 부름을 기다리지 않는다(주인공은 풀리는 줄을 16프레임 안팎에 지나감, 부름은 약 8프레임마다)
+        (x0, x1), y = b.TRIGGER
+        for cnt in range(b.TICK):
+            for x in (x0, x1):
+                self.assertEqual(self.run_ctl((*b.START, 0), cnt, (x, y)) & 3, 2, (cnt, x))
+        self.assertEqual(self.run_ctl((*b.START, 0), 0, (x0, y + 1)), 0)
+
     def test_idle_boulder_does_nothing(self):
         self.assertEqual(self.run_step((3, 5, 0x00), [(3, 0x0E)]), (3, 5, 0x00))
         self.assertEqual(self.run_step((3, 0x25, 0x40), [(3, 0x24)]), (3, 0x25, 0x40))
