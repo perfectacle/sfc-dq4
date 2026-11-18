@@ -9,6 +9,10 @@
   block-NN キングスライム 이 マホステ(C9)를 쓴 뒤 주인공이 일행 주문 NN(전투원 칸 7E:1073 을 매 프레임 덮음, 대상 81)을
            외우면 외울 때마다 다음 메시지가 1A7「…에게는 주문이 닿지 않는다!」 이어야 한다. 실행 루틴(26:8865)마다 하나
   open-01  マホステ 없이(ようすをみる) 같은 メラ 는 1A7 없이 피해 메시지가 나와야 한다
+  full-*   부를 자리가 없으면 부르기를 고르지 않아야 한다(FC 10:$BC2D·$BC6B): 작은 몬스터 8마리(살아 있는 몬스터 8),
+           큰 몬스터 8마리 무리(화면에 다섯만 서 그림 자리 없음)
+  herb-*   필드 68 을 FC AI 종류로: サイモン(FC AI 1)은 HP 가 차 있으면 やくそう 를 고르지 않고, きりかぶおばけ(FC AI 0)는
+           HP 와 관계없이 고른다
 
   python sfc/dq4/tools/dq4monspecialcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/monspecial
 """
@@ -42,6 +46,11 @@ HERO = 0x00
 # 섞인 무리: (이름, 첫 종, 둘째 종, 둘째 종의 부르기)
 MIXED = (('mixed-b5', 0x07, 0x50, dq4monport.SUMMON_SAME), ('mixed-c8', 0x07, 0x77, S.GUARD))
 KING = 0x6B
+# 자리 없는 부르기: (이름, 몬스터, 마릿수, 부르기)
+FULL = (('full-b5-small', 0x50, 8, dq4monport.SUMMON_SAME), ('full-b5-wide', 0x77, 8, dq4monport.SUMMON_SAME),
+        ('full-b4-small', 0x50, 8, dq4monport.SUMMON_FIXED), ('full-c8-wide', 0x77, 8, S.GUARD))
+# やくそう: (이름, 몬스터, 골라야 하는지)
+HERBS = (('herb-ai1', 0x68, False), ('herb-ai0', 0x35, True))
 # 적에게 거는 일행 주문을 실행 루틴(26:8865)마다 하나. メガンテ(15)는 외운 주인공이 쓰러지고, ミナデイン(12)은 혼자인
 # 주인공이 외우면 071·072 로 끝나 대상에 닿지 않아 뺌
 BLOCK_SPELLS = (0x01, 0x04, 0x07, 0x13, 0x14, 0x16, 0x17, 0x19, 0x1A, 0x1B, 0x1C, 0x1F, 0x20)
@@ -74,6 +83,10 @@ def mixed_problems(log, summon):
     if max(c[1] for *_, c in log) < 2:
         problems.append(f'둘째 종 마릿수가 {max(c[1] for *_, c in log)}')
     return problems
+
+
+def used(log, action):
+    return any(act == action and actor & 0x80 for _, _, actor, act, _ in log)
 
 
 def block_problems(log, spell, shielded=True):
@@ -143,9 +156,26 @@ def main(argv=None):
         problems = [got['error']] if 'error' in got else block_problems(log, spell, shielded)
         return name, {'ok': not problems, 'problems': problems, 'messages': [f'{m:03X}' for _, m, *_ in log][:40]}
 
-    jobs = [(mixed, *m) for m in MIXED] + [(block, s) for s in BLOCK_SPELLS] + [(block, 0x01, False)]
+    def full(name, m, n, summon):
+        got, log = scene(name, [(m, n)], [(m, f'{summon:02X}')])
+        problems = [got['error']] if 'error' in got else []
+        if not problems and not log:
+            problems.append('메시지 없음')
+        if used(log, summon):
+            problems.append(f'자리가 없는데 {summon:02X} 를 고름')
+        return name, {'ok': not problems, 'problems': problems, 'messages': [f'{m:03X}' for _, m, *_ in log][:40]}
+
+    def herb(name, m, expect):
+        got, log = scene(name, [(m, 1)], [(m, f'{S.HERB:02X}')])
+        problems = [got['error']] if 'error' in got else []
+        if not problems and used(log, S.HERB) != expect:
+            problems.append('HP 가 찬 채 やくそう 를 ' + ('고르지 않음' if expect else '고름'))
+        return name, {'ok': not problems, 'problems': problems, 'messages': [f'{m:03X}' for _, m, *_ in log][:40]}
+
+    jobs = [(full, *f) for f in FULL] + [(herb, *h) for h in HERBS]
+    jobs += [(mixed, *m) for m in MIXED] + [(block, s) for s in BLOCK_SPELLS] + [(block, 0x01, False)]
     if a.only:
-        names = lambda j: j[1] if j[0] is mixed else f'{"block" if len(j) == 2 else "open"}-{j[1]:02X}'  # noqa: E731
+        names = lambda j: j[1] if j[0] in (mixed, full, herb) else f'{"block" if len(j) == 2 else "open"}-{j[1]:02X}'  # noqa: E731
         jobs = [j for j in jobs if any(names(j).startswith(p) for p in a.only.split(','))]
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as pool:
         results = dict(f.result() for f in [pool.submit(fn, *args) for fn, *args in jobs])

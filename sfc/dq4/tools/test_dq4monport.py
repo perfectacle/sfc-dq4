@@ -113,7 +113,17 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(e['내성'][:15], '310010232102100')
         self.assertEqual(e['내성'][15:], placeholder['내성'][15:])
         self.assertNotEqual(e['내성'], placeholder['내성'])
-        self.assertEqual(e['f68'], placeholder['f68'])
+        # 필드 68(조건 칸 수)은 FC AI 종류: メラゴースト 는 AI 2 라 1
+        self.assertEqual(e['f68'], 1)
+
+    def test_condition_slots_follow_fc_ai_kind(self):
+        # FC AI 0(거르지 않음) → 68 = 0, 1~3 → 1. きりかぶおばけ(0C) 는 0, サイモン(B2) 은 1
+        import dq4data
+        for fc in [*dq4monport.field_numbers(), *dq4monport.EVENT]:
+            r = next(rec for i, _, _, _, rec in dq4data.monsters(self.prg) if i == fc)
+            self.assertEqual(dq4monport.fc_entry(self.prg, fc)['f68'], 0 if r[20] >> 6 == 0 else 1, hex(fc))
+        self.assertEqual(dq4monport.fc_entry(self.prg, 0x0C)['f68'], 0)
+        self.assertEqual(dq4monport.fc_entry(self.prg, 0xB2)['f68'], 1)
 
     def test_second_slime_gets_its_own_number_and_fc_values(self):
         # FC 04 スライム(엔돌 쪽 구역 10~12)는 DQ5 슬라임 00 대역이 아니라 제 번호에 FC 값

@@ -22,6 +22,10 @@ class TableTests(unittest.TestCase):
         for fc, n in S.FC_ACTIONS.items():
             self.assertEqual(table[fc], f'{n:02X}')
 
+    def test_summon_numbers_match_monport(self):
+        self.assertEqual((S.SUMMON_SAME, S.SUMMON_FIXED, S.SUMMON_FIXED_FC),
+                         (dq4monport.SUMMON_SAME, dq4monport.SUMMON_FIXED, dq4monport.SUMMON_FIXED_FC))
+
     def test_messages_are_translated(self):
         import dq4battlemsg
         import dq4battletexts
@@ -177,6 +181,19 @@ class RomTests(unittest.TestCase):
         self.assertEqual(self.cond(room, {S.TILE_FREE: free(True)}), yes)
         self.assertEqual(self.cond(room, {S.TILE_FREE: free(False)}), no)
         self.assertEqual(self.cond({**room, 0x0D0D: 95}, {S.TILE_FREE: free(True)}), no)
+        # 같은 몬스터 부르기 B5 도 같은 검사
+        self.assertEqual(self.cond({**room, 0x10F7: S.SUMMON_SAME}, {S.TILE_FREE: free(True)}), yes)
+        self.assertEqual(self.cond({**room, 0x10F7: S.SUMMON_SAME}, {S.TILE_FREE: free(False)}), no)
+        self.assertEqual(self.cond({**base, 0x10F7: S.SUMMON_SAME, **slots(8)}), no)
+        # ホイミスライム 부르기 B4: 그림이 없으면 새 그림 칸(쓴 칸 < 16, 그림 칸 < 4 이거나 빈 그림 칸)
+        new = {**room, 0x10F7: S.SUMMON_FIXED}
+        self.assertEqual(self.cond({**new, 0x0D0E: 1}), yes)
+        self.assertEqual(self.cond({**new, 0x0D0E: 4, 0x0C1A: 1, 0x0C1B: 1, 0x0C1C: 1, 0x0C1D: 1}), no)
+        self.assertEqual(self.cond({**new, 0x0D0E: 4, 0x0C1A: 1, 0x0C1B: 0, 0x0C1C: 1, 0x0C1D: 1}), yes)
+        self.assertEqual(self.cond({**new, 0x0D0E: 1, 0x0D0C: 0x10}), no)
+        import dq4fieldencounter
+        hoimi = dq4fieldencounter.MONSTERS[S.SUMMON_FIXED_FC]
+        self.assertEqual(self.cond({**new, 0x117D: hoimi}, {S.TILE_FREE: free(False)}), no)   # 그림이 있으면 자리 검사
 
     def test_mahoste_condition(self):
         def status(on):
