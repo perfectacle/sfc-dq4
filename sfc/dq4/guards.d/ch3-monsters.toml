@@ -14,6 +14,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5battle.lua",
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq4/tools/dq4monport.py",
+  "sfc/dq4/tools/dq4monspecial.py",
   "sfc/dq4/tools/dq4fieldencounter.py",
   "sfc/dq4/tools/dq4fieldencountercheck.py",
   "sfc/dq4/tools/dq4groupbuild.py",
@@ -33,5 +34,35 @@ paths = [
   "tools/mesence_settings.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3monsters && uv run --locked python sfc/dq4/tools/dq4ch3monstercheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3monsters --jobs 4"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
+name = "dq4-monster-special"
+why = "DQ5 에 짝이 없는 FC 몬스터 행동(dq4monspecial C6~CA)과 같은 몬스터 부르기가 FC 대로여야 한다: 서로 다른 두 종 무리에서 둘째 종이 부르기(B5)·みをまもる+たすけ(C8)를 쓰면 둘째 종만 늘고(행동하는 쪽을 대상 $10F6 에서 읽던 롬은 첫 종을 불러 실패), キングスライム 이 マホステ 를 쓴 뒤 주인공이 외우는 적 주문(실행 루틴마다 하나: メラ·ギラ·イオ·ザキ·ザラキ·ニフラム·ラリホー·マホトーン·マヌーサ·メダパニ·マホトラ·ルカニ·ルカナン)은 외울 때마다 1A7 「…에게는 주문이 닿지 않는다!」, マホステ 없이는 같은 メラ 가 피해. MesenCE 헤드리스, 1장 필드, 무리·행동은 롬 치트"
+paths = [
+  "sfc/dq4/tools/dq4monspecial.py",
+  "sfc/dq4/tools/dq4monspecialcheck.py",
+  "sfc/dq4/tools/dq4monport.py",
+  "sfc/dq4/tools/dq4battletexts.py",
+  "sfc/dq4/tools/dq4battlemsg.py",
+  "sfc/dq4/tools/dq4battlecheck.py",
+  "sfc/dq4/tools/dq4groupcheck.py",
+  "sfc/dq4/tools/dq4fieldencountercheck.py",
+  "sfc/dq4/tools/dq4ch3monstercheck.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4readset.py",
+  "sfc/dq5/tools/lua/dq5warptrace.lua",
+  "sfc/dq5/tools/lua/dq5warp.lua",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4windowcheck.py",
+  "sfc/dq4/tools/lua/dq4battle.lua",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/dq5progresscheck.py",
+  "sfc/dq5/tools/lua/dq5battle.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/monspecial && uv run --locked python sfc/dq4/tools/dq4monspecialcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/monspecial --jobs 4"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-build", "ch1-walk"]

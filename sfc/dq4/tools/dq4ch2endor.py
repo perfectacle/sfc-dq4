@@ -95,8 +95,8 @@ BATTLES = tuple({"group": g, "members": ((m, 1),), "flags": BATTLE_FLAGS} for g,
 MONSTERS = {m: fc for _, m, fc, _ in OPPONENTS}
 MONSTER_NAMES = {m: ko for _, m, _, ko in OPPONENTS}
 # FC 행동 번호(dq4ch1event.FC_ACTIONS 에 없는 것) → DQ5 몬스터 행동. 07 ヒャド·23 ベホイミ 는 몬스터용 주문 42·5D(カンダタ 의
-# 것), 2D ちからを ためる 는 6C. 64 ブーメラン·5F 몬스터의 やくそう 는 DQ5 에 맞는 행동이 없어 공격 73 으로
-FC_ACTIONS = {0x07: '42', 0x23: '5D', 0x2D: '6C', 0x64: '73', 0x5F: '73'}
+# 것), 2D ちからを ためる 는 6C. 64 ブーメラン·5F 몬스터의 やくそう 는 dq4monspecial 의 새 행동 번호
+FC_ACTIONS = {0x07: '42', 0x23: '5D', 0x2D: '6C'}
 
 # 대화 스크립트가 부르는 입구(dq4ch2battle 칸 1·2·3). fight 는 공용 전투 루틴처럼 BRK 0E 를 뱅크 06 에서 먼저 돈다
 CALLS = {1: 'leave', 2: ('fight', bytes((0x00, 0x0E))), 3: 'herb'}

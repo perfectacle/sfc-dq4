@@ -203,6 +203,7 @@ why = "2장 전투 몬스터 NDS 그림(dq4monport 의 PORT·EVENT 번호)이 �
 paths = [
   "@ch2-modules",
   "sfc/dq4/tools/dq4monport.py",
+  "sfc/dq4/tools/dq4monspecial.py",
   "sfc/dq4/tools/dq4monart.py",
   "sfc/dq4/tools/dq4monartcheck.py",
   "sfc/dq4/tools/test_dq4monartcheck.py",
@@ -237,9 +238,11 @@ why = "2장 전투 몬스터(dq4monport 의 PORT·EVENT 번호)가 빌드 롬 �
 paths = [
   "@ch2-modules",
   "sfc/dq4/tools/dq4monport.py",
+  "sfc/dq4/tools/dq4monspecial.py",
   "sfc/dq4/tools/dq4monactcheck.py",
   "sfc/dq4/tools/test_dq4monactcheck.py",
   "sfc/dq4/tools/test_dq4monport.py",
+  "sfc/dq4/tools/test_dq4monspecial.py",
   "sfc/dq4/tools/dq4ch1event.py",
   "sfc/dq4/tools/dq4ch2tempe.py",
   "sfc/dq4/tools/dq4ch2endor.py",
