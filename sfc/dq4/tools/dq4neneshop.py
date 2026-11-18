@@ -309,7 +309,8 @@ def _view(vars2, brk):
     a.label('pad')(0xA9, 0xFF, 0x9F, *_al(items), 0xE8, 0xE0, ITEM_SLOTS).br(BCC, 'pad')
     a(0xA2, 0x00)
     a.label('count')(0xBF, *_al(items), 0xC9, 0xFF).br(BEQ, 'counted')(0xE8, 0xE0, VIEW_LINES).br(BCC, 'count')
-    a.label('counted')(0x8E, *_w(VIEW_COUNT))
+    # 표지·줄 수(7E:2824~)는 뱅크 00 거울(7E:0000~1FFF) 밖이고 BRK 받침을 지나면 DB 가 7E 가 아니므로 긴 주소로 쓴다
+    a.label('counted')(0x8A, sta(0x7E0000 | VIEW_COUNT))
     a(lda(items), 0xC9, 0xFF).br(BEQ, 'done')
     # 다음 쪽이 있는지(남은 가게 칸에 물건이 있나)로 위 테두리 ▶ 를 정한다
     a(0xC2, 0x10, 0xAE, *_w(it), 0xAC, *_w(itc))
@@ -318,7 +319,7 @@ def _view(vars2, brk):
     a.br(0x80, 'peek')
     a.label('more')(0xA9, VIEW_MORE).br(0x80, 'kind')
     a.label('last')(0xA9, VIEW_MORE + 1)
-    a.label('kind')(0xE2, 0x30, 0x8D, *_w(SHOP_KIND), 0x8D, *_w(VIEW_MARK))
+    a.label('kind')(0xE2, 0x30, 0x8D, *_w(SHOP_KIND), sta(0x7E0000 | VIEW_MARK))
     a(0xA9, 0x00, sta(equip), sta(equip + 1))
     a(0x22, *_al(PICKER_RESET), 0x64, 0xE4, j('pick'), 0xA5, 0xE8, 0x48, j('close'), 0x68).br(0x30, 'done')
     a.brl('page')
@@ -326,7 +327,7 @@ def _view(vars2, brk):
     for i in range(ITEM_SLOTS + 2):
         dst = items + i if i < ITEM_SLOTS else equip + i - ITEM_SLOTS
         a(lda(save + i), sta(dst))
-    a(0x68, 0x8D, *_w(SHOP_KIND), 0x9C, *_w(VIEW_MARK))
+    a(0x68, 0x8D, *_w(SHOP_KIND), 0xA9, 0x00, sta(0x7E0000 | VIEW_MARK))
     a.label('end')
     return a.bytes() + LEAVE
 
