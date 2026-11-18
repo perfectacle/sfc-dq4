@@ -113,9 +113,10 @@ class SlotTest(unittest.TestCase):
         self.assertEqual(slots.VARS2_AT + slots.VARS2_SIZE + 1, slots.VARS_AT)
         far = [(k, s.far) for k, s in SLOTS.items() if s.far] + [(f'spare{i}', c) for i, c in enumerate(slots.SPARE['code'])]
         far.append(('monsters', slots.MONSTERS_CODE))
+        far.append(('casino', slots.CASINO_CODE))
         import dq4fieldencounter
         self.assertEqual(dq4fieldencounter.CH3_CODE_AT, slots.MONSTERS_CODE[0])
-        # 몫 셋이 뱅크 4E 를 남김없이 나눈다
+        # 몫들이 뱅크 4E 를 남김없이 나눈다
         self.assertEqual(sum(hi - lo for _, (lo, hi) in far), 0x8000)
         for i, (k, (lo, hi)) in enumerate(far):
             self.assertEqual(lo >> 16, (hi - 1) >> 16, k)

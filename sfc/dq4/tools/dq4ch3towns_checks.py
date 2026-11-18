@@ -41,7 +41,7 @@ FLAGS.update({'TOWNS_SLOT_COIN0': (0x7E1216, 0xFF), 'TOWNS_SLOT_COIN1': (0x7E121
 SELLER = W.cell(0x18, 0x02)
 EXCHANGE = W.cell(0x1C, 0x08)
 SLOT = W.cell(*W.SLOT_CELLS[2])
-SLOT_RNG = 0x7E1200
+GAME_RNG = 0x7E075B
 ARENA = W.cell(0x08, 0x0A)
 ARENA_RNG = '7E075B=11;7E075C=22;7E075D=33'
 # 시합 동안 셋째 몬스터(몬스터 칸 2, 7E:07C0 + 칸 × 16 의 +2 HP)를 999 로 묶어 난수와 상관없이 셋째가 이기게 한다
@@ -59,7 +59,7 @@ def _gold(n):
 
 
 def _slot_rng(fill):
-    return ';'.join(f'{SLOT_RNG + k:06X}={fill:02X}' for k in range(16))
+    return ';'.join(f'{GAME_RNG + k:06X}={fill:02X}' for k in range(3))
 
 
 def _coins(n):
@@ -96,15 +96,14 @@ SEGMENTS = [
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
     ('towns_slot', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:8;wait:60',
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'bytes': {'TOWNS_SLOT_COIN0': 99, 'TOWNS_SLOT_COIN1': 0}}),
-    # 한 판 돌리고 나오기: 넣고 A 로 돌린 뒤 B 로 「もういちど」 를 띄워 「いいえ」. 슬롯 화면 안에서 구간을 나누면 다음
-    # 구간이 슬롯에 든 것을 모르고 시작하므로(dq4peoplesample 이 슬롯 입구로 화면을 가림) 맞은편부터 다시 걷는다.
-    # 릴이 서는 칸은 슬롯 전용 난수 7E:1200~120F(11:BC26, 슬롯 화면에서 매 프레임 굴림)가 정해 코어마다 갈리므로
-    # 판 동안 묶는다: 모두 04 면 가운데 줄 체리 셋(배당 3)이라 99 + 3 = 102, 모두 00 이면 맞지 않아 99
-    *(seg for name, fill, coins in (('win', 0x04, 102), ('lose', 0x00, 99))
+    # FC 슬롯 한 판(기계 2, 코인 둘 = 가운데·위 줄). 릴 처음 자리는 게임 난수(00:953A)로 고르므로 판 동안 7E:075B~075D 를
+    # 묶어 결과를 정한다: 모두 11 이면 위 줄이 물방울 셋(배당 20)이라 100 − 2 + 20 = 118, 모두 00 이면 맞는 줄이 없어 98.
+    # 「한 번 더?」 에 B(아니오)로 나온다
+    *(seg for name, fill, coins in (('win', 0x11, 118), ('lose', 0x00, 98))
       for seg in ((f'towns_slot_{name}_side', 'warp', f'{W.CASINO},{SLOT[0]},{SLOT[1] + 1}',
                    {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
-                  (f'towns_slot_{name}', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:8;wait:60;'
-                   'a:8;wait:1500;b:8;wait:300;right:8;wait:30;a:8;wait:300',
+                  (f'towns_slot_{name}', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:4;wait:30;'
+                   'up:4;wait:30;a:4;wait:700;b:8;wait:300',
                    {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{_slot_rng(fill)}',
                     'bytes': {'TOWNS_COIN0': coins, 'TOWNS_COIN1': 0}}))),
     # 코인 판매(DQ5 대화 0B): 금화 1000 에서 한 장(3장 한 장 200)
