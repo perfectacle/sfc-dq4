@@ -10,6 +10,7 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 import dq4ch3event as ev  # noqa: E402
 import dq4ch3lakanaba as L  # noqa: E402
 import dq4chapter1 as ch1  # noqa: E402
+from dq4chapterbox import ENTER  # noqa: E402
 
 ROOT = HERE.parents[2]
 DQ5 = ROOT / 'rom' / 'dq5.sfc'
@@ -156,6 +157,27 @@ class NativeTest(unittest.TestCase):
         for name in ('where', 'prep', 'result', 'haggle', 'sell', 'buy_in', 'pay_wage', 'arrive', 'set_talk',
                      'rest', 'wake', 'tom_pay', 'night'):
             self.assertEqual(code[at[name] - c.code_at], 0x08, name)     # PHP(ENTER)
+
+    def test_nene_turn_waits_for_the_128_frame_edge_of_the_frame_count(self):
+        # 이동 간격으로는 128프레임 차례가 나오지 않아 FRAME bit6 경계를 기다린다. 첫 걸음은 경계 둘(FC 첫 차례도 128프레임 뒤)
+        c = ctx()
+        code, at = L.native(c)
+        frame = bytes((0xAF, *L.FRAME.to_bytes(3, 'little'), 0x29, 0x40))
+        for name in ('nene_hi', 'nene_lo'):
+            self.assertIn(frame, code[at[name] - c.code_at:][:len(ENTER) + 8], name)
+        body = next(s['commands'] for s in L.scripts(c) if s['address'] == L.SCRIPTS['nene_walk'][2])
+        polls = [cmd['args'] for cmd in body if cmd['op'] == '05']
+        self.assertEqual(len(polls), 4)
+        self.assertEqual(body.index(next(cmd for cmd in body if cmd.get('label') == 'step')), 3)
+
+    @unittest.skipUnless(DQ5.is_file(), 'local source ROM not present')
+    def test_frame_count_is_written_only_by_the_nmi_increment(self):
+        rom = DQ5.read_bytes()
+        lo, hi = L.FRAME & 0xFF, (L.FRAME >> 8) & 0xFF
+        writes = [i for op in (0x8D, 0x9C, 0x8E, 0x8C, 0x9D, 0x99, 0xEE, 0xCE, 0x0E, 0x4E, 0x2E, 0x6E, 0xFE, 0xDE)
+                  for i in range(len(rom) - 2) if rom[i] == op and rom[i + 1] == lo and rom[i + 2] == hi]
+        writes += [i for i in range(len(rom) - 3) if rom[i] in (0x8F, 0x9F) and rom[i + 1:i + 4] == bytes((lo, hi, 0x7E))]
+        self.assertEqual([(rom[i], i & 0x7FFF | 0x8000, i >> 15) for i in writes], [(0xEE, 0x889D, 0)])
 
     def test_tables_index_by_mode_times_sixteen(self):
         c = ctx()
