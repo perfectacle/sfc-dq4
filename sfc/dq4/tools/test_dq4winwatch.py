@@ -25,7 +25,7 @@ def planes(rows):
 
 
 def fake_rom():
-    rom = bytearray(0x30000)
+    rom = bytearray(0x300000)
     o = ww.lorom(ww.BORDER_ROM)
     for i, t in enumerate(range(ww.BORDER_FIRST, ww.BORDER_LAST + 1)):
         art = {0x8B: CORNER, 0x8C: CORNER, 0x8D: EDGE, 0x8E: SIDE}.get(t, FILL)
@@ -288,6 +288,15 @@ class FileTest(unittest.TestCase):
             found = ww.analyze(d, fake_rom())
         self.assertTrue(found)
         self.assertEqual({(b[0], b[1], b[2]) for _, _, _, bad in found for b in bad}, {(18, 29, '테두리')})
+
+    def test_kana_rule_only_on_translated_windows(self):
+        rom = bytearray(fake_rom())
+        self.assertFalse(ww.Ref(bytes(rom)).korean)
+        t = ww.lorom(0x588000)
+        rom[t] = 1          # 지도 묶음 시험 롬처럼 색인 뱅크에 다른 자료만 있으면 아님
+        self.assertFalse(ww.Ref(bytes(rom)).korean)
+        rom[ww.lorom(ww.WINDOW_NAME_HOOK)] = 0x5C
+        self.assertTrue(ww.Ref(bytes(rom)).korean)
 
     def test_broken_file_is_an_error(self):
         with self.assertRaises(ValueError):

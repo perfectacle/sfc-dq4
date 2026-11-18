@@ -239,6 +239,7 @@ def flip(px, h, v):
     return tuple(r[::-1] for r in rows) if h else tuple(rows)
 
 
+WINDOW_NAME_HOOK = 0x04ABCF     # dq4windowname 이 JML WnName 으로 바꾸는 창 이름 그리기(원래 롬은 A2)
 WINDOW_TABLE = 0x04EB48         # 창 번호 × 2 → 창 레코드(뱅크 04)
 WINDOW_COUNT = 0x94
 SHARED_JP = 0x60B400            # 8000 아래(04:1AC0~)를 가리키는 창 레코드의 롬 사본(dq4menupatch.SHARED_JP)
@@ -268,9 +269,12 @@ class Ref:
         k = lorom(KANA_ROM)
         self.kana = {t: planar(rom[k + (t - 1) * 8:k + t * 8], b'\xff' * 8) for t in KANA}
         import dq4windowtext
-        # 창 글자를 한글로 옮긴 빌드 단계(메뉴 단계부터)의 롬인가. 그 앞 단계(서곡·타이틀)와 원본 DQ5 는 가나가 맞다
+        # 창 글자를 한글로 옮긴 롬(메뉴 단계부터)인가: 창 이름 그리기 04:ABCF 가 JML(dq4windowname 훅)이고 창 글자 색인
+        # 뱅크가 비지 않음. 그 앞 단계(서곡·타이틀), 원본 DQ5, 지도 묶음 시험 롬(dq4groupbuild 의 groups.sfc: 원본 DQ5 에
+        # 맵·인물만 옮겨 창 글자는 가나 그대로, 4MB 로 늘려 색인 뱅크 자리에 맵 자료가 듦)은 가나가 맞다
         t = lorom(dq4windowtext.TEXT_BANK << 16 | dq4windowtext.INDEX)
-        self.korean = any(rom[t:t + 0x2000].strip(b'\xff'))
+        hook = lorom(WINDOW_NAME_HOOK)
+        self.korean = rom[hook:hook + 1] == b'\x5c' and any(rom[t:t + 0x2000].strip(b'\xff'))
         # 원본 DQ5 와 왼쪽 변(x)·오른쪽 변(x + 너비)이 다른 창 번호 {'왼쪽': {…}, '오른쪽': {…}}. 원본 롬이 없으면 None
         # (모든 창을 바뀐 것으로 봄)
         self.moved = None
