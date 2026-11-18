@@ -20,6 +20,7 @@ import dq4itemport  # noqa: E402
 
 DQ4 = ROOT / 'rom' / 'dq4.nes'
 BUILT = os.environ.get('DQ4_CH3_ROM')
+ROOM = 256                   # 사건 코드 자리마다 남겨 둘 바이트
 
 
 def _ctx():
@@ -34,8 +35,10 @@ def machine(extra=None):
     """(w65816.Cpu, 네이티브 주소): 롬은 이 모듈 네이티브와 extra({주소: 바이트}), WRAM 은 0."""
     from w65816 import Cpu
     code, at = bm.native(_ctx())
+    far, far_at = bm.far_native(_ctx())
+    at = {**at, **far_at}
     rom = bytearray(0x300000)
-    for addr, data in ((_ctx().code_at, code), *(extra or {}).items()):
+    for addr, data in ((_ctx().code_at, code), (_ctx().far_at, far), *(extra or {}).items()):
         rom[lorom(addr):lorom(addr) + len(data)] = data
     return Cpu(bytes(rom), bytearray(0x20000)), at
 
@@ -63,6 +66,18 @@ class SlotTest(unittest.TestCase):
         code, _ = bm.native(_ctx())
         start, end = SLOTS['B'].code
         self.assertLessEqual(start + len(code), end)
+        far, _ = bm.far_native(_ctx())
+        start, end = SLOTS['B'].far
+        self.assertLessEqual(start + len(far), end)
+
+    def test_code_slot_keeps_room(self):
+        # 감옥 병사 코드가 다른 뱅크 몫으로 옮기기 전에는 B 몫이 2바이트만 남아 다음 사건을 더할 수 없었다
+        code, _ = bm.native(_ctx())
+        start, end = SLOTS['B'].code
+        self.assertGreaterEqual(end - start - len(code), ROOM)
+        far, _ = bm.far_native(_ctx())
+        start, end = SLOTS['B'].far
+        self.assertGreaterEqual(end - start - len(far), ROOM)
 
     def test_story_items_are_the_event_items(self):
         self.assertEqual(bm.PRINCE_LETTER, dq4itemport.PRINCE_LETTER)
@@ -138,6 +153,23 @@ class BridgeTest(unittest.TestCase):
             shut = bm._shut(frames)
             self.assertIn(bytes((0x22, *bm._al(site))), shut, key)
             self.assertNotIn(bytes((0x00, 0x95)), shut, key)
+
+    def test_jail_out_goes_dark_right_after_closing(self):
+        # FC: 창이 사라진 2프레임 뒤부터 3프레임마다 한 단계, 네 번째에 검음. 병사 스크립트의 다음 차례에 이벤트로 어둡게
+        # 하면 창이 닫힌 뒤 20프레임 늦었다
+        native, at = bm.native(_ctx())
+        from dq4ch3slots import BONMALMO_STUBS
+        code = native[at['shut_jail_out'] - _ctx().code_at:]
+        close = bytes((0x22, *bm._al(BONMALMO_STUBS[0])))
+        fade = bm._fade_down(bm.JAIL_FADE_STEP, bm.JAIL_FADE_HOLD)
+        go = bytes((0xA9, at['jail_event'] & 0xFF, 0x8D, 0xB3, 0x19))
+        self.assertEqual(code.index(fade), code.index(close) + len(close))     # 닫은 곧바로
+        self.assertLess(code.index(fade), code.index(go))
+        self.assertEqual((bm.JAIL_FADE_STEP, bm.JAIL_FADE_HOLD), (4, 3))
+        self.assertEqual(-(-15 // bm.JAIL_FADE_STEP), 4)                       # 15 → 11 → 7 → 3 → 0
+        guard = next(s for s in bm.scripts(_ctx()) if s['address'] == bm.SCRIPTS['guard'][2])['commands']
+        self.assertEqual(guard[-1]['op'], '16')
+        self.assertEqual(guard[-2]['args'], list(bm._al(at['shut_jail_out'])))
 
     def test_fox_scene_flashes_grey_then_goes_dark(self):
         # 회색 번쩍임은 지금 색을 목표 색 칸에 옮겨 두고(MVN) 회색과 원래 색을 FLASHES 번 올리고, 밝기를 0 까지 내린다
@@ -387,12 +419,43 @@ class JailStepTest(unittest.TestCase):
         self.assertEqual(self.w[0x21A4] & 0x3F, (0x3E + bm.TILE_FRAMES[0]) & 0x3F)
         self.assertEqual(self.w[0x21A3], 0)                       # 공용 ANSWERED 의 바이트
 
-    def test_sees_ahead_and_marks_the_guard(self):
+    def watch(self, tick, entry='jail_watch'):
+        self.w[bm.TICK] = tick
+        self.cpu.p, self.cpu.dbr, self.cpu.d = 0x30, 0x7E, 0
+        self.cpu.jsl(self.at[entry], max_steps=40000)
+        return self.cpu.a & 0xFFFF
+
+    def test_watch_sees_ahead_every_16_frames_and_marks_the_guard(self):
         self.guard(0x0D)
+        self.w[0x3020 + 0x0C] = 0x80                              # 병사 0 은 맵 밖
         self.hero(20, 27)                                         # 두 칸 아래
-        self.step(0x00)
+        self.assertEqual(self.watch(0x02), 1)
+        self.assertEqual(self.w[flag_at(bm.SPOTTED)], 0)          # 16프레임에 한 번만 본다
+        self.assertEqual(self.watch(0x10), 1)
         self.assertEqual(self.w[flag_at(bm.SPOTTED)] & 0xC0, bm.SPOTTED[1] | bm.SPOTTER_BIT)
-        self.assertEqual(self.step(0x01), 0)                       # 들킴 갈래로
+        self.w[0x90] = 0x0D
+        self.assertEqual(self.step(0x11), 0)                       # 들킴 갈래로
+
+    def test_watch_sees_a_walking_guard(self):
+        # FC 는 걸음과 따로 16~17프레임마다 본다. 걷는 동안(3280 bit7) 병사 스크립트는 돌지 않는다
+        self.guard(0x0C)
+        self.w[0x3020 + 0x0D] = 0x80
+        self.w[0x328C] |= 0x80
+        self.w[0x308C] = 24                                       # 칸 사이(셀 y 짝수)
+        self.hero(20, 29)
+        self.watch(0x20)
+        self.assertEqual(self.w[flag_at(bm.SPOTTED)] & 0xC0, bm.SPOTTED[1])
+
+    def test_watch_from_the_son_steps_aside_once_freed(self):
+        self.assertEqual(self.watch(0x03, 'jail_watch_son'), 1)
+        self.w[flag_at(bm.SON_FREED)] |= bm.SON_FREED[1]
+        self.assertEqual(self.watch(0x03, 'jail_watch_son'), 0)
+
+    def test_step_does_not_look(self):
+        self.guard(0x0D)
+        self.hero(20, 27)
+        self.step(0x00)
+        self.assertEqual(self.w[flag_at(bm.SPOTTED)], 0)
 
     def test_temps_are_the_reserved_map_bytes(self):
         from dq4ch3slots import MAP_TEMPS
