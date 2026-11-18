@@ -26,7 +26,7 @@ import dq4ch2event as ch2  # noqa: E402
 import dq4ch3event as ch3  # noqa: E402
 import dq4ch1event  # noqa: E402
 from dq4chapterbox import ENTER, LEAVE  # noqa: E402
-from dq4ch2endor import Asm, BCC, BEQ, BNE, lda, sta  # noqa: E402
+from dq4ch2endor import Asm, BCC, BCS, BEQ, BNE, BRA, lda, sta  # noqa: E402
 from dq4itemport import KING_LETTER, PRINCE_LETTER  # noqa: E402
 
 say, narrate = ch1.say, ch1.narrate
@@ -70,6 +70,24 @@ def cell(x, y):
 PRINCE = {'day': cell(0x01, 0x0B), 'night': cell(0x20, 0x06)}     # FC 05/01 슬롯 06, 대화 061
 KING = cell(0x11, 0x07)                                           # FC 05/01 왕, 대화 06B
 SON = cell(0x0D, 0x0C)                                            # FC 05/00 슬롯 08, 대화 065
+SON_SIDE = cell(0x0B, 0x0C)                                       # 창살 (0C,0C) 너머 아들에게 말을 거는 칸
+# 감옥 병사 둘(FC 05/00 대화 066, (0A,0E)·(02,07)). FC 는 (0A,07)→(0A,0E)→(02,0E)→(02,07) 을 돌다가(블록 05:$8EBE) 보는
+# 방향의 세 줄(제 줄과 양옆) 한 칸 앞부터 벽까지에 주인공이 들면 조작을 막고 0307 → 일행 쪽으로 8프레임/칸 곧게 걸어 맞닿은
+# 칸에서 멈춤 → 034A → 3F/01 FC (19,02) 왼쪽을 보고(이벤트 24·25, 1D:$A213·$98BD·$A24C). 두 창은 A 없이 닫히고, 다시
+# 들어오면 또 걸린다(실측)
+GUARDS = ((0x0A, 0x0E), (0x02, 0x07))
+JAIL_LOOP = ((0x0A, 0x07), (0x0A, 0x0E), (0x02, 0x0E), (0x02, 0x07))
+JAIL_OUT = ('3F/01', (0x19, 0x02))
+# 맵 안 임시 값(7E:21A2·21A4 는 3F/00 에서 다른 쓰임이 없음): 들킴 bit, 들킨 병사의 인물 칸
+SPOTTED = (0x14, 0x40)
+SPOTTER = 0x7E21A2
+# 순찰은 한 칸씩 목표를 두고(jail_step 이 닿을 때마다 다음 칸) 다음 칸을 이 주기(프레임, 2의 거듭제곱)에 한 번만 정해
+# FC 병사의 33프레임/칸에 맞춘다. 속도 01 이면 한 칸을 16프레임에 걸어 주기 안에 닿는다
+PATROL_PERIOD = 32
+PATROL_WINDOW = 4             # 주기의 앞 몇 프레임에 다음 칸을 정하나(순찰 고리는 명령 셋이라 그보다 넓게)
+PATROL_SPEED, APPROACH_SPEED = 0x01, 0x02    # 인물 명령 1E. 01 은 16프레임/칸(00 은 서 있음), 02 는 유모처럼 8프레임/칸
+# 시야를 막는 FC 칸(05/00 의 벽·창살). 실측 근거는 dq4-chapter3-format 「본몰 감옥 병사」
+SIGHT_BLOCKS = {0x28, 0x2B}
 CHIEF = cell(0x0C, 0x01)                                          # FC 18/00 슬롯 07, 대화 05E
 FOX = cell(0x04, 0x0D)                                            # FC 18/01 슬롯 06, 대화 2D2
 GAADE = cell(0x11, 0x0D)                                          # FC 18/01 슬롯 07(맵 오른쪽 밖)
@@ -110,7 +128,9 @@ SECOND_NANNY = cell(0x06, 0x07)
 # 빌릴 인물 스크립트(dq4ch3slots B: 10:BEE5 칸 2·4~9). 칸마다 한 시간대에만 놓인다
 LIST = '10:BEE5'
 SCRIPTS = {'fox': (LIST, 2, '10:BEFA'), 'gaade': (LIST, 4, '10:BF14'), 'son': (LIST, 5, '10:BF27'),
-           'nanny': (LIST, 6, '10:BF45'), 'village_dog': (LIST, 7, '10:BF63'), 'village_dog_night': (LIST, 8, '10:BF81')}
+           'nanny': (LIST, 6, '10:BF45'), 'village_dog': (LIST, 7, '10:BF63'), 'village_dog_night': (LIST, 8, '10:BF81'),
+           # 감옥 병사 둘이 함께 씀(자리로 다음 모퉁이를 고르므로 누가 누구인지 가리지 않음)
+           'guard': (LIST, 9, '10:BF9F')}
 
 # 다리: FC 필드 0 의 블록 16(다리). FC 는 3장에서 $6286 bit4 가 꺼져 있으면 그 블록 정의를 00 17(속성 80, 막힘)로
 # 올린다(08:$808E, fc/dq4/docs/dq4-block-format.md). 이 롬은 그 칸들을 같은 512 갈래의 막힌 블록(암초: 물 위 바위)으로
@@ -243,8 +263,12 @@ MESSAGES = {
     'monica_trust': pages('모니카', '아버님께는 분명/좋은 생각이/있으실 거예요./아버님을 믿어요.'),                     # 0884
     'monica_thanks': pages('모니카', '사랑하는 릭과의/결혼을 허락받다니/마치 꿈만 같아요!',                             # 0885
                            '톨네코라고 했죠./진심으로/감사드려요.'),
-    # 여우 마을의 개(FC 18/00 슬롯 06): 달려가기 전 02F1, 말을 걸면 0663(같은 글)
+    # 여우 마을의 개(FC 18/00 슬롯 06): 말을 걸면 0663, 달려가기 전 02F1(같은 글이지만 A 없이 닫혀 끝 코드가 다름)
     'woof': say('멍멍멍!'),
+    'woof_run': _held(say('멍멍멍!')),
+    # 감옥 병사(FC 05/00 대화 066): 일행을 보면 0307, 다가와 034A(마을 사람 모듈의 같은 대사와 같은 글)
+    'jail_who': _held(say('웬 놈이냐!')),                                                                              # 0307
+    'jail_out': _held(say('여기는 감옥이다!/죄수와 이야기하는/것은 허락할 수/없다! 자, 나가시오!')),                  # 034A
 }
 TALKS = ('prince', 'king', 'son', 'chief', 'fox', 'monica', 'dog')
 CALLS = {'give_prince_letter': ('give', PRINCE_LETTER), 'take_prince_letter': ('take', PRINCE_LETTER),
@@ -253,7 +277,7 @@ CALLS = {'give_prince_letter': ('give', PRINCE_LETTER), 'take_prince_letter': ('
          'room': ('room', 0), 'fox_go': ('fox_go', 0), 'inn': ('inn', 0), 'jingle': ('jingle', 0)}
 ITEM_SONG = 0x2F               # 물건을 받는 징글(dq4ch2frenol.ITEM_SONG, 끝을 기다리는 곡)
 # 네이티브 가운데 코드가 아닌 이벤트 스크립트(dq4brkscan)
-DATA_ENTRIES = ('fox_event', 'inn_event')
+DATA_ENTRIES = ('fox_event', 'inn_event', 'jail_event', 'jail_walls')
 # PHP 없이 JSL 로 시작하는 훅(원래 대상을 먼저 부름)
 CODE_ENTRIES = ('bridge_hook',)
 
@@ -265,9 +289,10 @@ def _set(flag):
     return bytes((0xAF,)) + _al(a) + bytes((0x09, flag[1], 0x8F)) + _al(a)
 
 
-def _warp(mp, at):
+def _warp(mp, at, facing=0):
+    """이벤트 명령 90: 맵을 옮겨 셀 at 에 섬. facing 은 $198E bit0-1(0 위, 1 오른쪽, 2 아래, 3 왼쪽)."""
     g, n = (int(v, 16) for v in mp.split('/'))
-    return bytes((0x90, g, n, *at, 0x01, 0x80))
+    return bytes((0x90, g, n, *at, 0x01, 0x80 | facing))
 
 
 def _morning():
@@ -279,6 +304,176 @@ FLASHES, FLASH_FRAMES = 6, 3                 # FC 084C 뒤 회색 3프레임·�
 # 페이드 아웃 뒤 검은 채 기다림. 워프의 맵 불러오기(43프레임쯤)와 합쳐 FC 의 182프레임(실측 894~1075)
 DARK_FRAMES = 139
 FADE_LEVELS = (13, 11, 9, 7, 5, 3, 1, 0)     # 한 프레임에 두 단계씩: FC 페이드 아웃 9프레임(885~893)
+
+
+# 맵 밝히기 루틴(00:CEC3, X 프레임마다 $1D 아래 넷 비트를 0F 까지 1씩, 16번)의 들머리. 워프 뒤 숲을 밝힐 때 여우 장면이면
+# $1D 를 FOREST_FADE_FROM 에서 시작해 FC 처럼 4프레임 만에 밝힌다(FC 1076~1079 실측). 그 밖의 밝히기는 그대로
+FADE_IN_SITE = 0x00CEC3
+FADE_IN_ORIG = bytes((0x08, 0xC2, 0x30, 0x48))      # PHP / REP #$30 / PHA
+FOREST_FADE_FROM = 0x0B
+
+
+def _fade_in_hook():
+    g, n = (int(v, 16) for v in FOREST.split('/'))
+    a = Asm()(0x08, 0xE2, 0x20, lda(0x7E2190 + FOX_SCENE[0]), 0x29, FOX_SCENE[1]).br(BEQ, 'off')
+    a(0xAF, 0xBC, 0x00, 0x7E, 0xC9, g).br(BNE, 'off')(0xAF, 0xBD, 0x00, 0x7E, 0xC9, n).br(BNE, 'off')
+    a(0xAF, 0x1D, 0x00, 0x7E, 0x29, 0x80, 0x09, FOREST_FADE_FROM, 0x8F, 0x1D, 0x00, 0x7E)
+    a.label('off')(0x28, FADE_IN_ORIG, 0x5C, *_al(FADE_IN_SITE + len(FADE_IN_ORIG)))
+    return a.bytes()
+
+
+# FC 05/00(18×21 칸)에서 시야를 막는 칸의 비트맵, 줄마다 3바이트(bit7 이 왼쪽 칸). 롬에서 푼 값(fc_jail_walls)과 같은지
+# 단위 시험이 본다
+JAIL_W, JAIL_H = 18, 21
+JAIL_WALLS = bytes.fromhex('FFFFC0 841040 841040 841040 841040 FFFFC0 800040 800040 800840 9B8FC0 910840 918840 908840 '
+                           '9F8840 800FC0 800840 FFF840 840840 840840 840840 FFFFC0'.replace(' ', ''))
+
+
+def fc_jail_walls(dq4_rom):
+    """FC 롬의 05/00 에서 JAIL_WALLS 를 다시 만든다."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'fc' / 'dq4' / 'tools'))
+    import dq4map
+    from kr_patch.fc import ines
+    _, w, h, cells = dq4map.load(ines.prg(dq4_rom), 0x05, 0x00)
+    out = bytearray()
+    for y in range(h):
+        bits = bytearray((w + 7) // 8)
+        for x in range(w):
+            if cells[y * w + x] in SIGHT_BLOCKS:
+                bits[x >> 3] |= 0x80 >> (x & 7)
+        out += bits
+    return w, h, bytes(out)
+
+
+def jail_walls():
+    return JAIL_W, JAIL_H, JAIL_WALLS
+
+
+# 인물 스크립트 네이티브는 DB 7E·직접 페이지 0 에서 불린다. 지금 인물 칸은 $90(01:C810), X·Y 는 7E:3020·3080(셀, 높은 바이트
+# 3040·30A0), 걷는 목표는 3560·35A0(명령 13, 01:CB4A), 방향은 31E0(10 오른쪽·20 왼쪽·40 아래·80 위), 걷는 중은 3280 bit7.
+# $00~$0D 는 해석기가 명령마다 다시 쓰는 임시 칸이라 여기서 쓴다
+def _tile_of(slot_x):
+    """A = 그 인물의 FC 칸 X(→ $00 또는 $02), Y. slot_x 가 참이면 X 칸, 아니면 주인공(칸 0)."""
+    ix = 0xBD if slot_x else 0xAD
+    return lambda base: bytes((ix, base & 0xFF, base >> 8))
+
+
+def _guard_tiles():
+    """$00 = 병사 X 칸, $01 = Y 칸, $02·$03 = 주인공. 셀 y = 2 × 칸 + 1."""
+    out = b''
+    for src, dst in ((_tile_of(True), 0x00), (_tile_of(False), 0x02)):
+        out += src(0x3020) + bytes((0x29, 0x7F, 0x4A, 0x85, dst))
+        out += src(0x3080) + bytes((0x29, 0x7F, 0x3A, 0x4A, 0x85, dst + 1))
+    return out
+
+
+def _set_target():
+    """$06·$07 FC 칸을 X 인물의 걷는 목표로(명령 13 과 같이 높은 바이트 0, 00:E808)."""
+    return bytes((0xA5, 0x06, 0x0A, 0x9D, 0x60, 0x35, 0x9E, 0x80, 0x35,
+                  0xA5, 0x07, 0x0A, 0x1A, 0x9D, 0xA0, 0x35, 0x9E, 0xC0, 0x35,
+                  0x22, 0x08, 0xE8, 0x00))
+
+
+RET0 = bytes((0xC2, 0x30, 0xA9, 0x00, 0x00, 0x28, 0x6B))
+RET1 = bytes((0xC2, 0x30, 0xA9, 0x01, 0x00, 0x28, 0x6B))
+
+
+def _next_corner(a):
+    """X 병사의 자리로 순찰의 다음 모퉁이 쪽 한 칸을 걷는 목표로. (0A,07)→(0A,0E)→(02,0E)→(02,07) 을 돈다.
+    $00~$07 을 씀."""
+    (ax, ay), (bx, by), (cx, cy), (dx, dy) = JAIL_LOOP
+    a(_guard_tiles())
+    a(0xA5, 0x01, 0xC9, ay).br(BNE, 'kb')(0xA5, 0x00, 0xC9, ax).br(BCS, 'kb')(0xA9, ax, 0xA0, ay).br(BRA, 'kgo')
+    a.label('kb')(0xA5, 0x00, 0xC9, bx).br(BNE, 'kc')(0xA5, 0x01, 0xC9, by).br(BCS, 'kc')(0xA9, bx, 0xA0, by).br(BRA, 'kgo')
+    a.label('kc')(0xA5, 0x01, 0xC9, cy).br(BNE, 'kd')(0xA5, 0x00, 0xC9, cx + 1).br(BCC, 'kd')(0xA9, cx, 0xA0, cy)
+    a.br(BRA, 'kgo')
+    a.label('kd')(0xA9, dx, 0xA0, dy)
+    # 모퉁이 쪽으로 한 칸만: 칸마다 차례 간격을 거쳐 걷는다
+    a.label('kgo')(0x85, 0x06, 0x84, 0x07)
+    for axis in (0, 1):
+        t, s = 0x06 + axis, axis
+        a(0xA5, t, 0xC5, s).br(BEQ, f'k{axis}e').br(BCC, f'k{axis}l')(0xA5, s, 0x1A, 0x85, t).br(BRA, f'k{axis}e')
+        a.label(f'k{axis}l')(0xA5, s, 0x3A, 0x85, t)
+        a.label(f'k{axis}e')
+    a(_set_target())
+    return a
+
+
+def _jail_next():
+    """명령 37: 순찰 첫 목표(인물 레코드의 목표 칸은 맵마다 정해지지 않음)."""
+    return _next_corner(Asm()(0x08, 0xE2, 0x30, 0xA6, 0x90))(0x28, 0x6B).bytes()
+
+
+def _jail_step(walls_at):
+    """명령 37(순찰 고리에서 되풀이): 들켰으면 아무것도 안 함. 모퉁이에 닿았으면 다음 모퉁이를 목표로 하고, 명령 14 처럼
+    방향을 정해 걷기를 잇고, 시야를 본다. 시야는 FC 1D:$98BD: 보는 방향의 세 줄(제 줄과 양옆) 한 칸 앞부터 막는 칸까지.
+    보이면 SPOTTED 와 SPOTTER. 명령 05 는 네이티브가 0 이 아닌 값을 주면 걷는 중(3280 bit7)을 지워(01:C98F) 쓰지 않는다."""
+    w, h, _ = jail_walls()
+    row = (w + 7) // 8
+    flag = 0x2190 + SPOTTED[0]
+    a = Asm()(0x08, 0xE2, 0x30, 0xA6, 0x90, 0xAD, flag & 0xFF, flag >> 8, 0x29, SPOTTED[1]).br(BEQ, 'calm')(0x28, 0x6B)
+    # FC 는 창이 떠 있는 동안 맵이 멈춘다(병사도 멈춤, 실측). 창 번호 7E:0A00 이 FF(없음)·02(필드 상태 창)가 아니면 서 있는다
+    a.label('calm')(0xAD, 0x00, 0x0A, 0xC9, 0xFF).br(BEQ, 'look')(0xC9, 0x02).br(BEQ, 'look')
+    a(0xBD, 0x80, 0x32, 0x29, 0x7F, 0x9D, 0x80, 0x32, 0x28, 0x6B)
+    a.label('look')(0xBD, 0x60, 0x35, 0xDD, 0x20, 0x30).br(BNE, 'far')(0xBD, 0xA0, 0x35, 0xDD, 0x80, 0x30).br(BEQ, 'here')
+    a.label('far').brl('move')
+    # 닿은 칸에서 프레임 수 7E:1ECE 가 PATROL_PERIOD 주기의 앞 8프레임에 들 때만 다음 칸으로: 칸마다 PATROL_PERIOD
+    a.label('here')(0xBD, 0x80, 0x32, 0x29, 0x7F, 0x9D, 0x80, 0x32)                  # 명령 14 처럼 닿으면 걷기를 끔
+    a(0xAD, 0xCE, 0x1E, 0x29, PATROL_PERIOD - 1, 0xC9, PATROL_WINDOW).br(BCC, 'turn').brl('look2')
+    a.label('turn')
+    _next_corner(a)
+    a(0xA6, 0x90)
+    # 명령 14: 목표와 견주어 방향·걷는 중
+    a.label('move')(0xBD, 0x60, 0x35, 0xDD, 0x20, 0x30).br(BEQ, 'y')(0xA9, 0x10).br(BCS, 'fx')(0xA9, 0x20)
+    a.label('fx')(0x9D, 0xE0, 0x31).br(BRA, 'walk')
+    a.label('y')(0xBD, 0xA0, 0x35, 0xDD, 0x80, 0x30).br(BEQ, 'look2')(0xA9, 0x40).br(BCS, 'fy')(0xA9, 0x80)
+    a.label('fy')(0x9D, 0xE0, 0x31, 0x9E, 0x40, 0x36)
+    a.label('walk')(0xBD, 0x80, 0x32, 0x09, 0x80, 0x9D, 0x80, 0x32)
+    a.label('look2')
+    # 시야: $04·$05 = 방향 dx·dy, $08 = 줄(FF·00·01), $09·$0A = 줄 어긋남, $06·$07 = 보는 칸, $0B = 남은 걸음
+    a(_guard_tiles(), 0x64, 0x04, 0x64, 0x05, 0xBD, 0xE0, 0x31, 0x0A).br(BCC, 'nu')(0xC6, 0x05)
+    a.label('nu')(0x0A).br(BCC, 'nd')(0xE6, 0x05)
+    a.label('nd')(0x0A).br(BCC, 'nl')(0xC6, 0x04)
+    a.label('nl')(0x0A).br(BCC, 'nr')(0xE6, 0x04)
+    a.label('nr')(0xA9, 0xFF, 0x85, 0x08)
+    a.label('lane')(0x64, 0x09, 0x64, 0x0A, 0xA5, 0x04).br(BNE, 'hz')(0xA5, 0x08, 0x85, 0x09).br(BRA, 'st')
+    a.label('hz')(0xA5, 0x08, 0x85, 0x0A)
+    a.label('st')(0xA5, 0x00, 0x18, 0x65, 0x09, 0x18, 0x65, 0x04, 0x85, 0x06,
+                  0xA5, 0x01, 0x18, 0x65, 0x0A, 0x18, 0x65, 0x05, 0x85, 0x07, 0xA9, 0x20, 0x85, 0x0B)
+    a.label('step')(0xA5, 0x06, 0xC9, w).br(BCS, 'next')(0xA5, 0x07, 0xC9, h).br(BCS, 'next')
+    a(0xA5, 0x07)
+    for _ in range(row - 1):
+        a(0x18, 0x65, 0x07)
+    a(0x85, 0x0C, 0xA5, 0x06, 0x4A, 0x4A, 0x4A, 0x18, 0x65, 0x0C, 0xAA, 0xBF, *_al(walls_at), 0x85, 0x0C)
+    a(0xA5, 0x06, 0x29, 0x07, 0xA8, 0xA9, 0x80).label('m')(0xC0, 0x00).br(BEQ, 'md')(0x4A, 0x88).br(BRA, 'm')
+    a.label('md')(0x25, 0x0C).br(BNE, 'next')
+    a(0xA5, 0x06, 0xC5, 0x02).br(BNE, 'adv')(0xA5, 0x07, 0xC5, 0x03).br(BEQ, 'seen')
+    a.label('adv')(0xA5, 0x06, 0x18, 0x65, 0x04, 0x85, 0x06, 0xA5, 0x07, 0x18, 0x65, 0x05, 0x85, 0x07, 0xC6, 0x0B).br(BNE, 'step')
+    a.label('next')(0xA6, 0x90, 0xE6, 0x08, 0xA5, 0x08, 0xC9, 0x02).br(BEQ, 'unseen').brl('lane')
+    a.label('unseen')(0x28, 0x6B)
+    a.label('seen')(0xAD, flag & 0xFF, flag >> 8, 0x09, SPOTTED[1], 0x8D, flag & 0xFF, flag >> 8,
+                    0xA5, 0x90, 0x8D, SPOTTER & 0xFF, SPOTTER >> 8 & 0xFF, 0x28, 0x6B)
+    return a.bytes()
+
+
+def _jail_mine():
+    """명령 05: 들킨 병사면 A = 0, 다른 병사는 1(그 자리에서 기다림, FC 는 창이 떠 있는 동안 맵이 멈춤)."""
+    return bytes((0x08, 0xE2, 0x30, 0xA5, 0x90, 0xCD, SPOTTER & 0xFF, SPOTTER >> 8 & 0xFF, 0xF0, len(RET1))) + RET1 + RET0
+
+
+def _jail_near():
+    """명령 37: 병사의 줄을 따라 일행과 맞닿는 칸을 목표로(FC: 곧게 걸어 맞닿은 칸에서 멈춤, 돌아서지 않음).
+    가로로 보면 Y 는 그대로, X 는 같은 줄이면 주인공 X - dx, 옆 줄이면 주인공 X. 세로도 같다."""
+    a = Asm()(0x08, 0xE2, 0x30, 0xA6, 0x90, _guard_tiles(), 0xA5, 0x00, 0x85, 0x06, 0xA5, 0x01, 0x85, 0x07)
+    a(0xBD, 0xE0, 0x31, 0x29, 0x30).br(BEQ, 'v')
+    a(0xA5, 0x02, 0x85, 0x06, 0xA5, 0x03, 0xC5, 0x01).br(BNE, 'go')
+    a(0xBD, 0xE0, 0x31, 0x29, 0x10).br(BEQ, 'hl')(0xC6, 0x06).br(BRA, 'go')
+    a.label('hl')(0xE6, 0x06).br(BRA, 'go')
+    a.label('v')(0xA5, 0x03, 0x85, 0x07, 0xA5, 0x02, 0xC5, 0x00).br(BNE, 'go')
+    a(0xBD, 0xE0, 0x31, 0x29, 0x40).br(BEQ, 'vu')(0xC6, 0x07).br(BRA, 'go')
+    a.label('vu')(0xE6, 0x07)
+    a.label('go')(_set_target(), 0x28, 0x6B)
+    return a.bytes()
 
 
 def grey(c):
@@ -322,9 +517,10 @@ def _fox_dark():
     return _grey_flash() + fade + wait(DARK_FRAMES)
 
 
-# 유모의 창: FC 는 A 없이 03B0 을 223프레임, 03B1 을 204프레임 뒤 닫는다(실측, 창이 열린 프레임부터). 명령 30 은 글을 다
+# A 없이 닫히는 창(FC 실측, 창이 열린 프레임부터): 유모 03B0 223·03B1 204, 여우 마을 개 02F1 195. 명령 30 은 글을 다
 # 찍은 뒤 돌아와 찍는 동안만큼 길어지고, 유모가 닿은 뒤 조작이 돌아오기까지 535프레임(FC 524)이었다
 NANNY_SHUT = {'nanny_stop': 223, 'nanny_out': 204}
+SHUT = {**NANNY_SHUT, 'woof_run': 195, 'jail_who': 195, 'jail_out': 237}
 
 
 # BRK 처리기는 BRK 가 놓인 뱅크를 DB 로 두어 이 모듈의 뱅크(40 이상)에서는 창 번호를 롬에 쓴다(dq4ch3slots). 그래서
@@ -387,12 +583,20 @@ def native(ctx):
     put('fox_event', bytes((0xA0, *_al(at['fox_scene']))) + _warp(FOREST, FOREST_WAKE) + b'\xff')
     put('inn_event', bytes((0xA0, *_al(at['rest']))) + _warp(FOREST, FOREST_WAKE) + b'\xff')
     put('fox_go', dq4prologue._event_start(at['fox_event']))
-    for key, frames in NANNY_SHUT.items():
+    put('jail_event', _warp(JAIL_OUT[0], cell(*JAIL_OUT[1]), facing=3) + b'\xff')
+    put('jail_go', dq4prologue._event_start(at['jail_event']))
+    put('jail_walls', JAIL_WALLS)
+    put('jail_next', _jail_next())
+    put('jail_step', _jail_step(at['jail_walls']))
+    put('jail_mine', _jail_mine())
+    put('jail_near', _jail_near())
+    for key, frames in SHUT.items():
         put(f'shut_{key}', _shut(frames))
     put('inn', dq4prologue._event_start(at['inn_event']))
     put('jingle', ENTER + _fanfare(ITEM_SONG) + LEAVE)
     put('bridge_hook', _bridge_hook(SEA_FRAMES, BRIDGE_CELLS))
     put('enter_hook', _enter_hook())
+    put('fade_in_hook', _fade_in_hook())
     put('refresh', ENTER + dq4ch1event.REFRESH + LEAVE)
     put('dog_trigger', dq4prologue._inside(*DOG_TRIGGER))
     return bytes(out), at
@@ -425,7 +629,8 @@ def hooks(ctx):
     stubs, _ = low_stubs()
     return [(FIELD_CALL, bytes((0x22,)) + _al(SEA_FRAMES), bytes((0x22,)) + _al(ctx.at['bridge_hook'])),
             (ENTER_SITE, bytes((0x5C,)) + _al(_entrance_hook_at()), bytes((0x5C,)) + _al(ctx.at['enter_hook'])),
-            (BONMALMO_STUBS[0], bytes(len(stubs)), stubs)]
+            (BONMALMO_STUBS[0], bytes(len(stubs)), stubs),
+            (FADE_IN_SITE, FADE_IN_ORIG, bytes((0x5C,)) + _al(ctx.at['fade_in_hook']))]
 
 
 # ---- 대화 ----
@@ -536,9 +741,14 @@ def scripts(ctx):
     # 숨기는 것은 개 따라 걷기 장치 몫
     village_dog = [_cmd('28'), _cmd('52'), _cmd('1E', DOG_SPEED), _if_off(ch3.DOG, 'stay'), _if_on(FOXED, 'stay'),
                    poll(at['dog_trigger']), _cmd('3F'),
-                   msg('woof'), _or(DOG_AWAY), call(at['refresh']), _cmd('50', *DOG_FROM), _cmd('53'), _cmd('4F'), _cmd('1C'), *walk(DOG_RUN), _cmd('51'),
+                   *timed('woof_run'), _or(DOG_AWAY), call(at['refresh']), _cmd('50', *DOG_FROM), _cmd('53'), _cmd('4F'), _cmd('1C'), *walk(DOG_RUN), _cmd('51'),
                    _cmd('4F'), _cmd('52'), _cmd('50', *DOG_STAND), _cmd('53'), _cmd('4F'), _cmd('40'), _cmd('16', label='stay')]
-    bodies = {'nanny': nanny, 'village_dog': village_dog, 'village_dog_night': list(village_dog), 'fox': fox, 'gaade': gaade, 'son': son}
+    # 감옥 병사: 모퉁이를 하나씩 목표로 걸으며 차례마다 시야를 보다가 들키면 들킨 병사만 다가와 내보낸다
+    guard = [_cmd('1E', PATROL_SPEED), call(at['jail_next']), call(at['jail_step'], label='patrol'),
+             _if_on(SPOTTED, 'seen'), _cmd('03', target='patrol'),
+             _cmd('15', label='seen'), poll(at['jail_mine']), _cmd('3F'), *timed('jail_who'), call(at['jail_near']),
+             _cmd('1E', APPROACH_SPEED), _cmd('1C'), _cmd('14'), *timed('jail_out'), call(at['jail_go']), _cmd('16')]
+    bodies = {'guard': guard, 'nanny': nanny, 'village_dog': village_dog, 'village_dog_night': list(village_dog), 'fox': fox, 'gaade': gaade, 'son': son}
     return [{"address": SCRIPTS[name][2], "commands": bodies[name]} for name in SCRIPTS]
 
 
@@ -587,6 +797,8 @@ def npc_lists(lists, ctx):
     ctx.retalk(lists, CASTLE, KING, t['king'])
     ctx.retalk(lists, FOX_TOWN, CHIEF, t['chief'])
     _replace(lists[PRISON]["entries"], 'day', SON, lambda e: _scripted(e, 'son', t['son']))
+    for g in GUARDS:
+        _replace(lists[PRISON]["entries"], 'day', cell(*g), lambda e: _scripted(e, 'guard'))
     forest = lists[FOREST]["entries"]
     _replace(forest, 'day', FOX, lambda e: _scripted(e, 'fox', t['fox']))
     _replace(forest, 'day', GAADE, lambda e: _scripted(e, 'gaade'))

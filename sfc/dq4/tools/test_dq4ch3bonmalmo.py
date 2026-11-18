@@ -150,6 +150,29 @@ class BridgeTest(unittest.TestCase):
         native, at = bm.native(_ctx())
         self.assertIn(code, native)
 
+    def test_forest_fade_in_is_short_only_in_the_fox_scene(self):
+        # 밝히기 들머리를 JML 로 덮고, 훅은 원래 네 바이트를 되풀이해 그 뒤로 돌아간다
+        ctx = _ctx()
+        (site, orig, new), = [h for h in bm.hooks(ctx) if h[0] == bm.FADE_IN_SITE]
+        self.assertEqual(orig, bm.FADE_IN_ORIG)
+        self.assertEqual(new, bytes((0x5C, *bm._al(ctx.at['fade_in_hook']))))
+        code = bm._fade_in_hook()
+        self.assertTrue(code.endswith(bm.FADE_IN_ORIG + bytes((0x5C, *bm._al(site + 4)))))
+        self.assertIn(bytes((0x29, bm.FOX_SCENE[1])), code)
+        self.assertIn(bytes((0x09, bm.FOREST_FADE_FROM)), code)
+        self.assertEqual(0x0F - bm.FOREST_FADE_FROM, 4)
+
+    def test_dog_bark_closes_without_a_but_the_talk_waits(self):
+        ctx = _ctx()
+        dog = next(s for s in bm.scripts(ctx) if s['address'] == bm.SCRIPTS['village_dog'][2])['commands']
+        ops = [c['op'] for c in dog]
+        self.assertNotIn('21', ops)
+        k = ops.index('30')
+        self.assertEqual(dog[k]['args'][0] | dog[k]['args'][1] << 8, ctx.msg['woof_run'])
+        self.assertEqual(ops[k + 1], '37')
+        self.assertEqual(bm.MESSAGES['woof'][-1], 0x1001)
+        self.assertEqual(bm.MESSAGES['woof_run'][-1], 0x1018)
+
     def test_nanny_windows_close_without_a(self):
         ctx = _ctx()
         nanny = next(s for s in bm.scripts(ctx) if s['address'] == bm.SCRIPTS['nanny'][2])['commands']
@@ -267,7 +290,7 @@ def _lists():
         bm.CASTLE: {"map": bm.CASTLE, "entries": [person(*bm.PRINCE['day']), person(*bm.PRINCE['night'], 'night'),
                                                    person(*bm.KING), person(*bm.KING, 'night'), person(*bm.NANNY),
                                                    person(*bm.SECOND_NANNY)]},
-        bm.PRISON: {"map": bm.PRISON, "entries": [person(*bm.SON)]},
+        bm.PRISON: {"map": bm.PRISON, "entries": [person(*bm.SON), *(person(*bm.cell(*g)) for g in bm.GUARDS)]},
         bm.FOX_TOWN: {"map": bm.FOX_TOWN, "entries": [person(*bm.CORNER_DOG), person(*bm.CORNER_DOG, 'night'),
                                                        person(*bm.CHIEF), person(*bm.CHIEF, 'night')]},
         bm.FOREST: {"map": bm.FOREST, "entries": [person(*bm.FOX), person(*bm.GAADE)]},
@@ -285,8 +308,9 @@ class ListTest(unittest.TestCase):
         self.assertEqual([e["fields"]["talk"] for e in castle], [t['prince'], t['prince'], t['king'], t['king'], 1])
         self.assertEqual(castle[-1]["from"], bm._src('nanny'))
         self.assertNotIn(bm.SECOND_NANNY, [bm._at(e) for e in castle])
-        son = lists[bm.PRISON]["entries"][0]
+        son, *guards = lists[bm.PRISON]["entries"]
         self.assertEqual(son["from"], bm._src('son'))
+        self.assertEqual([g["from"] for g in guards], [bm._src('guard')] * 2)
         town = lists[bm.FOX_TOWN]["entries"]
         dogs = [e for e in town if bm._at(e) == bm.CORNER_DOG]
         self.assertEqual([(e["from"], e["fields"]["talk"]) for e in dogs],
