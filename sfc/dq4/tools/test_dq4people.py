@@ -1231,6 +1231,22 @@ class PinTests(unittest.TestCase):
             self.assertEqual((pins[p.role].line, dict(pins[p.role].slots)), placed[p])
         self.assertEqual(pins['a'].groups, (0x36, 0x3E))
 
+    def test_a_new_colour_far_from_every_slot_takes_a_slot_nobody_uses_in_its_groups(self):
+        pins, placed = self.pin([self.a])
+        late = P.Person((0x13,), None, 'x', 'late')
+        green = (30, 200, 30)
+        # 앞 인물의 색이 칸 색을 쥐고 있어야 새 색이 그 칸에서 멀다(가벼우면 새 색이 칸 색을 끌어가 버린다)
+        hists = {**self.hists, self.a: Counter({c: w * 100 for c, w in self.hists[self.a].items()}),
+                 late: Counter({green: 60, (205, 35, 35): 40})}
+        people = [self.a, late]
+        spots = P.pinned_where(people, {**self.used, 0x13: {0x36}}, pins)
+        again, board = P.place(people, hists, spots, pins)
+        self.assertEqual(again[self.a], placed[self.a])
+        line, slots = again[late]
+        self.assertEqual(board[(0x36, line)][slots[green]], green)
+        if line == again[self.a][0]:
+            self.assertNotIn(slots[green], again[self.a][1].values())
+
     def test_pinned_rows_ignore_changes_in_the_rom_people_list(self):
         people = [self.a, self.b, self.c]
         pins, placed = self.pin(people)
