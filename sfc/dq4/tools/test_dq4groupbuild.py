@@ -711,7 +711,8 @@ class SyntheticBuildTest(unittest.TestCase):
             mock.patch.object(dq4wellswitch, "writes", empty),
             mock.patch.object(dq4dungeonrate, "writes", empty),
             mock.patch.object(dq4balance, "writes", empty),
-            mock.patch.multiple(dq4chestport, port=lambda *a: ({"format": "dq5chest/1"}, {}), base_tables=lambda d: {}),
+            mock.patch.multiple(dq4chestport, port=lambda *a: ({"format": "dq5chest/1"}, {}), base_tables=lambda d, f=None: {},
+                                feet=lambda *a: {}),
         ]
         for p in patches:
             p.start()

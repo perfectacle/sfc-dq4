@@ -106,6 +106,12 @@ def port(dq5_path, dq4_path):
         maps.setdefault((group, number), {"chests": [], "furniture": []})["furniture"].append(entry)
         report.append({"fc": f"{e['group']:02X}/{e['index']:02X} ({e['x']},{e['y']})", "map": f"{group:02X}/{number:02X}",
                        "kind": "furniture", "fc_item": names[e["item"]], "reward": entry["reward"]})
+    for (group, number), x, y, reward, desc in look_up_feet(prg, items, target):
+        entry = {"x": x, "y": y, "reward": reward, "flag_index": FLAG_BYTES[flags // 8], "mask": 0x80 >> flags % 8}
+        flags += 1
+        maps.setdefault((group, number), {"chests": [], "furniture": []})["furniture"].append(entry)
+        report.append({"fc": desc, "map": f"{group:02X}/{number:02X}", "kind": "furniture", "fc_item": desc,
+                       "reward": reward})
     doc = {"format": "dq5chestplace/1",
            "maps": [{"map": f"{g:02X}/{n:02X}", **{k: v for k, v in m.items() if v}} for (g, n), m in sorted(maps.items())]}
     return doc, report
@@ -116,7 +122,59 @@ def port(dq5_path, dq4_path):
 LOWER_SHIFT = 0x1B
 
 
-def base_tables(tables):
+# FC 발밑 숨은 물건(fc dq4chest.feet_items) 가운데 물건·금화를 주는 것을 옮기는 장(뒤 장 맵은 그 장을 옮길 때 화면으로
+# 확인하며 넣는다. 문서 「남은 것」 에 뒤 장 줄이 있다)
+FEET_CHAPTERS = (1, 2, 3)
+# 「그 칸에서 조사」(내용 00~7F, A0~AA 는 1E:$BF4F 표의 물건·금화)는 DQ5 발밑 표(12:E6BE: 선 칸과 그 위·오른쪽 위·오른쪽 칸)의
+# (2x, 2y+1) — 일행이 FC (x, y) 에 선 DQ5 칸(dq4groupbuild.cell)이라 그 칸에 섰을 때만 걸린다
+FOOT_LAYER = 1                                 # 새 그룹 실내 맵의 주인공 층($C3)
+# 「위를 보면」(E5~E9, 1E:$B917·B94B·B964·B97D)은 FC 에서 바로 위 칸의 물건 없는 つぼ·タンス 를 보고 조사하는 것이라, 그 가구
+# 칸에 서랍 표 항목으로 둔다(DQ5 조사는 가구를 두 칸 앞 표보다 먼저 찾아, 두 칸 앞 표로는 빈 つぼ 가 가로막았다)
+FEET_LOOK_UP = {0xE9: "すばやさのたね", 0xE7: "かわのよろい", 0xE6: "やくそう", 0xE5: 50}
+# 발밑 표는 칸 수를 늘리면 옮길 자리가 필요해, DQ4 가 쓰지 않는 DQ5 맵의 ちいさなメダル 등 물건 줄을 차례로 덮고 그 줄의
+# 열림 비트(7E:2240 + flag_index)를 물려받는다(DQ4 는 그 DQ5 맵에 가지 않아 1·2장 기록에서 0). 2240~2242 를 표 밖에서 읽는
+# 명령은 없다(06:B4BE·BAEB·D9A6 의 0C 22xx 는 BRK 0C 의 피연산자). 뒤 장은 이 목록의 남은 줄부터 쓴다
+FREE_FOOT = (0, 4, 9, 10, 11, 12, 15, 16, 17)
+
+
+def _chapter(group):
+    import dq4groupbuild
+    return min(p.get("chapter") or 1 for p in dq4groupbuild.LINKS[group])
+
+
+def _feet(prg, target):
+    for g, k, x, y, c, desc, _ in dq4chest.feet_items(prg):
+        if (g, k) in target and _chapter(target[g, k][0]) in FEET_CHAPTERS:
+            yield target[g, k], x, y, c, f"{g:02X}/{k:02X} ({x},{y}) {desc}"
+
+
+def look_up_feet(prg, items, target):
+    """[(DQ5 맵, x, y, 보상, 설명)]: 「위를 보면」 발밑 물건을 그 위 FC 칸(가구) (x, y−1) 의 DQ5 가구 칸 (2x+1, 2y−1) 에."""
+    out = []
+    for there, x, y, c, desc in _feet(prg, target):
+        if c in FEET_LOOK_UP:
+            gift = FEET_LOOK_UP[c]
+            reward = GOLD + gift if isinstance(gift, int) else items[_fold(gift)]
+            out.append((there, 2 * x + 1, 2 * (y - 1) + 1, reward, desc))
+    return out
+
+
+def feet(dq5_path, dq4_path):
+    """{'foot': [줄]}: 옮긴 1~3장 맵의 FC 발밑 물건(그 칸에서 조사)을 dq5chesttables/1 발밑 줄로."""
+    prg = ines.prg(Path(dq4_path).read_bytes())
+    items = dq5_items(dq5item.Rom(Path(dq5_path).read_bytes()))
+    names, _ = dq4shop.item_names(prg)
+    out = {"foot": []}
+    for (group, number), x, y, c, _ in _feet(prg, placement(prg)):
+        if c < 0x80 or 0xA0 <= c < 0xAB:
+            it = c if c < 0x80 else dq4chest.rd(prg, dq4chest.CHEST_BANK, dq4chest.FLAG_ITEMS + (c & 0x0F))
+            reward = GOLD + (it & 0x7F) * 40 if c >= 0x80 and it & 0x80 else _reward(names, items, it & 0x7F)
+            out["foot"].append({"group": group, "map": number, "x": 2 * x, "y": 2 * y + 1, "layer": FOOT_LAYER,
+                                "reward": reward})
+    return out
+
+
+def base_tables(tables, feet_rows=None):
     """The original chest tables (dq5chestreloc dump) without the DQ5 maps whose records dq4environmentrom
     replaces (TARGETS). Their blocks carry no attributes, so the chest and drawer cells are gone, and
     dq5chestplace refuses a map whose chest cells differ from its count or a drawer entry off a furniture cell.
@@ -130,8 +188,21 @@ def base_tables(tables):
             chests += tables["chests"][start:start + row["count"]]
         start += row["count"]
     lower = [{**e, "flag_index": e["flag_index"] + LOWER_SHIFT} for e in tables["lower"]]
-    return {**tables, "chests": chests, "chest_maps": maps, "lower": lower,
-            "search": [e for e in tables["search"] if (e["group"], e["map"]) not in slots]}
+    out = {**tables, "chests": chests, "chest_maps": maps, "lower": lower,
+           "search": [e for e in tables["search"] if (e["group"], e["map"]) not in slots]}
+    for name, free in (("foot", FREE_FOOT),):
+        new = (feet_rows or {}).get(name, [])
+        if not new:
+            continue
+        if len(new) > len(free):
+            raise ValueError(f"{name}: FC 발밑 {len(new)}줄, 덮을 DQ5 줄 {len(free)}")
+        rows = [dict(e) for e in tables[name]]
+        for slot, row in zip(free, new):
+            if rows[slot]["reward"] >= 0xD000 or (rows[slot]["group"], rows[slot]["map"]) in slots:
+                raise ValueError(f"{name} {slot}: 사건 보상이나 DQ4 가 쓰는 맵의 줄은 덮지 않음")
+            rows[slot].update(row)
+        out[name] = rows
+    return out
 
 
 def main():

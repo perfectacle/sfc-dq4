@@ -101,7 +101,8 @@ class PortTests(unittest.TestCase):
                     mock.patch.object(chestport, "placement", lambda prg: self.PLACEMENT), \
                     mock.patch.object(chestport.dq4chest, "chests", lambda prg, g, k: chests.get((g, k), [])), \
                     mock.patch.object(chestport.dq4chest, "special_codes", lambda prg, which: set(special)), \
-                    mock.patch.object(chestport.dq4block, "pots", lambda prg: pots):
+                    mock.patch.object(chestport.dq4block, "pots", lambda prg: pots), \
+                    mock.patch.object(chestport.dq4chest, "feet_items", lambda prg: []):
                 return chestport.port(dq5, dq4)
 
     def test_chest_cells_rewards_and_report(self):
@@ -170,3 +171,75 @@ class MainTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+DQ5_ROM, FC_ROM = ROOT / "rom" / "dq5.sfc", ROOT / "rom" / "dq4.nes"
+
+
+@unittest.skipUnless(DQ5_ROM.is_file() and FC_ROM.is_file(), "rom/dq5.sfc 와 rom/dq4.nes 가 필요")
+class FeetTests(unittest.TestCase):
+    """FC 발밑 숨은 물건: 그 칸 조사는 덮는 DQ5 발밑 줄로, 「위를 보면」 은 위 가구 칸의 서랍 항목으로."""
+
+    @classmethod
+    def setUpClass(cls):
+        import sys
+        sys.path.insert(0, str(ROOT / "sfc" / "dq5" / "tools"))
+        import dq5chestreloc
+        from dq5map import Rom
+        cls.tables = dq5chestreloc.parse(Rom(DQ5_ROM.read_bytes()))
+        cls.feet = chestport.feet(DQ5_ROM, FC_ROM)
+        cls.base = chestport.base_tables(cls.tables, cls.feet)
+        cls.place, _ = chestport.port(DQ5_ROM, FC_ROM)
+
+    def test_foot_row_lands_on_its_cell(self):
+        self.assertEqual(self.feet["foot"], [{"group": 0x3D, "map": 3, "x": 24, "y": 7, "layer": 1, "reward": 0xB1}])
+
+    def test_look_up_item_sits_in_the_pot_above(self):
+        row = next(m for m in self.place["maps"] if m["map"] == "38/01")
+        self.assertIn(0xAF, [e["reward"] for e in row["furniture"] if (e["x"], e["y"]) == (7, 3)])
+
+    def foot_bits(self):
+        out = set()
+        for slot in chestport.FREE_FOOT[:len(self.feet["foot"])]:
+            r = self.base["foot"][slot]
+            out |= {(0x7E2240 + r["flag_index"], 1 << b) for b in range(8) if r["mask"] & 1 << b}
+        return out
+
+    def test_new_bits_do_not_meet_other_bits_or_chapter_variables(self):
+        import dq4ch2event
+        import dq4ch2slots
+        import dq4ch3slots
+        mine = self.foot_bits()
+        others = set()
+        for i, r in enumerate(self.base["foot"]):
+            if i not in chestport.FREE_FOOT[:len(self.feet["foot"])]:
+                others |= {(0x7E2240 + r["flag_index"], 1 << b) for b in range(8) if r["mask"] & 1 << b}
+        for r in self.base["lower"] + self.base["ahead"]:
+            others |= {(0x7E2190 + (r["flag_index"] | 0x80), 1 << b) for b in range(8) if r["mask"] & 1 << b}
+        drawers = {(0x7E222C + e["flag_index"], e["mask"]) for m in self.place["maps"] for e in m.get("furniture", [])}
+        self.assertEqual(mine & (others | drawers), set())
+        # 장 사건 변수(2·3장 flag 바이트)와 장 넘김이 비우는 맡긴 물건 칸에 닿지 않는다(FC 처럼 주운 것은 장이 바뀌어도 남음)
+        slot_bytes = {0x7E2190 + f for mod in (dq4ch2slots, dq4ch3slots) for s in mod.SLOTS.values() for f in s.flags}
+        cleared = range(dq4ch2event.BANK_ITEMS_AT, dq4ch2event.BANK_ITEMS_AT + dq4ch2event.BANK_ITEMS)
+        for at, _ in mine | drawers:
+            self.assertNotIn(at, slot_bytes, f"{at:06X}")
+            self.assertNotIn(at, cleared, f"{at:06X}")
+
+    def test_foot_bytes_are_not_read_outside_the_table(self):
+        # 2240~2242 를 abs·long 으로 읽는 명령이 원래 롬에 없다(덮은 줄의 비트가 다른 DQ5 코드로 DQ4 에 닿지 않음)
+        d = DQ5_ROM.read_bytes()
+        for at in (0x2240, 0x2241, 0x2242):
+            for op in (0xAD, 0x2D, 0x2C):
+                self.assertNotIn(bytes((op, at & 0xFF, at >> 8)), d)
+            self.assertNotIn(bytes((0xAF, at & 0xFF, at >> 8, 0x7E)), d)
+
+    def test_only_chapters_one_to_three(self):
+        import dq4groupbuild
+        for r in self.feet["foot"]:
+            self.assertIn(min(p.get("chapter") or 1 for p in dq4groupbuild.LINKS[r["group"]]), chestport.FEET_CHAPTERS)
+
+    def test_overwritten_rows_were_dq5_only(self):
+        for slot in chestport.FREE_FOOT[:len(self.feet["foot"])]:
+            old = self.tables["foot"][slot]
+            self.assertLess(old["reward"], 0xD000)
+            self.assertLess(old["group"], 0x36)
