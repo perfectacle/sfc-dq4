@@ -73,7 +73,9 @@ RAFT_CODE = (0x5DF000, 0x5DF800)
 # (실측: 4E 에서 BRK 95 34 가 04:DADA 에서 끝없이 돎). 낮은 뱅크 받침(LOW_STUBS 같은 BRK … / RTL)으로 부른다
 MONSTERS_CODE = (0x4E8000, 0x4EC000)
 # 엔돌(E) 몫의 낮은 뱅크 BRK 받침(dq4neneshop.BRKS). 원래 롬 빈 자리(dq5build free) 가운데 아무 도구도 쓰지 않던 곳
-LOW_STUBS = (0x29FF80, 0x2A0000)
+LOW_STUBS = (0x29FF80, 0x29FFF0)
+# 본몰(B) 몫의 낮은 뱅크 BRK 받침(dq4ch3bonmalmo.LOW_BRKS). 같은 빈 자리의 끝
+BONMALMO_STUBS = (0x29FFF0, 0x2A0000)
 # 3장 넘김·공용 장치 코드(dq4ch3event.CODE_AT~TABLE_AT)와 대화 호출 표(TABLE_AT~CODE_END)
 BASE_CODE = (0x5CC000, 0x5CD000)
 

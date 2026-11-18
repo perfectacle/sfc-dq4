@@ -128,6 +128,38 @@ class BridgeTest(unittest.TestCase):
         back = bytes((0xA5, 0xBC, 0xC9, 0x16, 0x5C, *bm.ENTER_BACK.to_bytes(3, 'little')))
         self.assertIn(back, code)                              # 여우 마을이면 훅이 하던 끝맺음
 
+    def test_window_close_goes_through_the_low_bank_stub(self):
+        # 이 모듈 뱅크에서 BRK 를 바로 쓰면 창 번호가 롬에 쓰인다(dq4ch3slots)
+        from dq4ch3slots import BONMALMO_STUBS
+        (site, orig, new), = [h for h in bm.hooks(_ctx()) if h[0] == BONMALMO_STUBS[0]]
+        self.assertEqual(new, bytes((0x00, 0x95, 0xFF, 0x6B)))
+        self.assertEqual(orig, bytes(len(new)))
+        for key, frames in bm.NANNY_SHUT.items():
+            shut = bm._shut(frames)
+            self.assertIn(bytes((0x22, *bm._al(site))), shut, key)
+            self.assertNotIn(bytes((0x00, 0x95)), shut, key)
+
+    def test_fox_scene_flashes_grey_then_goes_dark(self):
+        # 회색 번쩍임은 지금 색을 목표 색 칸에 옮겨 두고(MVN) 회색과 원래 색을 FLASHES 번 올리고, 밝기를 0 까지 내린다
+        code = bm._fox_dark()
+        self.assertTrue(code.startswith(bytes((0xC2, 0x30, 0xA2, 0x14, 0x39, 0xA0, 0x14, 0x3B))))
+        self.assertIn(bytes((0xA9, bm.FLASHES)), code)
+        self.assertEqual(code.count(bytes((0x09, 0x02, 0x8D, 0x1A, 0x00))), 2)       # $1A bit1: 회색·원래 색
+        self.assertEqual(bm.FADE_LEVELS[-1], 0)
+        self.assertIn(bytes((0xA9, 0x00, 0x8D, 0x1D, 0x00)), code)
+        native, at = bm.native(_ctx())
+        self.assertIn(code, native)
+
+    def test_nanny_windows_close_without_a(self):
+        ctx = _ctx()
+        nanny = next(s for s in bm.scripts(ctx) if s['address'] == bm.SCRIPTS['nanny'][2])['commands']
+        ops = [c['op'] for c in nanny]
+        self.assertNotIn('21', ops)
+        self.assertEqual(ops.count('30'), len(bm.NANNY_SHUT))
+        for k, c in enumerate(nanny):
+            if c['op'] == '30':
+                self.assertEqual(nanny[k + 1]['op'], '37')
+
     def test_hook_replaces_the_sea_call(self):
         (site, orig, new), = [h for h in bm.hooks(_ctx()) if h[0] == bm.FIELD_CALL]
         self.assertEqual(site, bm.FIELD_CALL)
@@ -178,7 +210,7 @@ class TalkTest(unittest.TestCase):
 
     def test_every_message_is_used(self):
         used = {m for name in bm.TALKS for m in self.msgs(name)}
-        used |= {c['args'][0] | c['args'][1] << 8 for s in bm.scripts(self.ctx) for c in s['commands'] if c['op'] == '21'}
+        used |= {c['args'][0] | c['args'][1] << 8 for s in bm.scripts(self.ctx) for c in s['commands'] if c['op'] in ('21', '30')}
         self.assertEqual(set(self.ctx.msg.values()) - used, set())
 
     def test_first_day_meeting_marks_the_scolding(self):

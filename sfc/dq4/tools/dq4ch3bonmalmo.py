@@ -173,13 +173,19 @@ def _join(*parts):
 
 
 # 메시지. FC 원문 뜻대로 옮겼다. 인물은 입말, 서술은 해라체
+def _held(message):
+    """시간이 지나면 닫는 창의 메시지: 끝 코드 1001 은 넷째 줄 뒤에서 밀어 올리며 ▼ 를 기다려(실측) 1018(커서만 내림)로."""
+    assert message[-1] == ch1.END
+    return message[:-1] + [0x1018]
+
+
 MESSAGES = {
     # 왕자 릭(FC 05/01, 대화 061)
     'prince_hello': pages('릭', '저는 릭./이 나라의 왕자예요.', '당신을 여행하는/상인이라 보고/부탁하고 싶은 게/있는데요…….',  # 0837·0838
                           '자세한 이야기는/밤에 무기점/뒤에서…….'),
     'prince_tip': pages('릭', '자세한 이야기는/밤에 무기점/뒤에서…….'),                                               # 0838
-    'nanny_stop': say('왕자님!/그런 천한 자와/이야기하시면/안 됩니다!'),                                              # 03B0
-    'nanny_out': say('자! 나가세요!'),                                                                                 # 03B1
+    'nanny_stop': _held(say('왕자님!/그런 천한 자와/이야기하시면/안 됩니다!')),                                       # 03B0
+    'nanny_out': _held(say('자! 나가세요!')),                                                                          # 03B1
     'prince_night': pages('릭', '아, 와 주셨군요./저예요. 이 성의/왕자 릭이에요.',                                     # 0839
                           '실은 부탁인데요,/다리가 고쳐지면/바로 엔돌에/가 주셨으면 해요.',
                           '그리고 이 편지를/성의 공주에게/전해 주세요.'),
@@ -268,6 +274,82 @@ def _morning():
     return bytes((0xC2, 0x20, 0xA9, *ch2.MORNING.to_bytes(2, 'little'))) + sta(ch2.TIME_AT) + bytes((0xE2, 0x20))
 
 
+CGRAM_NOW, CGRAM_KEEP = 0x7E3914, 0x7E3B14   # 지금 색(NMI 가 $1A bit1 이면 CGRAM 으로 보냄, 00:8EE?) / 밝히기 목표 색
+FLASHES, FLASH_FRAMES = 6, 3                 # FC 084C 뒤 회색 3프레임·원래 색 3프레임을 여섯 번(실측 851~881)
+# 페이드 아웃 뒤 검은 채 기다림. 워프의 맵 불러오기(43프레임쯤)와 합쳐 FC 의 182프레임(실측 894~1075)
+DARK_FRAMES = 139
+FADE_LEVELS = (13, 11, 9, 7, 5, 3, 1, 0)     # 한 프레임에 두 단계씩: FC 페이드 아웃 9프레임(885~893)
+
+
+def grey(c):
+    """BGR555 색의 번쩍임 회색: g = (R + 2G + B) / 4 를 세 채널에. _grey_flash 의 코드와 같은 셈."""
+    g = ((c & 31) + 2 * (c >> 5 & 31) + (c >> 10 & 31)) >> 2
+    return g | g << 5 | g << 10
+
+
+def _upload():
+    return bytes((0xAD, 0x1A, 0x00, 0x09, 0x02, 0x8D, 0x1A, 0x00))      # LDA $1A / ORA #$02 / STA $1A
+
+
+def _grey_flash():
+    """M8·DB 0 에서. 지금 색을 목표 색 칸에 옮겨 둔 뒤 (R + 2G + B)/4 회색과 원래 색을 번갈아 올린다. 목표 색 칸은
+    밝히기(03:A5CE) 동안만 쓰이고 그때는 지금 색과 같아지므로, 지금 색으로 덮어도 다른 연출에 남지 않는다."""
+    lo = lambda a: (a & 0xFF, a >> 8 & 0xFF, a >> 16)  # noqa: E731
+    copy = bytes((0xC2, 0x30, 0xA2, *lo(CGRAM_NOW)[:2], 0xA0, *lo(CGRAM_KEEP)[:2], 0xA9, 0xFF, 0x01,
+                  0x54, 0x7E, 0x7E, 0xF4, 0x00, 0x00, 0xAB, 0xAB, 0xE2, 0x20))           # MVN 지금 → 목표 / DB 0
+    back = bytes((0xC2, 0x30, 0xA2, *lo(CGRAM_KEEP)[:2], 0xA0, *lo(CGRAM_NOW)[:2], 0xA9, 0xFF, 0x01,
+                  0x54, 0x7E, 0x7E, 0xF4, 0x00, 0x00, 0xAB, 0xAB, 0xE2, 0x20))           # MVN 목표 → 지금 / DB 0
+    from dq4chapterbox import wait
+    t, u = 0x1EAE, 0x1EB0                                # 여러 루틴이 함께 쓰는 임시 칸(dq5-text-format)
+    grey = Asm()(copy, 0xA9, FLASHES).label('f')(0x48, 0xC2, 0x30, 0xA2, 0x00, 0x00).label('c')
+    grey(0xBF, *lo(CGRAM_KEEP), 0x48, 0x29, 0x1F, 0x00, 0x8D, *lo(t)[:2])                # LDA keep,X / PHA / R
+    grey(0x68, 0x48, 0x4A, 0x4A, 0x4A, 0x4A, 0x4A, 0x29, 0x1F, 0x00, 0x0A, 0x18, 0x6D, *lo(t)[:2],
+         0x8D, *lo(t)[:2])                                                               # + 2G
+    grey(0x68, 0xEB, 0x4A, 0x4A, 0x29, 0x1F, 0x00, 0x18, 0x6D, *lo(t)[:2], 0x4A, 0x4A,
+         0x8D, *lo(t)[:2])                                                               # + B, / 4
+    grey(0x0A, 0x0A, 0x0A, 0x0A, 0x0A, 0x0D, *lo(t)[:2], 0x8D, *lo(u)[:2])               # g | g << 5
+    grey(0xAD, *lo(t)[:2], 0xEB, 0x0A, 0x0A, 0x0D, *lo(u)[:2], 0x9F, *lo(CGRAM_NOW))     # | g << 10 → 지금 색
+    grey(0xE8, 0xE8, 0xE0, 0x00, 0x02).br(BNE, 'c')(0xE2, 0x20)
+    grey(_upload(), wait(FLASH_FRAMES), back, _upload(), wait(FLASH_FRAMES))
+    grey(0x68, 0x3A).br(BEQ, 'done').brl('f').label('done')                              # PLA / DEC A
+    return grey.bytes()
+
+
+def _fox_dark():
+    """FC 084C 뒤: 회색 번쩍임 여섯 번, 페이드 아웃, 검은 화면(실측)."""
+    from dq4chapterbox import wait
+    fade = b''.join(bytes((0xA9, v, 0x8D, 0x1D, 0x00)) + wait(1) for v in FADE_LEVELS)   # LDA #v / STA $1D
+    return _grey_flash() + fade + wait(DARK_FRAMES)
+
+
+# 유모의 창: FC 는 A 없이 03B0 을 223프레임, 03B1 을 204프레임 뒤 닫는다(실측, 창이 열린 프레임부터). 명령 30 은 글을 다
+# 찍은 뒤 돌아와 찍는 동안만큼 길어지고, 유모가 닿은 뒤 조작이 돌아오기까지 535프레임(FC 524)이었다
+NANNY_SHUT = {'nanny_stop': 223, 'nanny_out': 204}
+
+
+# BRK 처리기는 BRK 가 놓인 뱅크를 DB 로 두어 이 모듈의 뱅크(40 이상)에서는 창 번호를 롬에 쓴다(dq4ch3slots). 그래서
+# BRK 는 낮은 뱅크 받침(BRK … / RTL)으로 부른다
+LOW_BRKS = {'close_all': (0x95, 0xFF)}
+
+
+def low_stubs():
+    """(바이트, {이름: 주소})."""
+    from dq4ch3slots import BONMALMO_STUBS
+    out, where = bytearray(), {}
+    for name, args in LOW_BRKS.items():
+        where[name] = BONMALMO_STUBS[0] + len(out)
+        out += bytes((0x00, *args, 0x6B))
+    if BONMALMO_STUBS[0] + len(out) > BONMALMO_STUBS[1]:
+        raise SystemExit(f'본몰 BRK 받침 {len(out)}바이트가 예약을 넘음')
+    return bytes(out), where
+
+
+def _shut(frames):
+    """창을 연 채 frames 프레임 기다린 뒤 모두 닫는다."""
+    from dq4chapterbox import wait
+    return ENTER + wait(frames) + bytes((0x22,)) + _al(low_stubs()[1]['close_all']) + LEAVE
+
+
 def _next_day():
     """아침으로 두고 날이 바뀜(공용 next_day, FC 15:$9F79). FC 는 묵어도 HP 를 채우지 않는다(실측)."""
     return _morning() + bytes((0x22,)) + _al(ch3.native()[1]['next_day'])
@@ -300,11 +382,13 @@ def native(ctx):
         out.extend(b)
     # 촌장 둘 다 FC 처럼 아침(FC $62ED = 28)·날수 + 1 로 숲 (04,0C) 에 옮긴다. 개가 있으면 여우 장면 flag 를 켠다
     put('rest', ENTER + _next_day() + LEAVE)
-    put('fox_scene', ENTER + _set(FOX_SCENE) + _next_day() + LEAVE)
+    put('fox_scene', ENTER + _fox_dark() + _set(FOX_SCENE) + _next_day() + LEAVE)
     put('room', _room())
     put('fox_event', bytes((0xA0, *_al(at['fox_scene']))) + _warp(FOREST, FOREST_WAKE) + b'\xff')
     put('inn_event', bytes((0xA0, *_al(at['rest']))) + _warp(FOREST, FOREST_WAKE) + b'\xff')
     put('fox_go', dq4prologue._event_start(at['fox_event']))
+    for key, frames in NANNY_SHUT.items():
+        put(f'shut_{key}', _shut(frames))
     put('inn', dq4prologue._event_start(at['inn_event']))
     put('jingle', ENTER + _fanfare(ITEM_SONG) + LEAVE)
     put('bridge_hook', _bridge_hook(SEA_FRAMES, BRIDGE_CELLS))
@@ -335,9 +419,13 @@ def _enter_hook():
 
 
 def hooks(ctx):
-    """필드를 불러올 때 FIELD_CALL 을 다리 훅으로(훅이 원래 대상을 먼저 부름), 입구별 도착 훅 앞에 여우 마을 갈래."""
+    """필드를 불러올 때 FIELD_CALL 을 다리 훅으로(훅이 원래 대상을 먼저 부름), 입구별 도착 훅 앞에 여우 마을 갈래,
+    낮은 뱅크 BRK 받침."""
+    from dq4ch3slots import BONMALMO_STUBS
+    stubs, _ = low_stubs()
     return [(FIELD_CALL, bytes((0x22,)) + _al(SEA_FRAMES), bytes((0x22,)) + _al(ctx.at['bridge_hook'])),
-            (ENTER_SITE, bytes((0x5C,)) + _al(_entrance_hook_at()), bytes((0x5C,)) + _al(ctx.at['enter_hook']))]
+            (ENTER_SITE, bytes((0x5C,)) + _al(_entrance_hook_at()), bytes((0x5C,)) + _al(ctx.at['enter_hook'])),
+            (BONMALMO_STUBS[0], bytes(len(stubs)), stubs)]
 
 
 # ---- 대화 ----
@@ -425,6 +513,9 @@ def scripts(ctx):
     call = lambda a, **kw: _cmd('37', *_al(a), **kw)  # noqa: E731
     poll = lambda a, **kw: _cmd('05', *_al(a), **kw)  # noqa: E731
     msg = lambda k: _cmd('21', *(ctx.msg[k].to_bytes(2, 'little') if ctx.msg else (0, 0)))  # noqa: E731
+    # 창을 연 채 띄우고(30) 정한 프레임 뒤 닫음(A 를 기다리지 않음)
+    timed = lambda k: [_cmd('30', *(ctx.msg[k].to_bytes(2, 'little') if ctx.msg else (0, 0))),  # noqa: E731
+                       call(at[f'shut_{k}'])]
     gone = [_cmd('28', label='gone'), _cmd('52'), _cmd('16')]
     walk = lambda cells: [c for at in cells for c in (_cmd('13', *at), _cmd('14'))]  # noqa: E731
     # 여우: 장면(FOX_SCENE)이 아니면 숨는다. 장면이면 조작을 막고 「예」 까지 빈 뒤 위로 걸어가 사라지고 FOXED
@@ -440,7 +531,7 @@ def scripts(ctx):
     # 유모(FC 15:$A509 가 깨우는 슬롯 07 블록): 왕자가 처음 말을 마치면 조작을 막고 걸어와 03B0, 한 걸음 더 와서 03B1 뒤
     # 그 자리에 남는다(맵을 다시 부르면 제자리)
     nanny = [_wait_on(NANNY_GO), _cmd('3F'), _cmd('1C'), *walk(NANNY_PATH[:-1]), _cmd('2F', FACE_DOWN),
-             *walk(NANNY_PATH[-1:]), msg('nanny_stop'), msg('nanny_out'), _cmd('40'), _cmd('16')]
+             *walk(NANNY_PATH[-1:]), *timed('nanny_stop'), *timed('nanny_out'), _cmd('40'), _cmd('16')]
     # 마을의 개: 개가 따라오면 주인공이 (14,13)에 설 때 짖고 촌장 옆으로 달려간다(주인공 칸도 지나감). 따라 걷는 개를
     # 숨기는 것은 개 따라 걷기 장치 몫
     village_dog = [_cmd('28'), _cmd('52'), _cmd('1E', DOG_SPEED), _if_off(ch3.DOG, 'stay'), _if_on(FOXED, 'stay'),

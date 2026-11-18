@@ -40,6 +40,13 @@ class KindTests(unittest.TestCase):
         self.assertEqual(E.kind([0x318C] * 15, want), '밝음')
         self.assertEqual(E.kind([0x2108] * 14 + [0x001F], want), '다름')
 
+    def test_grey_flash_is_its_own_kind(self):
+        # 여우 마을 촌장 장면의 번쩍임: 색마다 (R + 2G + B)/4 회색. 한 색이라도 어긋나면 다름
+        want = [0x14C8, 0x001F, 0x7C00] + [0x2108] * 12
+        grey = [0x18C6, 0x1CE7, 0x1CE7] + [0x2108] * 12
+        self.assertEqual(E.kind(grey, want), '회색')
+        self.assertEqual(E.kind(grey[:-1] + [0x18C6], want), '다름')
+
 
 class LineReportTests(unittest.TestCase):
     def run_report(self, recs):
