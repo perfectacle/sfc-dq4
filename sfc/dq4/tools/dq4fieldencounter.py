@@ -349,13 +349,42 @@ def field_rate_index(prg, dq5, base, kinds=LAND_KINDS):
     """Index of the DQ5 rate coefficient whose mean cells to a fight, the terrain rate being the FC factor
     (terrain_rates), are nearest two cells per FC step of fc_steps on the FC kinds `kinds` by day and by night:
     the least sum of the ratios' absolute logarithms. A factor of 0 fights in neither engine."""
-    enc = _fc(prg)
     coefs = _coefs(dq5)
-    factors = [f for t in (enc.TERRAIN_DAY, enc.TERRAIN_NIGHT) for k in kinds if (f := enc.rd(prg, t + k))]
+    return min(range(8), key=lambda i: (rate_error(prg, base, coefs[i], kinds), i))
 
-    def error(coef):
-        return sum(abs(math.log(dq5_steps(coef, f) / (2 * fc_steps(prg, base, f)))) for f in factors)
-    return min(range(8), key=lambda i: (error(coefs[i]), i))
+
+def rate_error(prg, base, coef, kinds=LAND_KINDS):
+    """field_rate_index's error of coefficient `coef` for FC base rate `base`; a coefficient that never fights is
+    infinitely wrong."""
+    enc = _fc(prg)
+    factors = [f for t in (enc.TERRAIN_DAY, enc.TERRAIN_NIGHT) for k in kinds if (f := enc.rd(prg, t + k))]
+    steps = [dq5_steps(coef, f) for f in factors]
+    if not all(steps):
+        return math.inf
+    return sum(abs(math.log(s / (2 * fc_steps(prg, base, f)))) for s, f in zip(steps, factors))
+
+
+# 계수 표(23:EA44)에 기본 조우율 28 에 맞는 값이 없어(가장 가까운 2B 로는 풀밭이 FC 보다 15% 드묾) 그 기본의 필드
+# 구역(1~3장에서는 구역 08 하나)만 FC 에 가장 가까운 계수(own_coef)를 coef 훅이 표 대신 준다. 다른 구역은 표 그대로
+OWN_COEF_BASES = (28,)
+COEF_SITE, COEF_ORIG = 0x23E892, bytes.fromhex("A9 00 EB A5 01 A8 B9 44 EA")   # LDA #0 / XBA / LDA $01 / TAY / LDA $EA44,Y
+
+
+@functools.cache
+def own_coef(prg, base):
+    """1~FF 가운데 rate_error 가 가장 작은 계수(같으면 작은 값)."""
+    return min(range(1, 0x100), key=lambda c: (rate_error(prg, base, c), c))
+
+
+def own_coefs(prg, report):
+    """[(DQ5 구역, 계수)]: 기본 조우율이 OWN_COEF_BASES 인 필드 구역(fc_zones·chapter3_zones). report 는 docs 의 보고."""
+    enc = _fc(prg)
+    out = []
+    for z in sorted({*fc_zones(prg), *chapter3_zones(prg)}):
+        base = enc.zone(prg, z)["rate"]
+        if base in OWN_COEF_BASES and f"{z:02X}" in report:
+            out.append((report[f"{z:02X}"]["zone"], own_coef(prg, base)))
+    return out
 
 
 def terrain_rates(prg, dq5):
@@ -912,9 +941,9 @@ def _long(v):
 PICK_BLOCK = 8     # 낮·밤 묶음: 셋째 /256, 넷째 /256, 첫 목록 주소, 둘째 목록 주소, 구역 자료 주소
 
 
-def ch3_code(merchant, picks, items, tables, at=CH3_CODE_AT):
+def ch3_code(merchant, picks, items, tables, coefs=(), at=CH3_CODE_AT):
     """(코드, 라벨). merchant 는 merchant_zones, picks 는 pick_rows, items 는 DQ5 물건 16칸(dq5_drop_items), tables 는
-    fc_tables."""
+    fc_tables, coefs 는 own_coefs."""
     from dq4environmentrom import _Asm
     import dq4ch2event
     flag, bit = chapter3_flag()
@@ -1084,6 +1113,13 @@ def ch3_code(merchant, picks, items, tables, at=CH3_CODE_AT):
     a.label('s_ambush').b(0xA9, 0x01)
     a.label('s_set').b(0x85, 0x71, 0xAF, *_long(BATTLE_FLAGS), 0x29, 0xFC, 0x05, 0x71, 0x8F, *_long(BATTLE_FLAGS))
     a.b(0x5C, *_long(SURPRISE_DONE))
+    # 23:E892 에서(M 8비트, X 16비트, DB 23, X = 구역 × 22): coefs 의 구역이면 그 계수, 아니면 원래처럼 표 23:EA44[$01]
+    a.label('coef')
+    for zone, coef in coefs:
+        a.b(0xE0, *(zone * CH3_ZONE_RECORD).to_bytes(2, 'little')).rel(0xD0, f'coef_not{zone}')  # CPX #구역×22 / BNE
+        a.b(0xA9, 0x00, 0xEB, 0xA9, coef, 0x6B)                                 # LDA #0 / XBA / LDA #계수 / RTL
+        a.label(f'coef_not{zone}')
+    a.b(*COEF_ORIG, 0x6B)
     a.label('zones')
     for zone in merchant:
         a.b(*(zone * CH3_ZONE_RECORD).to_bytes(2, 'little'))
@@ -1119,10 +1155,10 @@ def ch3_code(merchant, picks, items, tables, at=CH3_CODE_AT):
 
 
 def ch3_inputs(prg, dq5, report):
-    """ch3_code 의 (merchant, picks, items)."""
+    """ch3_code 의 (merchant, picks, items, tables, coefs)."""
     table = fc_drop_table(prg)
     return (merchant_zones(report), pick_rows(prg, report), list(zip((t for t, _ in table), dq5_drop_items(prg, dq5))),
-            fc_tables(prg))
+            fc_tables(prg), own_coefs(prg, report))
 
 
 def ch3_labels(prg, dq5, report, at=CH3_CODE_AT):
@@ -1158,6 +1194,8 @@ def ch3_writes(prg, dq5, report, at=CH3_CODE_AT):
     out.append(put(SURPRISE_SITE, bytes((0x5C, *_long(labels['surprise_hook']), 0xEA)), SURPRISE_ORIG,
                    '걸음 전투의 기습·선제를 FC 문턱으로'))
     out.append(put(WAKE_SITE, jsl('wake'), WAKE_ORIG, '필드 여관(떠돌이 상인)에서 깨면 그룹 01 갈래로 가지 않음'))
+    out.append(put(COEF_SITE, jsl('coef') + bytes((0xEA,) * (len(COEF_ORIG) - 4)), COEF_ORIG,
+                   '계수 표에 맞는 값이 없는 기본 조우율의 구역은 FC 에 맞춘 계수로(own_coefs)'))
     out.append(put(LAST_KILL_SITE, LAST_KILL, LAST_KILL_ORIG, '떨어뜨림 후보는 마지막으로 쓰러뜨린 종류(FC)'))
     for site, orig, new in DROP_SPECIES:
         out.append(put(site, new, orig, '떨어뜨림 종류는 마지막으로 쓰러뜨린 종류 $111C(FC, 도망은 바꾸지 않음)'))

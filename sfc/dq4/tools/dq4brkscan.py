@@ -111,7 +111,7 @@ def blobs():
     blob, at = fe.ch3_code([0] * len(fe.CH3_FIELD), [(0, 0, 0, 0, {'day': lists, 'night': lists}, data)],
                            [(0, 0)] * fe.DROP_SLOTS, tables)
     widths = {'encounter': (True, False), 'pick': (True, False), 'surprise_hook': (True, True),
-              'wake': (True, False), 'drop': (True, True), 'talk': (True, True)}
+              'wake': (True, False), 'drop': (True, True), 'talk': (True, True), 'coef': (True, False)}
     out.append(('ch3monsters', fe.CH3_CODE_AT, blob, [(at[k], m8, x8) for k, (m8, x8) in widths.items()]))
     # 입구별 도착·맵별 필드 자리 훅(dq4entrancehook, 뱅크 5B). 표 내용과 상관없이 코드는 같다. 3장 본몰 모듈의 입구 훅이
     # 그 enter 로 이어 간다. 2A:F28D 는 어떤 폭이든 들어오므로 M·X 8비트와 16비트 둘 다 훑는다
