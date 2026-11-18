@@ -68,6 +68,10 @@ DONE3 = Scene('done3', None, None, ENDING2.title, subtitle=DONE, hold=415)
 # 빌드가 같은 목록을 써야 한다. 새 장면은 끝에 더해 앞 장면의 상자 주소를 지킨다
 GAME_SCENES = (PROLOGUE, CHAPTER1, CHAPTER2, ENDING, ENDING2, CHAPTER3, ENDING3, DONE1, DONE2, DONE3)
 SUB_GAP = 1                                 # 상자와 부제 띠 사이 행
+SUB_ROWS = 3                                # 부제 띠 행 수: 16점 글자에 「완」 을 한 행 내릴 자리
+# FC 장 끝 「完」(1A:$B8FF 뒤 화면)은 상자 아래 두 행을 비운 행 16, 열 16(x 128)에서 시작한다. 「완」 도 그 자리에: 상자가 열
+# BOX_COL 에서 시작하므로 상자 안 x 는 128 - 8 × BOX_COL, 띠 안 y 는 8
+DONE_X, DONE_Y = 128 - 8 * BOX_COL, 8
 ROW = BOX_W * 2                             # 상자 타일맵 한 행의 바이트
 
 # FC 팔레트(MesenCE 색): 0 검정, 1 금색(테두리)·흰색(글자), 2 파랑, 3 흰색
@@ -107,15 +111,15 @@ def fc_tile(nes, n):
     return [[(p0[y] >> (7 - x) & 1) | (p1[y] >> (7 - x) & 1) << 1 for x in range(8)] for y in range(8)]
 
 
-def title_mask(font, text, width):
-    """글자 점(16줄 x width). Galmuri 를 한 점 오른쪽으로 겹쳐 굵게 하고 가운데에 둔다."""
+def title_mask(font, text, width, left=None):
+    """글자 점(16줄 x width). Galmuri 를 한 점 오른쪽으로 겹쳐 굵게 하고 가운데에(left 를 주면 그 점에서 시작) 둔다."""
     import dq4menupatch
     cols = dq4menupatch.render(font, text)
     band = [sum((col[y] for col in cols), []) for y in range(dq4menupatch.BAND)]
     w = max((x + 2 for row in band for x, v in enumerate(row) if v), default=0)
     if w > width:
         raise ValueError(f'{text!r}: 상자 안 {width}점을 넘음({w})')
-    left = (width - w) // 2
+    left = (width - w) // 2 if left is None else left
     out = [[0] * width for _ in band]
     for y, row in enumerate(band):
         for x, v in enumerate(row):
@@ -125,8 +129,8 @@ def title_mask(font, text, width):
 
 
 def rows(subtitle):
-    """상자 타일맵의 행 수. 부제가 있으면 상자 아래 SUB_GAP 행을 띄우고 16점 띠(2행)를 더한다."""
-    return BOX_H + (SUB_GAP + 2 if subtitle else 0)
+    """상자 타일맵의 행 수. 부제가 있으면 상자 아래 SUB_GAP 행을 띄우고 띠 SUB_ROWS 행을 더한다."""
+    return BOX_H + (SUB_GAP + SUB_ROWS if subtitle else 0)
 
 
 def box_pixels(nes, font, text=TITLE, subtitle=None):
@@ -153,9 +157,10 @@ def box_pixels(nes, font, text=TITLE, subtitle=None):
             up = mask[y - 1][x] if y else 0
             img[TEXT_ROW * 8 + y][8 + x] = g | (0 if up else 2)
     if subtitle:
-        # 검은 바탕 위라 그림자·파랑 없이 흰 점(색 1)만
-        for y, row in enumerate(title_mask(font, subtitle, W)):
-            img[(BOX_H + SUB_GAP) * 8 + y] = row[:]
+        # 검은 바탕 위라 그림자·파랑 없이 흰 점(색 1)만. 「완」 만 FC 「完」 자리
+        done = subtitle == DONE
+        for y, row in enumerate(title_mask(font, subtitle, W, DONE_X if done else None)):
+            img[(BOX_H + SUB_GAP) * 8 + y + (DONE_Y if done else 0)] = row[:]
     return img, pal
 
 
