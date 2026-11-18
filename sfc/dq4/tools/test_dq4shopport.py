@@ -304,16 +304,17 @@ class ArenaTest(unittest.TestCase):
         import dq4monport
         from kr_patch.fc import ines
         prg = ines.prg(DQ4.read_bytes())
-        picked, skipped = shopport.arena(shopport.dq5item.Rom(DQ5.read_bytes()), prg)
-        # FC 3장 20시합 = 옮긴 것 + 뺀 것(짝 없는 몬스터·그림 아직·폭)
-        self.assertEqual(len(picked) + len(skipped), 20)
-        self.assertIn((6, []), skipped)
         numbers = dq4monport.field_numbers()
+        picked, skipped = shopport.arena(shopport.dq5item.Rom(DQ5.read_bytes()), prg)
+        # FC 3장 20시합 = 옮긴 것 18 + 폭으로 뺀 6·17번. おおめだま(FC 29)는 dq4monport.ARENA 번호, メタルスライム(5C)은
+        # DQ5 같은 이름 그림(LATER)으로 들어간다
+        self.assertEqual(len(picked) + len(skipped), 20)
+        self.assertEqual(skipped, [(6, []), (17, [])])
+        self.assertIn([(numbers[0x40], 10), (dq4monport.ARENA[0x29][0], 1), (numbers[0x40], 10)], picked)
         for match in picked:
             self.assertTrue(1 <= len(match) <= 4)
             for m, odds in match:
                 self.assertIn(m, numbers.values())
-                self.assertNotIn(m, dq4monport.LATER)
                 self.assertTrue(1 <= odds < 0x80)
         # 첫 시합은 FC 표 첫 줄: 46·4D ×3, 배율 1·33
         self.assertEqual(picked[0], [(numbers[0x46], 1)] + [(numbers[0x4D], 33)] * 3)

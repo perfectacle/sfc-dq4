@@ -84,7 +84,8 @@ LAKANABA_STOCK = (0x0B, 0x04, 0x23)
 FC_ARENA_BANK, FC_ARENA_TABLE, FC_ARENA_COUNTS, FC_ARENA_CHAPTER = 0x18, 0xADBA, 0xADAA, 2
 ARENA_MATCHES, ARENA_LEVELS, ARENA_SIZE = 0x23DA97, 0x23DC27, 50
 # 옮기지 않는 FC 시합: 넷의 그림 가로 합이 전투 화면을 넘어 넷째가 놓이지 않는다(dq5monlimits.Pictures.place, 빌드 롬에서
-# dq4ch3townscheck --rom 이 옮긴 시합마다 본다). 놓이지 않은 몬스터에도 걸 수 있어 빼 둔다
+# dq4ch3townscheck --rom 이 옮긴 시합마다 본다). 놓이지 않은 몬스터에도 걸 수 있어 빼 둔다. 그림이 바뀌면 다시 재어
+# 놓이는 시합은 이 집합에서 뺀다(차례를 바꿔도 놓이지 않는 것만 남김)
 ARENA_WIDE = {6, 17}
 ONE_SHOT_AT = _CH3_VARS2 + _CH3_SLOTS['L'].vars2[0]     # 한 번 쓰는 키 바이트(레이크나바 몫)
 # Sellers who come only with a chapter's event (dq4shop.npc_lists 「목록 플래그 n&m」): FC map -> the person list that
@@ -387,7 +388,8 @@ def arena(rom, prg):
     for k in range(fc(FC_ARENA_COUNTS + FC_ARENA_CHAPTER)):
         row = [fc(FC_ARENA_TABLE + 8 * k + i) for i in range(8)]
         slots = [(m, row[4 + i]) for i, m in enumerate(row[:4]) if m != 0xFF]
-        missing = [m for m, _ in slots if m not in numbers or numbers[m] in dq4monport.LATER]
+        # LATER(조우에 아직 없어 NDS 그림을 넣지 않은 번호)는 DQ5 의 같은 이름 몬스터 그림 그대로라 시합에 써도 된다
+        missing = [m for m, _ in slots if m not in numbers]
         if k in ARENA_WIDE:
             skipped.append((k, []))
             continue
