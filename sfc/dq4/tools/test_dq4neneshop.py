@@ -146,8 +146,17 @@ class ShapeTest(unittest.TestCase):
             at = where[name] - slots.LOW_STUBS[0]
             self.assertEqual(code[at:at + len(args) + 2], bytes((0x00, *args, 0x6B)), name)
         stock = shop._stock(VARS2, {k: 0x1234 for k in shop.MESSAGES}, where) + shop._view(VARS2, where)
-        jsl = {bytes((0x22, a & 0xFF, a >> 8 & 0xFF, a >> 16)) for a in where.values()}
+        # pick(팔기 창 95 37)은 네네가 쓰지 않고 dq4ch3towns 가 빌려 쓴다
+        jsl = {bytes((0x22, a & 0xFF, a >> 8 & 0xFF, a >> 16)) for n, a in where.items() if n != 'pick'}
         self.assertTrue(all(j in stock for j in jsl), '받침을 모두 씀')
+
+    def test_picker_is_the_field_item_window(self):
+        # FC 036E 의 창처럼 값이 보이지 않게, 고르기는 팔기 창(BRK 95 37, 값 칸이 있음)이 아니라 필드 도구 창(95 0F)
+        _, where = shop.low_stubs(slots.LOW_STUBS[0])
+        stock = shop._stock(VARS2, {k: 0x1234 for k in shop.MESSAGES}, where)
+        jsl = lambda name: bytes((0x22, *(where[name]).to_bytes(3, 'little')))  # noqa: E731
+        self.assertIn(jsl('items'), stock)
+        self.assertNotIn(jsl('pick'), stock)
 
     def test_number_and_item_codes(self):
         self.assertIn(0x1004, shop.MESSAGES['nene_sales'])
