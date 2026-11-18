@@ -94,7 +94,7 @@ class FlagTest(unittest.TestCase):
         import dq4ch3slots
         import dq4shopport
         lo, hi = dq4ch3slots.SLOTS['L'].vars2
-        self.assertEqual((L.SHOP_KEY_AT, hi - lo), (dq4ch3slots.VARS2_AT + lo, 1))
+        self.assertEqual((L.SHOP_KEY_AT, L.NENE_ANCHOR, hi - lo), (dq4ch3slots.VARS2_AT + lo, dq4ch3slots.VARS2_AT + lo + 1, 2))
         self.assertEqual(dq4shopport.ONE_SHOT_AT, L.SHOP_KEY_AT)
         # 재고 칸 차례가 가게 목록의 덧붙임 차례와 같다(ブーメラン·くさりがま·はじゃのつるぎ)
         self.assertEqual(len(dq4shopport.LAKANABA_STOCK), len(L.GOODS) - L.STOCKED)
@@ -158,17 +158,21 @@ class NativeTest(unittest.TestCase):
                      'rest', 'wake', 'tom_pay', 'night'):
             self.assertEqual(code[at[name] - c.code_at], 0x08, name)     # PHP(ENTER)
 
-    def test_nene_turn_waits_for_the_128_frame_edge_of_the_frame_count(self):
-        # 이동 간격으로는 128프레임 차례가 나오지 않아 FRAME bit6 경계를 기다린다. 첫 걸음은 경계 둘(FC 첫 차례도 128프레임 뒤)
+    def test_nene_turn_counts_128_frames_from_the_map_entry(self):
+        # 이동 간격으로는 128프레임 차례가 나오지 않아 맵에 들 때의 FRAME 을 기준으로 128 마다 걷는다(FC 첫 차례도 128 뒤)
         c = ctx()
         code, at = L.native(c)
-        frame = bytes((0xAF, *L.FRAME.to_bytes(3, 'little'), 0x29, 0x40))
-        for name in ('nene_hi', 'nene_lo'):
-            self.assertIn(frame, code[at[name] - c.code_at:][:len(ENTER) + 8], name)
+        anchor = L.NENE_ANCHOR.to_bytes(3, 'little')
+        mark = code[at['nene_mark'] - c.code_at:][:len(ENTER) + 12]
+        self.assertIn(bytes((0xAF, *L.FRAME.to_bytes(3, 'little'), 0x8F, *anchor)), mark)
+        due = code[at['nene_due'] - c.code_at:][:len(ENTER) + 16]
+        self.assertIn(bytes((0xAF, *L.FRAME.to_bytes(3, 'little'), 0x38, 0xEF, *anchor, 0xC9, 0x80)), due)
         body = next(s['commands'] for s in L.scripts(c) if s['address'] == L.SCRIPTS['nene_walk'][2])
-        polls = [cmd['args'] for cmd in body if cmd['op'] == '05']
-        self.assertEqual(len(polls), 4)
-        self.assertEqual(body.index(next(cmd for cmd in body if cmd.get('label') == 'step')), 3)
+        ops = [cmd['op'] for cmd in body]
+        # 기준은 걸음 고리 밖에서 한 번만 적는다(고리 안이면 차례가 128 + 걸음이 됨)
+        self.assertEqual(ops.index('05'), [i for i, cmd in enumerate(body) if cmd.get('label') == 'step'][0])
+        self.assertEqual(ops.count('37'), 2)
+        self.assertLess(ops.index('37'), ops.index('05'))
 
     @unittest.skipUnless(DQ5.is_file(), 'local source ROM not present')
     def test_frame_count_is_written_only_by_the_nmi_increment(self):
