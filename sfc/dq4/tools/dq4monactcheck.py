@@ -33,6 +33,7 @@ HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools'), str(HERE.parents[2] / 'fc' / 'dq4' / 'tools')]
 
 import dq4monport  # noqa: E402
+import dq4monspecial  # noqa: E402
 
 CORE = 'snes9x'
 SCENE = 'monact'
@@ -49,24 +50,29 @@ AFTER_TURNS = 2
 SHORT_TURNS = 3
 # 차례 창마다 지우는 상태 (행동들, [(주소, 지울 비트)]): 주인공 잠(전투 칸 +5 bit7, 카운터 +8 bit4-5), 몬스터 アストロン
 # (몬스터 칸 +A bit2, 카운터 +F bit6-7). dq5-data-format 「행동할 차례」·「턴이 끝날 때」
+# マホステ(dq4monspecial.MAHOSTE)는 자기에게 상태 44(몬스터 칸 +D bit4, 실측)가 있으면 고르지 않는다
 RESET = (({0x4B, 0x4C}, [(0x7E0765, 0x80), (0x7E0768, 0x30)]),
-         ({0x59}, [(0x7E07CA, 0x04), (0x7E07CF, 0xC0)]))
-# 몬스터는 HP 가 최대(레코드)의 1/4 아래인 편이 없으면 회복 주문을 고르지 않으므로(21:BB42 조건 0E), 이 행동은 첫 차례 창에서
+         ({0x59}, [(0x7E07CA, 0x04), (0x7E07CF, 0xC0)]),
+         ({dq4monspecial.MAHOSTE}, [(0x7E07CD, 0x10)]))
+# 몬스터는 HP 가 최대(레코드)의 1/2 아래인 편이 없으면 회복 주문을 고르지 않으므로(21:BB42 조건 0E, 21:B8E9), 이 행동은 첫 차례 창에서
 # 슬롯 HP(7E:07C0 + 16k + 2)를 HURT 로 둔다
-HEALS = range(0x5A, 0x62)         # ホイミ ~ ベホマズン(몬스터용)
+HEALS = (*range(0x5A, 0x62), dq4monspecial.HERB)   # ホイミ ~ ベホマズン(몬스터용), やくそう(조건 0E)
 HURT = 100
 # 쓰지 못해도 되는 (DQ5 번호, 행동): 까닭
 ALLOWED_UNUSED = {}
 # 부르기(dq4monport.summon_writes): 쓴 뒤 무리(7E:1001~ 몬스터 넷, 7E:1005~ 마릿수 넷)에 부른 몬스터가 있어야 한다.
 # B5 는 부른 몬스터와 같은 몬스터가 한 마리 더(한 마리 무리로 붙였으므로 2 이상), B4 는 ホイミスライム 의 DQ5 번호 무리
-SUMMONS = {dq4monport.SUMMON_SAME: None, dq4monport.SUMMON_FIXED: dq4monport.SUMMON_FIXED_FC}
+# みをまもる+たすけ(dq4monspecial.GUARD)도 같은 몬스터 부르기
+SUMMONS = {dq4monport.SUMMON_SAME: None, dq4monport.SUMMON_FIXED: dq4monport.SUMMON_FIXED_FC, dq4monspecial.GUARD: None}
 # 합체(DQ5 がったいだ 6F)는 같은 몬스터 8마리 무리로 붙여야 고르고, 쓰면 무리가 キングスライム(MERGED) 한 마리
 MERGE, MERGE_COUNT = 0x6F, 8
 
 
 def spell_costs(prg):
-    """{DQ5 몬스터용 주문 번호: FC 주문 MP}. prg 는 FC 롬 PRG."""
-    return {int(e['id'], 16): e['MP'] for e in dq4monport.spell_entries(prg)}
+    """{DQ5 몬스터용 주문 번호·dq4monspecial 의 주문 번호: FC 주문 MP}. prg 는 FC 롬 PRG."""
+    import dq4data
+    costs = {int(e['id'], 16): e['MP'] for e in dq4monport.spell_entries(prg)}
+    return {**costs, **{n: dq4data.spell_mp(prg, fc)[0] for n, fc in dq4monspecial.FC_SPELL_IDS.items()}}
 
 
 def casts(rom, m, cost):

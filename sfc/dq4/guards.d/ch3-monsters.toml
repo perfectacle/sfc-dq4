@@ -14,6 +14,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5battle.lua",
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq4/tools/dq4monport.py",
+  "sfc/dq4/tools/dq4monspecial.py",
   "sfc/dq4/tools/dq4fieldencounter.py",
   "sfc/dq4/tools/dq4fieldencountercheck.py",
   "sfc/dq4/tools/dq4groupbuild.py",

@@ -9,8 +9,9 @@ sys.path[:0] = [str(HERE), str(ROOT / 'sfc' / 'dq5' / 'tools'), str(ROOT / 'fc' 
 import dq4monport  # noqa: E402
 
 DQ4, DQ5 = ROOT / 'rom' / 'dq4.nes', ROOT / 'rom' / 'dq5.sfc'
-# DQ5 몬스터 행동 번호: 39~65 몬스터용 주문, 66~AA 특기(dq5-data-format 「주문과 행동」), AE~B5 부르기(20:D9D6)
-MONSTER_ACTIONS = (*range(0x39, 0xAB), *range(0xAE, 0xB6))
+# DQ5 몬스터 행동 번호: 39~65 몬스터용 주문, 66~AA 특기(dq5-data-format 「주문과 행동」), AE~B5 부르기(20:D9D6),
+# C6~CA 이 해킹이 더한 FC 행동(dq4monspecial)
+MONSTER_ACTIONS = (*range(0x39, 0xAB), *range(0xAE, 0xB6), *range(0xC6, 0xCB))
 
 
 class ActionTableTests(unittest.TestCase):
@@ -52,8 +53,10 @@ class RecordTests(unittest.TestCase):
     def test_every_action_is_one_a_dq5_monster_uses(self):
         import dq4ch1walkcheck as wc
         used = {b for n in range(236) for b in self.dq5[wc.MONSTERS + n * 25 + 17:wc.MONSTERS + n * 25 + 23]}
+        import dq4monspecial
         for fc, a in dq4monport.fc_actions().items():
-            self.assertIn(int(a, 16), used, f'FC {fc:02X} → {a}')
+            if fc not in dq4monspecial.FC_ACTIONS:
+                self.assertIn(int(a, 16), used, f'FC {fc:02X} → {a}')
 
     def test_chapter3_numbers_take_fc_values_and_the_placeholder_picture(self):
         # 3장 새 종: 2장 예비였던 번호에 FC 능력치, 그림 레코드 포인터는 대역 것(그림·색·무리 한도가 지금 대역과 같음)

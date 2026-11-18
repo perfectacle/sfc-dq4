@@ -306,6 +306,8 @@ class FcTest(unittest.TestCase):
             import dq4ch1walkcheck as wc
             data = DQ5.read_bytes()
             used = {f'{b:02X}' for n in range(236) for b in data[wc.MONSTERS + n * 25 + 17:wc.MONSTERS + n * 25 + 23]}
+            import dq4monspecial
+            used |= {f'{n:02X}' for n in dq4monspecial.FC_ACTIONS.values()}   # 이 해킹이 더한 행동 번호
             for d in doc:
                 for k in range(1, 7):
                     self.assertIn(d[f'행동{k}'], used, (d['id'], k))

@@ -117,13 +117,12 @@ def doc(rom, out_dir, only=None):
 # 47 にげだす 는 DQ5 슬라임의 98(필드 68 이 0 이 아니면 주인공 레벨이 구역 레벨 + 4 를 넘을 때만 고름). 48·4B なかまをよぶ
 # 는 고쳐 쓴 DQ5 부르기 칸 B5·B4(summon_writes).
 # 55 がったい(행동 ID 66, 11:$A292: AI 평가 10:$BBAF 가 같은 편 8마리 이상일 때만 남기고, 모두를 キングスライム 30 한 마리로)는
-# 같은 일을 하는 DQ5 がったいだ 6F(조건 12: 같은 몬스터 8마리 이상, 필드 68 ≥ 1)로. 합체한 キングスライム 의 1B マホステ 는 DQ5
-# 몬스터용 주문에 없어 66.
-# DQ5 몬스터 スカラ 는 55·56 둘이 주문 표(범위·대상 루틴·MP)가 같아 앞의 것. ピオリム(1E, 1장 ピクシー)은 DQ5 에 몬스터용도
-# 일행용도 없어 부르기처럼 66
+# 같은 일을 하는 DQ5 がったいだ 6F(조건 12: 같은 몬스터 8마리 이상, 필드 68 ≥ 1)로.
+# DQ5 몬스터 スカラ 는 55·56 둘이 주문 표(범위·대상 루틴·MP)가 같아 앞의 것. DQ5 에 짝이 없는 1B マホステ·1E ピオリム·
+# 49 みをまもる+たすけ·5F やくそう·64 ブーメラン 은 dq4monspecial 의 새 행동 번호 C6~CA
 FC_ACTIONS = {0x0A: '45', 0x10: '4B', 0x11: '4C', 0x12: '4D', 0x13: '4E', 0x16: '53', 0x17: '54', 0x19: '59',
-              0x1A: '52', 0x1C: '55', 0x1E: '66', 0x25: '5B', 0x33: '74', 0x36: '77', 0x38: '8B', 0x43: '96', 0x45: 'A3',
-              0x47: '98', 0x48: 'B5', 0x49: '71', 0x4B: 'B4', 0x5D: 'AA', 0x55: '6F', 0x1B: '66'}
+              0x1A: '52', 0x1C: '55', 0x25: '5B', 0x33: '74', 0x36: '77', 0x38: '8B', 0x43: '96', 0x45: 'A3',
+              0x47: '98', 0x48: 'B5', 0x4B: 'B4', 0x5D: 'AA', 0x55: '6F'}
 # FC 내성 칸 0~E(fc dq4data.RESIST_NAMES 차례: イオ ギラ メラ デイン バギ ヒャド マヌーサ ラリホー ザキ ニフラム マホトラ
 # マホトーン メダパニ ルカニ メガンテ) → DQ5 내성 종류(50~61, dq5-data-format 「동료가 되는 몬스터」 앞 내성 표). DQ5 에만 있는
 # 5F(쓰는 곳 없음)·60 どくのいき·61 なめまわし 등은 FC 에 짝이 없어 바탕 값을 둔다
@@ -135,7 +134,9 @@ def fc_actions():
     import dq4ch1event
     import dq4ch2endor
     import dq4ch2tempe
-    tables = (dq4ch1event.FC_ACTIONS, dq4ch2tempe.FC_ACTIONS, dq4ch2endor.FC_ACTIONS, FC_ACTIONS)
+    import dq4monspecial
+    special = {fc: f'{n:02X}' for fc, n in dq4monspecial.FC_ACTIONS.items()}
+    tables = (dq4ch1event.FC_ACTIONS, dq4ch2tempe.FC_ACTIONS, dq4ch2endor.FC_ACTIONS, FC_ACTIONS, special)
     out = {}
     for t in tables:
         for k, v in t.items():
@@ -366,7 +367,8 @@ SUMMON_FIXED_FC = 0x14
 # 같은 몬스터 부르기 코드: BRK 88 7D(전투원 칸 $42 → 무리 $46)를 쓰므로 40 아래 뱅크. 원래 롬 빈 자리 16:FE10~ 가운데
 # 맡기는 곳 수수료(dq4bankfee) 뒤
 SUMMON_CODE_AT = 0x16FF00
-ACTOR, GROUP_MONSTERS = 0x10F6, 0x1001          # 행동하는 전투원(bit7 몬스터), 무리마다 몬스터
+# 행동하는 전투원(bit7 몬스터)은 $10F5 다. 범위가 자기인 부르기여도 $10F6(대상)은 다른 몬스터일 수 있다(세 무리 전투 실측)
+ACTOR, GROUP_MONSTERS = 0x10F5, 0x1001          # 무리마다 몬스터
 
 
 def summon_code(at=SUMMON_CODE_AT):
@@ -450,12 +452,14 @@ def crit_writes(original):
 
 
 def records_patch(original, prg, path):
-    """record_writes·picture_writes·summon_writes·crit_writes 를 dq5patch/1 파일로. prg 는 FC 롬 PRG."""
+    """record_writes·picture_writes·summon_writes·crit_writes·dq4monspecial.writes 를 dq5patch/1 파일로. prg 는 FC 롬 PRG."""
     import dq4fieldencounter
+    import dq4monspecial
     writes = record_writes(original, dq4fieldencounter.PLACEHOLDERS, prg)
     writes += picture_writes(original, dq4fieldencounter.PLACEHOLDERS)
     writes += summon_writes(original)
     writes += crit_writes(original)
+    writes += dq4monspecial.writes(original, prg, summon_code()[1]['same'])
     path.write_text(json.dumps({'format': 'dq5patch/1', 'name': 'dq4-monster-records', 'writes': writes},
                                ensure_ascii=False))
     return path
