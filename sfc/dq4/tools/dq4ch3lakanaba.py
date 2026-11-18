@@ -924,8 +924,11 @@ def scripts(ctx):
                 _cmd('16', label='stay'), *hide]
     # 아들은 본몰 감옥에서 풀려난 뒤에만(FC 1C:$A29A 가 $6280&04 로 목록을 고침), 아래층 주인은 출근 중에만(1C:$A326)
     # 개를 빌려주면 위로 한 칸 비켜 아래를 보고, 돌려받으면 (다시) 비켜 있다가 개가 우리에 닿으면 제자리로 돌아와 왼쪽을 본다
-    # 낮 네네: FC 블록 2B 처럼 한 차례에 한 걸음(nene_step), 도착을 기다려 되풀이
-    nene_walk = [_cmd('1E', WALK_SPEED), call(at['nene_step']) | {"label": "step"}, _cmd('14'), _cmd('03', target='step')]
+    # 낮 네네: FC 블록 2B 처럼 한 차례에 한 걸음(nene_step), 도착을 기다려 되풀이. FC 는 맵에 든 뒤 첫 차례도 128프레임
+    # 뒤라($7040 = 88) 처음 방향(아래)을 다시 보는 명령 셋으로 첫 걸음을 그만큼 늦춘다(맵에 들자마자 말을 거는 검사가 서
+    # 있는 네네를 만남). 명령 00 은 스크립트를 멈춘다
+    nene_walk = [_cmd('1E', WALK_SPEED), _cmd('2F', 0x44), _cmd('2F', 0x44), _cmd('2F', 0x44),
+                 call(at['nene_step']) | {"label": "step"}, _cmd('14'), _cmd('03', target='step')]
     son = [_if_off(SON_FREED, 'hide'), _cmd('1E', WALK_SPEED), _cmd('1C'), _if_on(ch3.DOG, 'lent'),
            _wait_on(ch3.DOG), _cmd('13', *SON_ASIDE), _cmd('14'), _cmd('2F', 0x44),
            _cmd('09', ch3.DOG[0], ch3.DOG[1], label='lent'), _cmd('13', *SON_ASIDE), _cmd('14'), _cmd('2F', 0x44),
@@ -1037,6 +1040,11 @@ def start_messages(ctx):
     return {(HOUSE, FC_NENE, False): m['home'], (HOUSE, FC_NENE, True): m['night_home'],
             (HOUSE, FC_POPOLO_DAY, False): m['popolo_day'], (HOUSE, FC_POPOLO_NIGHT, True): m['popolo_night'],
             (TOWN, FC_TOM, False): m['tom_hello'], (TOWN, FC_TOM, True): m['tom_night']}
+
+
+def walkers(ctx):
+    """{(맵, DQ5 셀 x, y, 밤)}: 이 모듈이 걷게 바꾼 인물. 낮 네네(nene_walk)."""
+    return {(HOUSE, *NENE['day'], False)}
 
 
 def absent(ctx):
