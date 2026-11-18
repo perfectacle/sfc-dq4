@@ -3150,7 +3150,8 @@ paths = [
   "sfc/dq4/tools/dq4libretro.py",
   "tools/mesence_settings.py",
   # 이 장면들의 픽셀을 만드는 그림 입력. 묶음(groups)으로만 닿는 파일은 PR 에서 이 검사를 걸지 않으므로 여기 직접 적는다.
-  # 장면 밖 그림(필드 타일, 밤 색)과 창 글자 훅 asm 은 넣지 않는다(늘 걸리지 않게)
+  # 장면 밖 그림(필드 타일, 밤 색)은 넣지 않는다(늘 걸리지 않게). 창 꼴·창 글자는 상태 창·사기 목록 장면의 픽셀이다.
+  # dq4windowname 을 빼 두었더니 가게 동료 창 3A 너비를 바꾼 PR(#1245)이 이 검사 없이 머지되어 main 기준이 깨졌다
   "sfc/dq4/tools/dq4environmentart.py",
   "sfc/dq4/tools/dq4environmentmap.py",
   "sfc/dq4/tools/dq4environmentrom.py",
@@ -3160,6 +3161,10 @@ paths = [
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4windowtext.py",
+  "sfc/dq4/tools/dq4windowname.py",
+  "sfc/dq4/tools/dq4windowname.asm",
+  "sfc/dq4/tools/dq4menupatch.py",
+  "sfc/dq4/tools/dq4bg3slot.py",
   "sfc/dq4/tools/dq4titleanimation.py",
   "sfc/dq4/tools/dq4titleassets.py",
   "sfc/dq4/tools/dq4titlelayers.py",
