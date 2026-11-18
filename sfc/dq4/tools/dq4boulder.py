@@ -35,9 +35,8 @@ FALL_X = {0x01: 0x06, 0x02: 0x16}   # 메움 비트 → 그 구덩이 영역 이
 # 인물 표(dq5-map-format 「인물 표」)와 엔진 루틴
 SLOT_X, SLOT_X2, SLOT_Y, SLOT_Y2, SLOT_GFX = 0x3020, 0x30E0, 0x3080, 0x3140, 0x3220
 SLOTS = 0x40                     # 훑을 인물 슬롯 수
-SLOT_FACING = 0x31E0
-# 인물 표 방향 바이트(실측: 목록 방향 down·left·right·up 으로 세운 바위 넷의 7E:31E0)
-FACING_CODES = {'down': 0x44, 'left': 0x22, 'right': 0x11, 'up': 0x88}
+# 7E:32A0 bit4-5: 말을 걸 때 도는 꼴(dq5-map-format 「인물 표」). 10 이면 돌지 않는다
+SLOT_TURN, TURN_MASK, NO_TURN = 0x32A0, 0x30, 0x10
 FOLLOWERS = 0x1967               # 걷는 일행 그림 수(dq4ch1event 「따라 걷는 그림」)
 CLEAR_CELLS = 0x00DEB5           # Y = 슬롯: 지금 자리의 셀 차지 비트를 지움
 SET_CELLS = 0x00DF37             # Y = 슬롯: 지금 자리의 셀 차지 비트를 켬
@@ -245,19 +244,9 @@ def cell(x, y):
     return (2 * x, 2 * y)
 
 
-def _face_back(a):
-    """_rocks 의 body: X 슬롯의 방향 바이트를 몇째(1,S)의 ROCK_FACINGS 방향으로."""
-    from dq4ch2endor import BEQ, BRA
-    codes = [FACING_CODES[f] for f in ROCK_FACINGS]
-    a(0xA3, 0x01)
-    for k in range(1, 4):
-        a(0xC9, k).br(BEQ, f'fb{k}')
-    a(0xA9, codes[0]).br(BRA, 'fbput')
-    for k in range(1, 4):
-        a.label(f'fb{k}')(0xA9, codes[k])
-        if k < 3:
-            a.br(BRA, 'fbput')
-    a.label('fbput')(0x9F, _al(0x7E0000 | SLOT_FACING))
+def _no_turn(a):
+    """_rocks 의 body: X 슬롯이 말을 걸어도 돌지 않게(32A0 bit4-5 = 10)."""
+    a(0xBF, _al(0x7E0000 | SLOT_TURN), 0x29, ~TURN_MASK & 0xFF, 0x09, NO_TURN, 0x9F, _al(0x7E0000 | SLOT_TURN))
 
 
 def ctl(v, at):
@@ -268,9 +257,6 @@ def ctl(v, at):
     따라 놓친다(snes9x 실측. FC 는 걸음마다 1D 이벤트로 본다)."""
     from dq4ch2endor import BCC, BCS, BEQ, BNE, BRA, lda, sta
     a = _asm()(0x08, 0xE2, 0x30)
-    # 말을 걸면 바위 인물이 주인공 쪽으로 돌아 다른 사분면 프레임이 되어 바위가 깨져 보였다(실측). 부를 때마다
-    # 몇째 바위인지(ROCK_FACINGS)의 방향으로 되돌린다
-    _rocks(a, v, _face_back, 'fb')
     a(lda(v(ST)), 0x29, 0x03).br(BEQ, 'idle')
     a(lda(v(CNT)), 0x1A, sta(v(CNT)), 0xC9, TICK).br(BCS, 'tick').brl('out')
     a.label('tick')(0xA9, 0x00, sta(v(CNT))).brl('run')
@@ -303,6 +289,9 @@ def reset(v):
     a = _asm()(0x08, 0xE2, 0x30)
     for k, val in ((BX, START[0]), (BY, START[1]), (ST, 0), (FILL, 0), (CNT, 0)):
         a(0xA9, val, sta(v(k)))
+    # 말을 걸면 바위 인물이 주인공 쪽으로 돌아 다른 사분면 프레임이 되어 바위가 깨져 보였다(실측). FC 바위는 BG 블록이라
+    # 말을 걸면 「아무도 없다」 만 뜨고 그림이 그대로다
+    _rocks(a, v, _no_turn, 'nt')
     a(0x28, 0x6B)
     return a.bytes()
 

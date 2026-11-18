@@ -349,8 +349,9 @@ SHARED_LINES = (0, 1, 2, 3, 4)
 # 넷을 방향만 달리 2×2 로 세운다. 색은 따로 줄을 받지 않고 그 그룹 공용 줄 가운데 가장 가까운 줄의 색으로 고른다
 # (줄 색 계산에 넣으면 같은 그룹 사람 색이 흔들린다). 그림 번호는 DQ4 가 쓰지 않는 것이라 세트를 그 자리에서 바꾼다
 PROPS = (
-    # 북쪽 동굴(SFC 3E/07)의 구르는 바위. NDS 사건 모델 oiwa(큰 바위). 동굴 바닥과 같은 갈색 계열이라 윤곽을 둔다
-    Person((0x2A,), 0x3E, 'oiwa', '구르는 바위', anim='prop', spare=0x2A, outline=True),
+    # 북쪽 동굴(SFC 3E/07)의 구르는 바위. NDS 사건 모델 oiwa(큰 바위). 동굴 바닥과 같은 갈색 계열이라 윤곽을 둔다.
+    # 줄 3: 거리 합이 가장 작은 줄 2 는 밝은 면과 그늘이 한 주황으로 뭉쳐 공처럼 보이지 않았다(줄마다 넣어 본 결과)
+    Person((0x2A,), 0x3E, 'oiwa', '구르는 바위', anim='prop', spare=0x2A, outline=True, line=3),
 )
 PROP_SHEETS = {'oiwa': Path('nds') / 'dq4' / 'chr' / 'model_anim' / 'oiwa_0_0.webp'}
 PROP_SIZE = 32
@@ -1431,7 +1432,7 @@ def prepare(rom, assets, work, base=None, squeeze=False, pins=None):
         rows.append((p, s, layout, limit, tiles(path, layout), steps, line, pal))
     for p in PROPS:
         cells = prop_frames(p, assets)
-        line, pal = prop_line(cells, board, p.group)
+        line, pal = (p.line, board[(p.group, p.line)]) if p.line is not None else prop_line(cells, board, p.group)
         s, layout, limit = target(p, rom)
         if layout != 'simple':
             raise SystemExit(f'{p.role}: 세트 {s:02X} 가 {layout} 배치(사분면은 simple 세트에만 실음)')

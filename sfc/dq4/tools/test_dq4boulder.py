@@ -130,18 +130,18 @@ class NativeTest(unittest.TestCase):
                 self.assertEqual(self.run_ctl((*b.START, 0), cnt, (x, y)) & 3, 2, (cnt, x))
         self.assertEqual(self.run_ctl((*b.START, 0), 0, (x0, y + 1)), 0)
 
-    def test_ctl_turns_rocks_back_to_their_quadrant(self):
-        # 말을 걸면 바위 인물이 주인공 쪽으로 돈다. 부를 때마다 몇째 바위인지의 방향 프레임으로 되돌려야 사분면이 맞는다
+    def test_reset_keeps_rocks_from_turning_when_talked_to(self):
+        # 말을 걸면 바위 인물이 주인공 쪽으로 돌아 사분면이 바뀐다. 맵에 들 때 바위 넷만 돌지 않는 꼴(32A0 bit4-5 = 10)로
         w = bytearray(0x20000)
-        w[V(b.BX) & 0xFFFF], w[V(b.BY) & 0xFFFF] = b.START
-        w[b.SLOT_X], w[b.SLOT_Y] = 0x20, 0x21
-        rocks = range(0x0A, 0x0E)
-        for s in rocks:
-            w[b.SLOT_GFX + s], w[b.SLOT_X + s], w[b.SLOT_Y + s], w[b.SLOT_FACING + s] = b.ROCK_GFX, 6, 11, 0x88
+        rocks, other = range(0x0A, 0x0E), 0x0E
+        for s in (*rocks, other):
+            w[b.SLOT_GFX + s], w[b.SLOT_X + s], w[b.SLOT_TURN + s] = b.ROCK_GFX, 6, 0xE1
+        w[b.SLOT_GFX + other] = 0x01
         c = self.Cpu(self.rom, w)
         c.pbr = BASE >> 16
-        c.jsl(self.at['ctl'], max_steps=20000)
-        self.assertEqual([c.wram[b.SLOT_FACING + s] for s in rocks], [b.FACING_CODES[f] for f in b.ROCK_FACINGS])
+        c.jsl(self.at['reset'], max_steps=20000)
+        self.assertEqual([c.wram[b.SLOT_TURN + s] for s in rocks], [0xD1] * 4)
+        self.assertEqual(c.wram[b.SLOT_TURN + other], 0xE1)
 
     def test_idle_boulder_does_nothing(self):
         self.assertEqual(self.run_step((3, 5, 0x00), [(3, 0x0E)]), (3, 5, 0x00))
@@ -191,7 +191,6 @@ class PictureTest(unittest.TestCase):
         self.assertNotEqual(b.ROCK_GFX, 0x4B)
         self.assertEqual(dq4people.PROP_SHEETS[prop.sheet].name, 'oiwa_0_0.webp')
         self.assertEqual(b.ROCK_FACINGS, dq4people.PROP_QUADRANTS)
-        self.assertEqual(sorted(b.FACING_CODES), sorted(b.ROCK_FACINGS))
 
     def test_safe_rocks_stand_in_quadrant_order(self):
         import dq4ch3safe as safe
