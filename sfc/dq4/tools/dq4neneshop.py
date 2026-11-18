@@ -97,7 +97,8 @@ def _next(a, tag):
 
 
 def _day(vars2):
-    """날이 바뀜(JSL, 아무 모드): 가게 칸마다 rand < C0 이면 값 × (96 + ⌊r × 33/256⌋)/64 를 매상에 더하고 칸을 비운다.
+    """날이 바뀜(JSL, 아무 모드): 가게 칸마다 rand < C0 이면 값 × (96 + ⌊r × 33/256⌋)/64 를 매상에 더하고 칸을 비운 뒤,
+    남은 물건을 앞으로 당긴다(FC 목록처럼 차례가 이어진다).
     셈 칸 TEMP 는 뱅크 00 거울(7E:0000~1FFF)이라 DB 0 에서 절대 주소로 쓴다."""
     from dq4ch2endor import BCC, BCS, BEQ, BNE, lda, sta
     p, acc, cnt = TEMP & 0xFFFF, (TEMP + 3) & 0xFFFF, (TEMP + 6) & 0xFFFF
@@ -129,7 +130,24 @@ def _day(vars2):
     a(0x7A, 0xFA, 0xA9, 0x00, 0x9F, *LONG)
     a.label('next')
     _next(a, 'turn')
-    a(0xE0, *_w(STOCK_END)).br(BCS, 'end').brl('slot')
+    a(0xE0, *_w(STOCK_END)).br(BCS, 'pack').brl('slot')
+    # FC 처럼 팔린 칸을 당긴다(15:$9F79 가 목록에서 빼면 뒤가 앞으로 옴): 비지 않은 칸을 차례대로 앞으로 옮기고 나머지를 비움
+    wp, wc, val = TEMP & 0xFFFF, (TEMP + 2) & 0xFFFF, (TEMP + 4) & 0xFFFF
+    a.label('pack')
+    _first(a)
+    a(0x8E, *_w(wp), 0x8C, *_w(wc))
+    _first(a)
+    a.label('move')(0xBF, *LONG).br(BEQ, 'hole')
+    a(0x8D, *_w(val), 0xDA, 0x5A, 0xAE, *_w(wp), 0xAC, *_w(wc), 0xAD, *_w(val), 0x9F, *LONG)
+    _next(a, 'wnext')
+    a(0x8E, *_w(wp), 0x8C, *_w(wc), 0x7A, 0xFA)
+    a.label('hole')
+    _next(a, 'rnext')
+    a(0xE0, *_w(STOCK_END)).br(BCC, 'move')
+    a(0xAE, *_w(wp), 0xAC, *_w(wc))
+    a.label('clear')(0xE0, *_w(STOCK_END)).br(BCS, 'end')(0xA9, 0x00, 0x9F, *LONG)
+    _next(a, 'cnext')
+    a.br(0x80, 'clear')
     a.label('end')
     return a.bytes() + LEAVE
 

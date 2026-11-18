@@ -9,6 +9,7 @@ dq4chapterwalk)로 「아니요」 갈래와 flag 마다 다른 첫 말을 걷�
   (--only 구간,… · --repeat 2 · --seeds 는 dq4ch3walkcheck 와 같다)
 """
 import json
+import os
 import sys
 import types
 from pathlib import Path
@@ -303,11 +304,88 @@ def check_messages(report, ids):
     return problems
 
 
+# 모험의 서 베끼기·지우기(네네 가게 물건이 기록과 함께 가는지): 3장 출발 상태에서 가게 120칸·매상을 넣고 엔돌 교회
+# (40/00 신부 오른쪽)에서 저장 → 리셋 → 타이틀 「모험의 서를 복사한다」 로 다른 빈 칸에 베끼고(COPY_AT 에 SRAM 덤프)
+# 「모험의 서를 지운다」 로 원본을 지운다(끝에 덤프). 메뉴 입력은 화면으로 맞춘 프레임
+SAVE_SCENE = 'nene_save'
+CHURCH = '40/00,12,20'
+SAVE_STOCK = [(k % 0x30) + 2 for k in range(shop.STOCK_SLOTS)]
+SAVE_SALES = 0x3039
+TITLE_MENU = 'start:4,wait:200,start:4,wait:200,start:4,wait:400'
+COPY_MENU = 'down:6,wait:40,down:6,wait:40,down:6,wait:60,a:6,wait:150,a:6,wait:150,down:6,wait:40,a:6,wait:300'
+DELETE_MENU = 'down:6,wait:40,' * 3 + 'down:6,wait:60,a:6,wait:150,a:6,wait:150,a:6,wait:150,a:6,wait:200'
+COPY_AT, DELETE_AT = 6000, 7000
+
+
+def save_copy(mesence, rom, out):
+    """[문제]. 베낀 뒤 가게 120칸·매상이 같은 기록이 하나 늘고, 지운 뒤 하나 줄어 지운 칸의 가게 칸이 0 인지."""
+    import re
+    import shutil
+    import dq4ch1savecheck as sc
+    import dq4readset
+    from dq5exitcheck import warp_exit
+    dest = out / SAVE_SCENE
+    if dest.exists():
+        shutil.rmtree(dest)
+    (dest / 'warp').mkdir(parents=True)
+    fill = ';'.join(f'{shop.stock_addr(k) & 0xFFFF:04X}={v:02X}' for k, v in enumerate(SAVE_STOCK))
+    sc.walk.run(mesence, rom, sc.walk.WARP, dest / 'warp',
+                {'STATE': str(out / 'head' / 'ch3_open' / 'end.mss'), 'TO': CHURCH, 'SAVE': 'church.mss', 'SETTLE': '120',
+                 'MAXF': '1500', 'WARPEXIT': f'{warp_exit(rom):X}', 'ANYWHERE': '1', 'ROMPATCH': sc.walk.NO_ENCOUNTERS,
+                 'SET': f'{fill};{sales_set(SAVE_SALES)}'}, 300, readset=True)
+    if not (dest / 'warp' / 'church.mss').exists():
+        return ['엔돌 교회에 닿지 못함']
+    dumps = [f'{at}:700000:{sc.SRAM_SIZE}' for at in (COPY_AT, DELETE_AT)]
+    env = dict(os.environ, STATE=str(dest / 'warp' / 'church.mss'), SHOT_DIR=str(dest),
+               NEXT=str(sc.DQ5_TOOLS / 'lua' / 'dq5msg.lua'), RESETAT=str(sc.RESET), MAXF=str(DELETE_AT + 10),
+               PRE=f'{sc.TALK},wait:400,{TITLE_MENU},{COPY_MENU},{DELETE_MENU}', CALLS=sc.MESSAGE,
+               ROMPATCH=sc.walk.NO_ENCOUNTERS, SHOTS=f'{COPY_AT},{DELETE_AT}', DUMP=';'.join(dumps))
+    info = dq4readset.run(mesence, rom, sc.DQ5_TOOLS / 'lua' / 'dq5cdldump.lua', dest, env, timeout=900)
+    why = sc.run_failure(info, 900)
+    if why:
+        return [f'저장·베끼기 장면: {why}']
+    text = (dest / 'msg.txt').read_text(encoding='utf-8') if (dest / 'msg.txt').exists() else ''
+    got = {int(m[1]): bytes.fromhex(m[2]) for m in re.finditer(r'(\d+) dump 700000 ([0-9A-F ]+)', text)}
+    if set(got) != {COPY_AT, DELETE_AT}:
+        return ['SRAM 덤프가 모자람']
+
+    def holding(sram):
+        out = []
+        for n, at in enumerate(sc.SLOTS):
+            rec = sram[at:at + sc.well.SAVE_SIZE]
+            stock = [rec[(shop.stock_addr(k) & 0xFFFF) - 0x2000] for k in range(shop.STOCK_SLOTS)]
+            at = (ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + shop.SALES & 0xFFFF) - 0x2000
+            sales = int.from_bytes(rec[at:at + 3], 'little')
+            out.append((stock == SAVE_STOCK and sales == SAVE_SALES, not any(stock)))
+        return out
+    copied, deleted = holding(got[COPY_AT]), holding(got[DELETE_AT])
+    problems = []
+    if sum(h for h, _ in copied) < 2:
+        problems.append(f'베낀 뒤 가게 120칸이 든 기록 {sum(h for h, _ in copied)}개(2개 이상이어야 함)')
+    if sum(h for h, _ in deleted) != sum(h for h, _ in copied) - 1:
+        problems.append(f'지운 뒤 가게 120칸이 든 기록 {sum(h for h, _ in deleted)}개')
+    gone = [n + 1 for n, ((was, _), (now, empty)) in enumerate(zip(copied, deleted)) if was and not now]
+    if len(gone) != 1 or not deleted[gone[0] - 1][1]:
+        problems.append(f'지운 칸 {gone} 의 가게 칸이 비지 않음')
+    return problems
+
+
 def main():
+    # 걷기 틀(cwk)은 SEGMENTS 밖의 이름을 받지 않으므로 장면 이름을 떼어 내고, 그것만 골랐으면 가벼운 구간 하나로
+    # 출발 상태(head)만 만든다
+    only = None
+    if '--only' in sys.argv:
+        k = sys.argv.index('--only') + 1
+        only = sys.argv[k].split(',')
+        rest = [n for n in only if n != SAVE_SCENE]
+        sys.argv[k] = ','.join(rest or ['king_no_side'])
     rc = cwk.main(chapter(), __doc__, 'dq4build.py --chapter3 의 롬', '같은 롬으로 만든 3장 출발 상태')
     out = Path(sys.argv[sys.argv.index('--out') + 1]).resolve()
     report = json.loads((out / 'results.json').read_text(encoding='utf-8'))
     problems = check_messages(report, message_ids())
+    if only is None or SAVE_SCENE in only:
+        rom = Path(sys.argv[sys.argv.index('--rom') + 1]).resolve()
+        problems += [f'{SAVE_SCENE}: {p}' for p in save_copy(Path(os.environ['MESENCE']), rom, out)]
     for p in problems:
         print(p, flush=True)
     report['message_problems'] = problems

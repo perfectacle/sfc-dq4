@@ -27,18 +27,16 @@ def value(item):
 
 
 def fc_day(stock, rolls):
-    """FC 식: 칸마다 r < C0 이면 값 × (96 + ⌊r × 33/256⌋)/64 를 더하고 칸을 비운다. (매상, 남은 칸)."""
+    """FC 식: 칸마다 r < C0 이면 값 × (96 + ⌊r × 33/256⌋)/64 를 더하고 목록에서 뺀다(뒤가 앞으로 당겨짐). (매상, 남은 칸)."""
     rolls, sales, left = iter(rolls), 0, []
     for item in stock:
         if item is None:
-            left.append(None)
             continue
         if next(rolls) < 0xC0:
             sales += value(item) * (96 + next(rolls) * 33 // 256) // 64
-            left.append(None)
         else:
             left.append(item)
-    return sales, left
+    return sales, left + [None] * (len(stock) - len(left))
 
 
 class DayTest(unittest.TestCase):
