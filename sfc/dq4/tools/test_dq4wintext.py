@@ -15,6 +15,8 @@ import dq4winrule_party as party  # noqa: E402
 import dq4winrule_raw as raw  # noqa: E402
 import dq4winrule_textlines as textlines  # noqa: E402
 import dq4winrule_unknownink as unknownink  # noqa: E402
+import dq4winrule_blankrow as blankrow  # noqa: E402
+import dq4winrule_phrase as phrase  # noqa: E402
 
 W = (2, 2, 12, 20)
 
@@ -147,6 +149,27 @@ class ShapeTests(unittest.TestCase):
         ln = wt.Line(8, [(8, '가', 10, 'galmuri9', 6), (20, wt.UNREAD, 3, None, 6)])
         self.assertEqual(len(unknownink.check(screen_with([ln]))), 1)
         self.assertEqual(unknownink.check(screen_with([line('가나')])), [])
+
+
+class SceneRuleTests(unittest.TestCase):
+    def test_blank_row_inside_a_list(self):
+        rows = [line('가나', y=y) for y in (8, 24, 56, 72)]
+        self.assertEqual(len(blankrow.check(screen_with(rows))), 1)
+        self.assertEqual(blankrow.check(screen_with([line('가나', y=y) for y in (8, 24, 40)])), [])
+
+    def test_fixed_phrase_swapped_while_other_lines_stay(self):
+        class Run:
+            pass
+        menu = ['쓰기', '건네기']
+        a = screen_with([line(t, y=8 + 16 * i) for i, t in enumerate(menu + ['버리기'])])
+        b = screen_with([line(t, y=8 + 16 * i) for i, t in enumerate(menu + ['수비력'])])
+        other = screen_with([line(t, y=8 + 16 * i) for i, t in enumerate(['예', '아니요', '수비력'])])
+        words = frozenset({'쓰기', '건네기', '버리기', '수비력', '예', '아니요'})
+        with mock.patch.object(wt, 'ui_words', return_value=words):
+            with mock.patch.object(wt, 'steady_screens', return_value=[(10, a, {}), (20, b, {})]):
+                self.assertEqual(len(phrase.check_run(Run())), 1)
+            with mock.patch.object(wt, 'steady_screens', return_value=[(10, a, {}), (20, other, {})]):
+                self.assertEqual(phrase.check_run(Run()), [])
 
 
 @unittest.skipUnless(os.environ.get('DQ4_GALMURI'), 'DQ4_GALMURI 가 없음')

@@ -47,6 +47,19 @@ def font(name):
     return MP.Font(name)
 
 
+# 게임 글에 나오는 글자만 글리프 표에 둔다. Galmuri 의 작은 기호(결합 부호·ǀ·ˉ·˙ 등)를 두면 쓰레기 타일 조각이 그 기호로
+# 읽혀 「모르는 잉크」 가 숨는다(장비 창 메시지 조각에서 잼)
+GAME_SIGNS = set('·…「」『』【】！？、。，．：ー〜～♥★☆○●◆◇□■△▲▽▼▶◀→←↑↓＊※＋－×÷＝％＆＃＠')
+
+
+def game_char(ch):
+    """글리프 표에 둘 글자: 한글 음절·자모, 출력되는 ASCII, 가나(원본 DQ5 글자 비교용), GAME_SIGNS."""
+    if ch in NOT_TEXT:
+        return False
+    return ('가' <= ch <= '힣' or 'ㄱ' <= ch <= 'ㅣ' or (ch.isascii() and ch.isprintable() and ch != ' ')
+            or '\u3041' <= ch <= '\u30ff' or '\uff01' <= ch <= '\uff5e' or ch in GAME_SIGNS)
+
+
 ROM_FOR_MESSAGES = None       # dq5message 표를 만들 빌드 롬(use_rom 으로 둠)
 
 
@@ -54,6 +67,7 @@ def use_rom(rom):
     """메시지 원본 글자 표를 이 빌드 롬 기준으로 다시 만든다."""
     global ROM_FOR_MESSAGES
     ROM_FOR_MESSAGES = bytes(rom)
+    _READ_CACHE.clear()
     glyph_table.cache_clear()
     widths.cache_clear()
     band_height.cache_clear()
@@ -67,7 +81,7 @@ def glyph_table(name):
     table = {}
 
     def put(ch, adv, pts):
-        if ch in NOT_TEXT or adv <= 0 or any(not 0 <= y < BAND or not 0 <= x < adv for x, y in pts):
+        if not game_char(ch) or adv <= 0 or any(not 0 <= y < BAND or not 0 <= x < adv for x, y in pts):
             return
         cols = [0] * adv
         for x, y in pts:
@@ -237,6 +251,26 @@ def read_window(screen, w, rom_table):
     grid, words = interior(screen, w)
     if not grid or not grid[0]:
         return []
+    # 같은 창 내용(점 격자·칸 낱말·가려진 칸·엔진 창인지)은 다시 읽지 않는다: 장면의 모습 대부분은 창 하나만 바뀐다
+    covered = frozenset(getattr(screen, '_covered', {}).get(w, ()))
+    partial = w not in (getattr(screen, 'engine_rects', None) or [])
+    key = (w[2] - w[0], w[3] - w[1], tuple(map(tuple, grid)), tuple(sorted(words.items())),
+           frozenset((r - 0, c - 0) for r, c in covered), partial)
+    hit = _READ_CACHE.get(key)
+    if hit is not None:
+        return hit
+    got = _read(screen, w, rom_table, grid, words)
+    if len(_READ_CACHE) > READ_CACHE_SIZE:
+        _READ_CACHE.clear()
+    _READ_CACHE[key] = got
+    return got
+
+
+_READ_CACHE = {}
+READ_CACHE_SIZE = 4096
+
+
+def _read(screen, w, rom_table, grid, words):
     # 바탕색은 칸 줄마다 센다: 창 제목은 위 테두리 줄에 바탕과 글자색을 바꿔 그린다(창 제목 색)
     ink = []
     for r0 in range(0, len(grid), 8):
@@ -563,3 +597,43 @@ def has_final(ch):
     if not '가' <= ch <= '힣':
         return None
     return (ord(ch) - 0xAC00) % 28 != 0
+
+
+def steady_screens(run):
+    """장면 전체(dq4winwatch.Run)의 안정된 모습마다 (처음 프레임, Screen, {사각형: 엔진 창 번호}) 를 차례로. 판정 틀의
+    analyze 와 같이 STEADY 프레임 넘게 보인 모습만, 그 앞까지의 엔진 그리기 차례로 창을 정한다."""
+    import dq4winwatch as ww
+    rec = run.record
+    timeline = ww.stacks(rec.draws)
+    frames = {}
+    for (f, i), nxt in zip(rec.events, rec.events[1:] + [(None, None)]):
+        if i in rec.shots:
+            span = (nxt[0] - f) if nxt[0] is not None else ww.STEADY
+            first, n = frames.get(i, (f, 0))
+            frames[i] = (first, max(n, span))
+    out = []
+    for i, shot in rec.shots.items():
+        first, n = frames.get(i, (shot.frame, 0))
+        if n < ww.STEADY:
+            continue
+        engine, numbers = None, {}
+        for f, stack, nos in timeline:
+            if f >= first:
+                break
+            engine, numbers = stack, nos
+        out.append((first, ww.Screen(shot, run.ref, run.scene, engine, numbers), numbers))
+    return sorted(out, key=lambda v: v[0])
+
+
+CURSOR_MARKS = set('▶▼') | {UNREAD}
+
+
+def phrase(line):
+    """줄 글자열에서 고르기 손가락·넘김 표시·숫자·못 읽음을 뺀 것(목록 고르기·값 바뀜은 문구 바뀜이 아니다)."""
+    return ''.join(ch for ch in line.text if ch not in CURSOR_MARKS and not ch.isdigit()).strip()
+
+
+def drawn_only(line):
+    """창 글자(Galmuri9)·롬 글자 칸으로만 읽은 줄인가(메시지는 글자를 찍어 나가며 바뀌므로 문구 비교에서 뺀다)."""
+    kinds = {k for _, _, _, k, _ in line.items}
+    return bool(kinds) and kinds <= {'galmuri9', 'rom', 'known'}
