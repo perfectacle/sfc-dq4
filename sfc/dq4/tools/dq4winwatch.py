@@ -46,9 +46,10 @@ CORNER, EDGE, SIDE = 0x8C, 0x8D, 0x8E
 PROMPT = 0x7B                   # 메시지 넘김 표시 ▼
 TILES = 0x400                   # 모습에 적는 BG3 글자 칸 수(타일맵 낱말의 칸 번호 10비트 전부)
 SCREEN_H = 224
-# 이만큼 이어 보인 모습만 판정한다. DQ5 는 메시지 창을 열 때 한두 프레임마다 아래에서 두 줄씩 키우며 그 줄의 옛 창을
-# 지워, 그 사이 모습은 옛 창 아래쪽이 없거나 새 창 위 변이 없다(원래 엔진의 동작, 한 모습이 2프레임까지 감)
-STEADY = 3
+# 같은 칸이 이만큼 이어 걸려야 남긴다. DQ5 는 메시지 창을 열 때 한두 프레임마다 아래에서 두 줄씩 키우며 그 줄의 옛 창을
+# 지워, 그 사이 옛 창 아래쪽이나 새 창 위 변이 없는 칸이 프레임마다 옮겨 간다(원래 엔진의 동작)
+PERSIST = 3
+STEADY = PERSIST
 MODES = ('rules', 'report', 'fail')
 
 
@@ -206,13 +207,14 @@ def parse(data, ranges=None):
 
 
 def stacks(draws):
-    """[(프레임, [사각형, …])] 엔진 창 그리기 기록에서 그 프레임 뒤로 떠 있는 창(아래 → 위). 이미 있는 창(맨 위가 아님)을
-    다시 그리면 창을 닫은 뒤의 다시 그리기로 보고, REPAINT_GAP 안에 이어진 그리기로 목록을 새로 짠다."""
+    """[(프레임, [사각형, …], {사각형: 창 번호})] 엔진 창 그리기 기록에서 그 프레임 뒤로 떠 있는 창(아래 → 위). 맨 아래
+    창을 다시 그리면 창을 닫은 뒤의 다시 그리기로 보고, REPAINT_GAP 안에 이어진 그리기로 목록을 새로 짠다."""
     out, cur, last, burst, numbers = [], [], None, False, {}
     for frame, no, rect in draws:
         if burst and last is not None and frame - last > REPAINT_GAP:
             burst = False
-        if not burst and rect in cur and rect != cur[-1]:
+        # 다시 그리기는 맨 아래 창부터다. 닫힌 뒤 목록에 남은 창을 다시 열 때(맨 아래가 아님)는 다시 그리기가 아니다
+        if not burst and len(cur) > 1 and rect == cur[0]:
             cur, burst = [], True
         if rect in cur:
             cur.remove(rect)
@@ -490,15 +492,30 @@ class Screen:
         if not self.engine or not self.window_screen:
             return []
         out = []
-        for i, w in enumerate(self.engine):
+        # 엔진이 그릴 때의 $0A45·$0A46 이 그려진 창보다 큰 창이 있다(가게 물건 목록은 높이 25 로 그린 뒤 물건 수만큼 줄인
+        # 꼴로 보이고, 가게 창 33 은 왼쪽 두 칸이 큼). 모서리 하나를 함께 쓰는(왼쪽 위·오른쪽 아래·오른쪽 위·왼쪽 아래
+        # 차례로 찾음), 네 모서리가 다 있는 화면 창이 있으면 그 자리·크기를 쓴다
+        def corners(w):
+            return ((w[0], w[1]), (w[2], w[3]), (w[0], w[3]), (w[2], w[1]))
+        whole = [w for w in self.found if all(corner_kind(word(self.shot, r, c)) for r, c in corners(w))]
+
+        def snap(w):
+            for k in range(4):
+                for v in whole:
+                    if corners(v)[k] == corners(w)[k]:
+                        return v
+            return w
+        engine = [snap(w) for w in self.engine]
+        self.numbers = {**self.numbers, **{snap(w): n for w, n in self.numbers.items()}}
+        for i, w in enumerate(engine):
             if not (0 <= w[0] <= w[2] < 32 and 0 <= w[1] <= w[3] < 32) or w[2] - w[0] < 1 or w[3] - w[1] < 1:
                 continue
-            above = self.engine[i + 1:]
+            above = engine[i + 1:]
             cells = border_cells(w)
             seen = sum(self.stroke_ok(*cell) or any(inside(v, cell[0], cell[1]) for v in above) for cell in cells)
-            # 위 창에 다 가려진 창은 화면에 없는 것과 같다. 모서리 하나는 선이 보여야 남은 창이다(다른 창 변과 겹친 변
-            # 칸은 그 창의 선으로도 통과하므로 변으로는 가르지 않음)
-            if 2 * seen > len(cells) and any(self.stroke_ok(*cell) for cell in cells[:4]):
+            # 위 창에 다 가려진 창은 화면에 없는 것과 같다. 모서리 둘은 선이 보여야 남은 창이다(다른 창 변과 겹친 변
+            # 칸·모서리 하나는 그 창의 선으로도 통과하므로 변이나 모서리 하나로는 가르지 않음)
+            if 2 * seen > len(cells) and sum(self.stroke_ok(*cell) for cell in cells[:4]) >= 2:
                 out.append(w)
         return out
 
@@ -601,9 +618,19 @@ def check(shot, ref, scene='', only=None, engine=None, numbers=None):
     return bad
 
 
+def structure(shot):
+    """창 틀 꼴: 테두리 타일(08B~095)을 가리키는 칸과 그 낱말. 창을 열고 닫는 애니메이션은 프레임마다 이것을 바꾸고, 이름
+    글자가 깜박이는 깨짐은 바꾸지 않는다."""
+    return frozenset((i, w) for i, w in enumerate(shot.map) if BORDER_FIRST <= w & 0x3FF <= BORDER_LAST)
+
+
 def analyze(folder, rom, scene=None):
-    """[(모습, 처음 프레임, 이어 보인 가장 긴 프레임 수, 걸린 칸)] winwatch.bin 이 없으면 None. STEADY 프레임보다 짧게 보인
-    모습은 보지 않는다."""
+    """[(모습, 처음 프레임, 걸린 칸이 보인 프레임 수, 걸린 칸)] winwatch.bin 이 없으면 None.
+
+    창 틀 꼴(structure)이 PERSIST 프레임 넘게 그대로인 동안의 모습만 판정하고, 그 동안 PERSIST 프레임 넘게 걸린 칸만 남긴다.
+    DQ5 는 창을 열고 닫을 때 여러 프레임에 걸쳐 창을 키우거나 줄이며 지워(원본 DQ5 무작위 입력에서 닫기 한 번이 12프레임
+    남짓), 그 사이 테두리가 끊긴 꼴이 프레임마다 바뀐다. 틀 꼴은 그대로인데 글자·이름 칸만 프레임마다 바뀌며 깨지는 것(한
+    모습이 한 프레임씩만 보임)은 이 길로 걸린다."""
     path = Path(folder) / DATA
     if not path.is_file():
         return None
@@ -611,29 +638,43 @@ def analyze(folder, rom, scene=None):
     shots, events, timeline = rec.shots, rec.events, stacks(rec.draws)
     ref = Ref(rom)
     scene = scene or str(folder)
-    frames = {}
-    for (f, i), nxt in zip(events, events[1:] + [(None, None)]):
-        if i in shots:
-            # 마지막 모습은 장면이 끝날 때까지 보였다(얼마나 더 보였는지는 모름)
-            span = (nxt[0] - f) if nxt[0] is not None else STEADY
-            first, n = frames.get(i, (f, 0))
-            frames[i] = (first, max(n, span))
-    out = []
-    for i, shot in sorted(shots.items()):
-        first, n = frames.get(i, (shot.frame, 0))
-        if n < STEADY:
+    spans = [(f, i, (nxt[0] - f) if nxt[0] is not None else PERSIST)
+             for (f, i), nxt in zip(events, events[1:] + [(None, None)])]
+    # 틀 꼴이 같은 이어진 구간
+    groups, cur, key = [], [], None
+    keys = {}
+    for f, i, span in spans:
+        k = None if i not in shots else keys.setdefault(i, structure(shots[i]))
+        if k != key:
+            if cur:
+                groups.append((key, cur))
+            cur, key = [], k
+        cur.append((f, i, span))
+    if cur:
+        groups.append((key, cur))
+    cache, out, t = {}, {}, 0
+    for key, group in groups:
+        if key is None or sum(span for _, _, span in group) < PERSIST:
             continue
-        # 그린 프레임의 버퍼는 다음 NMI 에 화면으로 가므로 이 모습이 처음 보인 프레임 앞의 그리기까지 본다
-        engine = None
-        numbers = {}
-        for f, stack, nos in timeline:
-            if f >= first:
-                break
-            engine, numbers = stack, nos
-        bad = check(shot, ref, scene, engine=engine, numbers=numbers)
-        if bad:
-            out.append((shot, first, n, bad))
-    return out
+        seen = {}
+        for f, i, span in group:
+            # 그린 프레임의 버퍼는 다음 NMI 에 화면으로 가므로 이 모습이 보인 프레임 앞의 그리기까지 본다
+            while t < len(timeline) and timeline[t][0] < f:
+                t += 1
+            engine, numbers = (timeline[t - 1][1], timeline[t - 1][2]) if t else (None, {})
+            ck = (i, tuple(engine or ()))
+            if ck not in cache:
+                cache[ck] = check(shots[i], ref, scene, engine=engine, numbers=numbers)
+            for b in cache[ck]:
+                c = (b[0], b[1], b[2])
+                first, n, shot, cell = seen.get(c, (f, 0, i, b))
+                seen[c] = (first, n + span, shot, cell)
+        for c, (first, n, i, cell) in seen.items():
+            if n >= PERSIST:
+                f0, m, got = out.get(i, (first, 0, {}))
+                got[c] = cell
+                out[i] = (min(f0, first), max(m, n), got)
+    return [(shots[i], first, n, list(got.values())) for i, (first, n, got) in sorted(out.items())]
 
 
 @dataclass

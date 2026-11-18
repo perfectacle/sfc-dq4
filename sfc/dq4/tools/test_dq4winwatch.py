@@ -214,7 +214,7 @@ class FileTest(unittest.TestCase):
             self.assertEqual([(s.id, first, n) for s, first, n, _ in found], [])
             (Path(d) / ww.DATA).write_bytes(data.replace(record_e(41, 1), record_e(44, 1)))
             found = ww.analyze(d, fake_rom())
-            self.assertEqual([(s.id, first, n) for s, first, n, _ in found], [(2, 20, 4)])
+            self.assertEqual([(s.id, first, n) for s, first, n, _ in found], [(2, 40, 4)])
             self.assertEqual([b[:3] for b in found[0][3]], [(18, 29, '테두리')])
 
     def test_sprite_scene_and_wram_records(self):
@@ -269,6 +269,25 @@ class FileTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, mock.patch.object(ww, 'wram_env', side_effect=lambda ranges=None, attr='WRAM': attr):
             parts = dq4readset.key_parts(__file__, b'rom', __file__, Path(d), {}, ())
         self.assertEqual(parts['winwatch'], ['WRAM', 'OAM_WRAM'])
+
+    def test_flicker_with_the_same_broken_cell_is_caught(self):
+        # 이름이 프레임마다 바뀌어 모습이 한 프레임씩만 보여도, 같은 칸이 계속 깨져 있으면 건다
+        m = [0x2C00] * 1024
+        draw(m, 15, 1, 25, 29)
+        m[18 * 32 + 29] = 0x2001
+        other = list(m)
+        other[18 * 32 + 5] = 0x2000 | TEXT
+        chr_ = vram_chr()
+        used = sorted({w & 0x3FF for w in m} | set(range(0x8B, 0x96)) | {1, TEXT})
+        data = b'V' + struct.pack('<H', ww.VERSION) + struct.pack('<cH', b'R', 0)
+        data += record_s(1, 10, list(enumerate(m)), [(t, chr_[t * 16:t * 16 + 16]) for t in used])
+        data += record_s(2, 11, [(18 * 32 + 5, other[18 * 32 + 5])], [])
+        data += b''.join(record_e(10 + k, 1 + k % 2) for k in range(6)) + record_e(16, -1)
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / ww.DATA).write_bytes(data)
+            found = ww.analyze(d, fake_rom())
+        self.assertTrue(found)
+        self.assertEqual({(b[0], b[1], b[2]) for _, _, _, bad in found for b in bad}, {(18, 29, '테두리')})
 
     def test_broken_file_is_an_error(self):
         with self.assertRaises(ValueError):
