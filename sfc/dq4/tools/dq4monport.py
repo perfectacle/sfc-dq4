@@ -63,7 +63,8 @@ MERGED = {0x30: (0x6B, 107)}
 # 크거나 같고, 그 머리를 다른 그림 번호가 같이 쓰지 않으며(같이 쓰면 그 그림 번호를 쓰는 몬스터의 색 수가 모자람), 행동에
 # 고쳐 쓴 부르기 칸(SUMMON_SAME·SUMMON_FIXED)이 없는 빈 번호에서 작은 것부터
 ART = {0x0A: 0x09, 0x29: 0x52,
-       0x19: 0x80, 0x09: 0xC3, 0x21: 0x8D, 0x13: 0x45}
+       0x19: 0x80, 0x09: 0xC3, 0x21: 0x8D, 0x13: 0x45,
+       0x17: 0x9F, 0x30: 0x7E, 0x22: 0x97, 0x1E: 0xCD}
 # 1·2장 조우·사건 무리·격투장에 아직 나오지 않아 빌드가 그림을 넣지 않는 번호(dq4monport.build 의 appear). 그 장을 옮기면
 # 여기서 빼고, dq4monartcheck 는 이 밖의 번호가 원래 DQ5 그림이면 실패로 본다
 LATER = set()
@@ -90,9 +91,11 @@ def entries():
 
 # 그림자를 그림에서 셈하는(shadow_header) FC 몬스터: 3장에 넣은 종. 2장 PORT·EVENT 는 그림 자리의 원래 그림자 그대로
 SHADOWED = {*ART, 0x5C}
-# 땅에 닿지 않는(날개로 날거나 발 없이 떠 있는) FC 몬스터: 머리 띄움(줄 2)과 띄운 몬스터의 그림자 규칙을 쓴다. 에어랫(날개
-# 귀로 낢), 견습 악마(발 없는 옷자락), 픽시(날개). SHADOWED 밖의 번호에는 아직 쓰지 않는다
-FLOATING = {0x09, 0x10, 0x22}
+# 땅에 닿지 않는 FC 몬스터: 머리 띄움(줄 2)과 띄운 몬스터의 그림자 규칙을 쓴다. NDS 전투 그림(MONSTER/mNNN.anm 의 DSSA
+# 대기 첫 프레임)의 아래 끝이 원점보다 5픽셀 넘게 위인 종이다. 땅에 선 종은 0~+2(슬라임 0, 픽시 +2)이고 에어랫 −16,
+# 흡혈 박쥐 −7. 견습 악마 −4·메라 고스트 −3 은 풀 위로 살짝 뜬 정도라, 최대 24픽셀을 올리는 DQ5 띄움보다 땅이 NDS 화면에
+# 가깝다. 그 값은 롬에서 뽑은 자료라 저장소에 없어 목록으로 둔다. SHADOWED 밖의 번호에는 아직 쓰지 않는다
+FLOATING = {0x09}
 FOOT_ROWS = 4                   # 발 자리로 보는 아래쪽 불투명 픽셀 줄 수
 
 
@@ -435,13 +438,15 @@ def arena_groups(prg):
 def build(dq5, rom, work, zone_report, event_groups, prg=None):
     """빌드 중인 롬(무리·구역·사건 무리가 들어간 것)으로 그림·색 패치 목록을 만들어 경로를 돌려준다. 무리 조합 검사
     (dq5monlimits)는 이 롬의 무리 가운데 나올 수 있는 것(reachable)과, prg(FC 롬 PRG)를 주면 격투장 시합(arena_groups)만
-    센다."""
+    센다. 합체(MERGED)로만 나오는 번호는 합친 뒤의 한 마리 무리로 센다."""
     import dq5monlimits
     import dq5monwrite
     from dq5map import Rom
     work.mkdir(parents=True, exist_ok=True)
     areas, groups = reachable(zone_report, event_groups)
     arena = arena_groups(prg) if prg is not None else {}
+    # がったい(DQ5 6F)는 무리를 그 번호 한 마리로 바꾸므로 조우 무리에 나오지 않는다
+    arena.update({((m, 1, 0),): f'합체 {m:02X}' for m, _ in MERGED.values()})
     counted, area = dq5monlimits.compositions, dq5monlimits.area
 
     def scoped_area(r, n, *rest):

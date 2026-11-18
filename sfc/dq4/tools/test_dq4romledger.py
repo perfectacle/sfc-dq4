@@ -218,6 +218,19 @@ class OriginalTest(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(len(bad), 1)
 
+    def test_picture_item_takes_only_picture_spans(self):
+        # pictures = true 항목은 바이트 상한 대신, 실제로 쓴 바이트가 그림 자리(picture_spans) 밖이면 실패
+        from unittest import mock
+        dq5 = rom(0x1000, o100=b'\1' * 0x100)
+        allow = '[[original]]\nstage = "a"\nat = "00:8000~00:8FFF"\npictures = true\nwhy = "그림"\n'
+        with mock.patch.object(C, 'picture_spans', return_value=[(0x100, 0x180)]):
+            _, _, bad = C.check_original([stage('a', [(0x100, 0x180)])], C.load_allow(allow, ['a']), dq5, b'')
+            self.assertEqual(bad, [])
+            _, _, bad = C.check_original([stage('a', [(0x100, 0x190)])], C.load_allow(allow, ['a']), dq5, b'')
+            self.assertEqual(len(bad), 1)
+            self.assertIn('16바이트', bad[0])
+        self.assertEqual(C.outside(0x100, 0x200, [(0x120, 0x140), (0x1F0, 0x210)]), 0x100 - 0x20 - 0x10)
+
 
 class StagesTest(unittest.TestCase):
     def test_missing_stages_fail_unless_allowed(self):
