@@ -170,6 +170,7 @@ NENE_INTERVAL = 5             # 한 차례 = 명령 3개 × 5 × 8프레임 ≈ 
 NENE_WALKER = (HOUSE, 'day', cell(0x21, 0x02))
 POPOLO = {'day': (cell(0x1B, 0x07),), 'night': (cell(0x1B, 0x07), cell(0x10, 0x02))}
 QUIT_MASTER = (CELLAR, 'day', cell(0x07, 0x04))        # FC 16/02 대화 052
+CELLAR_NIGHT = (0x08, 0x06)                             # 같은 인물의 밤 자리(FC 칸, 대화 22A)
 MASTER_PIC = 0x07
 WALK_SPEED = 0x02               # 인물 명령 1E: 7E:3360(01 이면 한 칸 8프레임)
 CUSTOMER_PIC = 0x40            # FC 손님 겉모습 17(15:$A3FC 의 하나). 이 맵 인물이 이미 쓰는 그림이라 OBJ 자리가 늘지 않음
@@ -360,6 +361,13 @@ def _where():
     a.label('in')(lda(0x7E3020), 0x29, 0x7F, 0xC9, COUNTER_IN[0]).br(BNE, 'end')
     a(lda(0x7E3080), 0x29, 0x7F, 0xC9, COUNTER_IN[1]).br(BNE, 'end')(_set(HERE_))
     return a.label('end').bytes() + LEAVE
+
+
+def _hero_not_at(c):
+    """인물 명령 05: 주인공이 셀 c 에 서 있지 않으면 0."""
+    a = Asm()(ENTER, 0xE2, 0x30, lda(0x7E3020), 0x29, 0x7F, 0xC9, c[0]).br(BNE, 'go')
+    a(lda(0x7E3080), 0x29, 0x7F, 0xC9, c[1]).br(BNE, 'go')
+    return a(POLL_END[1]).label('go')(POLL_END[0]).bytes()
 
 
 def _hero_across():
@@ -697,6 +705,7 @@ def native(ctx):
     import dq4ch1event
     put('refresh', ENTER + dq4ch1event.REFRESH + LEAVE)
     put('hero_across', _hero_across())
+    put('door_free', _hero_not_at(CUSTOMER_IN))
     put('dog_home', _someone_at(DOG_HOME))
     put('nene_cells', nene_cells_table())
     put('nene_step', _nene_step(at))
@@ -868,19 +877,22 @@ def scripts(ctx):
     # 빌린 인물의 속도가 0 이라 걷기(13)가 끝나지 않았다(실측). 한 칸 4프레임으로. 숨기는 것은 DQ5 의 걷는 인물처럼 맵
     # 구석으로 순간이동(2B)해서 한다: 52(사라진 뒤 치우기)·53(나타나기) 뒤에는 걷기가 도착하지 않았다(실측)
     customer = [
-        _cmd('1E', WALK_SPEED), _cmd('1C'), _cmd('2B', *PARK),
+        _cmd('1E', WALK_SPEED), _cmd('2B', *PARK),
         # 기다림은 09 로: 06 으로 같은 자리로 되뛰면 두 명령이 한 프레임 안에서 끝없이 돌아(출근 중 일찍 그만둔 뒤 낮
         # 마을이 멈췄다, 실측) 차례를 넘기지 않는다
         _wait_on(SHIFT) | {"label": "wait"}, _cmd('09', DONE[0], DONE[1]), poll(at['pace']),
         _if_off(SHIFT, 'wait'), _if_on(DONE, 'wait'),
-        # 주인공이 카운터 안에 선 뒤 조작을 막고서야 들어와, 걷는 길((12,53)~(8,53))이 주인공과 겹치지 않는다
-        poll(at['at_counter']), _cmd('3F'), call(at['look']),
+        # FC 손님(16/00 슬롯 11, 05:$A87D)처럼 주인공이 카운터 안에 없어도 문 칸 (12,53)에 나타나 카운터 앞 (8,53)으로 걸어와
+        # 기다리고, 주인공이 카운터 안에 서면 말을 건다. 주인공을 지나가지 않아(1C 없음) 길에 서 있으면 FC 처럼 막혀 서 있다.
+        # 문 칸에 주인공이 서 있으면 나타나지 않는다
+        call(at['look']), poll(at['door_free']),
         _cmd('2B', out_x, out_y), _cmd('13', *COUNTER_OUT), _cmd('14'), _cmd('2F', 0x22),
-        call(at['arrive']),
+        poll(at['at_counter']), _cmd('3F'), call(at['arrive']),
         _and_off(ANSWERED) | {"label": "talk"}, _and_off(AGAIN), call(at['set_talk']), call(talk_here),
         _wait_on(ANSWERED), _if_on(AGAIN, 'talk'),
-        _if_on(CLOSE, 'close'),
-        _cmd('13', out_x, out_y), _cmd('14'), _cmd('2B', *PARK), _cmd('40'), _cmd('03', target='wait'),
+        _if_on(CLOSE, 'close'), _cmd('40'),
+        # 말이 끝나면 조작을 풀고 문 칸으로 걸어 나가 사라진다(FC 는 문 칸에 숨은 채 남지만 맵 구석으로)
+        _cmd('13', out_x, out_y), _cmd('14'), _cmd('2B', *PARK), _cmd('03', target='wait'),
         # 가게를 닫는 것은 주인 스크립트가 맡는다(조작은 막힌 채)
         _cmd('2B', *PARK, label='close'), _cmd('16')]
     first = [_if_on(SEEN, 'hide'), _cmd('1E', WALK_SPEED), _cmd('1C'), poll(at['first_trigger']), _cmd('3F'), msg('late'),
@@ -1030,6 +1042,14 @@ def npc_lists(lists, ctx):
             raise SystemExit(f'{CELLAR}: 아래층 주인 {QUIT_MASTER[2]} 이 {len(hit)}명')
         e = cellar[hit[0]]
         cellar[hit[0]] = _person('cellar', 'day', QUIT_MASTER[2], e["fields"]["facing"], t['quit'], e["fields"]["gfx"])
+        # 밤에는 FC 처럼 같은 인물이 (08,06)에서 누워 잔다(FC 그림 bit7 = 돌려 그림, 대화 22A 는 05C9 「ぐうぐう」). 옮긴
+        # 누운 인물(dq4npcport.LIE, 1장 그룹에만 쓰임)과 같은 자리 셈으로 눕힌다
+        night = [k for k, e in enumerate(cellar) if (e["time"], _at(e)) == ('night', cell(*CELLAR_NIGHT))]
+        if len(night) != 1:
+            raise SystemExit(f'{CELLAR}: 밤 아래층 주인 {CELLAR_NIGHT} 이 {len(night)}명')
+        import dq4chapter1
+        e = cellar[night[0]]
+        cellar[night[0]] = dq4chapter1.lying(*CELLAR_NIGHT, e["fields"]["gfx"], e["fields"]["talk"])
     return [], []
 
 
@@ -1050,10 +1070,12 @@ def walkers(ctx):
 def absent(ctx):
     """{(맵, DQ5 셀 x, y, 밤)}: 처음 상태에서 없는 FC 인물. 카운터 주인은 첫 출근(꾸지람) 전에는 숨고, 문·밖에 세운 FC 슬롯
     11·14·15 와 집의 둘째 네네는 목록에서 뺐다(첫 출근 주인·손님·가게를 닫는 이벤트, 첫머리 자리 네네가 맡음). 아래층 주인은
-    출근 전, 톰 아들과 우리 안 (1B,03) 의 개는 본몰 감옥에서 아들이 풀려나기 전에 숨는다."""
+    출근 전, 톰 아들과 우리 안 (1B,03) 의 개는 본몰 감옥에서 아들이 풀려나기 전에 숨는다. 아래층 주인의 밤 자리는 누운
+    인물로 옮겨(dq4chapter1.lying) 옮긴 인물 보고서의 칸과 달라 말 걸기 검사에서 빼고 dq4ch3lakanabacheck 가 본다."""
     return {(m, *c, time == 'night') for m, time, c in (MASTER, *STRAYS, NENE_WALKER, QUIT_MASTER,
                                                          (TOWN, 'day', SON), (TOWN, 'night', SON),
-                                                         (TOWN, 'day', DOG_HOME), (TOWN, 'night', DOG_HOME))}
+                                                         (TOWN, 'day', DOG_HOME), (TOWN, 'night', DOG_HOME),
+                                                         (CELLAR, 'night', cell(*CELLAR_NIGHT)))}
 
 
 FC_NENE, FC_TOM, FC_SON, FC_MASTER, FC_QUIT = 0x057, 0x058, 0x055, 0x054, 0x052

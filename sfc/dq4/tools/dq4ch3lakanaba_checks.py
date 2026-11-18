@@ -82,8 +82,6 @@ def hero_cases():
 
 
 PASS_NO_DEVICE = {
-    lakanaba.SCRIPTS['customer'][2]: '레이크나바 손님: 주인공이 카운터 안 (4,53)에 선 뒤 조작을 막고서야 카운터 바깥 '
-    '(12,53)~(8,53) 만 걷고, 맵 구석으로 사라진 뒤 조작을 푼다(dq4ch3lakanabacheck 손님 사례)',
     lakanaba.SCRIPTS['first_master'][2]: '레이크나바 첫 출근 주인: 주인공이 문 칸·문 밖(X 14 이상)에 서면 조작을 막고 X 12 '
     '이하((12,53)→(10,53)→(10,49))로만 비킴(heroblock shop-right·shop-above·shop-below)',
     lakanaba.SCRIPTS['master'][2]: '레이크나바 카운터 주인: 가게를 닫을 때만 걷고, 그때 주인공은 손님이 막은 채 카운터 안 '
@@ -99,4 +97,6 @@ PASS_NO_DEVICE = {
 WALK_EXEMPT = {
     lakanaba.SCRIPTS['nene_walk'][2]: '레이크나바 낮 네네: FC 블록 2B 처럼 한 걸음씩 고르는 네이티브(nene_step)가 주인공을 '
     '비롯해 보이는 인물이 선 칸은 고르지 않는다. DQ5 의 돌아다니는 인물처럼 1C 없이 걷는다',
+    lakanaba.SCRIPTS['customer'][2]: '레이크나바 손님: FC 손님처럼 주인공을 지나가지 않고 카운터 바깥 (12,53)~(8,53) 만 '
+    '걷는다. 문 칸에 주인공이 서 있으면 나타나지 않고, 길에 서 있으면 막혀 기다린다(dq4ch3lakanabacheck 손님 사례)',
 }
