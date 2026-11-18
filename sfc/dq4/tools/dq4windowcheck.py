@@ -83,6 +83,16 @@ FULL_BAG = (0x01, 0x50, 0x78, 0x8A, 0xA1, 0xA1, 0xA4, 0xCD, 0xA3, 0xA2, 0xB1, 0x
 NAME = '97338C3799299827'
 
 
+# 주문 → 누가(주인공) → 루라(7E:2063 = FF 이면 일곱째) → ルーラ 목록 창 4D(곳 이름 = 이름 표 0B, 코드 D5). 1~3장에서
+# 목록이 가장 긴 2장의 다섯 곳(サントハイム·エンドール·テンペ·フレノール·사막의 바자, 한 쪽)을 다녀온 것으로 두고 커서를
+# 한 바퀴 돌린다. 곳 이름이 원래 가나 바이트로 찍히면 가나 칸 슬롯 그림을 가리켜 「가나」 로 걸린다
+RULER_VISITED = sum(1 << s for s in (1, 3, 12, 13, 14))
+RULER_POKE = ';'.join(['7E2063=FF', '7E2044=63', '7E2050=63']
+                      + [f'7E{0x2030 + i:04X}={RULER_VISITED >> 8 * i & 0xFF:02X}' for i in range(3)])
+RULER_PRE = (OPEN + 'right:4,wait:30,a:6,wait:60,a:6,wait:80,' + 'down:4,wait:20,' * 6 + 'a:6,wait:120,'
+             + 'down:4,wait:30,' * 6 + 'b:6,wait:60')
+
+
 # --every 로 매 프레임 재는 장면과 구간(장면의 원래 프레임에 더함). 넘친 목록 이름을 묶음 버퍼로 보내는 장면들과, 메시지 창
 # 없이 상태 창에 이름이 넘치는 battle11·party21 의 구간
 EVERY = {'talk02-full': range(60, 700), 'shopwho': range(100, 1900), 'partyitems': range(60, 900),
@@ -146,6 +156,7 @@ def scenes(ship, party, shop=None, battle=None):
         out.append((f'talk{n:02X}', ship, talk.format(n), '', TALK, range(60, 1500, 30)))
     bag = ';'.join(f'7E{0x2056 + i:04X}={b:02X}' for i, b in enumerate(FULL_BAG))
     out.append(('talk02-full', ship, f'{talk.format(2)};{bag}', '', SELL, range(60, 700, 10)))
+    out.append(('ruler', ship, RULER_POKE, '', RULER_PRE, range(60, 900, 10)))
     for seed in (1, 2, 3, 4):
         out.append((f'ship{seed}', ship, '', '', fuzz(seed), range(100, 8000, 50)))
     out.append(('partyitems', party, PARTY_ITEMS, '', PARTY_ITEMS_PRE, range(60, 900, 30)))

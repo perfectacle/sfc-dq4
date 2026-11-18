@@ -382,6 +382,20 @@ class BuildTests(unittest.TestCase):
         out, _ = self.build({5: names})
         self.assertEqual(self.blob(out, self.ptr(out, 5, 2)), fake_columns(FakeFont(wt.NARROW_FONT), names[2]))
 
+    def test_place_names_go_to_the_free_numbers_of_table_0(self):
+        # 곳 이름(표 0B)은 색인의 표 0 자리 80~ 에 칸 번호로. 롬의 표 0B(이 단계에서는 DQ5 이름)는 읽지 않는다
+        out, report = self.build({wt.PLACE_KIND: ['らいんはっと'] * 23}, adopted={'らいんはっと': '라인하트'},
+                                 numbered={wt.PLACE_KIND: {0: '킹 레오', 15: '사란'}})
+        at = wt.index_at(wt.PLACE_KIND, 15)
+        self.assertEqual(at, wt.PLACE_SLOT * 0x200 + (wt.PLACE_BASE + 15) * 2)
+        self.assertEqual(self.blob(out, int.from_bytes(out[at:at + 2], 'little')), fake_columns(FakeFont(), '사란'))
+        self.assertEqual(report[wt.PLACE_KIND], (16, 2))
+        self.assertTrue(all(self.ptr(out, 0, n) == 0 for n in range(wt.PLACE_BASE)))
+
+    def test_place_index_stops_at_its_table(self):
+        with self.assertRaises(ValueError):
+            wt.index_at(wt.PLACE_KIND, 0x100 - wt.PLACE_BASE)
+
     def test_numbered_name_wins_over_rom_name(self):
         names = [''] * 256
         names[3] = 'かさ'
@@ -455,6 +469,14 @@ class ColumnsTests(unittest.TestCase):
             wt.columns(DotFont(0), '가')
         with self.assertRaisesRegex(ValueError, '아래로 넘침'):
             wt.columns(DotFont(10), '가')
+
+
+class PlaceNamesTests(unittest.TestCase):
+    def test_every_ruler_slot_has_its_korean_name(self):
+        import dq4fieldtravel
+        names = wt.place_names()
+        self.assertEqual(sorted(names), sorted(dq4fieldtravel.slot_names()))
+        self.assertEqual((names[2], names[7], names[8], names[14]), ('바트랜드', '이무르', '출발의 마을', '사막의 바자'))
 
 
 class RomNamesTests(unittest.TestCase):

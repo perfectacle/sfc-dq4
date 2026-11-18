@@ -38,7 +38,7 @@ paths = [
 
 [[check]]
 name = "dq4-window-check"
-why = "창 글자 깨짐·비침(#911 가게 동료 창 2프레임 깨짐 shopflip, #916·#918·#922 가게 목록·동료 창·사기 확인 shopwho)과, 넘친 목록 이름이 창보다 늦게 올라와 목록 줄이 비는 프레임·「누가」 창이 닫히며 메시지 창에 이름이 비치는 프레임(--every 로 talk02-full·shopwho·partyitems 와 battle11·party21 구간을 매 프레임 잼)이 다시 생기지 않게"
+why = "창 글자 깨짐·비침(#911 가게 동료 창 2프레임 깨짐 shopflip, #916·#918·#922 가게 목록·동료 창·사기 확인 shopwho)과, 넘친 목록 이름이 창보다 늦게 올라와 목록 줄이 비는 프레임·「누가」 창이 닫히며 메시지 창에 이름이 비치는 프레임(--every 로 talk02-full·shopwho·partyitems 와 battle11·party21 구간을 매 프레임 잼)이 다시 생기지 않게. ルーラ 목록의 곳 이름(이름 표 0B, 코드 D5)이 원래 가나 바이트로 찍혀 깨지던 것(ruler)"
 paths = [
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4windowname.asm",
@@ -1542,7 +1542,7 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-groups-scenes"
-why = "그룹 롬(groups.sfc)의 상자·필드·필드 조우·ルーラ 장면이 그 롬으로 만든 배 선실 출발 상태(dq4freshstate)에서 통과해야 한다. 필드 조우 장면마다 무리 짓기 훅이 지은 무리(몬스터·마릿수)가 난수 상태·시계·장으로 낸 FC 모형(fc_formation)과 같음(1·2·3장 구역). 2장 キメラのつばさ 목록·ルーラ 목록 FC 차례(dq4fieldtravelcheck kimera2·ruler2)"
+why = "그룹 롬(groups.sfc)의 상자·필드·필드 조우·ルーラ 장면이 그 롬으로 만든 배 선실 출발 상태(dq4freshstate)에서 통과해야 한다. 필드 조우 장면마다 무리 짓기 훅이 지은 무리(몬스터·마릿수)가 난수 상태·시계·장으로 낸 FC 모형(fc_formation)과 같음(1·2·3장 구역). 1~3장 キメラのつばさ 목록(FC 처럼 장과 상관없이, 다녀온 칸이 없을 때만 바로 날기)·ルーラ 목록 FC 차례(dq4fieldtravelcheck kimera1·2·3·ruler2)"
 paths = [
   "sfc/dq4/tools/dq4environmentnight.py",
   "sfc/dq4/tools/dq4freshstate.py",

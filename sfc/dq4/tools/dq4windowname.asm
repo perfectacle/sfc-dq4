@@ -1721,6 +1721,18 @@ WnText:
 +
     LDA.b $43
     AND #$00FF
+    CMP.w #!wt_place
+    BNE +
+    ; 곳 이름(표 0B)은 색인에 자리가 없어 표 !wt_place_slot 의 빈 번호 !wt_place_base~ 에 둔다(dq4windowtext.index_at)
+    LDA.b $42
+    AND #$00FF
+    CLC
+    ADC.w #!wt_place_base
+    ASL
+    CLC
+    ADC.w #!wt_place_slot*$200
+    BRA .indexed
++
     CMP #$0008
     BCC +
     JMP .original
@@ -1733,6 +1745,7 @@ WnText:
     ASL
     CLC
     ADC.l $7E0000|!wt_ptr
+.indexed
     TAX
     LDA.l (!wt_bank<<16)|$8000,X
     BNE +
