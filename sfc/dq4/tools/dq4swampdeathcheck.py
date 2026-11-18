@@ -6,6 +6,7 @@ swamp-* 이다.
   torneko  톨네코 혼자 HP 2: 쓰러짐 메시지 586, 전멸 처리 01:88EF 한 번, 금화 반(FC 12:$ADC2)
   safe     같은데 소지품에 철 금고: 금화 그대로(FC 3장)
   scott    톨네코와 용병 スコット, スコット 만 HP 2: 586, スコット 레코드 쓰러짐(+1 bit7 꺼짐)·관(7E:1978), 전멸 없음, 금화 그대로
+  hero     같은 둘에 톨네코만 HP 2: FC 는 손님을 생존자로 세지 않아 585(일행은 죽고 말았다) 뒤 전멸 처리 한 번, 금화 반
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4swampdeathcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/swampdeath
 형식은 sfc/dq4/docs/dq4-field-format.md 「독늪에서 쓰러짐」.
@@ -37,14 +38,15 @@ START = (0x7E, 0x41)
 GOLD = 1000
 RNG = '075B=55;075C=AA'
 MESSAGE, WIPE = '248BAF', '0188EF'
-# 이름 → (일행 용병, 레코드마다 HP, 철 금고, 쓰러질 레코드, 전멸)
-SCENES = {'torneko': ((), (2,), False, (), True), 'safe': ((), (2,), True, (), True),
-          'scott': (('scott',), (0x30, 2), False, (1,), False)}
+# 이름 → (일행 용병, 레코드마다 HP, 철 금고, 쓰러질 레코드, 전멸, 뜰 쓰러짐 메시지)
+SCENES = {'torneko': ((), (2,), False, (), True, (sd.DIED,)), 'safe': ((), (2,), True, (), True, (sd.DIED,)),
+          'scott': (('scott',), (0x30, 2), False, (1,), False, (sd.DIED,)),
+          'hero': (('scott',), (2, 0x30), False, (), True, (sd.WIPED,))}
 TEST = 'idle:16,' + ','.join(['right:40,wait:40,a:8'] * 40)
 
 
 def run(mesence, rom, start, out, name):
-    members, hps, safe, dead, wipe = SCENES[name]
+    members, hps, safe, dead, wipe, want = SCENES[name]
     data = rom.read_bytes()
     dq4groupcheck.WARP = DQ5_TOOLS / 'lua' / 'dq5warptrace.lua'
     cell = dq4fieldport.stand(*START)
@@ -66,8 +68,8 @@ def run(mesence, rom, start, out, name):
     dead_now = [n for n in range(len(hps)) if not ram[0x2041 + 42 * n] & 0x80]
     coffins = [n for n in range(ram[0x1967]) if ram[0x1978 + n] & 0x80]
     problems = []
-    if sd.DIED not in messages:
-        problems.append(f'쓰러짐 메시지 {sd.DIED:03X} 이 뜨지 않음({[f"{m:03X}" for m in messages[:8]]})')
+    if {sd.DIED, sd.WIPED} & set(messages) != set(want):
+        problems.append(f'쓰러짐 메시지 기대 {[f"{m:03X}" for m in want]}, 뜬 것 {[f"{m:03X}" for m in messages[:8]]}')
     if wipes != (1 if wipe else 0):
         problems.append(f'전멸 처리 {wipes}번')
     want_gold = GOLD // 2 if wipe and not safe else GOLD

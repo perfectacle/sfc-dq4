@@ -7,7 +7,7 @@
          같은지 본다. 리셋 뒤 뜬 메시지 번호와 저장할 때·이어 한 뒤의 화면(sNNNNN.png)을 남긴다
   wipe   호이민 합류 뒤 우물 아래 3B/00 으로 가 일행 HP 를 1, 걸음마다 전투(dq4dungeonencountercheck.rates)로 두고
          싸워 전멸한다. 1장 귀환 자리(교회 신부 앞) 하나로 돌아오는지, 깃발이 그대로인지, 금화가 반이 되는지 본다
-  swamp-*  필드 독늪에서 쓰러짐(SWAMP_SCENES): 혼자·둘 다면 전멸 처리·교회·금화 반, 호이민만이면 쓰러짐 메시지·관·금화 그대로
+  swamp-*  필드 독늪에서 쓰러짐(SWAMP_SCENES): 라이안이 쓰러지면 혼자 586·호이민 동행 585 뒤 전멸 처리·교회·금화 반, 호이민은 독늪 피해 없음
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1.sfc --out work/ch1walk
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4ch1savecheck.py --rom work/ch1/dq4-ch1.sfc --states work/ch1walk \\
@@ -67,12 +67,14 @@ WIPE_TO = '3B/00,6,43'
 # 갈리므로, 고정하지 않으면 전투와 무관한 창 코드만 바뀌어도 HP 1 인 일행이 이겨 버리는 일이 생겼다
 WIPE_RNG = '075B=55;075C=AA'
 GOLD = 1000
-# 독늪에서 쓰러짐(dq4swampdeath, FC 1E:$99E1): (구간 끝 상태, 레코드마다 HP, 쓰러질 레코드, 전멸). FC 는 혼자면 전투 전멸과
-# 같은 길(금화 반 → 저장 교회), 한 사람만이면 「…は しんでしまった！」 뒤 관이 따라오고 금화 그대로(실측)
+# 독늪에서 쓰러짐(dq4swampdeath, FC 1E:$99E1): (구간 끝 상태, 레코드마다 HP, 쓰러질 레코드, 전멸, 뜰 메시지). FC 는 라이안이
+# 쓰러지면 혼자면 「…は しんでしまった！」, 호이민이 있으면 「…たちは しんでしまった！」 뒤 전투 전멸과 같은 길(금화 반 → 저장
+# 교회)이고, 호이민은 일행 기록이 없어 독늪 피해를 받지 않는다(실측)
 SWAMP_START = (0x7E, 0x41)
 SWAMP_SHOTS = ','.join(str(f) for f in range(600, 1200, 30))     # 쓰러짐 메시지가 뜨는 동안
-SWAMP_SCENES = {'swamp-alone': ('night_child', (2,), (), True), 'swamp-hoimin': ('hoimin', (0x30, 2), (1,), False),
-                'swamp-both': ('hoimin', (2, 2), (), True)}
+SWAMP_SCENES = {'swamp-alone': ('night_child', (2,), (), True, (0x586,)),
+                'swamp-hoimin': ('hoimin', (0x30, 2), (), False, ()),
+                'swamp-both': ('hoimin', (2, 2), (), True, (0x585,))}
 # 1장 귀환 자리(dq4chapter1.return_places): 전멸하면 마지막에 들어간 마을($195E)의 교회 신부 앞
 RETURNS = {'36/00': [10, 45], '37/00': [50, 9]}
 
@@ -228,7 +230,7 @@ def swamp_scene(mesence, rom, states, out, name):
     난수 고정. 레코드마다 HP 를 두고, 쓰러진 레코드(+1 bit7 꺼짐)·관(7E:1978 bit7)·쓰러짐 메시지·전멸 처리 01:88EF·돌아온
     자리·금화를 본다."""
     import dq4fieldport
-    state, hps, dead, wipe = SWAMP_SCENES[name]
+    state, hps, dead, wipe, want = SWAMP_SCENES[name]
     dq4groupcheck.WARP = DQ5_TOOLS / 'lua' / 'dq5warptrace.lua'
     cell = dq4fieldport.stand(*SWAMP_START)
     gold = f'2019={GOLD & 0xFF:02X};201A={GOLD >> 8:02X};201B=00'
@@ -245,10 +247,8 @@ def swamp_scene(mesence, rom, states, out, name):
     coffins = [n for n in range(ram[0x1967]) if ram[0x1978 + n] & 0x80]
     wiped = any(pc == '0188EF' for _, pc, _ in rows)
     problems = []
-    import dq4swampdeath
-    want = [dq4swampdeath.DIED]
-    if not set(want) <= set(messages):
-        problems.append(f'메시지 {[f"{m:03X}" for m in want]} 이 뜨지 않음({[f"{m:03X}" for m in messages[:8]]})')
+    if {0x585, 0x586} & set(messages) != set(want):
+        problems.append(f'쓰러짐 메시지 기대 {[f"{m:03X}" for m in want]}, 뜬 것 {[f"{m:03X}" for m in messages[:8]]}')
     if wiped != wipe:
         problems.append(f'전멸 처리 01:88EF {"를 지나지 않음" if wipe else "를 지남"}')
     if wipe:
@@ -263,6 +263,8 @@ def swamp_scene(mesence, rom, states, out, name):
             problems.append(f'쓰러진 레코드 {dead_now}·관 {coffins}(기대 {list(dead)})')
         if gold_after != GOLD:
             problems.append(f'금화 {gold_after}(기대 {GOLD}, 한 사람만 쓰러지면 그대로)')
+        if not dead and [ram[0x2042 + 42 * n] for n in range(1, len(hps))] != list(hps[1:]):
+            problems.append(f'호이민 HP {[ram[0x2042 + 42 * n] for n in range(1, len(hps))]}(기대 {list(hps[1:])}, 독늪 피해 없음)')
     return name, {'status': 'failed' if problems else 'passed', 'problems': problems, **got, 'gold': gold_after,
                   'dead': dead_now, 'coffins': coffins, 'messages': [f'{m:03X}' for m in messages[:12]]}
 
