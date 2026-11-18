@@ -13,6 +13,10 @@ FLAGS = {
     'NENE_STOCK0': (shop.stock_addr(0), 0xFF),
     'NENE_MARK': (0x7E0000 | shop.VIEW_MARK, 0xFF),     # 보기 표지는 보기 밖에서 늘 0
     'NENE_LINES': (0x7E0000 | shop.VIEW_COUNT, 0xFF),   # 보기 쪽 줄 수(창 높이)
+    # 보기 창 타일맵 버퍼(7E:5000, 칸마다 낱말)의 오른쪽 테두리 열 x 29: 줄 k(위 테두리 y 3 아래 y 4 + 2k)의 아래 바이트는
+    # 테두리 8E. 바깥 x 30 은 창 밖 빈칸(위 바이트 2C)
+    **{f'NENE_RIGHT{k}': (0x7E5000 + ((4 + 2 * k) * 32 + 29) * 2, 0xFF) for k in range(8)},
+    'NENE_OUTSIDE': (0x7E5000 + (4 * 32 + 30) * 2 + 1, 0xFF),
     # 따라 걷는 첫 칸의 그림 번호(인물 표 7E:3220 + 슬롯 1). 용병은 dq4people 이 NDS 병사·시인을 싣는 그림
     'FOLLOWER1': (0x7E3221, 0xFF),
 }

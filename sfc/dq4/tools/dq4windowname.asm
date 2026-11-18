@@ -648,14 +648,14 @@ pushpc
 org !nene_spot
 ; 남은 줄 n(1~8)마다 높이 2n + 2 인 레코드. FC 창 66 은 마지막 쪽을 남은 줄 수만큼의 창으로 그린다
 NeneViewRecs:
-    db $40|!nene_view_x, !nene_view_y, $8D, $A4, $00, $81, $01, $D3, $FF, $83   ; 1줄
-    db $40|!nene_view_x, !nene_view_y, $8D, $A6, $00, $81, $01, $D3, $FF, $83   ; 2줄
-    db $40|!nene_view_x, !nene_view_y, $8D, $A8, $00, $81, $01, $D3, $FF, $83   ; 3줄
-    db $40|!nene_view_x, !nene_view_y, $8D, $AA, $00, $81, $01, $D3, $FF, $83   ; 4줄
-    db $40|!nene_view_x, !nene_view_y, $8D, $AC, $00, $81, $01, $D3, $FF, $83   ; 5줄
-    db $40|!nene_view_x, !nene_view_y, $8D, $AE, $00, $81, $01, $D3, $FF, $83   ; 6줄
-    db $40|!nene_view_x, !nene_view_y, $8D, $B0, $00, $81, $01, $D3, $FF, $83   ; 7줄
-    db $40|!nene_view_x, !nene_view_y, $8D, $B2, $00, $81, $01, $D3, $FF, $83   ; 8줄
+    db $40|!nene_view_x, !nene_view_y, $8C, $A4, $00, $81, $01, $D3, $FF, $83   ; 1줄
+    db $40|!nene_view_x, !nene_view_y, $8C, $A6, $00, $81, $01, $D3, $FF, $83   ; 2줄
+    db $40|!nene_view_x, !nene_view_y, $8C, $A8, $00, $81, $01, $D3, $FF, $83   ; 3줄
+    db $40|!nene_view_x, !nene_view_y, $8C, $AA, $00, $81, $01, $D3, $FF, $83   ; 4줄
+    db $40|!nene_view_x, !nene_view_y, $8C, $AC, $00, $81, $01, $D3, $FF, $83   ; 5줄
+    db $40|!nene_view_x, !nene_view_y, $8C, $AE, $00, $81, $01, $D3, $FF, $83   ; 6줄
+    db $40|!nene_view_x, !nene_view_y, $8C, $B0, $00, $81, $01, $D3, $FF, $83   ; 7줄
+    db $40|!nene_view_x, !nene_view_y, $8C, $B2, $00, $81, $01, $D3, $FF, $83   ; 8줄
 NeneListRes:
     JSL NeneListFar
     RTS
@@ -1786,10 +1786,33 @@ WnText:
     STA.w !wt_cols
     ; 아홉 글자 고정(전투 몬스터·도구 창)은 자리가 아홉 칸이다. 열 칸 물건 이름은 빌드가 그림 바로 뒤(1 + 열 × 9)에
     ; 붙인 띄어쓰기 없는 아홉 칸 그림으로 바꾸고(dq4windowtext NINE_KIND, 열 수 0 이면 없음), 그 밖의 열 칸 이름은 가나로 둔다
+    ; 네네 보기 창(표지 7·8, FC 창 66 처럼 너비 12)도 열 칸 물건 이름은 아홉 칸 그림으로 그리고, 그림이 없으면 그대로 둔다
     LDA.w !wt_mode
     AND #$00FF
     CMP #$0009
+    BEQ .nine
+    LDA.l !nene_mark
+    AND #$00FF
+    SEC
+    SBC.w #!nene_view_more
+    CMP #$0002
+    BCS +
+    LDA.w !wt_cols
+    CMP #$000A
+    BCC +
+    LDA.b $43
+    AND #$00FF
+    CMP #$0005
     BNE +
+    LDA.l $7E0000|!wt_ptr
+    CLC
+    ADC.w #(10*9)+1                ; 이 파일은 math pri 가 꺼져 왼쪽부터 셈한다(1+10*9 는 99)
+    TAX
+    LDA.l !wt_bank<<16,X
+    AND #$00FF
+    BEQ +
+    BRA .swap
+.nine
     LDA.w !wt_cols
     CMP #$000A
     BCC +
@@ -1801,13 +1824,13 @@ WnText:
 ++
     LDA.l $7E0000|!wt_ptr
     CLC
-    ADC #1+10*9
+    ADC.w #(10*9)+1                ; 이 파일은 math pri 가 꺼져 왼쪽부터 셈한다(1+10*9 는 99)
     TAX
     LDA.l !wt_bank<<16,X
     AND #$00FF
-    BNE ++
+    BNE .swap
     JMP .full
-++
+.swap
     TXA
     STA.l $7E0000|!wt_ptr
     LDX #$0000
