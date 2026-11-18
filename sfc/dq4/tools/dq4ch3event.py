@@ -684,6 +684,12 @@ def absent():
     return {k for ctx in contexts() if hasattr(ctx.module, 'absent') for k in ctx.module.absent(ctx)}
 
 
+def walkers():
+    """{(맵, DQ5 셀 x, y, 밤)}: 사건 모듈이 걷게 바꾼 인물(옮긴 인물 보고서에는 서 있는 인물). dq4npccheck --chapter3 이
+    걷는 인물처럼 다룬다(맵에 들 때 말을 걸지 않고, 걸음을 멈춘 상태 장면에서만 건다)."""
+    return {k for ctx in contexts() if hasattr(ctx.module, 'walkers') for k in ctx.module.walkers(ctx)}
+
+
 def ported_texts():
     """{FC 메시지 묶음: 한글}: 사건 모듈의 PORTED. dq4npcport 가 옮긴 일본어 임시 대사를 같은 메시지 번호에서 덮는다
     (dq4chapter1.messages, 2장 dq4ch2talk 과 같음)."""

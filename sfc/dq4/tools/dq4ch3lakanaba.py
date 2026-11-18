@@ -151,6 +151,20 @@ RETURN_FROM = cell(0x17, 0x05)
 RETURN_PATH = (cell(0x17, 0x03), DOG_HOME)
 NENE = {'day': ch3.NENE_CELL, 'night': cell(0x1D, 0x03)}     # FC 16/01 대화 057
 NENE_FC_STEP = 8                                         # FC 슬롯 07 의 걸음 간격(차례, 머리 바이트 80 = 128프레임)
+# 낮 네네가 걸을 수 있는 FC 16/01 칸: 첫머리 자리 (1B,04)에서 벽 속성(bit7)이 아닌 칸으로 이어진 곳(구역 비트는 모두 0,
+# 아래 오른쪽 방은 문 칸이 벽이라 떨어짐). test_dq4ch3lakanaba 가 FC 롬에서 다시 셈해 견준다
+NENE_CELLS = frozenset({
+    (0x1B, 2), (0x1B, 3), (0x1B, 4), (0x1B, 6), (0x1B, 8), (0x1C, 2), (0x1C, 4), (0x1C, 6), (0x1C, 8),
+    *((0x1D, y) for y in range(1, 9)), *((0x1E, y) for y in range(1, 9)), (0x1F, 3), (0x1F, 4),
+    *((x, y) for x in (0x20, 0x21) for y in (2, 3, 4)), (0x22, 2), (0x22, 3), (0x23, 2), (0x23, 3)})
+NENE_X0, NENE_W, NENE_H = 0x18, 16, 10                   # 칸 표 자리: FC X 18~27 × Y 0~9, 칸마다 1바이트
+NENE_LAST = 0x7E21A2           # 집 맵에서만: bit7 이면 bit0-1 이 네네의 바로 전 방향(맵을 옮기면 지워짐, 손님 PACE 는 마을만)
+# 검사용: 낮 네네(집 낮 목록 차례로 물체 슬롯 0B, 실측)의 이동 간격(7E:3300+슬롯, 명령 16 이 0 으로 두는 칸)을 매
+# 프레임 0 으로 묶어 첫머리 자리 (54,9)에 세우는 POKE. 집에 들기 전부터 건다. 말 걸기 검사가 돌아다니는 네네를 쫓지 않게
+# 한다(걸음 자체는 검사 nene_walk 가 본다). 자리만 되돌리면 말 상대 판정이 따라오지 않았다(실측)
+NENE_SLOT = 0x0B
+NENE_HOLD = f'7E{0x3300 + NENE_SLOT:04X}=00'
+NENE_INTERVAL = 5             # 한 차례 = 명령 3개 × 5 × 8프레임 ≈ 120프레임 + 걸음(FC 128프레임마다 한 걸음)
 # FC 16/01 낮 목록의 둘째 네네(슬롯 07, 돌아다님). FC 는 첫머리 뒤 이쪽만 두지만, 첫머리 자리 (1B,04) 의 네네를 남기고 이쪽을
 # 뺀다(한 사람만 서게, 말 거는 자리가 검사·첫머리 인물과 같게)
 NENE_WALKER = (HOUSE, 'day', cell(0x21, 0x02))
@@ -302,7 +316,7 @@ MESSAGES = {
 }
 
 # 네이티브 안의 자료(dq4brkscan 이 코드로 풀지 않게)
-DATA_ENTRIES = ('ids', 'prices', 'wages', 'looks', 'close_event', 'sleep_event')
+DATA_ENTRIES = ('ids', 'prices', 'wages', 'looks', 'nene_cells', 'close_event', 'sleep_event')
 
 TALKS = ('nene', 'popolo_day', 'popolo_night', 'late', 'master', 'quit', 'buyer_intro', 'buyer', 'seller', 'tom',
          'son')
@@ -352,6 +366,57 @@ def _hero_across():
     """인물 명령 05: 주인공이 카운터 바깥(손님 쪽)이면 0."""
     a = Asm()(ENTER, 0xE2, 0x30, lda(0x7E3020), 0x29, 0x7F, 0xC9, COUNTER_X).br(BCS, 'go')
     return a(POLL_END[1]).label('go')(POLL_END[0]).bytes()
+
+
+def nene_cells_table():
+    """NENE_CELLS 의 칸 표: (Y × 16 + X − 18) 번째 바이트가 1 이면 걸을 수 있음."""
+    return bytes(1 if (NENE_X0 + i % NENE_W, i // NENE_W) in NENE_CELLS else 0 for i in range(NENE_W * NENE_H))
+
+
+def _nene_step(at):
+    """인물 명령 37: FC 블록 2B(1F:$D8D3) 한 차례. rand(4) 로 방향을 고르되 바로 전 방향의 반대면 세 번까지 다시 뽑고,
+    그 칸이 칸 표 밖이거나 다른 보이는 인물이 서 있으면 걷지 않는다. 걸으면 명령 13 처럼 목표(3560·35A0)를 적고
+    00:E808 로 걸음을 시작한다. 걷지 않으면 목표를 지금 자리로 둬 뒤의 14 가 곧 끝난다. 방향 0 위·1 오른쪽·2 아래·3 왼쪽."""
+    a = Asm()(ENTER, 0xE2, 0x30)
+    # 쌓기: 방향 d 1,S · FC Y 2,S · FC X 3,S · 슬롯 4,S
+    a(0xA5, 0x90, 0x48, 0xAA)
+    a(0xBF, *_al(0x7E3020), 0x29, 0x7F, 0x4A, 0x48)
+    a(0xBF, *_al(0x7E3080), 0x29, 0x7F, 0x3A, 0x4A, 0x48)
+    a(0x48, 0xA0, 0x03)
+    a.label('draw')(0x5A, _rand(4), 0x7A, 0x83, 0x01)
+    a(0xAF, *_al(NENE_LAST)).br(0x10, 'pick')(0x29, 0x03, 0x49, 0x02, 0xC3, 0x01).br(BNE, 'pick')
+    a(0x88).br(0x10, 'draw')
+    a.label('pick')(0xA3, 0x03, 0xAA, 0xA3, 0x02, 0xA8, 0xA3, 0x01)
+    a(0xC9, 0x00).br(BNE, 'r')(0x88).br(BRA, 'go')
+    a.label('r')(0xC9, 0x01).br(BNE, 'dn')(0xE8).br(BRA, 'go')
+    a.label('dn')(0xC9, 0x02).br(BNE, 'lf')(0xC8).br(BRA, 'go')
+    a.label('lf')(0xCA)
+    # 칸 번호 Y × 16 + (X − 18) → X 레지스터. 표 밖이면 머묾
+    a.label('go')(0x8A, 0x38, 0xE9, NENE_X0, 0xC9, NENE_W).br(BCC, 'xin').brl('stay')
+    a.label('xin')(0x48, 0x98, 0xC9, NENE_H).br(BCC, 'yin')(0x68).brl('stay')
+    a.label('yin')(0x0A, 0x0A, 0x0A, 0x0A, 0x18, 0x63, 0x01, 0x83, 0x01, 0xFA)
+    a(0xBF, *_al(at['nene_cells'])).br(BNE, 'cell').brl('stay')
+    # 쌓기: DQ5 목표 Y 1,S · X 2,S · d 3,S · FC Y 4,S · FC X 5,S · 슬롯 6,S
+    a.label('cell')(0x8A, 0x29, 0x0F, 0x18, 0x69, NENE_X0, 0x0A, 0x48)
+    a(0x8A, 0x4A, 0x4A, 0x4A, 0x4A, 0x0A, 0x1A, 0x48)
+    a(0xA2, 0x00)
+    a.label('who')(0x8A, 0xC3, 0x06).br(BEQ, 'next')
+    a(0xBF, *_al(0x7E3380)).br(0x30, 'next')
+    a(0xBF, *_al(0x7E3020), 0x29, 0x7F, 0xC3, 0x02).br(BNE, 'next')
+    a(0xBF, *_al(0x7E3080), 0x29, 0x7F, 0xC3, 0x01).br(BNE, 'next')
+    a(0x68, 0x68).brl('stay')
+    a.label('next')(0xE8, 0xE0, 0x20).br(BCC, 'who')
+    a(0xA3, 0x06, 0xAA)
+    a(0x68, 0x9F, *_al(0x7E35A0), 0xA9, 0x00, 0x9F, *_al(0x7E35C0))
+    a(0x68, 0x9F, *_al(0x7E3560), 0xA9, 0x00, 0x9F, *_al(0x7E3580))
+    a(0x22, *_al(0x00E808))
+    a(0x68, 0x09, 0x80, 0x8F, *_al(NENE_LAST), 0x68, 0x68, 0x68).brl('out')
+    # 머묾: 쌓인 넷을 치우고 목표를 지금 자리로(14 가 곧 끝나게)
+    a.label('stay')(0x68, 0x68, 0x68, 0x68, 0xAA)
+    for src, dst in ((0x7E3020, 0x7E3560), (0x7E3040, 0x7E3580), (0x7E3080, 0x7E35A0), (0x7E30A0, 0x7E35C0)):
+        a(0xBF, *_al(src), 0x9F, *_al(dst))
+    a.label('out')
+    return a.bytes() + LEAVE
 
 
 def _someone_at(c):
@@ -633,6 +698,8 @@ def native(ctx):
     put('refresh', ENTER + dq4ch1event.REFRESH + LEAVE)
     put('hero_across', _hero_across())
     put('dog_home', _someone_at(DOG_HOME))
+    put('nene_cells', nene_cells_table())
+    put('nene_step', _nene_step(at))
     put('arrive', _arrive())
     put('set_talk', _set_talk(talk))
     put('prep', _prep(at))
@@ -857,6 +924,11 @@ def scripts(ctx):
                 _cmd('16', label='stay'), *hide]
     # 아들은 본몰 감옥에서 풀려난 뒤에만(FC 1C:$A29A 가 $6280&04 로 목록을 고침), 아래층 주인은 출근 중에만(1C:$A326)
     # 개를 빌려주면 위로 한 칸 비켜 아래를 보고, 돌려받으면 (다시) 비켜 있다가 개가 우리에 닿으면 제자리로 돌아와 왼쪽을 본다
+    # 낮 네네: FC 블록 2B 처럼 한 차례에 한 걸음(nene_step), 도착을 기다려 되풀이. FC 는 맵에 든 뒤 첫 차례도 128프레임
+    # 뒤라($7040 = 88) 처음 방향(아래)을 다시 보는 명령 셋으로 첫 걸음을 그만큼 늦춘다(맵에 들자마자 말을 거는 검사가 서
+    # 있는 네네를 만남). 명령 00 은 스크립트를 멈춘다
+    nene_walk = [_cmd('1E', WALK_SPEED), _cmd('2F', 0x44), _cmd('2F', 0x44), _cmd('2F', 0x44),
+                 call(at['nene_step']) | {"label": "step"}, _cmd('14'), _cmd('03', target='step')]
     son = [_if_off(SON_FREED, 'hide'), _cmd('1E', WALK_SPEED), _cmd('1C'), _if_on(ch3.DOG, 'lent'),
            _wait_on(ch3.DOG), _cmd('13', *SON_ASIDE), _cmd('14'), _cmd('2F', 0x44),
            _cmd('09', ch3.DOG[0], ch3.DOG[1], label='lent'), _cmd('13', *SON_ASIDE), _cmd('14'), _cmd('2F', 0x44),
@@ -864,7 +936,7 @@ def scripts(ctx):
     cellar = [_if_off(SHIFT, 'hide'), _if_on(DONE, 'hide'), _cmd('16'), *hide]
     bodies = {'customer': customer, 'first_master': first, 'master': master, 'tom': tom, 'helper': helper,
               'dog': dog, 'helper_night': helper_night, 'dog_night': list(dog), 'son': son, 'son_night': list(son),
-              'dog_home': dog_home, 'dog_home_night': list(dog_home), 'nene_walk': [_cmd('18')],
+              'dog_home': dog_home, 'dog_home_night': list(dog_home), 'nene_walk': nene_walk,
               'cellar': cellar}
     return [{"address": SCRIPTS[name][2], "commands": bodies[name]} for name in SCRIPTS]
 
@@ -947,7 +1019,7 @@ def npc_lists(lists, ctx):
         for e in house:
             if (e["time"], _at(e)) == ('day', NENE['day']):
                 e["from"] = _src('nene_walk')
-                e["fields"] = {**e["fields"], "interval": dq4npcport.dq5_interval(NENE_FC_STEP)}
+                e["fields"] = {**e["fields"], "interval": NENE_INTERVAL}
         for time, cells in POPOLO.items():
             for c in cells:
                 ctx.retalk(lists, HOUSE, c, t[f'popolo_{time}'], time=time)
@@ -968,6 +1040,11 @@ def start_messages(ctx):
     return {(HOUSE, FC_NENE, False): m['home'], (HOUSE, FC_NENE, True): m['night_home'],
             (HOUSE, FC_POPOLO_DAY, False): m['popolo_day'], (HOUSE, FC_POPOLO_NIGHT, True): m['popolo_night'],
             (TOWN, FC_TOM, False): m['tom_hello'], (TOWN, FC_TOM, True): m['tom_night']}
+
+
+def walkers(ctx):
+    """{(맵, DQ5 셀 x, y, 밤)}: 이 모듈이 걷게 바꾼 인물. 낮 네네(nene_walk)."""
+    return {(HOUSE, *NENE['day'], False)}
 
 
 def absent(ctx):

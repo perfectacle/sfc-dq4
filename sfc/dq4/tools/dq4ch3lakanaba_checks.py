@@ -19,8 +19,10 @@ BOOMERANG = lakanaba.GOODS[lakanaba.STOCKED][0]
 # 네네: 오늘 도시락 전이라 잠 → 아침(날수 + 1) → 오늘 도시락. 손님 갈래·톰을 교회까지 미는 길은 dq4ch3lakanabacheck 가
 # 롬 사본·톰 자리로 본다
 SEGMENTS = [
-    ('nene_house', 'warp', f'{ch3.HOUSE},54,6', {'map': ch3.HOUSE}),
-    ('nene_sleep', 'walk', talk('down', 10), {'map': ch3.HOUSE, 'want': ['BENTO'], 'bytes': {'SCOTT_DAYS': 1}}),
+    ('nene_house', 'warp', f'{ch3.HOUSE},54,6', {'map': ch3.HOUSE, 'poke': lakanaba.NENE_HOLD}),
+    # 돌아다니는 낮 네네는 첫머리 자리에 묶고 말을 건다(lakanaba.NENE_HOLD)
+    ('nene_sleep', 'walk', talk('down', 10), {'map': ch3.HOUSE, 'want': ['BENTO'], 'bytes': {'SCOTT_DAYS': 1},
+                                              'poke': lakanaba.NENE_HOLD}),
     # 톰 노인: 「예」 뒤 밀리는 인물이 되고, 밀며 집 남쪽으로 걸어 나간다(막히면 끝 셀이 다름)
     ('tom_room', 'warp', f'{TOWN},48,24', {'map': TOWN}),
     ('tom_ask', 'walk', talk('up', 5), {'map': TOWN, 'want': ['TOM_PUSH']}),
@@ -69,7 +71,9 @@ def hero_cases():
     bento = f'{0x2190 + lakanaba.BENTO_TODAY[0]:04X}={lakanaba.BENTO_TODAY[1]:02X}'
     out = {'nene-above': {'hop': HOP, 'warp': f'{ch3.HOUSE},{nx},{ny - 3}', 'set': bento,
                           'walk': f'{talk("down", 12)};wait:120;{CLOSE};{CLOSE};{nx},{ny - 4}', 'free': f'{nx + 4},{ny - 4}',
-                          'want': [], 'map': ch3.HOUSE, 'distinct': 1, 'maxf': 2500}}
+                          'want': [], 'map': ch3.HOUSE, 'distinct': 1, 'maxf': 2500,
+                          # 돌아다니는 낮 네네를 첫머리 자리에 묶는다(lakanaba.NENE_HOLD)
+                          'poke': lakanaba.NENE_HOLD}}
     for name, warp in SHOP_APPROACH:
         out[name] = {'warp': f'{lakanaba.TOWN},{warp}', 'set': '', 'walk': f'16,53;{taps(12)};{CLOSE}',
                      'free': f'{lakanaba.COUNTER_IN[0]},{lakanaba.COUNTER_IN[1] - 4}', 'hero_at': lakanaba.COUNTER_IN,
@@ -89,4 +93,10 @@ PASS_NO_DEVICE = {
        '칸을 지나 (46,7)→(54,7)로 간다(dq4ch3lakanabacheck son·son_return 사례)' for name in ('dog_home', 'dog_home_night')},
     **{lakanaba.SCRIPTS[name][2]: '레이크나바 톰 아들: 개를 빌리고 돌려줄 때 제자리 (46,7)과 위 칸 (46,5) 사이만 걷는다. '
        '주인공은 아래 (46,9)에서 말을 건 채다(dq4ch3lakanabacheck son·son_return 사례)' for name in ('son', 'son_night')},
+}
+
+# 조작을 막지 않고 걷는 인물(test_dq4heroblock.WALK_EXEMPT)
+WALK_EXEMPT = {
+    lakanaba.SCRIPTS['nene_walk'][2]: '레이크나바 낮 네네: FC 블록 2B 처럼 한 걸음씩 고르는 네이티브(nene_step)가 주인공을 '
+    '비롯해 보이는 인물이 선 칸은 고르지 않는다. DQ5 의 돌아다니는 인물처럼 1C 없이 걷는다',
 }

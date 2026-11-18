@@ -64,6 +64,31 @@ class FlagTest(unittest.TestCase):
         self.assertEqual(L.JOKE[0], 0x13)
         self.assertFalse(L.JOKE[1] & others)
 
+    def test_nene_cells_are_the_fc_house_cells_reachable_from_her_start(self):
+        # FC 16/01: 첫머리 자리 (1B,04)에서 벽 속성(bit7)이 아닌 칸으로 이어진 칸
+        dq4 = ROOT / 'rom' / 'dq4.nes'
+        if not dq4.is_file():
+            self.skipTest('local source ROM not present')
+        sys.path.insert(0, str(ROOT / 'fc' / 'dq4' / 'tools'))
+        import dq4block
+        import dq4environmentmap as em
+        from kr_patch.fc import ines
+        prg = ines.prg(dq4.read_bytes())
+        src = next(s for _, s in dq4block.all_maps(prg) if (s.g, s.k) == (0x16, 1) and s.buf is not None)
+        ok = lambda x, y: 0 <= x < src.w and 0 <= y < src.h and not em.block_prop(src, src.cell(x, y) & 31) & 0x80  # noqa: E731
+        seen, todo = {(0x1B, 0x04)}, [(0x1B, 0x04)]
+        while todo:
+            x, y = todo.pop()
+            for dx, dy in ((0, -1), (1, 0), (0, 1), (-1, 0)):
+                n = (x + dx, y + dy)
+                if n not in seen and ok(*n):
+                    seen.add(n)
+                    todo.append(n)
+        self.assertEqual(seen, set(L.NENE_CELLS))
+        table = L.nene_cells_table()
+        self.assertEqual(sum(table), len(L.NENE_CELLS))
+        self.assertTrue(all(L.NENE_X0 <= x < L.NENE_X0 + L.NENE_W and y < L.NENE_H for x, y in L.NENE_CELLS))
+
     def test_shop_key_byte_is_the_l_share_of_the_second_vars(self):
         import dq4ch3slots
         import dq4shopport
@@ -230,7 +255,7 @@ class PortedListTest(unittest.TestCase):
         self.assertEqual([(e['fields']['x'], e['fields']['y']) for e in nenes], [L.NENE['day']])
         # 낮 네네는 돌아다니는 틀(FC 슬롯 07 의 걸음 간격)
         # 범위 없이 돌아다니는 빌린 스크립트(18)
-        self.assertEqual((nenes[0]['from'], nenes[0]['fields']['interval']), (L._src('nene_walk'), 15))
+        self.assertEqual((nenes[0]['from'], nenes[0]['fields']['interval']), (L._src('nene_walk'), L.NENE_INTERVAL))
         # 첫머리 목록에도 둘째 네네가 없다(첫머리 뒤 집을 다시 불러오기 전까지 걸리는 목록)
         lists2, _, _ = dq4npcport.port(DQ5, ROOT / 'rom' / 'dq4.nes')
         new, _ = ev.npc_lists(lists2)

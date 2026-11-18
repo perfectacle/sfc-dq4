@@ -352,7 +352,7 @@ def main():
     prg = ines.prg(args.dq4.read_bytes())
     state = dq4freshstate.resolve(args.state, mesence, rom_path, out / "start")
 
-    events, gone = {}, set()
+    events, gone, moving = {}, set(), set()
     if args.chapter1:
         import dq4ch1event
         import dq4npcport
@@ -371,6 +371,8 @@ def main():
                 events.update(dq4ch3event.start_messages(third))
             if hasattr(dq4ch3event, "absent"):
                 gone |= dq4ch3event.absent()
+            if hasattr(dq4ch3event, "walkers"):
+                moving = dq4ch3event.walkers()
     states = {}
     held = bool(args.states) and args.chapter3
     if args.states:
@@ -417,7 +419,8 @@ def main():
             # 처음 칸에 세워 두고 말을 건다
             # 처음 상태에서 없앤 사람(absent)도 상태 표에 든 사람이면 그 상태에서는 서 있다(공사 재개 뒤 열린 카지노 등)
             listed = any((m, (p["x"], p["y"]), p["night"]) in table for _, table, *_ in states.values())
-            if (p["interval"] and not held) or ((m, p["dq5"]["x"], p["dq5"]["y"], p["night"]) in gone and not listed):
+            here = (m, p["dq5"]["x"], p["dq5"]["y"], p["night"])
+            if ((p["interval"] or here in moving) and not held) or (here in gone and not listed):
                 continue
             # People of the other time are not there. A walking person's start cell is the last resort: the hero
             # warps onto it before that person walks off.
