@@ -107,9 +107,33 @@ class RecordTests(unittest.TestCase):
                 self.assertEqual(rom.u16(table + 2 * m), rom.u16(table + 2 * d), f'{m:02X}')
             g = dq5mongfx.monster(original, d)[0]
             same_head = set(heads[dq5monwrite.head_of(original, g)][0])
-            for m in dq4monport.used_numbers() - users - {d}:
+            others = dq4monport.used_numbers() - users
+            for m in others:
                 self.assertNotIn(dq5mongfx.monster(rom, m)[0], same_head, f'{m:02X} 가 FC {fc:02X} 의 빌린 그림을 씀')
-            self.assertNotIn(d, dq4monport.used_numbers() - users, f'빌린 {d:02X} 는 다른 몬스터로 쓰임')
+
+    def test_borrowed_pictures_do_not_overlap(self):
+        # 장부는 그림 번호로 잡는다: 한 그림(과 그 머리)을 두 FC 몬스터가 덮지 않고, 머리를 다른 그림 번호가 같이 쓰지 않는다.
+        # 같이 쓰면 그 그림 번호를 쓰는 몬스터에 NDS 색이 가지 않아 빌드가 거부한다(D3 이 그림 29 로 00 의 머리를 씀)
+        import dq5monwrite
+        from dq5map import Rom
+        original = Rom(self.dq5)
+        ledger = dq4monport.borrowed_pictures(original)
+        self.assertEqual(len(ledger), len(dq4monport.ART))
+        heads = [dq5monwrite.head_of(original, g) for g in ledger]
+        self.assertEqual(len(set(heads)), len(heads))
+        by_head = dq5monwrite.heads(original)
+        for g, h in zip(ledger, heads):
+            self.assertEqual(by_head[h][0], [g], f'빌린 그림 {g:02X} 의 머리를 그림 {by_head[h][0]} 가 같이 씀')
+        with self.assertRaises(ValueError):
+            from unittest import mock
+            first = next(iter(dq4monport.ART.items()))
+            with mock.patch.dict(dq4monport.ART, {0xFE: first[1]}):
+                dq4monport.borrowed_pictures(original)
+
+    def test_borrowed_numbers_stay_free(self):
+        # 빌린 번호는 몬스터로 쓰지 않으므로 새 FC 몬스터 번호(free_numbers) 수를 줄이지 않는다
+        self.assertFalse(set(dq4monport.ART.values()) - {m for fc in dq4monport.ART for m in dq4monport.art_users(fc)}
+                         & dq4monport.used_numbers())
 
     def test_arena_matches_count_as_groups(self):
         # 격투장에만 나오는 번호(メタルスライム 0C, おおめだま)도 빌드의 무리 조합 셈에 들어 그림이 들어간다
@@ -347,6 +371,75 @@ class SpellMpTests(unittest.TestCase):
         with mock.patch.object(dq4monport, 'fc_actions', return_value={0x07: '42', 0x11: '42'}):
             with self.assertRaises(ValueError):
                 dq4monport.spell_entries(self.prg)
+
+
+class FootTests(unittest.TestCase):
+    def test_foot_is_the_bottom_rows_span(self):
+        grid = [[0] * 16 for _ in range(16)]
+        grid[2][1] = 1                     # 위쪽 픽셀은 발이 아님
+        for y in (12, 13, 14):
+            for x in range(5, 11):
+                grid[y][x] = 2
+        grid[11][14] = 3                   # 맨 아래 줄에서 FOOT_ROWS 줄 안
+        self.assertEqual(dq4monport.foot(grid), ((5 + 15) / 2, 10, 14))
+
+
+@unittest.skipUnless(DQ5.exists(), 'rom/dq5.sfc')
+class ShadowTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from dq5map import Rom
+        cls.rom = Rom(DQ5.read_bytes())
+        cls.rule = dq4monport.shadow_rule(cls.rom)
+
+    def test_rule_is_dq5_typical(self):
+        # DQ5 땅 몬스터의 그림자는 발보다 조금 넓고(1.2배 남짓), 발 가운데 언저리, 맨 아래 줄보다 위에 가운데가 있다
+        ratio, ox, oy = self.rule
+        self.assertTrue(1 <= ratio <= 1.5, ratio)
+        self.assertLessEqual(abs(ox), 6)
+        self.assertTrue(-16 <= oy <= 0, oy)
+
+    def test_shadow_header_puts_the_shadow_under_the_feet(self):
+        shapes = dq4monport.shadow_shapes(self.rom)
+        for x0, x1, h in ((2, 14, 3), (20, 60, 8), (30, 34, 6)):
+            grid = [[0] * 64 for _ in range(h * 8)]
+            for x in range(x0, x1):
+                grid[h * 8 - 1][x] = 1
+            hd = dq4monport.shadow_header(grid, self.rom, self.rule)
+            fx, fw, bottom = dq4monport.foot(grid)
+            sx, sy = dq4monport.place_shadow(shapes[hd['shadow']], 8, h, hd['shadow_dx'], hd['shadow_dy'])
+            self.assertLessEqual(abs(sx - fx - self.rule[1]), 0.5)
+            self.assertLessEqual(abs(sy - bottom - self.rule[2]), 0.5)
+            best = min(abs(s[0] - fw * self.rule[0]) for s in shapes.values())
+            self.assertEqual(abs(shapes[hd['shadow']][0] - fw * self.rule[0]), best)
+
+    def test_floating_shadow_sits_on_the_ground_line(self):
+        # 띄운 몬스터는 키와 상관없이 그림자 세로 가운데가 DQ5 띄운 몬스터의 화면 y 에 오고, 몸보다 아래다
+        shapes = dq4monport.shadow_shapes(self.rom)
+        rule = dq4monport.shadow_rule(self.rom, True)
+        for h in (3, 5, 8):
+            grid = [[0] * 48 for _ in range(h * 8)]
+            for x in range(16, 30):
+                grid[h * 8 - 1][x] = 1
+            hd = dq4monport.shadow_header(grid, self.rom, rule, True)
+            sx, sy = dq4monport.place_shadow(shapes[hd['shadow']], 6, h, hd['shadow_dx'], hd['shadow_dy'])
+            top = dq4monport.float_top(h)
+            self.assertLessEqual(abs(top + sy - rule[2]), 0.5, h)
+            self.assertGreater(top + sy, top + h * 8 - 1, h)
+
+    @unittest.skipUnless(__import__('os').environ.get('DQ4_ASSETS'), 'DQ4_ASSETS not present')
+    def test_chapter3_pictures_get_the_rule_shadow(self):
+        import json
+        import tempfile
+        import dq5mongfx
+        with tempfile.TemporaryDirectory() as d:
+            doc = json.loads(dq4monport.doc(self.rom, Path(d)).read_text())
+        by_picture = {int(p['picture'], 16): p['header'] for p in doc['pictures']}
+        for fc, m, _ in dq4monport.entries():
+            hd = by_picture[dq5mongfx.monster(self.rom, m)[0]]
+            self.assertEqual('shadow' in hd, fc in dq4monport.SHADOWED, f'FC {fc:02X}')
+            if fc in dq4monport.SHADOWED:
+                self.assertEqual(hd['float'], fc in dq4monport.FLOATING, f'FC {fc:02X}')
 
 
 if __name__ == '__main__':

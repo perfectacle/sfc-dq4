@@ -56,8 +56,14 @@ MERGED = {0x30: (0x6B, 107)}
 # 그 FC 몬스터를 쓰는 번호(art_users)가 모두 이 번호의 그림 레코드를 가리키고(picture_writes), 빌드는 이 번호의 그림
 # 자리에 NDS 그림을 덮는다(doc). 쓰는 번호의 원래 그림 자리가 NDS 그림보다 작거나 그 그림을 다른 FC 몬스터가 이미 덮어
 # 써서, 이 해킹이 몬스터로 쓰지 않는 번호(09 DQ5 バブルスライム)나 자리가 큰 쪽(52 1장 보스)의 것을 빌린다. 빌린 번호의
-# 그림을 같이 쓰는 번호는 모두 같은 그림이 되므로, 그 그림을 이 해킹의 다른 몬스터가 쓰면 안 된다(test_dq4monport)
-ART = {0x0A: 0x09, 0x29: 0x52}
+# 그림을 같이 쓰는 번호는 모두 같은 그림이 되므로, 그 그림을 이 해킹의 다른 몬스터가 쓰면 안 된다(test_dq4monport).
+# 빌리는 것은 그 번호의 그림 레코드(그림 번호와 색)이고 장부는 그림 번호로 잡는다(borrowed_pictures). 빌린 번호 자체는
+# 몬스터로 쓰지 않아 free_numbers 에 남는다: 뒷 장이 그 번호를 새 FC 몬스터에 주면 picture_writes 가 그 번호의 그림 레코드
+# 포인터를 따로 정하므로 빌린 레코드와 떨어진다. 고르는 규칙: 그림이 NDS 그림보다 조각·타일·가로·세로·줄 최대 타일이 모두
+# 크거나 같고, 그 머리를 다른 그림 번호가 같이 쓰지 않으며(같이 쓰면 그 그림 번호를 쓰는 몬스터의 색 수가 모자람), 행동에
+# 고쳐 쓴 부르기 칸(SUMMON_SAME·SUMMON_FIXED)이 없는 빈 번호에서 작은 것부터
+ART = {0x0A: 0x09, 0x29: 0x52,
+       0x19: 0x80, 0x09: 0xC3, 0x21: 0x8D, 0x13: 0x45}
 # 1·2장 조우·사건 무리·격투장에 아직 나오지 않아 빌드가 그림을 넣지 않는 번호(dq4monport.build 의 appear). 그 장을 옮기면
 # 여기서 빼고, dq4monartcheck 는 이 밖의 번호가 원래 DQ5 그림이면 실패로 본다
 LATER = set()
@@ -80,6 +86,84 @@ def entries():
     """그림을 넣는 [(FC 몬스터, 그림 자리 번호, 그 그림을 쓰는 번호들)]: PORT·EVENT 는 제 번호, ART 는 빌린 번호."""
     return [*((fc, m, {m}) for fc, m in [*PORT.items(), *EVENT.items()]),
             *((fc, d, art_users(fc)) for fc, d in ART.items())]
+
+
+# 그림자를 그림에서 셈하는(shadow_header) FC 몬스터: 3장에 넣은 종. 2장 PORT·EVENT 는 그림 자리의 원래 그림자 그대로
+SHADOWED = {*ART, 0x5C}
+# 땅에 닿지 않는(날개로 날거나 발 없이 떠 있는) FC 몬스터: 머리 띄움(줄 2)과 띄운 몬스터의 그림자 규칙을 쓴다. 에어랫(날개
+# 귀로 낢), 견습 악마(발 없는 옷자락), 픽시(날개). SHADOWED 밖의 번호에는 아직 쓰지 않는다
+FLOATING = {0x09, 0x10, 0x22}
+FOOT_ROWS = 4                   # 발 자리로 보는 아래쪽 불투명 픽셀 줄 수
+
+
+def shadow_shapes(rom):
+    """{그림자 모양 번호: (가장 넓은 줄의 너비, 그 줄 가운데 x, 줄 dy 가운데)}. 22:B4FE 표, 자료는 [줄 수][dy][왼쪽][오른쪽)]."""
+    import dq5monwrite
+    out = {}
+    for s in range(1, 32):
+        p = rom.u16(dq5monwrite.SHADOWS + 2 * s)
+        if p == 0xFFFF:
+            continue
+        a = dq5monwrite.SHADOWS & 0xFF0000 | p
+        rows = [(rom.u8(a + 1 + 3 * i), rom.u8(a + 2 + 3 * i), rom.u8(a + 3 + 3 * i)) for i in range(rom.u8(a))]
+        width = max(r - l for _, l, r in rows)
+        cx = next((l + r) / 2 for _, l, r in rows if r - l == width)
+        out[s] = (width, cx, (min(d for d, _, _ in rows) + max(d for d, _, _ in rows)) / 2)
+    return out
+
+
+def foot(grid):
+    """(발 가운데 x, 발 너비, 맨 아래 불투명 줄 y): 아래쪽 FOOT_ROWS 줄 불투명 픽셀의 왼쪽~오른쪽."""
+    bottom = max(y for y, row in enumerate(grid) if any(row))
+    xs = [x for row in grid[max(0, bottom - FOOT_ROWS + 1):bottom + 1] for x, v in enumerate(row) if v]
+    return (min(xs) + max(xs) + 1) / 2, max(xs) + 1 - min(xs), bottom
+
+
+def place_shadow(shape, w, h, dx, dy):
+    """(그림자 가운데 x, 세로 가운데 y): 상자 왼쪽 위 기준. dq5 그래픽 형식 「그림자」 의 식
+    x = 4w + (+1) + 1 + 구간 x, y = 8h + (+2) − 24 + dy."""
+    width, cx, cy = shape
+    return 4 * w + dx + 1 + cx, 8 * h + dy - 24 + cy
+
+
+def float_top(h):
+    """띄운 몬스터(줄 2, 들어올림 0) 상자 위 y: dq5 그래픽 형식 「줄과 높이」 의 $58 − min(4h, 24)."""
+    return 0x58 - min(4 * h, 24)
+
+
+def shadow_rule(rom, floating=False):
+    """DQ5 몬스터 그림자에서 잰 (너비 ÷ 발 너비, 가운데 x − 발 가운데 x, 세로)의 가운데값. 세로는 땅에 선(띄움·들어올림
+    없는) 몬스터면 가운데 − 맨 아래 줄, 띄운 몬스터(floating)면 화면 y(그림자는 몸과 떨어져 땅에 있음). 그림자를 그림에서
+    셀 때 DQ5 와 같은 모양새가 되게 한다."""
+    import statistics
+    import dq5mongfx
+    import dq5monwrite
+    shapes = shadow_shapes(rom)
+    ratio, ox, oy = [], [], []
+    for g in sorted(set(dq5monwrite.used_pictures(rom))):
+        hd = dq5mongfx.header(rom, g)
+        if hd['float'] != floating or hd['raise'] or hd['shadow'] not in shapes:
+            continue
+        fx, fw, bottom = foot(dq5monwrite.picture_grid(rom, g)[0])
+        sx, sy = place_shadow(shapes[hd['shadow']], hd['w'], hd['h'], hd['shadow_dx'], hd['shadow_dy'])
+        ratio.append(shapes[hd['shadow']][0] / fw)
+        ox.append(sx - fx)
+        oy.append(float_top(hd['h']) + sy if floating else sy - bottom)
+    return statistics.median(ratio), statistics.median(ox), statistics.median(oy)
+
+
+def shadow_header(grid, rom, rule=None, floating=False):
+    """그림(색 번호 격자, 8픽셀 칸)의 발 자리에서 머리의 shadow·shadow_dx·shadow_dy: 모양은 DQ5 모양 가운데 너비가 발 너비
+    × rule 비율에 가장 가까운 것, 가로는 발 가운데에서 rule 의 어긋남만큼, 세로는 맨 아래 줄에서(띄운 몬스터는 rule 의 화면
+    y 에). rule 은 같은 floating 의 shadow_rule."""
+    ratio, ox, oy = rule or shadow_rule(rom, floating)
+    shapes = shadow_shapes(rom)
+    fx, fw, bottom = foot(grid)
+    s = min(shapes, key=lambda k: (abs(shapes[k][0] - fw * ratio), k))
+    w, h = len(grid[0]) // GRID, len(grid) // GRID
+    sx, sy = place_shadow(shapes[s], w, h, 0, 0)
+    want_y = oy - float_top(h) if floating else bottom + oy
+    return {'shadow': s, 'shadow_dx': round(fx + ox - sx), 'shadow_dy': round(want_y - sy)}
 
 
 
@@ -113,6 +197,7 @@ def doc(rom, out_dir, only=None):
     # NUMBERED 번호는 빌드 롬에서 대역이나 ART 의 그림 레코드를 가리켜(picture_writes) 원래 그림을 쓰지 않는다
     taken = {*PORT.values(), *EVENT.values(), *(m for m, _ in NUMBERED.values()), *ART.values(),
              *(m for fc in ART for m in art_users(fc))}
+    rules = {f: shadow_rule(rom, f) for f in (False, True)}
     for fc, m, users in entries():
         if only is not None and not users & set(only):
             continue
@@ -121,8 +206,13 @@ def doc(rom, out_dir, only=None):
         name = f'{g:02X}.png'
         img.save(out_dir / name)
         w, h = img.width // GRID, img.height // GRID
-        pictures.append({'picture': f'{g:02X}', 'image': name,
-                         'header': {'float': False, 'raise': 0, 'hit_x': w // 2, 'hit_y': h // 2}})
+        header = {'float': False, 'raise': 0, 'hit_x': w // 2, 'hit_y': h // 2}
+        if fc in SHADOWED:
+            grid = [[img.getpixel((x, y)) for x in range(img.width)] for y in range(img.height)]
+            floating = fc in FLOATING
+            header['float'] = floating
+            header.update(shadow_header(grid, rom, rules[floating], floating))
+        pictures.append({'picture': f'{g:02X}', 'image': name, 'header': header})
         monsters.append({'monster': f'{m:02X}', 'colors': colors})
         # 같은 그림을 쓰는 다른 DQ5 몬스터는 이 롬에 나오지 않지만, 색 수가 그림보다 적으면 dq5monwrite 가 거부해 같은 색을 준다
         for other in range(dq5mongfx.COUNT):
@@ -306,6 +396,18 @@ def used_numbers():
     import dq4fieldencounter
     return (set(dq4fieldencounter.MONSTERS.values()) | set(field_numbers().values()) | set(EVENT.values())
             | set(dq4ch1event.BOSS_MONSTERS) | {m for s in dq4ch2slots.SLOTS.values() for m in s.monsters})
+
+
+def borrowed_pictures(rom):
+    """그림 레코드를 빌린 장부 {그림 번호: FC 몬스터}: ART 의 빌린 번호가 원래 DQ5 롬(rom)에서 가리키는 그림."""
+    import dq5mongfx
+    out = {}
+    for fc, d in ART.items():
+        g = dq5mongfx.monster(rom, d)[0]
+        if g in out:
+            raise ValueError(f'그림 {g:02X} 를 FC {out[g]:02X}·{fc:02X} 가 함께 빌림')
+        out[g] = fc
+    return out
 
 
 # dq5monwrite 의 옮긴 그림(24비트 머리 포인터 표 뒤, 뱅크를 넘으면 다음 뱅크로)과 늘린 몬스터 레코드 자리. 빌드 롬에서

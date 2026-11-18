@@ -34,6 +34,7 @@ TARGETS = (
     (0x33, 47, 'reduce'), (0x36, 63, 'reduce'), (0x38, 42, 'reduce'), (0x3E, 44, 'reduce'), (0x40, 71, 'reduce'),
     (0x48, 61, 'reduce'), (0x12, 35, 'reduce'), (0xAF, 175, 'reduce'), (0xB0, 176, 'reduce'), (0xB1, 177, 'reduce'),
     (0xBA, 170, 'reduce'),
+    (0x19, 6, 'reduce'), (0x09, 20, 'reduce'), (0x21, 32, 'reduce'), (0x13, 15, 'reduce'),
     (0x00, 0, 'same'), (0x04, 0, 'same'), (0x0B, 8, 'same'), (0x11, 14, 'same'), (0x14, 12, 'same'), (0x46, 34, 'same'),
     (0x5C, 68, 'same'), (0x0A, 9, 'same'),
     (0x29, 28, 'fit'),
