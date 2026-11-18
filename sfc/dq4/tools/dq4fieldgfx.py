@@ -153,6 +153,43 @@ def rocks():
     return [[s if s != w else None for s, w in zip(srow, wrow)] for srow, wrow in zip(shoal, water)]
 
 
+# FC block definition of the broken bridge (dq4fieldport.BROKEN_BRIDGE): block 16 keeps "00 17" until 08:$808E swaps
+# it for the mended "00 12" (fc/dq4/docs/dq4-block-format.md 「블록 정의 표」)
+FC_BROKEN_BRIDGE = (0x00, 0x17)
+FC_ROM = TOOLS.parents[2] / "rom" / "dq4.nes"
+
+
+@functools.cache
+def broken_mask(fc_rom=FC_ROM):
+    """16x16 rows of booleans: True where FC's broken-bridge shape (FC_BROKEN_BRIDGE on field 0) draws a plank or
+    pillar, False where it draws water. Read from the FC ROM, so no FC pixels are kept in this repository."""
+    sys.path.insert(0, str(TOOLS.parents[2] / "fc" / "dq4" / "tools"))
+    import dq4block
+    from kr_patch.fc import ines
+    prg = ines.prg(Path(fc_rom).read_bytes())
+    d = dq4block.entry(prg, *FC_BROKEN_BRIDGE)
+    pal12 = dq4block.palette(prg, 0, field=0)
+    from dq4fcgfx import MESEN_RGB
+    colours = [MESEN_RGB[0x0F]] + [MESEN_RGB[pal12[3 * d["pal"] + j] & 0x3F] for j in range(3)]
+    out = [[False] * 16 for _ in range(16)]
+    for q, addr in enumerate(d["addrs"]):
+        data = prg[d["bank"] * 0x4000 + (addr & 0x3FFF):][:16]
+        for r in range(8):
+            for c in range(8):
+                v = (data[r] >> (7 - c) & 1) | (data[r + 8] >> (7 - c) & 1) << 1
+                red, green, blue = colours[v]
+                out[q // 2 * 8 + r][q % 2 * 8 + c] = not (blue > 200 and red < 120)
+    return tuple(tuple(row) for row in out)
+
+
+def broken_bridge():
+    """Upper-layer pixels of the broken bridge: the mended bridge asset where FC's broken shape keeps a plank or
+    pillar, transparent where it shows water (the sea is the lower layer, as the reef's rocks). Nothing is drawn:
+    the two existing images are picked per pixel by FC's mask."""
+    bridge = _pixels(assets()["bridge"], "bridge")
+    return [[p if keep else None for p, keep in zip(row, mask)] for row, mask in zip(bridge, broken_mask())]
+
+
 def water(palettes):
     """Moving-sea source (dq5fieldgfxwrite water_files: tiles 4, 5, 20 and 21, 128 bytes) of the DQ4 water asset
     on line 2 (the sea tiles' nibble 0) of the world-0 day colours. The asset wraps at 16 pixels both ways, so
@@ -217,9 +254,10 @@ def generate(rom):
     for number, kind, borrowed in dq4fieldport.new_blocks():
         lower, upper = block_tiles(r, BLOCK_LOWER, borrowed), block_tiles(r, BLOCK_UPPER, borrowed)
         quarter_attrs = [o["tile_attributes"][u or lo] for lo, u in zip(lower, upper)]
-        if kind == REEF:
+        if kind in (REEF, dq4fieldport.BROKEN_BRIDGE):
             new_lower = list(SEA_TILES)
-            new_upper = [tile(p, a) for p, a in zip(quarters(rocks()), quarter_attrs)]
+            pieces = rocks() if kind == REEF else broken_bridge()
+            new_upper = [tile(p, a) for p, a in zip(quarters(pieces), quarter_attrs)]
         else:
             new_lower = [tile(p, a) for p, a in zip(quarters(art(FIELD_ART[kind][0])), quarter_attrs)]
             new_upper = [0, 0, 0, 0]

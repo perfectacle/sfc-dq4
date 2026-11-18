@@ -70,6 +70,12 @@ NO_FIGHT_KIND = 0x0D
 # Per FC field, kinds whose terrain differs from BLOCKS. Field 3 makes its hills impassable (08:$8A34 gives block 01
 # property 80), so they take the mountain's terrain and keep the hill art.
 FIELD_BLOCKS = {3: {0x01: MOUNTAIN}}
+# Block states that are not an FC map kind but an FC block definition swapped in by the game: FC field block 16 is
+# drawn with shape 17 (the broken bridge, property 80) until the bridge is mended (08:$808E, dq4ch3bonmalmo). The
+# event code writes this own block onto the bridge cells. Each takes the terrain of the DQ5 block it borrows (the
+# reef's, so it blocks walking as FC's 80 does) and is numbered after every FC kind, so no number before it moves.
+BROKEN_BRIDGE = 0x20
+STATE_KINDS = {BROKEN_BRIDGE: ("bridge_broken", BLOCKS[0x0A])}
 # Places of the field blocks and planes, free in both the dq4groupbuild ROM and the chapter-1 ROM (dq4chapter1.py).
 # The planes take the bank of "planes" (hooks and the 1-bit planes) and one bank per world after it; the chapter-1
 # menu ROM already uses bank 58. The tiles need no place: they stay 512 and go back in place (dq4fieldgfx.free_slots).
@@ -79,43 +85,50 @@ FIRST_BLOCK = 511
 
 
 def borrowed(field, kind):
+    if kind in STATE_KINDS:
+        return STATE_KINDS[kind][1]
     return FIELD_BLOCKS.get(field, {}).get(kind, BLOCKS[kind])
+
+
+def asset(kind):
+    """Art asset name of an FC kind (dq4environmentmap.FIELD_ART) or of a block state (STATE_KINDS)."""
+    from dq4environmentmap import FIELD_ART
+    return STATE_KINDS[kind][0] if kind in STATE_KINDS else FIELD_ART[kind][0]
 
 
 @functools.cache
 def _numbers():
     """(FIELD_ART asset, borrowed block) -> own DQ5 block, numbered from FIRST_BLOCK: field 0's kinds in FC kind
-    order (BLOCKS), then the FIELD_BLOCKS ones, so field 0 keeps its numbers when a field adds a block."""
-    from dq4environmentmap import FIELD_ART
+    order (BLOCKS), then the FIELD_BLOCKS ones, then the STATE_KINDS, so field 0 keeps its numbers when a field adds a
+    block."""
     numbers = {}
     pairs = [(kind, BLOCKS[kind]) for kind in sorted(BLOCKS)]
     pairs += [(kind, m) for field in sorted(FIELD_BLOCKS) for kind, m in sorted(FIELD_BLOCKS[field].items())]
+    pairs += [(kind, m) for kind, (_, m) in sorted(STATE_KINDS.items())]
     for kind, m in pairs:
         if m != SEA:
-            numbers.setdefault((FIELD_ART[kind][0], m), FIRST_BLOCK + len(numbers))
+            numbers.setdefault((asset(kind), m), FIRST_BLOCK + len(numbers))
     return numbers
 
 
 def own_blocks(field=0):
     """FC block kind -> its own DQ5 block on FC field `field`: one per FIELD_ART asset and borrowed block. The sea
-    keeps DQ5's block 0, drawn with the DQ4 moving water (dq4fieldgfx)."""
-    from dq4environmentmap import FIELD_ART
+    keeps DQ5's block 0, drawn with the DQ4 moving water (dq4fieldgfx). The STATE_KINDS are in it too."""
     out = {}
-    for kind in sorted(BLOCKS):
+    for kind in [*sorted(BLOCKS), *sorted(STATE_KINDS)]:
         m = borrowed(field, kind)
-        out[kind] = SEA if m == SEA else _numbers()[FIELD_ART[kind][0], m]
+        out[kind] = SEA if m == SEA else _numbers()[asset(kind), m]
     return out
 
 
 def new_blocks():
     """[(own DQ5 block, an FC kind drawn on it, borrowed DQ5 block)] of every own block, by number."""
-    from dq4environmentmap import FIELD_ART
     kinds = {}
     for field in [0, *sorted(FIELD_BLOCKS)]:
-        for kind in sorted(BLOCKS):
+        for kind in [*sorted(BLOCKS), *sorted(STATE_KINDS)]:
             m = borrowed(field, kind)
             if m != SEA:
-                kinds.setdefault(_numbers()[FIELD_ART[kind][0], m], (kind, m))
+                kinds.setdefault(_numbers()[asset(kind), m], (kind, m))
     return [(n, *kinds[n]) for n in sorted(kinds)]
 
 

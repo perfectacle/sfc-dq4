@@ -48,8 +48,9 @@ class MapTest(unittest.TestCase):
         self.assertNotIn(own3[0x01], own0.values())
         self.assertEqual({k: v for k, v in own3.items() if k != 0x01}, {k: v for k, v in own0.items() if k != 0x01})
         self.assertIn((own3[0x01], 0x01, port.MOUNTAIN), port.new_blocks())
-        # Field 0 keeps its numbers: the added block comes after them.
-        self.assertEqual(own3[0x01], max(own0.values()) + 1)
+        # Field 0 keeps its numbers: the added block comes after them, the block states after both.
+        self.assertEqual(own3[0x01], max(v for k, v in own0.items() if k in port.BLOCKS) + 1)
+        self.assertEqual(own0[port.BROKEN_BRIDGE], own3[0x01] + 1)
 
     def test_unknown_block(self):
         with self.assertRaises(ValueError):
@@ -59,11 +60,19 @@ class MapTest(unittest.TestCase):
         # Their terrain and attributes come from DQ5's own block table.
         self.assertLess(max(port.BLOCKS.values()), port.FIRST_BLOCK)
 
+    def test_broken_bridge_is_a_blocked_state_of_the_bridge(self):
+        # FC block 16 is drawn broken (shape 17, property 80) until the bridge is mended. Its own block borrows the
+        # reef's (blocked) and shares the bridge's 512 plane, so dq4ch3bonmalmo can swap the 7F byte of the cells
+        self.assertEqual(port.borrowed(0, port.BROKEN_BRIDGE), port.BLOCKS[0x0A])
+        self.assertEqual(port.OWN_BLOCKS[port.BROKEN_BRIDGE] >> 8, port.OWN_BLOCKS[0x16] >> 8)
+        self.assertNotIn(port.OWN_BLOCKS[port.BROKEN_BRIDGE],
+                         {v for k, v in port.OWN_BLOCKS.items() if k != port.BROKEN_BRIDGE})
+
     def test_own_blocks(self):
         own = port.OWN_BLOCKS
-        self.assertEqual(own.keys(), port.BLOCKS.keys())
+        self.assertEqual(own.keys(), port.BLOCKS.keys() | port.STATE_KINDS.keys())
         self.assertEqual(own[0x00], port.SEA)
-        numbers = sorted(set(own.values()) - {port.SEA})
+        numbers = sorted({v for k, v in own.items() if k in port.BLOCKS} - {port.SEA})
         self.assertEqual(numbers, list(range(port.FIRST_BLOCK, port.FIRST_BLOCK + len(numbers))))
         # One block per art and borrowed block: the cave mouths share one, the castle halves do not.
         self.assertEqual(own[0x08], own[0x09])
