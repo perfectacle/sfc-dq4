@@ -46,6 +46,25 @@ POKER = W.cell(0x13, 0x0B)
 POKER_DECK = 0x7E1280                # dq4fcpoker !deck(앞 다섯이 손)
 POKER_RIG = 0x7E1265                 # 더블 업 손질 차례 셋(FC $83~$85)
 SLOT_POS = 0x7E1224                  # dq4fcslot !fc_pos(릴마다 띠 칸)
+# 포커 화면 BG1 맵(dq4fcpoker !map = 7E:6000, 칸마다 낱말)의 칸. FC 포커 화면과 같은 자리: 글 창 행 22~27 열 3~28(안은
+# 바닥색 빈칸 0), 코인 상자 행 4~8 열 23~30(왼쪽 위 모서리 8C), 배당 표 숫자는 열 21 에서 끝나 열 16 은 빈칸
+POKER_MAP = 0x7E6000
+
+
+def _poker_cell(row, col):
+    return POKER_MAP + (row * 32 + col) * 2
+
+
+FLAGS.update({'POKER_WINDOW_IN': (_poker_cell(24, 4), 0xFF), 'POKER_WINDOW_IN_HI': (_poker_cell(24, 4) + 1, 0xFF),
+              'POKER_BOX_CORNER': (_poker_cell(4, 23), 0xFF), 'POKER_PAY_GAP': (_poker_cell(3, 16), 0xFF)})
+# FC 슬롯 배당 세기(dq4fcslot): 세는 중 표시·세는 줄·켜진 램프 비트, 줄 0·1 램프의 OAM 그림자 속성(켜짐 36·꺼짐 34)
+SLOT_OAM = 0x7E0300 + 0x30
+FLAGS.update({'SLOT_COUNTING': (0x7E126C, 0xFF), 'SLOT_LINE': (0x7E126B, 0xFF), 'SLOT_LIT': (0x7E126D, 0xFF),
+              'SLOT_LAMP_LINE0': (SLOT_OAM + 2 * 4 + 3, 0xFF), 'SLOT_LAMP_LINE1': (SLOT_OAM + 1 * 4 + 3, 0xFF)})
+SLOT_PLAY = f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:4;wait:30;up:4;wait:30;a:4'
+# 걷기는 앞 구간이 남긴 창을 닫는 PRE 뒤 77 프레임째부터 누르므로 SLOT_PLAY 의 A(돌리기)는 77 + 698 프레임째다.
+# 그 뒤(헤드리스 실측, 릴 자리 06 묶음·코인 둘): 판정 +367, 첫 코인 +516, 마지막 코인의 9프레임 끝 +696, 「한 번 더?」 +889
+SLOT_SPIN_AT = 77 + 698
 ARENA = W.cell(0x08, 0x0A)
 ARENA_RNG = '7E075B=77;7E075C=22;7E075D=33'
 # 시합 동안 셋째 몬스터(몬스터 칸 2, 7E:07C0 + 칸 × 16 의 +2 HP)를 999 로 묶어 난수와 상관없이 셋째가 이기게 한다
@@ -104,14 +123,29 @@ SEGMENTS = [
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'bytes': {'TOWNS_SLOT_COIN0': 99, 'TOWNS_SLOT_COIN1': 0}}),
     # FC 슬롯 한 판(기계 2, 코인 둘 = 가운데·위 줄). 릴 자리(7E:1224~1226, 띠 칸)를 판 동안 묶으면 멈추는 때·늦춤과
     # 상관없이 결과가 정해진다: 셋 다 06 이면 위 줄이 맞아 배당 20 이라 100 − 2 + 20 = 118, 셋 다 00 이면 맞는 줄이 없어 98.
-    # 「한 번 더?」 에 B(아니오)로 나온다
+    # 「한 번 더?」 에 B(아니오)로 나온다(맞은 판은 FC 처럼 코인을 9프레임에 한 장씩 세고 193프레임 뒤에 묻는다)
     *(seg for name, fill, coins in (('win', 0x06, 118), ('lose', 0x00, 98))
       for seg in ((f'towns_slot_{name}_side', 'warp', f'{W.CASINO},{SLOT[0]},{SLOT[1] + 1}',
                    {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
-                  (f'towns_slot_{name}', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:4;wait:30;'
-                   'up:4;wait:30;a:4;wait:700;b:8;wait:300',
+                  (f'towns_slot_{name}', 'walk', f'{SLOT_PLAY};wait:960;b:8;wait:300',
                    {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{_slot_pos(fill)}',
                     'bytes': {'TOWNS_COIN0': coins, 'TOWNS_COIN1': 0}}))),
+    # 같은 맞은 판(위 줄만 맞음, 배당 20)을 세는 도중(A + 606)과 다 센 뒤 기다리는 동안(A + 790)에 멈춰 본다(FC 17:$9EDA·
+    # $9E35·$A0D8 실측): 세는 중이고 세는 줄은 1, 켜진 램프는 맞은 줄 1 하나(줄 0 램프는 판정에서 꺼짐). 한 프레임에 한
+    # 장씩 세던 때는 판정 뒤 20프레임에 세기가 끝나 A + 606 에 이미 「한 번 더?」 였다
+    *(seg for name, at, counting in (('count', 606, 1), ('tail', 790, 0))
+      for seg in ((f'towns_slot_{name}_side', 'warp', f'{W.CASINO},{SLOT[0]},{SLOT[1] + 1}',
+                   {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
+                  (f'towns_slot_{name}', 'walk', SLOT_PLAY,
+                   {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{_slot_pos(0x06)}', 'maxf': SLOT_SPIN_AT + at,
+                    'bytes': {'SLOT_COUNTING': counting, 'SLOT_LIT': 0x02, 'SLOT_LAMP_LINE0': 0x34,
+                              'SLOT_LAMP_LINE1': 0x36, **({'SLOT_LINE': 1} if counting else {})}}))),
+    # 포커 「남길 카드를 골라 주세요」 화면에 멈춰 BG1 맵을 본다(FC 포커 화면 자리, 덱은 묶지 않아도 칸 자리는 같음)
+    ('towns_poker_screen_side', 'warp', f'{W.CASINO},{POKER[0]},{POKER[1] + 1}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
+    ('towns_poker_screen', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 3)};wait:200;a:4;wait:300',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'maxf': 900,
+      'bytes': {'POKER_WINDOW_IN': 0, 'POKER_WINDOW_IN_HI': 0, 'POKER_BOX_CORNER': 0x8C, 'POKER_PAY_GAP': 0}}),
     # FC 포커 한 판. 섞기는 게임 난수(00:953A, $075B~075D 를 NMI 가 매 프레임 올림)라 코어마다 덱이 갈리므로, 판 동안
     # 덱 앞 다섯(7E:1280~, 손)을 묶고 다섯 장을 모두 남긴다(바꿔 넣기가 없어 묶은 손 그대로). 패(!pk_rank)와 나온 뒤
     # 코인(7E:203C, 포커를 나올 때 옮겨짐)을 본다. 카드 = 숫자(A 0 … K 12) × 4 + 무늬

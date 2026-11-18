@@ -42,6 +42,22 @@ class FcSlotDataTest(unittest.TestCase):
         self.assertEqual(xs, bytes((0x38, 0x68, 0x98)))
         self.assertEqual(len(sympal), 8)
 
+    def test_pay_rows_blink_and_lamp(self):
+        """배당을 셀 때 FC 17:$9E80 이 숨기는 것은 배당 표의 그 무늬 줄(행 4·6…18, 열 24~29)이고, 바탕 칸 8F 는
+        색 2 로 찬 칸이다. 램프 0D(흰 램프)는 0C 와 같은 자리의 꽉 찬 색 1."""
+        self.assertEqual(slot.pay_rows(self.prg), [(18 - 2 * s, 24) for s in range(8)])
+        nt, _ = slot.nametable(self.prg)
+        for r, c in slot.pay_rows(self.prg):
+            self.assertNotIn(slot.PAY_BLANK, nt[r * 32 + c:r * 32 + c + 2], (r, c))
+            self.assertEqual(nt[(r + 1) * 32 + c:(r + 1) * 32 + c + 6], bytes([slot.PAY_BLANK]) * 6, (r, c))
+        self.assertEqual(slot.FILLS[slot.PAY_BLANK], bytes(8) + b'\xff' * 8)
+        self.assertEqual(slot.pay_cells(self.prg)[:2], bytes((24 * 8, 17 * 8 - 1)))
+        sheet = slot.obj(self.prg)
+        self.assertEqual(sheet[32 * slot.COVER_NAME:32 * slot.COVER_NAME + 32], slot.snes4(slot.FILLS[slot.PAY_BLANK]))
+        lamp = slot.rd(self.prg, slot.SMALL_TILES + 0x0D * 16, 16)
+        self.assertEqual(lamp.hex(), '1c' * 8 + '00' * 8)
+        self.assertEqual(len(slot.palettes(self.prg)[1]), 32 * 5)
+
 
 if __name__ == '__main__':
     unittest.main()

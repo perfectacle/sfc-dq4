@@ -29,10 +29,12 @@ math pri on
 !fc_lead = $124A
 !fc_dig = $124B
 !pay = $1256
-!fc_lp = $1260                      ; 줄 다섯의 배당(낱말)
+!fc_lp = $1276                      ; 줄 다섯의 배당(낱말). 글(11:B970)의 수 자리가 $125A~$1261 을 쓰므로 그 뒤에 둔다
 !fc_bt = $126A                      ; 세는 동안 깜박임 차례(0~31)
 !fc_ln = $126B                      ; 세는 줄
 !fc_cnt = $126C                     ; 0 이 아니면 세는 중(Frame 이 그 줄을 깜박임)
+!fc_lit = $126D                     ; 켜진 램프(줄 번호 비트)
+!fc_ls = $1270                      ; 줄 다섯의 배당 색인(0~7 = 배당 표 줄)
 !pad_new = $1212
 !oam = $0300
 !oam_hi = $0500
@@ -52,6 +54,10 @@ math pri on
 !REELS_OAM = $0000
 !LAMPS_OAM = $0030
 !DIGITS_OAM = $0044
+!COVER_OAM = $0060
+!COUNT_LEAD = 149                   ; 판정에서 첫 코인까지(맞음 글·소리 동안)
+!COUNT_GAP = 9                      ; 코인 한 장마다
+!COUNT_TAIL = 193                   ; 마지막 코인에서 「한 번 더」 까지
 
 macro ix()                          ; X ← A 낮은 바이트
     REP #$20 : AND #$00FF : TAX : SEP #$20
@@ -145,7 +151,7 @@ Setup:
     LDA.b #!obj_pal_cg : STA $2121
     LDX #$0000
 -   LDA.l ObjPal,X : STA $2122
-    INX : CPX #$0080 : BCC -
+    INX : CPX.w #ObjPalEnd-ObjPal : BCC -
     ; BG3 글 팔레트 0: 0 투명, 1·3 흰색, 2 검정
     STZ $2121
     LDX #$0000
@@ -213,9 +219,8 @@ Sfx:
 
 Frame:
     JSR DrawReels
-    LDA !fc_cnt : BEQ +
     JSR Blink
-+   JSR DrawLamps
+    JSR DrawLamps
     JSR DrawCoins
     JSL $009506
     REP #$10 : SEP #$20
@@ -261,6 +266,7 @@ Idle:
     REP #$20 : LDA !coins : SEC : SBC #$0001 : STA !coins : SEP #$20
     LDA !coins+2 : SBC #$00 : STA !coins+2
     INC !fc_n
+    LDA !fc_lit : ASL : INC : STA !fc_lit
     JSR SfxCoin
     BRA Idle
 .start
@@ -269,7 +275,7 @@ Idle:
     JSR Judge
     JSR Again
     BCC Leave
-    STZ !fc_n
+    STZ !fc_n : STZ !fc_lit
     JSR NoCoins : BCS Leave
     JSR Clear
     %text($05CC, !str_intro)
@@ -381,6 +387,7 @@ Judge:
 -   STZ !fc_lp,X : INX : INX : CPX #$000A : BCC -
     SEP #$20 : STZ !pay+2
     STZ !fc_row                     ; 줄 번호
+    STZ !fc_lit                     ; 판정하면 램프를 모두 끄고 맞은 줄만 켠다(FC 17:$A0D8·$9E35)
 .line
     LDA !fc_row : CMP !fc_n : BCC +
     JMP .done
@@ -392,6 +399,8 @@ Judge:
     LDA !fc_first : CMP #$01 : BNE .miss
     STZ !fc_first                   ; 체리 둘 = 색인 0
 .hit
+    LDA !fc_row : %ix() : LDA !fc_first : AND #$07 : STA !fc_ls,X
+    LDA.l LineBit,X : TSB !fc_lit
     LDA !fc_first : AND #$07 : ASL : %ix()
     REP #$20 : LDA.l Pay,X : PHA : CLC : ADC !pay : STA !pay
     LDA !fc_row : AND #$00FF : ASL : TAX : PLA : STA !fc_lp,X : SEP #$20
@@ -401,8 +410,13 @@ Judge:
     REP #$20 : LDA !pay : SEP #$20 : BNE +
     JMP .lose
 +
+    ; FC 17:$9DFA: 배당 합을 알리는 글(0475)과 맞음 소리 뒤에 세기 시작
+    JSR Clear
+    %text($05CC, !str_win)
     JSR SfxWin
-    ; 맞은 줄마다 배당을 한 프레임에 한 장씩 세며 장마다 소리, 그 줄 무늬는 32프레임마다 8프레임 숨김(FC 17:$9EDA)
+    LDA.b #!COUNT_LEAD : JSR Wait
+    ; FC 17:$9EDA: 맞은 줄마다 한 장씩 세며 장마다 소리. 세는 동안 배당 표의 그 무늬 줄을 32프레임마다 8프레임 숨기고
+    ; 그 줄 램프는 16프레임마다 한 프레임 흰 램프(17:$9E9D, 차례 $83 은 줄마다 0 부터, 매 프레임 1씩)
     STZ !fc_ln
     LDA #$01 : STA !fc_cnt
 .cline
@@ -415,16 +429,16 @@ Judge:
 +   LDA !fc_ln : ASL : %ix()
     REP #$20 : DEC !fc_lp,X : SEP #$20
     JSR SfxCoin
-    JSR Frame
+    LDA.b #!COUNT_GAP : STA !fc_wait
+-   JSR Frame
     LDA !fc_bt : INC : AND #$1F : STA !fc_bt
+    DEC !fc_wait : BNE -
     LDA !fc_ln : ASL : %ix()
     REP #$20 : LDA !fc_lp,X : SEP #$20 : BNE .count
 .nline
     INC !fc_ln : LDA !fc_ln : CMP #$05 : BCC .cline
     STZ !fc_cnt
-    JSR Clear
-    %text($05CC, !str_win)
-    LDA #$5A : JSR Wait
+    LDA.b #!COUNT_TAIL : JSR Wait
     RTS
 .lose
     JSR Clear
@@ -485,32 +499,44 @@ DrawReels:                          ; 릴마다 화면 행 -1~2(위→아래)의
     INX : CPX #$0003 : BCC .reel
     RTS
 
-; 세는 줄(!fc_ln)의 세 칸을 !fc_bt 0~7 동안 숨김(FC 17:$9EB4). DrawReels 뒤에 불러야 한다
+; 세는 줄 무늬의 배당 표 줄(6칸)을 !fc_bt 0~7 동안 FC 바탕 칸 8F 의 OBJ 로 덮음(FC 17:$9EB4 → $9E80 이 그 줄 BG 를 8F 로
+; 바꾸고 $9E64 가 되돌림). BG1 맵은 VRAM 에만 있어 OBJ(우선순위 3, 바탕 팔레트 !cover_pal)로 가린다
 Blink:
+    LDX #$0000
+-   LDA #$F0 : STA !oam+!COVER_OAM+1,X
+    INX : INX : INX : INX : CPX #$0018 : BCC -
+    LDA !fc_cnt : BEQ .ret
     LDA !fc_bt : CMP #$08 : BCS .ret
-    LDA !fc_ln : ASL : CLC : ADC !fc_ln : %ix()
-    LDY #$0003
--   PHX : PHY
-    LDA.l Lines,X : %ix() : LDA.l CellOam,X : %ix()
-    LDA #$F0 : STA !oam+!REELS_OAM+1,X
-    PLY : PLX
-    INX : DEY : BNE -
+    LDA !fc_ln : %ix() : LDA !fc_ls,X : ASL : %ix()
+    LDA.l PayCell,X : STA !fc_rx
+    LDA.l PayCell+1,X : STA !fc_ry
+    LDX #$0000
+-   LDA !fc_rx : STA !oam+!COVER_OAM,X
+    CLC : ADC #$08 : STA !fc_rx
+    LDA !fc_ry : STA !oam+!COVER_OAM+1,X
+    LDA.b #!cover_name : STA !oam+!COVER_OAM+2,X
+    LDA.b #$30|(!cover_pal<<1) : STA !oam+!COVER_OAM+3,X
+    INX : INX : INX : INX : CPX #$0018 : BCC -
 .ret
     RTS
 
-; 격자 칸(행 × 3 + 릴, 행 0 이 아래) → 그 칸 OAM 자리(DrawReels: 릴 × 4 + 3 − 행 번째)
-CellOam: db 12, 28, 44, 8, 24, 40, 4, 20, 36
-
-DrawLamps:                          ; 줄 램프 다섯. 켜진 줄(줄 번호 < 넣은 수)은 팔레트 3, 아니면 2(FC 실측)
+; 줄 램프 다섯. 켜진 줄(!fc_lit: 넣은 코인의 줄, 판정 뒤에는 맞은 줄)은 팔레트 3, 아니면 2(FC 실측). 세는 줄의 램프는
+; 차례(!fc_bt)가 16의 배수인 프레임에 흰 램프 타일 0D(FC 17:$9EAC → $9E92)
+DrawLamps:
     LDX #$0000
 -   TXA : ASL : ASL : %iy()
     LDA.b #24 : STA !oam+!LAMPS_OAM,Y
     LDA.l LampY,X : STA !oam+!LAMPS_OAM+1,Y
     LDA.b #(!small_name+$0C) : STA !oam+!LAMPS_OAM+2,Y
-    LDA.l LampLine,X : CMP !fc_n
-    LDA.b #$36 : BCC +
-    LDA.b #$34
-+   STA !oam+!LAMPS_OAM+3,Y
+    LDA !fc_cnt : BEQ +
+    LDA.l LampLine,X : CMP !fc_ln : BNE +
+    LDA !fc_bt : AND #$0F : BNE +
+    LDA.b #(!small_name+$0D) : STA !oam+!LAMPS_OAM+2,Y
++   LDA.l LampLine,X : PHX : %ix() : LDA.l LineBit,X : PLX
+    AND !fc_lit : BEQ +
+    LDA.b #$36 : BRA ++
++   LDA.b #$34
+++  STA !oam+!LAMPS_OAM+3,Y
     INX : CPX #$0005 : BCC -
     RTS
 
@@ -544,6 +570,8 @@ DrawCoins:                          ; 코인 수 6자리(앞의 0 은 빈칸, 0 
 Pow: dl 100000, 10000, 1000, 100, 10, 1
 LampY: db 20, 52, 84, 116, 148
 LampLine: db 3, 1, 0, 2, 4          ; 램프(위→아래)가 맡은 줄 번호(코인 1~5장째에 켜지는 차례, FC 실측)
+LineBit: db $01, $02, $04, $08, $10
+PayCell: incbin "paycell.bin"       ; 배당 색인 0~7 마다 배당 표 줄 첫 칸의 OBJ (x, y)
 
 BgTiles: incbin "bgtiles.bin"
 BgTilesEnd:
@@ -552,6 +580,7 @@ ObjTiles: incbin "objtiles.bin"
 ObjTilesEnd:
 BgPal: incbin "bgpal.bin"
 ObjPal: incbin "objpal.bin"
+ObjPalEnd:
 Machines: incbin "machines.bin"
 Lines: incbin "lines.bin"
 Pay: incbin "pay.bin"

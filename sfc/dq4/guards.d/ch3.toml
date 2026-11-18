@@ -54,6 +54,11 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4groupbuild.py",
+  # 카지노 슬롯·포커 본체(towns_slot_*·towns_poker_* 사례가 세기·램프·화면 맵 칸을 본다)
+  "sfc/dq4/tools/dq4fcslot.py",
+  "sfc/dq4/tools/dq4fcslot.asm",
+  "sfc/dq4/tools/dq4fcpoker.py",
+  "sfc/dq4/tools/dq4fcpoker.asm",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3walk && uv run --locked python sfc/dq4/tools/dq4ch3walkcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3walk --repeat 2"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태·3장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -140,6 +145,8 @@ paths = [
   "sfc/dq4/tools/dq4brkscan.py",
   "sfc/dq4/tools/dq4npcport.py",
   "sfc/dq4/tools/dq4groupbuild.py",
+  "sfc/dq4/tools/dq4fcslot.py",
+  "sfc/dq4/tools/dq4fcpoker.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3compat && uv run --locked python sfc/dq4/tools/dq4compatcheck.py walk --chapter3 --rom work/ch3/dq4-ch1-full.sfc --out work/ch3compat --jobs 4"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]

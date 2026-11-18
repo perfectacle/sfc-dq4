@@ -470,5 +470,27 @@ class RomNamesTests(unittest.TestCase):
         self.assertEqual(wt.kana_key('カサ 　ぬの'), 'かさぬの')
 
 
+DQ5_ROM = Path(__file__).resolve().parents[3] / 'rom' / 'dq5.sfc'
+
+
+@unittest.skipUnless(DQ5_ROM.is_file() and __import__('os').environ.get('DQ4_GALMURI'), 'DQ5 롬과 DQ4_GALMURI 가 필요')
+class KanaFallbackTest(unittest.TestCase):
+    """실제 이름 표에서 창 열 수를 넘어 가나로 떨어지는 한글 이름. 아홉 글자 고정 창(전투 몬스터·도구 창, 코인 교환
+    목록)에 뜨는 물건·몬스터 표에는 하나도 없어야 하고, 그 밖은 주문 창 일곱 칸을 넘는 몬스터 특기 하나만 둔다(KINDS 주석)."""
+    def test_no_korean_name_falls_to_kana_in_nine_column_windows(self):
+        _, report = wt.build(DQ5_ROM.read_bytes(), dq4menupatch.Font('galmuri9'), {})
+        nine = [k for k in report['kana'] if k[0] in wt.NINE_WINDOW_KINDS]
+        self.assertEqual(nine, [])
+        self.assertEqual([(kind, n, name) for kind, n, name, _, _ in report['kana']], [(3, 0x93, 'こごえるふぶき')])
+
+    def test_ten_column_monster_would_be_reported(self):
+        # 몬스터 칸을 열 칸으로 넓히면 띄어쓰기를 빼지 않은 열 칸 이름(슬라임 베호마즌 등)이 아홉 글자 고정 창에서
+        # 가나가 되므로 보고에 남는다
+        kinds = {**wt.KINDS, 4: ('몬스터', 10, False)}
+        with mock.patch.object(wt, 'KINDS', kinds):
+            _, report = wt.build(DQ5_ROM.read_bytes(), dq4menupatch.Font('galmuri9'), {})
+        self.assertEqual(sorted((n, c) for kind, n, _, _, c in report['kana'] if kind == 4), [(19, 10), (148, 10)])
+
+
 if __name__ == '__main__':
     unittest.main()
