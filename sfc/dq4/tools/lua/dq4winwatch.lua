@@ -8,7 +8,7 @@
 -- 바뀌는 글자 찍기와 200~3FF(필드에서는 BG1·BG2 그림이라 물결마다 바뀜)는 새 모습으로 치지 않는다.
 -- 모습은 앞서 적은 모습과 달라진 타일맵 낱말과, 이 타일맵이 가리키는 칸(과 테두리 칸 08B~095) 가운데 앞서 적은 그림과
 -- 달라진 칸의 그림만 적는다. 같은 때의 OAM(544바이트)·CGRAM(512바이트)도 앞 모습과 달라진 낱말만 적는다(스프라이트·색
--- 규칙용). 파일 첫머리는 판 기록 V(지금 4).
+-- 규칙용). 파일 첫머리는 판 기록 V(지금 5).
 --
 -- 엔진이 창 하나의 틀을 버퍼에 그릴 때(04:A56C, 창 틀 그리기가 $0A46 높이를 읽는 첫 명령)마다 D 기록(프레임, 창 번호 $0A00,
 -- x·y·너비·높이 $0A43~$0A46)을 적는다. 창을 닫으면 엔진이 남은 창을 아래부터 다시 그리므로 판정이 그 차례로 겹친 순서를 안다.
@@ -17,6 +17,7 @@
 --   O  OAM 이 바뀐 프레임과 바뀐 낱말, 이어서 P: 그 프레임의 WINWATCH_OWRAM 조각 가운데 달라진 바이트(인물 표 등)
 --   B  OBJ 설정(이름 자리·둘째 표 거리·크기 꼴), 밝기·강제 블랭크, BG 모드·BG3 우선, 주·부 화면 층이 바뀐 프레임
 --   M  맵 번호($BC/$BD)·세계($1949)·전투 여부(NMI 작업 $1944 = 8952)·시각($075E)·일행 수($1967)가 바뀐 프레임
+--   F  스캔라인 OBJ 넘침 플래그(STAT77 bit6 rangeOver·bit7 timeOver, 그 프레임 끝의 PPU 상태)가 바뀐 프레임
 --   J  M 뒤 OBJ_SETTLE 프레임과, M 뒤 엔진이 창을 처음 그린 다음 프레임에 OBJ VRAM 두 이름 표(16KB)를 32바이트 덩이로
 --      앞서 적은 것과 달라진 덩이만, 이어서 CGRAM 512바이트 전부
 --   R  파일 첫머리(V 뒤)에 한 번, WRAM 조각 목록 글(WINWATCH_WRAM = "주소:길이,…", 7E 뱅크 16진 주소·10진 길이)
@@ -33,7 +34,7 @@ emu.stop = function(...)
   return stopOrig(...)
 end
 if out then
-  out:write(string.pack("<c1I2", "V", 4))
+  out:write(string.pack("<c1I2", "V", 5))
   local n, last, ids, nid = 0, nil, {}, 0
   local map, art, oam, cg = {}, {}, {}, {}
   local CPU = emu.memType.snesMemory
@@ -66,7 +67,7 @@ if out then
     for k = 0, tonumber(len) - 1 do owram[#owram + 1] = 0x7E0000 + tonumber(a, 16) + k end
   end
   out:write(string.pack("<c1s2", "Q", ospec))
-  local ostore, bkey, mkey, jat, jstore, jwin = {}, nil, nil, nil, {}, false
+  local ostore, bkey, mkey, jat, jstore, jwin, fkey = {}, nil, nil, nil, {}, false, nil
   local function scene(s)
     local on = not s["ppu.forcedBlank"] and (s["ppu.screenBrightness"] or 0) > 0
     local b = {s["ppu.oamBaseAddress"] or 0, s["ppu.oamAddressOffset"] or 0, s["ppu.oamMode"] or 0,
@@ -92,6 +93,11 @@ if out then
       jat = math.min(jat or (n + 1), n + 1)
     end
     drew = false
+    local f = (s["ppu.rangeOver"] and 1 or 0) | (s["ppu.timeOver"] and 2 or 0)
+    if f ~= fkey then
+      fkey = f
+      out:write(string.pack("<c1I4B", "F", n, f))
+    end
     if not on then return end
     local t = delta(ostore, OAM, 272)
     if #t > 0 then

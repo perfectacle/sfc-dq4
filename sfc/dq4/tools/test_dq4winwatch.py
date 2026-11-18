@@ -227,6 +227,7 @@ class FileTest(unittest.TestCase):
         data += struct.pack('<cH', b'P', 1) + struct.pack('<HB', 1, 0x77)
         data += struct.pack('<cIHHBBBBBBB', b'B', 11, 0x6000, 0x1000, 0, 15, 0, 1, 1, 0x17, 0x17)
         data += struct.pack('<cIBBBBBB', b'M', 12, 0x37, 0x00, 0, 0, 0x50, 2)
+        data += struct.pack('<cIB', b'F', 13, 3)
         data += struct.pack('<cIHHH', b'J', 42, 0x6000, 0x1000, 1) + struct.pack('<H', 3) + bytes(range(32)) + bytes(512)
         rec = ww.parse(data)
         self.assertEqual(rec.shots[1].wram, {0x201D: 3, 0x2041: 0x41})
@@ -236,6 +237,7 @@ class FileTest(unittest.TestCase):
         self.assertEqual(rec.obj, [(11, 0x6000, 0x1000, 0, 15, 0, 1, 1, 0x17, 0x17)])
         self.assertEqual(rec.maps, [(12, 0x37, 0x00, 0, 0, 0x50, 2)])
         self.assertEqual(len(rec.objvram[0][4]), 512)
+        self.assertEqual(rec.overs, [(13, True, True)])
         self.assertEqual(rec.objvram[0][3][96:128], bytes(range(32)))
         self.assertEqual(ww.Screen(rec.shots[1], None).wram(0x2040, 2), [None, 0x41])
 
@@ -260,11 +262,21 @@ class FileTest(unittest.TestCase):
             self.assertEqual(ww.wram_env(attr='OAM_WRAM'), '3020:64')
             self.assertEqual(ww.wram_env(), '201D:1,2040:46')
 
+    def test_readset_keeps_judgement_out_of_cache(self):
+        # 판정 글은 규칙 코드로 다시 만들므로 캐시 출력·재검증에서 빼고, 기록하는 WRAM 조각 목록은 캐시 키에 든다
+        import dq4readset
+        self.assertIn(ww.LOG, dq4readset.SKIP)
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(ww, 'wram_env', side_effect=lambda ranges=None, attr='WRAM': attr):
+            parts = dq4readset.key_parts(__file__, b'rom', __file__, Path(d), {}, ())
+        self.assertEqual(parts['winwatch'], ['WRAM', 'OAM_WRAM'])
+
     def test_broken_file_is_an_error(self):
         with self.assertRaises(ValueError):
             ww.parse(b'X')
         with self.assertRaises(ValueError):
             ww.parse(b'V\x01\x00')
+        # 판 4 기록은 그대로 읽는다
+        self.assertEqual(ww.parse(b'V\x04\x00').overs, [])
 
 
 if __name__ == '__main__':

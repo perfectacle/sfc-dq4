@@ -32,7 +32,9 @@ import sys
 HERE = Path(__file__).resolve().parent
 LOG = 'winwatch.log'
 DATA = 'winwatch.bin'
-VERSION = 4
+VERSION = 5
+# 판 4 기록도 읽는다(F 가 없을 뿐)
+READABLE = (4, 5)
 # 엔진 창 틀 그리기 기록 뒤 이만큼 프레임 안에 이어진 그리기는 한 번의 다시 그리기(창을 닫은 뒤 남은 창을 아래부터)로 본다
 REPAINT_GAP = 8
 BORDER_ROM = 0x04E978           # 08B~095, 타일마다 평면 0 8바이트 + 평면 1 8바이트
@@ -75,6 +77,7 @@ class Record:
     maps: list                  # [(프레임, $BC, $BD, $1949, 전투 1/0, 시각 $075E, 일행 수 $1967)]
     objvram: list               # [(프레임, 이름 자리, 둘째 표 거리, OBJ VRAM 16KB, CGRAM 512바이트)] 맵이 바뀐 뒤·창을 처음
                                 #   그린 뒤 한 번씩
+    overs: list = None          # [(프레임, rangeOver, timeOver)] 스캔라인 OBJ 넘침 플래그가 바뀐 프레임(판 5부터)
 
 
 def wram_ranges(attr='WRAM'):
@@ -104,9 +107,9 @@ def parse(data, ranges=None):
     """Record. 모습 기록은 앞 모습과 달라진 낱말·칸 그림·OAM·CGRAM 낱말만 담아 차례로 덮어 간다. 한 번도 적지 않은 칸 그림은
     0 으로 둔다(그 모습의 타일맵이 가리키지 않는 칸). WRAM 조각은 기록 첫머리 R 의 목록(ranges 로 덮을 수 있음)으로 W 의
     번호를 주소로 바꾼다."""
-    shots, events, draws, oams, objs, maps, objvram = {}, [], [], [], [], [], []
-    if data[:1] != b'V' or struct.unpack_from('<H', data, 1)[0] != VERSION:
-        raise ValueError(f'winwatch 기록 판이 {VERSION} 이 아님')
+    shots, events, draws, oams, objs, maps, objvram, overs = {}, [], [], [], [], [], [], []
+    if data[:1] != b'V' or struct.unpack_from('<H', data, 1)[0] not in READABLE:
+        raise ValueError(f'winwatch 기록 판이 {READABLE} 가운데 하나가 아님')
     o = 3
     head = struct.Struct('<IIHHHHHHHH')
     words, chr_, oam, cgram = [0] * 1024, bytearray(TILES * 16), bytearray(544), bytearray(512)
@@ -176,6 +179,10 @@ def parse(data, ranges=None):
                 o += 3
             if oams:
                 oams[-1] = oams[-1][:2] + (dict(owram),)
+        elif kind == b'F':
+            frame, f = struct.unpack_from('<IB', data, o + 1)
+            overs.append((frame, bool(f & 1), bool(f & 2)))
+            o += 6
         elif kind == b'B':
             objs.append(struct.unpack_from('<IHHBBBBBBB', data, o + 1))
             o += 16
@@ -195,7 +202,7 @@ def parse(data, ranges=None):
             raise ValueError(f'winwatch 기록이 {o} 에서 깨짐')
         if o > len(data):
             raise ValueError('winwatch 기록이 중간에 끊김')
-    return Record(shots, events, draws, oams, objs, maps, objvram)
+    return Record(shots, events, draws, oams, objs, maps, objvram, overs)
 
 
 def stacks(draws):
