@@ -90,11 +90,12 @@ RAFT_CODE = (0x5DF000, 0x5DF800)
 MONSTERS_CODE = (0x4E8000, 0x4EC000)
 # 엔돌(E) 몫의 낮은 뱅크 BRK 받침(dq4neneshop.BRKS). 원래 롬 빈 자리(dq5build free) 가운데 아무 도구도 쓰지 않던 곳
 LOW_STUBS = (0x29FF80, 0x29FFF0)
-# DQ5 사람 자리 표 넷(7E:1BC5·1BD3·1BE1·1BEF + 0~13). 00:864C 가 맵을 들 때마다 56바이트를 지우고(엔돌 검사 전체를
-# dq5wramwatch 로 잼: 이 범위에 쓴 원래 DQ5 코드는 00:864C 뿐), 뱅크 02 의 DQ5 맵 사건(02:87D2·93AE·8B1A)이 채운다
+# DQ5 사람 자리 표 넷(7E:1BC5·1BD3·1BE1·1BEF + 0~13). 뱅크 02 의 DQ5 필드 갈래(02:87D2·93AE·8B1A)가 채운다(1장 걷기의
+# 필드·ルーラ 장면에서 02:87E0~87F2 가 씀, dq5wramwatch). 엔돌 검사 전체에서는 전원·리셋 때 WRAM 을 지우는 00:864C 밖에
+# 이 범위에 쓴 원래 DQ5 코드가 없었다
 DQ5_PEOPLE = (0x7E1BC5, 0x7E1BFD)
 # 낮은 WRAM 의 3장 몫: 네네 가게 임시 칸(dq4neneshop.TEMP). DQ5_PEOPLE 안이라 루틴 한 번 안에서만 쓰는 값만 둔다
-# (맵을 드는 동안 걸치지 않음). 보기 표지·쪽 줄 수처럼 오래 남거나 매 프레임 읽히는 값은 두지 않는다
+# (네네 가게 대화 안에서 끝남). 보기 표지·쪽 줄 수처럼 오래 남거나 매 프레임 읽히는 값은 두지 않는다
 NENE_TEMP = (0x7E1BD6, 0x7E1BE0)
 # 본몰(B) 몫의 낮은 뱅크 BRK 받침(dq4ch3bonmalmo.LOW_BRKS). 같은 빈 자리의 끝
 BONMALMO_STUBS = (0x29FFF0, 0x2A0000)

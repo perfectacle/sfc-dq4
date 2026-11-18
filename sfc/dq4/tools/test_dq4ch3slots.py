@@ -341,7 +341,7 @@ class LowWramTest(unittest.TestCase):
         self.assertTrue(slots.NENE_TEMP[0] & 0xFFFF <= shop.PICK & 0xFFFF < slots.NENE_TEMP[1] & 0xFFFF)
 
     def test_view_marks_stay_out_of_dq5_and_scratch(self):
-        # 보기 표지·줄 수는 모든 고르기 창이 매 프레임 읽으므로 DQ5 가 지우는 표·날 바뀜이 쓰는 TEMP 밖에, E 둘째 변수 칸 안에
+        # 보기 표지·줄 수는 모든 고르기 창이 매 프레임 읽으므로 DQ5 사람 자리 표·날 바뀜이 쓰는 TEMP 밖에, E 둘째 변수 칸 안에
         import dq4neneshop as shop
         e = slots.SLOTS['E'].vars2
         for at in (shop.VIEW_MARK, shop.VIEW_COUNT):

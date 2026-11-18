@@ -35,7 +35,7 @@ ITEM_SLOTS = 12
 VIEW_LINES = 8                                 # FC 보기 창 66 의 한 쪽 줄 수(15:$9F68)
 VIEW_MORE = 7                                  # dq4windowname.NENE_VIEW_MORE 와 같아야 함(시험이 견줌)
 # 보기 표지(dq4windowname.NENE_MARK, 보기 동안 VIEW_MORE·+1, 끝나면 0)와 쪽 줄 수(NENE_LINES, 창 높이). 매 프레임 모든 고르기
-# 창에서 읽히므로 날 바뀜 루틴이 쓰는 TEMP 나 DQ5 가 지우는 낮은 WRAM(7E:1BC5~1BFC, dq4ch3slots.DQ5_PEOPLE)에 두면 안 된다
+# 창에서 읽히므로 날 바뀜 루틴이 쓰는 TEMP 나 DQ5 사람 자리 표(7E:1BC5~1BFC, dq4ch3slots.DQ5_PEOPLE)에 두면 안 된다
 VIEW_MARK = ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + MARK & 0xFFFF    # = dq4ch3slots.NENE_VIEW_MARK
 VIEW_COUNT = ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + LINES & 0xFFFF   # = dq4ch3slots.NENE_VIEW_LINES
 STOCK_SLOTS = len(_STOCK_SLOTS) * STOCK_PER_SLOT
