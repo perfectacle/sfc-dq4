@@ -369,6 +369,13 @@ def rate_error(prg, base, coef, kinds=LAND_KINDS):
 OWN_COEF_BASES = (28,)
 COEF_SITE, COEF_ORIG = 0x23E892, bytes.fromhex("A9 00 EB A5 01 A8 B9 44 EA")   # LDA #0 / XBA / LDA $01 / TAY / LDA $EA44,Y
 
+# 독늪: FC 는 16픽셀 블록 걸음마다 일행마다 HP 1(1E:$99E1), DQ5 는 8픽셀 셀 걸음마다 1(06:8000)이라 같은 거리에 두 배였다.
+# 06:804E(발밑이 늪 종류 $00 인 것을 찾은 자리)에서 swamp 훅이, 종류가 4D 이고 トラマナ($194E)가 꺼져 있으면 사람 셀
+# (7E:3020+X, 7E:3080+X)의 X + Y 가 짝수인 셀에서는 피해 없이 끝낸다. 한 축으로 셀 둘(FC 블록 하나)을 가면 피해 하나
+SWAMP_SITE, SWAMP_ORIG = 0x06804E, bytes.fromhex("A9 01 85 80 A9 01 80 31")   # LDA #1 / STA $80 / LDA #1 / BRA $8087
+SWAMP_DAMAGE, SWAMP_KIND, TRAMANA = 0x068087, 0x4D, 0x7E194E
+PERSON_X, PERSON_Y = 0x7E3020, 0x7E3080
+
 
 @functools.cache
 def own_coef(prg, base):
@@ -1120,6 +1127,12 @@ def ch3_code(merchant, picks, items, tables, coefs=(), at=CH3_CODE_AT):
         a.b(0xA9, 0x00, 0xEB, 0xA9, coef, 0x6B)                                 # LDA #0 / XBA / LDA #계수 / RTL
         a.label(f'coef_not{zone}')
     a.b(*COEF_ORIG, 0x6B)
+    # 06:804E 에서(M·X 8비트, X = 사람 칸): 원래처럼 $80 = 1(늪 위). 4D·トラマナ 없음·X + Y 짝수면 피해 없이 RTL
+    a.label('swamp').b(0xA9, 0x01, 0x85, 0x80, 0xA5, 0x00, 0xC9, SWAMP_KIND).rel(0xD0, 'swamp_hit')
+    a.b(0xAF, *_long(TRAMANA)).rel(0xD0, 'swamp_hit')
+    a.b(0xBF, *_long(PERSON_X), 0x18, 0x7F, *_long(PERSON_Y), 0x4A).rel(0x90, 'swamp_skip')  # X + Y / LSR / BCC
+    a.label('swamp_hit').b(0xA9, 0x01, 0x5C, *_long(SWAMP_DAMAGE))
+    a.label('swamp_skip').b(0x6B)
     a.label('zones')
     for zone in merchant:
         a.b(*(zone * CH3_ZONE_RECORD).to_bytes(2, 'little'))
@@ -1196,6 +1209,8 @@ def ch3_writes(prg, dq5, report, at=CH3_CODE_AT):
     out.append(put(WAKE_SITE, jsl('wake'), WAKE_ORIG, '필드 여관(떠돌이 상인)에서 깨면 그룹 01 갈래로 가지 않음'))
     out.append(put(COEF_SITE, jsl('coef') + bytes((0xEA,) * (len(COEF_ORIG) - 4)), COEF_ORIG,
                    '계수 표에 맞는 값이 없는 기본 조우율의 구역은 FC 에 맞춘 계수로(own_coefs)'))
+    out.append(put(SWAMP_SITE, bytes((0x5C, *_long(labels['swamp']))) + bytes((0xEA,) * (len(SWAMP_ORIG) - 4)),
+                   SWAMP_ORIG, '독늪 피해를 FC 처럼 블록(셀 둘)마다 하나로'))
     out.append(put(LAST_KILL_SITE, LAST_KILL, LAST_KILL_ORIG, '떨어뜨림 후보는 마지막으로 쓰러뜨린 종류(FC)'))
     for site, orig, new in DROP_SPECIES:
         out.append(put(site, new, orig, '떨어뜨림 종류는 마지막으로 쓰러뜨린 종류 $111C(FC, 도망은 바꾸지 않음)'))

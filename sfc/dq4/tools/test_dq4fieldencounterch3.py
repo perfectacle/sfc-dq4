@@ -467,6 +467,33 @@ class PickTests(unittest.TestCase):
                 self.assertEqual(cpu.a, want, (zone, index))
         self.assertGreater(m.rate_error(self.prg, 28, 0x2B), 2 * m.rate_error(self.prg, 28, 0x31))
 
+    def test_swamp_hook_damages_one_cell_in_two(self):
+        # 06:804E 훅: 늪(4D)·トラマナ 없음이면 사람 셀 X + Y 가 홀수일 때만 원래 피해 길(06:8087, A = 1), 짝수면 RTL.
+        # 다른 종류·トラマナ 이면 늘 원래 길. 어느 쪽이든 $80 = 1(늪 위)
+        class Hit(Exception):
+            pass
+        blob, labels = m.ch3_code(m.merchant_zones(self.report), self.picks, [(0, 0)] * m.DROP_SLOTS,
+                                  m.fc_tables(self.prg))
+        for kind, tramana in ((m.SWAMP_KIND, 0), (m.SWAMP_KIND, 0x81), (0x02, 0)):
+            for slot in (0, 1, 2):
+                hits = []
+                for cell in range(0xFE, 0x106):
+                    cpu = self.dq5_cpu(blob, 1)
+                    cpu.p, cpu.x = 0x30, slot
+                    cpu.wram[0x00], cpu.wram[0x80], cpu.wram[0x194E] = kind, 0, tramana
+                    cpu.wram[0x3020 + slot], cpu.wram[0x3080 + slot] = cell & 0xFF, 0x83
+                    cpu.hooks[m.SWAMP_DAMAGE] = lambda c: (_ for _ in ()).throw(Hit(c.a & 0xFF))
+                    try:
+                        cpu.jsl(labels['swamp'])
+                        hits.append(False)
+                    except Hit as e:
+                        self.assertEqual(e.args[0], 1)
+                        hits.append(True)
+                    self.assertEqual(cpu.wram[0x80], 1)
+                plain = kind == m.SWAMP_KIND and not tramana
+                self.assertEqual(hits, [(c + 0x83) % 2 == 1 for c in range(0xFE, 0x106)] if plain else [True] * 8,
+                                 (kind, tramana, slot))
+
     def test_table_has_every_zone_and_fits(self):
         # docs 가 레코드를 쓰는 구역 모두(바다 81·82 포함), 목록 무게 합은 8비트
         zones = [r[0] for r in self.picks]

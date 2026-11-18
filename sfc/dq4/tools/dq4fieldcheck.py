@@ -12,6 +12,8 @@ walks out of 01/00 into world 0:
            dq4fieldgfx's (the animated 454-459 left out); the sea tiles 4·5·20·21 are one of the 16 frames
            01:C5C8 makes of dq4fieldgfx.water in that world (dq5gfx.water_frames); CGRAM lines 2 and 3 colours
            1-13 are one of the world's sets
+  swamp    (field 0) walk from a hill across the three poison-swamp blocks of SWAMP_ROW with no encounters: the
+           hero's HP (7E:2042) drops by one per FC block, as FC's 1E:$99E1
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4fieldcheck.py --rom work/dq4-groups/groups.sfc --out work/dq4-fieldcheck
 
@@ -35,6 +37,7 @@ import dq4freshstate  # noqa: E402
 import dq4fieldgfx  # noqa: E402
 import dq4fieldport  # noqa: E402
 from dq4environmentromcheck import dump  # noqa: E402
+import dq4groupcheck  # noqa: E402
 from dq4groupcheck import field_scene  # noqa: E402
 from dq5fieldwrite import split  # noqa: E402
 from dq5gfx import water_frames  # noqa: E402
@@ -51,6 +54,11 @@ PRESS = 18
 ALIGN = "idle:16"
 TOWARDS = {(1, 0): "right", (-1, 0): "left", (0, -1): "up", (0, 1): "down"}
 MAP_SCENE_CELL = (2 * 0xA4, 2 * 0x2F + 1)
+# 독늪(여신상 동굴 입구 둘레, FC 줄 41 의 80~82): (선 블록, 지나는 독늪 블록 수, 멈추는 블록). FC 는 블록 걸음마다 HP 1
+# (1장 필드 6걸음에 1B → 15), DQ5 는 셀마다 1 이라 고치기 전에는 HP 6 이 줄었다
+SWAMP_ROW = ((0x7E, 0x41), 3, (0x83, 0x41))
+SWAMP_HP = 0x1E
+NO_RATES = "11EA44=0000000000000000"
 # Field cells to look at the art from: below バトランド castle, outside イムル, on a bridge, in the desert south of
 # the castle, by a reef of the western sea.
 VIEWS = {"castle": MAP_SCENE_CELL, "imuru": (308, 47), "bridge": (400, 145), "desert": (328, 149), "reef": (80, 49)}
@@ -206,8 +214,21 @@ def main():
             block = [v // 2 for v in got.get("field", ())]
             return name, {"got": got, "block": block, "want_block": want, "target": list(target), "ok": block == want}
 
+        def run_swamp():
+            """SWAMP_ROW 의 독늪 블록 셋을 왼쪽 언덕에서 오른쪽 언덕(그 너머 산에 막힘)까지 걷는다. 조우 계수를 0 으로 둬
+            싸우지 않는다. FC 처럼 블록마다 HP 1 이 줄어야 한다."""
+            (x, y), blocks, end = SWAMP_ROW
+            cell = dq4fieldport.stand(x, y)
+            got = dq4groupcheck.scene(mesence, rom, state, out, "swamp", FIELD="{},{}".format(*cell),
+                                      ROMPATCH=f"{dq4fieldport.warp_patch(rom.read_bytes(), *cell)};{NO_RATES}",
+                                      TEST=f"{ALIGN},right:160,wait:30", MAXF="2600", SET=f"2042={SWAMP_HP:02X}")
+            hp = (out / "swamp" / "final.wram").read_bytes()[0x2042]
+            block = [v // 2 for v in got.get("field", ())]
+            return "swamp", {"got": got, "block": block, "hp": [SWAMP_HP, hp],
+                             "ok": block == list(end) and SWAMP_HP - hp == blocks}
+
         return [(run_map, ())] + [(run_probe, p) for p in probes(grid, props, taken, conf["kinds"], conf["centre"])] + \
-            [(run_view, v) for v in views.items()]
+            [(run_view, v) for v in views.items()] + ([(run_swamp, ())] if field == 0 else [])
 
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         futures = [pool.submit(f, *a) for field in FIELDS for f, a in scenes(field)]
