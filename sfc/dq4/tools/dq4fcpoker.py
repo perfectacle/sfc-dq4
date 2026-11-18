@@ -31,10 +31,10 @@ FC_PALETTE = 0xA975                # 슬롯과 같은 표의 앞은 BG; 포커 �
 HAND_COLORS = (0x30, 0x37, 0x17)
 FONT_AT = 0x04E528                 # DQ5 BG3 글자(11:BFCC 가 읽는 곳)
 FONT_TILES = {0x01: None, 0x8C: None, 0x8D: None, 0x8E: None}
-# 포커 화면 자리(BG1 맵 행·열)
-CARD_ROW, CARD_COL0 = 9, 1
-LABEL_ROW, DEAL_ROW, DEAL_COL = 17, 19, 13
-WINDOW_ROW = 21
+# 포커 화면 자리(BG1 맵 행·열). 필드에서 넘어온 겹침 주사(239줄, $2133)를 그대로 두므로 맵 0행과 29행은 TV 에서 가려진다
+CARD_ROW, CARD_COL0 = 11, 1
+LABEL_ROW, DEAL_ROW, DEAL_COL = 19, 21, 13
+WINDOW_ROW = 23
 from dq4ch3slots import POKER_CODE, POKER_TILES  # noqa: E402
 CODE_AT, CODE_END = POKER_CODE
 TILES_AT, TILES_END = POKER_TILES                 # 타일 앞 512칸(16KB)

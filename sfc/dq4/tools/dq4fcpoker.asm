@@ -23,6 +23,10 @@ math pri on
 !pk_lead = $1249
 !pk_pos = $124A                     ; 2바이트(맵 자리)
 !pk_n = $124C
+!pk_dc = $1264                      ; 더블 업에서 나눈 횟수(FC $82)
+!pk_sp = $1265                      ; 3바이트, 손질하는 차례(FC $83~$85)
+!pk_bw = $1260                      ; 상자 안 너비(낱말)
+!pk_bh = $1262                      ; 상자 안 높이(낱말)
 !pk_ptr = $124E                     ; 2바이트
 !counts = $1250                     ; 13바이트(FC $7635)
 !deck = $1280                       ; 53바이트(FC $7600), 앞 다섯이 손
@@ -190,7 +194,7 @@ PutLabel:                           ; X = 맵 자리, Y = Labels 안 자리
 
 ; 배당 표: 왼쪽(패 0·1·2·6·7·8)은 행 1~6, 오른쪽(3·4·5)은 행 4~6
 PayRows: db 0, 1, 2, 6, 7, 8, 3, 4, 5
-PayRow:  db 1, 2, 3, 4, 5, 6, 4, 5, 6
+PayRow:  db 3, 4, 5, 6, 7, 8, 6, 7, 8
 PayCol:  db 1, 1, 1, 1, 1, 1, 18, 18, 18
 PayNum:  db 14, 14, 14, 14, 14, 14, 26, 26, 26
 DrawPay:
@@ -266,12 +270,27 @@ Digits:
 
 Pow: dl 100000, 10000, 1000, 100, 10, 1
 
-DrawCoins:                          ; 행 1 열 25~30 코인, 행 2 열 28~30 건 수
+DrawCoins:                          ; 상자(행 2~5 열 22~30) 안 행 3 코인, 행 4 건 수
     LDA !coins : STA !pk_num : LDA !coins+1 : STA !pk_num+1 : LDA !coins+2 : STA !pk_num+2
-    %at(1, 25) : LDA.b #6 : JSR NumberRight
+    %at(3, 24) : LDA.b #6 : JSR NumberRightW
     LDA !pk_bet : STA !pk_num : STZ !pk_num+1 : STZ !pk_num+2
-    %at(2, 28) : LDA.b #3 : JSR NumberRight
+    %at(4, 27) : LDA.b #3 : JSR NumberRightW
     RTS
+
+; 창 글 숫자 꼴로 오른쪽 맞춤(빈칸은 창 바탕 01). A = 칸 수, X = 맵 자리
+NumberRightW:
+    STA !pk_n
+    JSR Digits
+    LDA !pk_n : SEC : SBC !pk_lead : BEQ ++ : BCC ++
+    STA !pk_tmp
+-   REP #$20 : LDA.w #$0001 : STA.l !map,X : SEP #$20
+    INX : INX
+    DEC !pk_tmp : BNE -
+++  LDY.w #$0000
+-   TYA : CMP !pk_lead : BCS +
+    LDA !pk_dig,Y : ASL : PHX : %ix() : REP #$20 : LDA.l WDigitTiles,X : PLX : STA.l !map,X : SEP #$20
+    INX : INX : INY : BRA -
++   RTS
 
 ; 카드 i(0~4) 칸에 카드 c(0~53, 35 = 뒷면)
 DrawCard:                           ; A = 카드, Y = 칸
@@ -334,23 +353,33 @@ ClearLabels:
 ; 글 창: 행 !window_row~+4, 열 4~27(11:BA8B 와 같은 꼴)
 DrawWindow:
     REP #$20
+    LDA.w #22 : STA !pk_bw : LDA.w #3 : STA !pk_bh
     %at(!window_row, 4)
+    BRA Box
+
+DrawCoinBox:
+    REP #$20
+    LDA.w #7 : STA !pk_bw : LDA.w #2 : STA !pk_bh
+    %at(2, 22)
+    ; 떨어짐
+
+; DQ5 창 테두리 상자. 16비트 A 로 들어옴. X = 왼쪽 위 맵 자리, 안 너비 !pk_bw·높이 !pk_bh
+Box:
+    STX !pk_pos
     LDA.w #$008C : STA.l !map,X : INX : INX
-    LDY.w #22
+    LDY !pk_bw
 -   LDA.w #$008D : STA.l !map,X : INX : INX : DEY : BNE -
     LDA.w #$408C : STA.l !map,X
-    LDA.w #3 : STA !pk_tmp
-    %at(!window_row+1, 4)
 .mid
-    STX !pk_pos
+    LDA !pk_pos : CLC : ADC.w #64 : STA !pk_pos : TAX
     LDA.w #$008E : STA.l !map,X : INX : INX
-    LDY.w #22
+    LDY !pk_bw
 -   LDA.w #$0001 : STA.l !map,X : INX : INX : DEY : BNE -
     LDA.w #$408E : STA.l !map,X
+    DEC !pk_bh : BNE .mid
     LDA !pk_pos : CLC : ADC.w #64 : TAX
-    DEC !pk_tmp : BNE .mid
     LDA.w #$808C : STA.l !map,X : INX : INX
-    LDY.w #22
+    LDY !pk_bw
 -   LDA.w #$808D : STA.l !map,X : INX : INX : DEY : BNE -
     LDA.w #$C08C : STA.l !map,X
     SEP #$20
@@ -419,6 +448,7 @@ Play:
     JSR Setup
     LDA.b #1 : STA !pk_bet
     JSR DrawPay
+    JSR DrawCoinBox
     JSR DrawCoins
     JSR DrawBacks
     JSR Frame
@@ -577,6 +607,12 @@ ShowWin:
 ; 그만두면 배당을 코인에 더함
 Double:
     LDA.b #1 : STA !pk_round
+    ; FC 17:$85FD: 나눈 횟수 0, 손질 차례 셋은 0~7 난수
+    STZ !pk_dc
+    LDX.w #$0000
+-   PHX : LDA.b #8 : JSL $00953A : REP #$10 : SEP #$20 : PLX
+    AND.b #$07 : STA !pk_sp,X
+    INX : CPX.w #$0003 : BCC -
 .ask
     LDA !pk_round : STA !pk_num : STZ !pk_num+1 : STZ !pk_num+2
     LDY.w #!text_double_ask : JSR Message
@@ -592,15 +628,18 @@ Double:
     LDA.b #$3C : JSR WaitKey
 .deal
     JSR Shuffle
-    ; 펴 보이는 카드는 2~9(FC 17:$8677): 맨 앞이 A(<4)이거나 10 이상·조커(>=24)면 다음 카드와 맞바꿈
-    LDX.w #$0005
--   LDA !deck : CMP.b #$04 : BCC + : CMP.b #$24 : BCC ++
-+   LDA !deck,X : PHA : LDA !deck : STA !deck,X : PLA : STA !deck
-    INX : BRA -
-++  LDA !deck : LDY.w #$0000 : JSR DrawCard
+    JSR Rig
+    INC !pk_dc
+    LDA !deck : LDY.w #$0000 : JSR DrawCard
     LDY.w #$0001
 -   PHY : LDA.b #!BACK : JSR DrawCard : PLY
     INY : CPY.w #$0005 : BCC -
+    ; 펴 보인 카드가 조커면 이길 카드가 없다(FC 17:$864F): 80프레임 뒤 넷을 펴고 짐
+    LDA !deck : CMP.b #!JOKER : BNE +
+    LDA.b #80 : JSR Wait
+    STZ !pk_cur : JSR Reveal
+    JMP .lose
++
     LDY.w #!text_double_pick : JSR Message
     LDA.b #1 : STA !pk_cur
 .pick
@@ -615,7 +654,7 @@ Double:
     BRL .pick
 ++++
     JSR HandOff
-    LDA !pk_cur : %ix() : %iy() : LDA !deck,X : JSR DrawCard
+    JSR Reveal
     ; 세기 견주기(FC 17:$87A6): 숫자 순위 2 < … < K < A, 조커 가장 셈
     LDA !deck : JSR Strength : STA !pk_tmp
     LDA !pk_cur : %ix() : LDA !deck,X : JSR Strength
@@ -632,6 +671,64 @@ Double:
 .lose
     LDY.w #!text_lose : JSR Message
     LDA.b #$5A : JSR WaitKey
+    RTS
+
+; 엎은 카드를 10프레임마다 하나씩 편다. 고른 칸(!pk_cur, 0 이면 없음)은 맨 끝(FC 17:$879A·$87A0)
+Reveal:
+    LDY.w #$0001
+-   TYA : CMP !pk_cur : BEQ +
+    PHY : LDA.b #10 : JSR Wait : PLY
+    PHY : LDA !deck,Y : JSR DrawCard : PLY
++   INY : CPY.w #$0005 : BCC -
+    LDA !pk_cur : BEQ +
+    LDA.b #10 : JSR Wait
+    LDA !pk_cur : %iy() : LDA !deck,Y : JSR DrawCard
++   RTS
+
+; 더블 업 덱 손질(FC 17:$8665). X = 맞바꿔 넣을 다음 카드(5 부터). 카드 = 숫자 × 4 + 무늬, 2~9 는 04~23
+; - 보통: 펴 보이는 카드를 2~9 로, 엎은 넷이 모두 2~9 면 그 하나를 A·10~K·조커로
+; - 나눈 횟수 & 7 이 !pk_sp 첫째·둘째: 펴 보이는 카드와 엎은 하나를 모두 A·10~K·조커로
+; - 셋째: 펴 보이는 카드를 2~4, 엎은 하나를 2~3 으로
+Rig:
+    LDX.w #$0005
+    LDA !pk_dc : AND.b #$07
+    CMP !pk_sp : BEQ .high
+    CMP !pk_sp+1 : BEQ .high
+    CMP !pk_sp+2 : BEQ .low
+    LDY.w #$0000
+-   LDA !deck : CMP.b #$04 : BCC + : CMP.b #$24 : BCC ++
++   JSR SwapY : BRA -
+++  LDY.w #$0001
+-   LDA !deck,Y : CMP.b #$04 : BCC .done : CMP.b #$24 : BCS .done
+    INY : CPY.w #$0005 : BCC -
+    BRA .pick
+.high
+    LDY.w #$0000
+.hi
+    LDA !deck,Y : CMP.b #$04 : BCC + : CMP.b #$24 : BCS +
+    JSR SwapY : BRA .hi
++   CPY.w #$0000 : BNE .done
+.pick
+    JSR RandY : BRA .hi
+.low
+    LDY.w #$0000
+-   LDA !deck : CMP.b #$04 : BCC + : CMP.b #$10 : BCC ++
++   JSR SwapY : BRA -
+++  JSR RandY
+-   LDA !deck,Y : CMP.b #$04 : BCC + : CMP.b #$0C : BCC .done
++   JSR SwapY : BRA -
+.done
+    RTS
+
+SwapY:                              ; 덱 X 와 Y 맞바꿈, X 다음으로
+    LDA !deck,X : PHA : LDA !deck,Y : STA !deck,X : PLA : STA !deck,Y
+    INX
+    RTS
+
+RandY:                              ; Y = 엎은 칸 1~4 가운데 하나, X 다음으로(FC 17:$86CD)
+    PHX : LDA.b #4 : JSL $00953A : REP #$10 : SEP #$20 : PLX
+    AND.b #$03 : INC : %iy()
+    INX
     RTS
 
 Strength:                           ; A = 카드 → 세기(2 = 0 … K = 11, A = 12, 조커 = FE)

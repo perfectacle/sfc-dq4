@@ -43,7 +43,8 @@ SELLER = W.cell(0x18, 0x02)
 EXCHANGE = W.cell(0x1C, 0x08)
 SLOT = W.cell(*W.SLOT_CELLS[2])
 POKER = W.cell(0x13, 0x0B)
-POKER_DECK = 0x7E1280          # dq4fcpoker !deck(앞 다섯이 손)
+POKER_DECK = 0x7E1280
+POKER_RIG = 0x7E1265                 # 더블 업 손질 차례 셋(FC $83~$85)          # dq4fcpoker !deck(앞 다섯이 손)
 GAME_RNG = 0x7E075B
 ARENA = W.cell(0x08, 0x0A)
 ARENA_RNG = '7E075B=11;7E075C=22;7E075D=33'
@@ -115,20 +116,25 @@ SEGMENTS = [
     # - take: 9 9 9 2 K → 스리 카드(배당 2), 더블 업 아니오 → 100 − 1 + 2 = 101
     # - double_win: 9 9 9 K K → 풀 하우스(8), 더블 업 예 → 펴 보인 9 보다 넷째 K 가 셈 → 16, 다음 도전 아니오 → 115
     # - double_lose: 9 9 9 3 3 → 풀 하우스, 넷째 3 이 약함 → 99
+    # - double_joker: 조커 9 9 K K → 풀 하우스, 더블 업에서 펴 보인 카드가 조커라 이길 카드가 없어 짐 → 99
     # - nothing: 2 5 7 9 J(무늬 섞임) → 패 없음 → 99
-    *(seg for name, hand, tail, rank, coins in (
-        ('take', (32, 33, 34, 4, 48), 'b:4;wait:60;b:4;wait:200', 7, 101),
-        ('double_win', (32, 33, 34, 48, 49), 'a:4;wait:120;right:4;wait:20;right:4;wait:20;a:4;wait:300;b:4;wait:100;'
+    # 더블 업 손질 차례(난수)도 묶는다: 07 셋이면 첫 판은 보통 손질, 00 셋이면 첫 판이 「펴 보이는 카드를 A·10~K·조커로」 손질
+    *(seg for name, hand, rig, tail, rank, coins in (
+        ('take', (32, 33, 34, 4, 48), 7, 'b:4;wait:60;b:4;wait:200', 7, 101),
+        ('double_win', (32, 33, 34, 48, 49), 7, 'a:4;wait:120;right:4;wait:20;right:4;wait:20;a:4;wait:300;b:4;wait:100;'
                                               'b:4;wait:100;b:4;wait:200', 4, 115),
-        ('double_lose', (32, 33, 34, 8, 9), 'a:4;wait:120;right:4;wait:20;right:4;wait:20;a:4;wait:300;b:4;wait:100;'
+        ('double_lose', (32, 33, 34, 8, 9), 7, 'a:4;wait:120;right:4;wait:20;right:4;wait:20;a:4;wait:300;b:4;wait:100;'
                                              'b:4;wait:100;b:4;wait:200', 4, 99),
-        ('nothing', (4, 17, 26, 35, 40), 'b:4;wait:100;b:4;wait:200', 0xFF, 99))
+        ('double_joker', (52, 32, 33, 48, 49), 0, 'a:4;wait:120;right:4;wait:20;right:4;wait:20;a:4;wait:300;b:4;wait:100;'
+                                                'b:4;wait:100;b:4;wait:200', 4, 99),
+        ('nothing', (4, 17, 26, 35, 40), 7, 'b:4;wait:100;b:4;wait:200', 0xFF, 99))
       for seg in ((f'towns_poker_{name}_side', 'warp', f'{W.CASINO},{POKER[0]},{POKER[1] + 1}',
                    {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
                   (f'towns_poker_{name}', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 3)};wait:200;a:4;wait:300;'
                    f'{"a:4;wait:20;right:4;wait:20;" * 4}a:4;wait:20;down:4;wait:30;a:4;wait:200;{tail}',
                    {'map': W.CASINO,
-                    'poke': f'{wc.DAY};{HOLD};' + ';'.join(f'{POKER_DECK + k:06X}={c:02X}' for k, c in enumerate(hand)),
+                    'poke': f'{wc.DAY};{HOLD};' + ';'.join([f'{POKER_DECK + k:06X}={c:02X}' for k, c in enumerate(hand)]
+                                                           + [f'{POKER_RIG + k:06X}={rig:02X}' for k in range(3)]),
                     'bytes': {'TOWNS_COIN0': coins, 'TOWNS_COIN1': 0, 'POKER_RANK': rank}}))),
     # 코인 판매(DQ5 대화 0B): 금화 1000 에서 한 장(3장 한 장 200)
     ('towns_coin_side', 'warp', f'{W.CASINO},{SELLER[0]},{SELLER[1] + 3}',
