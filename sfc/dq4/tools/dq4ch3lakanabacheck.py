@@ -52,6 +52,8 @@ FLAGS = {
     'NENE_X': (0x7E3020 + L.NENE_SLOT, 0xFF), 'NENE_Y': (0x7E3080 + L.NENE_SLOT, 0xFF), 'NENE_LAST': (L.NENE_LAST, 0xFF),
 }
 DOG_PICTURE = PICTURES[FC_DOG_PICTURE]
+REAL_LOOKS_FRAMES = 40000      # 일삯이 100 을 넘어 가게를 닫을 때까지(시드 0: 손님 스물넷 남짓)
+LOOKS_SEEN = 5
 TALK = 'a:8;wait:60'
 CLOSE = wc.pc.CLOSE
 
@@ -209,6 +211,11 @@ CASES = {
     # 끝이라 OBJ VRAM 512타일을 넘으면 그 세트부터 깨진다
     'looks': {'steps': [('work', 'warp', WORK_AT, {'set': _set(L0=SEEN_SHIFT)})], 'msgs': [],
               'check': lambda s: [], 'wram': lambda w: looks_problems(w)},
+    # 손님 겉모습 실제 장면: 첫 출근으로 카운터 안에 선 뒤 값을 덮어쓰지 않고 사건을 그대로 돌려(lua/dq4lakanabalooks.lua)
+    # 걸어 들어와 카운터 앞에 선 손님마다 그림을 적고, 모두 FC 표(LOOKS)의 그림인지·옷장 그림이 나오는지 본다
+    'looks_real': {'steps': [('door', 'warp', f'{L.TOWN},20,52', {}),
+                             ('scold', 'walk', f'16,53;{taps(6)};{CLOSE}', {'maxf': 1600, 'cell': L.COUNTER_IN})],
+                   'msgs': ['late', 'how'], 'check': lambda s: [], 'real_looks': REAL_LOOKS_FRAMES},
     # 밤의 아래층 주인은 FC 처럼 (08,06)에 누워 자고, 아래 칸에서 위로 말을 걸면 05C9(옮긴 메시지 CC9)
     'cellar_night': {'steps': [('cellar', 'warp', f'{L.CELLAR},16,14', {'set': f'{_a(ch2.TIME_AT):04X}={L.NIGHT_TIME:02X}'}),
                                ('talk', 'walk', f'{wc.talk("up", 3)};{CLOSE}', {'maxf': 900})],
@@ -267,6 +274,33 @@ def _nene_walked(seen):
     # 바로 전 방향(bit7)은 맵에 들 때 지워지고 한 걸음 걸어야 남는다. 자리는 걷다가 첫 칸에 돌아와 있을 수도 있다
     return ([] if cell in L.NENE_CELLS else [f'네네 FC 칸 {cell} 이 집 칸 표 밖']) + \
         ([] if seen.get('NENE_LAST', 0) & 0x80 else ['바로 전 방향이 남지 않음(걷지 않음)'])
+
+
+
+
+def real_looks(mesence, rom, state, out, frames):
+    """가게를 닫을 때까지 손님이 걸어 들어와 서는 것을 돌려 그림을 본다. 그림·자리는 덮어쓰지 않는다."""
+    import dq4mesen
+    out.mkdir(parents=True, exist_ok=True)
+    x, y = L.COUNTER_OUT
+    env = {**os.environ, 'STATE': str(state), 'SLOT': f'{L.CUSTOMER_SLOT:02X}', 'COUNTER_X': str(x), 'ROW': str(y),
+           'MAXF': str(frames), 'SHOT_DIR': str(out)}
+    dq4mesen.testrunner(mesence, str(rom), str(HERE / 'lua' / 'dq4lakanabalooks.lua'), env=env, cwd=str(out),
+                        capture_output=True, timeout=1200)
+    log = out / 'looks.txt'
+    pics = [int(line.split()[2], 16) for line in log.read_text().splitlines()] if log.exists() else []
+    return looks_real_problems(pics)
+
+
+def looks_real_problems(pics):
+    """걸어 들어온 손님 그림 목록의 문제: 너무 적음, FC 표 밖의 그림, 그림 가짓수가 적음(겉모습을 바꾸지 못하고 한 그림으로
+    남으면 걸림. 시드 0 은 스물넷 명에 여섯 가지)."""
+    if len(pics) < 10:
+        return [f'손님이 {len(pics)}명만 걸어 들어옴']
+    out = [f'손님 그림 {p:02X} 이 FC 표(LOOKS) 밖' for p in sorted(set(pics) - set(L.LOOKS))]
+    if len(set(pics)) < LOOKS_SEEN:
+        out.append(f'손님 그림이 {len(set(pics))}가지뿐: {sorted(set(pics))}')
+    return out
 
 
 def looks_problems(w):
@@ -388,6 +422,8 @@ def run_case(mesence, data, base, ctx, ids, name, dest, seed):
     # 모듈 밖 메시지(옮긴 FC 대사)는 번호로 본다
     problems += [f'메시지 {w} 가 뜨지 않음: {got}' for w in case.get('raw_msgs', ()) if w not in got]
     problems += case['check'](seen)
+    if case.get('real_looks') and state.exists():
+        problems += real_looks(mesence, rom, state, dest / 'looks', case['real_looks'])
     if case.get('wram'):
         wram = dest / case['steps'][-1][0] / 'final.wram'
         problems += case['wram'](wram.read_bytes() if wram.exists() else b'')
