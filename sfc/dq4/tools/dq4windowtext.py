@@ -471,8 +471,8 @@ def fixed_records(data, font):
 
     # 제목: 이름 자리(E0~) 없이 가나 한 덩이뿐인 제목만 창 안에서 늘어날 수 있다. 쓰는 창마다 제목 자리 + 열 수 ≤ 너비 − 1
     users = {}
-    first = rom.u16(dq5text.WINDOWS)
-    for w in range((first - (dq5text.WINDOWS & 0xFFFF)) // 2):
+    import dq4menupatch
+    for w in range(dq4menupatch.window_count(data)):
         addr, rec = dq5text.window(rom, w)
         # 메뉴 패치가 낮은 WRAM 으로 돌린 창(공용 창·이름 입력)은 롬에 레코드가 없다
         if addr & 0xFFFF >= 0x8000 and rec and not rec[0] & 0x80 and len(rec) > 6 and rec[4] & 0x0F:

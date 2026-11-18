@@ -235,6 +235,7 @@ def base_rom(windows=None):
         put(a, wn.HELD_ORIG + rel.to_bytes(2, 'little', signed=True))
     put(wn.EMPTY_SLOT_HOOK, wn.EMPTY_SLOT_ORIG)
     put(wn.WH_REQ_SITE, wn.WH_REQ_ORIG)
+    put(wn.NENE_SPOT, b'\xff' * (wn.NENE_SPOT_END - wn.NENE_SPOT))
     for a, orig in wn.NMI_SITES:
         put(a, orig)
     put(wn.PREFIX_HOOK, b'\x22' + PREFIX_PREV.to_bytes(3, 'little'))
@@ -391,6 +392,12 @@ class ApplyRejectTests(unittest.TestCase):
     def test_asar_failure(self):
         with self.assertRaises(SystemExit):
             run(base_rom(), FakeAsar(code=1))
+
+    def test_nene_spot_must_be_left_empty_by_the_titles(self):
+        rom = base_rom()
+        rom[lorom(wn.NENE_SPOT) + 3] = 0x01
+        with self.assertRaisesRegex(ValueError, '빈자리'):
+            run(rom)
 
     def test_code_past_its_area(self):
         def spill(rom):
