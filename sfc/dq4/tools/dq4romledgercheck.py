@@ -57,13 +57,16 @@ def load_allow(text, stages):
         for n, item in enumerate(items, 1):
             where = f'[[{kind}]] {n}번째'
             keys = set(KINDS[kind]) | {'at', 'why'}
-            extra = {'max', 'reuse'} if kind == 'overlap' else {'max', 'data'} if kind == 'original' else {'max'}
+            extra = {'max', 'reuse'} if kind == 'overlap' else {'max', 'data', 'pictures'} if kind == 'original' \
+                else {'max'}
             if not keys <= set(item) <= keys | extra:
                 raise AllowError(f'{where}: 키는 {sorted(keys)}(와 {"·".join(sorted(extra))}) 여야 함(받은 것 {sorted(item)})')
             if 'reuse' in item and not isinstance(item['reuse'], bool):
                 raise AllowError(f'{where}: reuse 는 true·false')
             if 'data' in item and not isinstance(item['data'], bool):
                 raise AllowError(f'{where}: data 는 true·false')
+            if 'pictures' in item and not isinstance(item['pictures'], bool):
+                raise AllowError(f'{where}: pictures 는 true·false')
             if 'max' in item and (not isinstance(item['max'], int) or item['max'] <= 0):
                 raise AllowError(f'{where}: max 는 양의 정수(바이트)')
             if not isinstance(item['why'], str) or not item['why'].strip():
@@ -192,8 +195,31 @@ def check_overlaps(stages, allow, size):
     return rows, bad
 
 
-def check_original(stages, allow, dq5):
+def picture_spans(rom, dq5):
+    """전투 몬스터 그림 자리 [시작, 끝)(파일 오프셋) 목록: 결과 롬과 원래 롬의 그림 번호마다 머리부터 자료 끝까지(새 그림이
+    원래보다 짧으면 원래 자리의 꼬리도 다시 쓰임)와, 원래 롬의 그림 레코드 표·레코드(27:E5DC, [그림][색 수 n][색 n개]).
+    그림을 제자리에 다시 쓰는 단계는 이 밖을 덮지 않아야 한다."""
+    import dq5mongfx as M
+    import dq5monwrite as W
+    from dq5map import Rom, lorom
+    base = Rom(dq5)
+    out = [(lorom(h), lorom(end)) for r in (Rom(rom), base) for h, (_, end) in W.heads(r).items()]
+    table = M.RECORDS
+    records = {0x270000 | base.u16(table + 2 * m) for m in range(M.TABLE_SIZE)}
+    out.append((lorom(table), lorom(table) + 2 * M.TABLE_SIZE))
+    out += [(lorom(a), lorom(a) + 2 + 2 * base.u8(a + 1)) for a in records]
+    return L.merge(sorted(out))
+
+
+def outside(s, e, spans):
+    """[s, e) 가운데 spans 밖의 바이트 수."""
+    inside = sum(max(0, min(e, b) - max(s, a)) for a, b in spans)
+    return e - s - inside
+
+
+def check_original(stages, allow, dq5, rom=None):
     rows, small, bad = [], {}, []
+    spans = None
     for st in stages:
         blocks = original_blocks(st, dq5)
         small[st['name']] = {'blocks': sum(1 for s, e in blocks if e - s < BIG),
@@ -205,6 +231,14 @@ def check_original(stages, allow, dq5):
             rows.append({'stage': st['name'], 'at': fmt(s, e), 'bytes': e - s, 'why': item and item['why']})
             if not item:
                 bad.append(f'{st["name"]}: 원래 롬 {fmt(s, e)}({e - s}바이트)를 덮는데 허용 목록에 없음')
+            elif item.get('pictures'):
+                if spans is None:
+                    spans = picture_spans(rom, dq5)
+                # 덩어리는 GAP 이하 틈을 이은 것이라, 실제로 쓴 바이트만 센다
+                n = sum(outside(max(s, a), min(e, b), spans) for a, b in written(st) if a < e and s < b)
+                if n:
+                    bad.append(f'{st["name"]}: {fmt(s, e)} 가운데 {n}바이트가 몬스터 그림·그림 레코드 자리 밖(허용 {item["at"]} 은 '
+                               '그림 자리만 받음)')
     return rows, small, bad
 
 
@@ -465,7 +499,7 @@ def run(ledger, rom, dq5, allow_text, allow_missing=False):
                           'cleared': sum(r['bytes'] for r in s.get('cleared', ()))} for s in stages]}
     report['overlap'], bad = check_overlaps(stages, allow, size)
     fails += bad
-    report['original'], report['original_small'], bad = check_original(stages, allow, dq5)
+    report['original'], report['original_small'], bad = check_original(stages, allow, dq5, rom)
     fails += bad
     report['cross'], bad = check_cross(stages, allow, code_blobs())
     fails += bad
