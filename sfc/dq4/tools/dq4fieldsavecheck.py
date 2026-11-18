@@ -35,6 +35,7 @@ import dq4fieldencountercheck  # noqa: E402
 import dq4fieldtravel  # noqa: E402
 import dq4freshstate  # noqa: E402
 import dq4groupcheck  # noqa: E402
+import dq4pins  # noqa: E402
 from dq4groupbuild import doors  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
@@ -92,7 +93,7 @@ def main():
         want = church(slot(dq4fieldtravel.FIRST_CHURCH_FC) if k >= dq4fieldtravel.UNSAVED else k)
         got = dq4groupcheck.scene(mesence, rom, state, out, name, FIELD="{},{}".format(*field), TEST=WIPE_TEST,
                                   MAXF="6000", SET=f"{RNG};{CHAPTER2};{HERO_HP_1};{PLACE:04X}={k:02X}", LATESET=RNG,
-                                  ROMPATCH=dq4fieldport_warp(data, field) + ";" + dq4fieldencountercheck.RATES)
+                                  POKE=dq4pins.RNG_HOLD, ROMPATCH=dq4fieldport_warp(data, field) + ";" + dq4fieldencountercheck.RATES)
         return name, {"saved": f"{k:02X}", "got": got, "want": want, "ok": dq4groupcheck.same_place(got, want)}
 
     def run_transfer():

@@ -266,7 +266,8 @@ def run_scene(mesence, rom, data, base, out, name, scene, rounds, seed=0):
             # 전투는 읽은 바이트 캐시를 거치지 않는다. 같은 상태에서 rounds 번 돌려 결과가 같은지 보는 검사라 캐시가 맞으면
             # 두 번째가 첫 번째의 사본이 되고, 판정이 화면 찍기(start.png·after.png)를 견준다
             wc.run(mesence, rom, BATTLE, run_dir, {'STATE': str(state), 'ROMPATCH': patch, 'AFTERPATCH': wc.NO_ENCOUNTERS,
-                                                    'SET': f'{wc.rng_for(seed)};{wc.DAY_SET}', 'POKE': wc.HERO_HP,
+                                                    'SET': f'{wc.rng_for(seed)};{wc.DAY_SET}',
+                                                    'POKE': f'{wc.HERO_HP};{wc.rng_hold(seed)}',
                                                     'STEP': scene['step'], 'KEYS': keys, 'MOVE': scene['move'],
                                                     'MAXF': '6000', 'KANATABLE': kana_range()}, 300)
             log = run_dir / 'battle.txt'

@@ -11,6 +11,18 @@ import dq4ch1walkcheck as wc
 
 
 class Ch1WalkCheckTests(unittest.TestCase):
+    def test_battle_segments_hold_rng_every_frame(self):
+        # 사건 전투를 지나는 구간만 075B·075C 를 붙든다. 시작에 한 번 둔 난수만으로는 사이클 수가 바뀐 롬에서 갈래가 바뀜
+        self.assertEqual(wc.battle_poke({'poke': wc.HERO_HP}, 5), wc.HERO_HP)
+        for key in wc.BATTLE_KEYS:
+            got = wc.battle_poke({key: 'win', 'poke': wc.HERO_HP}, 5)
+            self.assertEqual(got, f'{wc.HERO_HP};{wc.rng_hold(5)}')
+        self.assertEqual(wc.rng_hold(0), '7E075B=00;7E075C=00')
+        import dq4pins
+        self.assertEqual(dq4pins.RNG_HOLD, wc.rng_hold(0))
+        a, b, _ = wc.rng_for(9).split(';')
+        self.assertEqual(wc.rng_hold(9), f'7E{a};7E{b}')
+
     def test_boss_patch_sets_hp_one_and_defence_zero(self):
         rom = bytearray(0x200000)
         for n in (0xE2, 0x52):

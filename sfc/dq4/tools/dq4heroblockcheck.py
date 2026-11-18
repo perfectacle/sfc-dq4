@@ -266,7 +266,7 @@ def run_case(mesence, rom, base, out, name, case, exit_at, seed=0):
     env = {'STATE': str(state), 'WALK': str(wc.walk_driver(walk)), 'WALK_STATE': str(wc.WALK_STATE), 'WAYPOINTS': walk,
            'MAXF': str(case.get('maxf', wc.frames(walk))), 'CHANGES': str(case.get('changes', 99)), 'AFTER': '30',
            'WATCH': watch, 'ROMPATCH': rompatch(rom, case), 'SET': rng,
-           **({'POKE': case['poke']} if case.get('poke') else {})}
+           **({'POKE': poke} if (poke := wc.battle_poke(case, seed)) else {})}
     if 'snap' in case:
         env.update(SNAPMSG=f"{case['snap'][0]:X}", SNAPWATCH=case['watch'])
     env['TRACK'] = ','.join(f'{n:02X}' for n in TRACK)

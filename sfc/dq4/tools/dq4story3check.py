@@ -90,6 +90,12 @@ def segment_rng(opt, seed):
     return wc.rng_for(seed), bool(opt.get('rng'))
 
 
+def segment_poke(opt, seed):
+    """구간 내내 두는 POKE: 묶는 구간이면 세 바이트, 아니고 사건 전투(fight)면 075B·075C(dq4ch1walkcheck.rng_hold)."""
+    rng, held = segment_rng(opt, seed)
+    return ';'.join(f'7E{v}' for v in rng.split(';')) if held else wc.battle_poke({'fight': 1} if 'fight' in opt else {}, seed)
+
+
 def segment(mesence, rom, state, dest, seg, seed, flags):
     """구간 하나를 state 에서 걷는다. 토막이 ending:<장면> 이면 끝 상자에서 버튼으로 리셋되는지(dq4ch1walkcheck.ending)."""
     name, toks, opt = seg
@@ -97,7 +103,7 @@ def segment(mesence, rom, state, dest, seg, seed, flags):
         return {**wc.ending(mesence, rom, state, dest, seed, toks.split(':', 1)[1]), 'name': name}
     rng, held = segment_rng(opt, seed)
     start = ';'.join(v for v in (rng, story.writes_set(opt)) if v)
-    poke = ';'.join(f'7E{v}' for v in rng.split(';')) if held else ''
+    poke = segment_poke(opt, seed)
     patch = '' if opt.get('encounters') else wc.NO_ENCOUNTERS
     if 'battle' in opt:
         patch += ';' + tw.battle_patch(data_of(rom), opt['battle'])

@@ -34,6 +34,7 @@ import dq4dungeonencountercheck  # noqa: E402
 import dq4groupcheck  # noqa: E402
 import dq4wellswitch  # noqa: E402
 import dq4readset  # noqa: E402
+import dq4pins  # noqa: E402
 
 FLAG, BIT = dq4wellswitch.FLAG[0] & 0xFFFF, dq4wellswitch.FLAG[1]
 WIPE_TEST = ",".join(["left:24,right:24"] * 4 + ["a:4,wait:40"] * 90)
@@ -60,7 +61,8 @@ def wipe(mesence, rom, state, out, name):
     unhooked = name.endswith("-unhooked")
     orig = ";{:X}={}".format(lorom(dq4wellswitch.WIPE), dq4wellswitch.WIPE_ORIG.hex().upper()) if unhooked else ""
     got = dq4groupcheck.scene(mesence, rom, state, out, name, TO="3B/00,6,43", MAXF="6000", TEST=WIPE_TEST,
-                              SET=f"{FLAG:04X}|{BIT:02X};2042=01;2043=00{WIPES[name][0]}",
+                              SET=f"{dq4pins.RNG};{FLAG:04X}|{BIT:02X};2042=01;2043=00{WIPES[name][0]}",
+                              POKE=dq4pins.RNG_HOLD,
                               ROMPATCH=dq4dungeonencountercheck.rates(rom.read_bytes()) + orig, TRACE="0188EF,01899F",
                               LOG=f"7E{FLAG:04X}")
     rows = list(dq4dungeonencountercheck.lines(out / name / "trace.txt"))
