@@ -469,9 +469,9 @@ why = "세트 9A 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 
 
 [[original]]
 stage = "people"
-at = "0D:905F~0D:9454"
+at = "0D:8D86~0D:9454"
 data = true
-why = "세트 38 의 원래 타일 자료 자리(dq5sprite.split_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+why = "세트 37·38 의 원래 타일 자료 자리(이어져 있음. dq5sprite.split_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
 
 [[original]]
 stage = "people"
@@ -511,9 +511,21 @@ why = "세트 57 의 원래 타일 자료 자리(dq5sprite.split_tiles 로 원�
 
 [[original]]
 stage = "people"
-at = "0D:EFDA~0D:F305"
+at = "0D:ED01~0D:F305"
 data = true
-why = "세트 61 의 원래 타일 자료 자리(dq5sprite.split_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+why = "세트 60·61 의 원래 타일 자료 자리(이어져 있음. dq5sprite.split_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0C:D1EC~0C:D540"
+data = true
+why = "세트 21 의 원래 타일 자료 자리(dq5sprite.split_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
+
+[[original]]
+stage = "people"
+at = "0D:810E~0D:843C"
+data = true
+why = "세트 30 의 원래 타일 자료 자리(dq5sprite.split_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
 
 [[original]]
 stage = "people"

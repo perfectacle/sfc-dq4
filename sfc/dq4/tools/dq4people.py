@@ -315,6 +315,30 @@ PEOPLE = (
                            (4, 8, (5, 10)), (5, 8, (8, 6)), (10, 8, (8, 6)), (11, 8, (5, 10)),
                            (4, 9, (3, 9)), (11, 9, (12, 9)),
                            *((1, y, (2, 9)) for y in (7, 8, 9)), *((14, y, (13, 9)) for y in (7, 8, 9))]}),
+    # NDS 가 FC 와 다른 모습으로 그리는 3·4장 마을 사람(dq4npcport.NDS_LOOKS 가 그림 번호를 준다).
+    # 여행 상인의 터번(크림 두 색)은 줄 0 에서 살색 칸에 합쳐져 얼굴과 갈리지 않아 줄에 실리는 밝은 크림으로 옮긴다
+    Person((0x68,), None, 'h010', '여행 상인', line=0,
+           recolor={(206, 181, 156): (231, 214, 189), (148, 123, 115): (231, 214, 189)}),
+    Person((0x59,), None, 'h067', '해적', line=1),
+    Person((0x97,), None, 'h012', '선원'),
+    Person((0x6D,), None, 'h028', '바텐더', line=3),
+    Person((0x6A,), None, 'h065', '다츠'),
+    Person((0x62,), None, 'h175', '예티', anim='frames'),
+    Person((0x61,), None, 'h078', '벡'),
+    Person((0x44,), None, 'h014', '노예'),
+    Person((0x25,), None, 'h056', '시녀'),
+    # 귀걸이는 한 칸만: 눈 흰자 바로 아래 바깥에 흰 칸이 두 칸 이어지면 눈물로 읽힌다. 분홍 입 두 칸은 이 크기에서
+    # 주둥이처럼 튀어나와 보여 살색으로 덮는다.
+    Person((0x96,), None, 'h063', '집시 여자',
+           touch={'down': [(3, 9, (2, 9)), (4, 9, (2, 9)), (11, 9, (13, 9)), (12, 9, (13, 9)), (12, 10, (3, 10)),
+                           (7, 10, (6, 10)), (8, 10, (6, 10))]}),
+    # 줄인 눈이 머리 왼쪽 끝에 붙어 나온다. 눈 두 줄을 한 칸 오른쪽으로 옮겨 양옆 머리카락을 두 칸씩으로 맞춘다.
+    # 베끼는 순서가 오른쪽부터여야 옮기기 전 칸을 읽는다.
+    Person((0x71,), None, 'h004', '젊은 아내',
+           touch={'down': [(10, 7, 'white'), (9, 7, 'ink'), (8, 7, (7, 7)), (7, 7, (6, 7)), (6, 7, 'ink'), (5, 7, 'white'), (4, 7, (11, 7)),
+                           (10, 8, 'white'), (9, 8, 'ink'), (8, 8, (7, 8)), (7, 8, (6, 8)), (6, 8, 'ink'), (5, 8, 'white'), (4, 8, (11, 8)),
+                           (3, 8, (3, 7)), (3, 5, (3, 4)), (1, 9, (1, 10))]}),
+    Person((0x86,), None, 'h037', '릭'),
     *(Person((pic,), None, sheet, role, anim=anim, spare=pic, seen=(group,), face=role in FACE_KEPT,
              weight=KEY_WEIGHT if role in KEY_EVENT else None)
       for role, pic, sheet, group, anim in EVENT_PEOPLE),
@@ -954,6 +978,7 @@ def lines(people, hists, where=None, fixed=None, lock=None):
 
 
 ROUNDS = 6
+SPLIT = 12                                        # 가장 가까운 칸과 이 Lab 거리보다 먼 색은 빈 칸을 따로 차지한다
 
 
 def place(people, hists, where, pins=None):
@@ -998,6 +1023,37 @@ def place(people, hists, where, pins=None):
                 rows = [centers[(g, assign[p])] for g in at[p]]
                 mapping[p] = {c: min(range(len(rows[0])), key=lambda k: sum(math.dist(lab(c), r[k]) for r in rows))
                               for c in hists[p]}
+            acc = {}
+            for p in now:
+                for c, w in hists[p].items():
+                    for g in at[p]:
+                        acc.setdefault((g, assign[p], mapping[p][c]), Counter())[c] += w * p.weight
+            for (g, line, k), cs in acc.items():
+                total = sum(cs.values())
+                centers[(g, line)][k] = tuple(sum(lab(c)[i] * w for c, w in cs.items()) / total for i in range(3))
+        # 가장 가까운 칸도 먼 색(SPLIT 넘음)은, 그 인물이 나오는 그룹 모두에서 아무도 쓰지 않는 칸이 있으면 그 칸을
+        # 차지한다. 칸 색은 공용 줄 색에서 시작하므로, 그 그룹에 주인이 없는 칸은 엉뚱한 색으로 남아 새 색이 살색 같은
+        # 주인 있는 칸으로 몰린다(여행 상인의 터번, 선원의 두건이 살색으로 실림). 첫 차례는 표로 굳어 있어 건드리지
+        # 않는다
+        for p in sorted((p for p in fresh if p not in kept and wave), key=lambda p: -p.weight):
+            line = assign[p]
+            rows = [centers[(g, line)] for g in at[p]]
+            for row in rows:
+                row += [lab((0, 0, 0))] * (15 - len(row))
+            for c in sorted((c for c in hists[p] if c not in COMMON), key=lambda c: -hists[p][c]):
+                if max(math.dist(lab(c), row[mapping[p][c]]) for row in rows) <= SPLIT:
+                    continue
+                free = [k for k in range(15) if all((g, line, k) not in acc for g in at[p])]
+                if not free:
+                    break
+                moved = [c] + [d for d in hists[p] if d not in COMMON and d != c and math.dist(lab(d), lab(c)) < max(
+                    math.dist(lab(d), row[mapping[p][d]]) for row in rows)]
+                for d in moved:                    # 이 색에 가까운 제 색은 새 칸으로 모은다
+                    mapping[p][d] = free[0]
+                for g in at[p]:
+                    acc[(g, line, free[0])] = Counter({d: hists[p][d] * p.weight for d in moved})
+                    centers[(g, line)][free[0]] = lab(c)
+        if any(p not in kept and wave for p in fresh):
             acc = {}
             for p in now:
                 for c, w in hists[p].items():
