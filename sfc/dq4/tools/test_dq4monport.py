@@ -77,11 +77,47 @@ class RecordTests(unittest.TestCase):
             data[o:o + 2] = bytes.fromhex(w['hex'])
         rom = Rom(bytes(data))
         for fc, (m, _) in dq4monport.CH3.items():
-            self.assertEqual(dq5mongfx.monster(rom, m), dq5mongfx.monster(Rom(self.dq5),
-                                                                       dq4fieldencounter.PLACEHOLDERS[fc]))
+            src = dq4monport.ART.get(fc, dq4fieldencounter.PLACEHOLDERS[fc])
+            self.assertEqual(dq5mongfx.monster(rom, m), dq5mongfx.monster(Rom(self.dq5), src))
         names = dq4monport.korean_names()
         self.assertEqual(names[dq4monport.CH3[0x13][0]], '킬러 스콥')
         self.assertEqual(names[dq4monport.CH3[0x1E][0]], '릴리펏')
+
+    def test_borrowed_picture_is_only_for_its_fc_monster(self):
+        # ART: 그 FC 몬스터를 쓰는 번호는 모두 빌린 번호의 그림 레코드를 가리키고, 빌린 그림(과 같은 머리)을 이 해킹의 다른
+        # 몬스터는 쓰지 않는다. 쓰면 NDS 그림을 덮을 때 그 몬스터 그림도 바뀐다
+        import dq4fieldencounter
+        import dq5mongfx
+        import dq5monwrite
+        from dq5map import Rom
+        original = Rom(self.dq5)
+        data = bytearray(self.dq5)
+        for w in dq4monport.picture_writes(self.dq5, dq4fieldencounter.PLACEHOLDERS):
+            bank, addr = (int(v, 16) for v in w['at'].split(':'))
+            o = (bank & 0x7F) * 0x8000 + (addr & 0x7FFF)
+            data[o:o + 2] = bytes.fromhex(w['hex'])
+        rom = Rom(bytes(data))
+        table = dq5mongfx.record_table(rom)[0]
+        heads = dq5monwrite.heads(original)
+        self.assertTrue(dq4monport.ART)
+        for fc, d in dq4monport.ART.items():
+            users = dq4monport.art_users(fc)
+            self.assertTrue(users, f'FC {fc:02X}')
+            for m in users:
+                self.assertEqual(rom.u16(table + 2 * m), rom.u16(table + 2 * d), f'{m:02X}')
+            g = dq5mongfx.monster(original, d)[0]
+            same_head = set(heads[dq5monwrite.head_of(original, g)][0])
+            for m in dq4monport.used_numbers() - users - {d}:
+                self.assertNotIn(dq5mongfx.monster(rom, m)[0], same_head, f'{m:02X} 가 FC {fc:02X} 의 빌린 그림을 씀')
+            self.assertNotIn(d, dq4monport.used_numbers() - users, f'빌린 {d:02X} 는 다른 몬스터로 쓰임')
+
+    def test_arena_matches_count_as_groups(self):
+        # 격투장에만 나오는 번호(メタルスライム 0C, おおめだま)도 빌드의 무리 조합 셈에 들어 그림이 들어간다
+        groups = dq4monport.arena_groups(self.prg)
+        seen = {m for g in groups for m, _, _ in g}
+        self.assertIn(dq4monport.PORT[0x5C], seen)
+        self.assertIn(dq4monport.ARENA[0x29][0], seen)
+        self.assertTrue(all(n == 1 and flag == 0 for g in groups for _, n, flag in g))
 
     def test_chapter1_numbers_were_free(self):
         # 1장 셋의 DQ5 번호는 이 해킹이 쓰지 않고 부르기·격투장·동료·빈 레코드·겹치는 이름·FC 같은 이름이 아닌 번호에서

@@ -539,7 +539,7 @@ class BuildFlowTests(unittest.TestCase):
                 path.write_text(json.dumps({'format': 'dq5patch/1', 'name': name, 'writes': []}))
                 return path
 
-            def monport_build(dq5, rom, folder, zone_report, events):
+            def monport_build(dq5, rom, folder, zone_report, events, prg=None):
                 return empty_patch(work / 'monport.dq5patch.json', 'monport')
 
             def monport_records(original, prg, path):

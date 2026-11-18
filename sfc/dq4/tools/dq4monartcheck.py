@@ -2,7 +2,7 @@
 sfc/dq4/docs/dq4-sprite-format.md 「2장 전투 몬스터 그림」.
 
 기대 그림은 dq4monport.doc 가 원래 DQ5 롬으로 쓰는 PNG(색 번호)와 monsters.json 의 색(BGR555)이다.
-- 정적: 빌드 롬에서 PORT·EVENT 번호마다 그림(dq5monwrite.picture_grid, 옮긴 그림 표를 따라감)과 색(dq5mongfx.monster)을
+- 정적: 빌드 롬에서 PORT·EVENT 번호와 ART 의 그림을 쓰는 번호(빌린 번호의 그림 자리가 기대)마다 그림(dq5monwrite.picture_grid, 옮긴 그림 표를 따라감)과 색(dq5mongfx.monster)을
   풀어 기대와 견준다. 빌드는 그 롬의 조우에 아직 나오지 않는 번호를 빼므로(dq4monport.build 의 appear), 원래 DQ5 그림·색과
   같은 번호는 「아직」 으로 두고, 기대와도 원래와도 다르면 실패다. 들어간 번호의 그림을 같이 쓰는 다른 DQ5 몬스터의 색도
   기대 색이어야 한다(dq4monport.doc).
@@ -50,9 +50,15 @@ OBJ_PALETTES = 128                # CGRAM 에서 OBJ 팔레트 0 의 색 번호
 
 
 def targets():
-    """(종류, FC 번호, DQ5 번호) — dq4monport 의 PORT 와 EVENT."""
+    """(종류, FC 번호, DQ5 번호) — dq4monport 의 PORT 와 EVENT, ART 의 그림을 쓰는 번호(art_users)."""
     return [('port', fc, m) for fc, m in dq4monport.PORT.items()] + \
-        [('event', fc, m) for fc, m in dq4monport.EVENT.items()]
+        [('event', fc, m) for fc, m in dq4monport.EVENT.items()] + \
+        [('art', fc, m) for fc in dq4monport.ART for m in sorted(dq4monport.art_users(fc))]
+
+
+def sources():
+    """{DQ5 번호: 그림 자리 번호}: 원래 DQ5 롬에서 그 번호가 받을 그림이 있는 번호(ART 는 빌린 번호, 나머지는 제 번호)."""
+    return {m: d for _, d, users in dq4monport.entries() for m in users}
 
 
 def expected(dq5, folder):
@@ -61,10 +67,10 @@ def expected(dq5, folder):
     doc = json.loads(dq4monport.doc(dq5, folder).read_text())
     images = {int(p['picture'], 16): p['image'] for p in doc['pictures']}
     colors = {int(e['monster'], 16): e['colors'] for e in doc['monsters']}
-    want = {}
+    want, source = {}, sources()
     for _, _, m in targets():
-        g = M.monster(dq5, m)[0]
-        want[m] = (W.image_grid(folder / images[g]), colors[m])
+        d = source[m]
+        want[m] = (W.image_grid(folder / images[M.monster(dq5, d)[0]]), colors[d])
     shared = {m: c for m, c in colors.items() if m not in want}
     return want, shared
 

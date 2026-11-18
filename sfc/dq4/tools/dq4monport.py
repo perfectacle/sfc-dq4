@@ -41,8 +41,8 @@ PORT = {
 # 필드의 あばれこまいぬ(PORT 18)와 텐페 석상은 번호가 달라(예약 번호는 필드에 나오지 않음) 같은 그림을 두 자리에 둔다
 EVENT = {0x12: 0x53, 0x18: 0xA3, 0xAF: 0xAA, 0xB0: 0xA4, 0xB1: 0x8E, 0xB2: 0x68, 0xBA: 0x72}
 # 3장 구역에 처음 FC 능력치로 넣은 FC 몬스터 → (DQ5 번호, NDS 그림 번호). 1장 구역에도 이 번호를 쓴다. 번호는 2장 예비
-# (dq4ch2slots)에서 왔다. 그림은 아직 옮기지 않아 대역(dq4fieldencounter.PLACEHOLDERS)의 그림 레코드를 가리키게 하고
-# (picture_writes), 레코드는 PORT 처럼 대역 바탕에 FC 값을 덮는다(record_writes). NDS 번호는 이름(adopt.tsv)과 뒤에 넣을 그림
+# (dq4ch2slots)에서 왔다. 그림은 ART 의 번호나, NDS 그림을 아직 넣지 않은 것은 대역(dq4fieldencounter.PLACEHOLDERS)의
+# 그림 레코드를 가리키게 하고(picture_writes), 레코드는 PORT 처럼 대역 바탕에 FC 값을 덮는다(record_writes). NDS 번호는 이름(adopt.tsv)과 뒤에 넣을 그림
 CH3 = {0x0A: (0xC5, 9), 0x13: (0xB6, 15), 0x17: (0x9D, 110), 0x19: (0xA5, 6), 0x1E: (0xE3, 7), 0x21: (0x3D, 32)}
 # 1장 구역에만 나오던 대역 셋(エアラット·みならいあくま·ピクシー). 번호는 이 해킹이 쓰지 않는 DQ5 몬스터(free_numbers)
 CH1 = {0x09: (0x07, 20), 0x10: (0x16, 10), 0x22: (0x21, 26)}
@@ -52,9 +52,15 @@ NUMBERED = {**CH3, **CH1, **ARENA}
 # 조우에는 없고 합체(がったい, FC 55 → DQ5 6F)로만 나오는 FC 몬스터 → (DQ5 번호, NDS 그림 번호). DQ5 6F 는 무리를 DQ5
 # キングスライム 6B 한 마리로 바꾸므로 6B 레코드에 FC キングスライム(30) 값을 둔다. 그림은 DQ5 6B 그대로
 MERGED = {0x30: (0x6B, 107)}
-# 1·2장 조우·사건 무리에 아직 나오지 않아 빌드가 그림을 넣지 않는 번호(dq4monport.build 의 appear). 그 장을 옮기면
+# NUMBERED·MERGED·1장 보스(dq4ch1event.BOSS_MONSTERS) 가운데 NDS 그림을 넣은 FC 몬스터 → 그림 레코드를 빌리는 DQ5 번호.
+# 그 FC 몬스터를 쓰는 번호(art_users)가 모두 이 번호의 그림 레코드를 가리키고(picture_writes), 빌드는 이 번호의 그림
+# 자리에 NDS 그림을 덮는다(doc). 쓰는 번호의 원래 그림 자리가 NDS 그림보다 작거나 그 그림을 다른 FC 몬스터가 이미 덮어
+# 써서, 이 해킹이 몬스터로 쓰지 않는 번호(09 DQ5 バブルスライム)나 자리가 큰 쪽(52 1장 보스)의 것을 빌린다. 빌린 번호의
+# 그림을 같이 쓰는 번호는 모두 같은 그림이 되므로, 그 그림을 이 해킹의 다른 몬스터가 쓰면 안 된다(test_dq4monport)
+ART = {0x0A: 0x09, 0x29: 0x52}
+# 1·2장 조우·사건 무리·격투장에 아직 나오지 않아 빌드가 그림을 넣지 않는 번호(dq4monport.build 의 appear). 그 장을 옮기면
 # 여기서 빼고, dq4monartcheck 는 이 밖의 번호가 원래 DQ5 그림이면 실패로 본다
-LATER = {0x0C}     # メタルスライム(FC 5C)
+LATER = set()
 GRID = 8
 RECORD, RECORD_SIZE = 0x238000, 25      # DQ5 몬스터 표(dq5tables monsters)
 
@@ -62,6 +68,18 @@ RECORD, RECORD_SIZE = 0x238000, 25      # DQ5 몬스터 표(dq5tables monsters)
 def nds_of(fc):
     return next(nds for f, nds, _ in dq4monart.TARGETS if f == fc)
 
+
+def art_users(fc):
+    """FC 몬스터 fc 를 쓰는 NUMBERED·MERGED·1장 보스 번호."""
+    import dq4ch1event
+    out = {m for f, (m, _) in {**NUMBERED, **MERGED}.items() if f == fc}
+    return out | {m for m, (f, _) in dq4ch1event.BOSS_MONSTERS.items() if f == fc}
+
+
+def entries():
+    """그림을 넣는 [(FC 몬스터, 그림 자리 번호, 그 그림을 쓰는 번호들)]: PORT·EVENT 는 제 번호, ART 는 빌린 번호."""
+    return [*((fc, m, {m}) for fc, m in [*PORT.items(), *EVENT.items()]),
+            *((fc, d, art_users(fc)) for fc, d in ART.items())]
 
 
 
@@ -87,12 +105,16 @@ def picture_image(fc):
 
 def doc(rom, out_dir, only=None):
     """dq5monster/1 문서를 out_dir/monsters.json 으로, 그림 PNG 를 그 옆에 쓴다. rom 은 원래 DQ5(dq5map.Rom).
-    only 는 넣을 DQ5 번호(없으면 모두)."""
+    only 는 넣을 DQ5 번호(없으면 모두): 그림을 쓰는 번호(entries)가 하나라도 들면 넣는다. ART 의 빌린 번호에 쓴 색은
+    빌드 롬에서 그 레코드를 가리키는 번호가 함께 받는다(dq5monwrite 가 레코드를 같이 쓰는 번호에 같은 값을 줌)."""
     import dq5mongfx
     out_dir.mkdir(parents=True, exist_ok=True)
     pictures, monsters = [], []
-    for fc, m in [*PORT.items(), *EVENT.items()]:
-        if only is not None and m not in only:
+    # NUMBERED 번호는 빌드 롬에서 대역이나 ART 의 그림 레코드를 가리켜(picture_writes) 원래 그림을 쓰지 않는다
+    taken = {*PORT.values(), *EVENT.values(), *(m for m, _ in NUMBERED.values()), *ART.values(),
+             *(m for fc in ART for m in art_users(fc))}
+    for fc, m, users in entries():
+        if only is not None and not users & set(only):
             continue
         g = dq5mongfx.monster(rom, m)[0]
         img, colors = picture_image(fc)
@@ -102,9 +124,7 @@ def doc(rom, out_dir, only=None):
         pictures.append({'picture': f'{g:02X}', 'image': name,
                          'header': {'float': False, 'raise': 0, 'hit_x': w // 2, 'hit_y': h // 2}})
         monsters.append({'monster': f'{m:02X}', 'colors': colors})
-        # 같은 그림을 쓰는 다른 DQ5 몬스터는 이 롬에 나오지 않지만, 색 수가 그림보다 적으면 dq5monwrite 가 거부해 같은 색을 준다.
-        # NUMBERED 번호는 빌드 롬에서 대역의 그림 레코드를 가리켜(picture_writes) 원래 그림을 쓰지 않는다
-        taken = {*PORT.values(), *EVENT.values(), *(m for m, _ in NUMBERED.values())}
+        # 같은 그림을 쓰는 다른 DQ5 몬스터는 이 롬에 나오지 않지만, 색 수가 그림보다 적으면 dq5monwrite 가 거부해 같은 색을 준다
         for other in range(dq5mongfx.COUNT):
             if other not in taken and dq5mongfx.monster(rom, other)[0] == g:
                 monsters.append({'monster': f'{other:02X}', 'colors': colors})
@@ -302,14 +322,24 @@ def reachable(zone_report, event_groups):
     return areas, {f'이벤트 무리 {g:02X}' for g in event_groups}
 
 
-def build(dq5, rom, work, zone_report, event_groups):
+def arena_groups(prg):
+    """격투장 시합(dq4shopport.arena)을 무리 조합 꼴 {((DQ5 번호, 1, 0), …): '격투장 시합 n'} 으로. 격투장은 몬스터마다
+    한 마리 무리로 놓는다(dq4ch3townscheck.arena_problems 와 같음)."""
+    import dq4shopport
+    return {tuple((m, 1, 0) for m, _ in match): f'격투장 시합 {k}'
+            for k, match in enumerate(dq4shopport.arena(None, prg)[0])}
+
+
+def build(dq5, rom, work, zone_report, event_groups, prg=None):
     """빌드 중인 롬(무리·구역·사건 무리가 들어간 것)으로 그림·색 패치 목록을 만들어 경로를 돌려준다. 무리 조합 검사
-    (dq5monlimits)는 이 롬의 무리 가운데 나올 수 있는 것(reachable)만 센다."""
+    (dq5monlimits)는 이 롬의 무리 가운데 나올 수 있는 것(reachable)과, prg(FC 롬 PRG)를 주면 격투장 시합(arena_groups)만
+    센다."""
     import dq5monlimits
     import dq5monwrite
     from dq5map import Rom
     work.mkdir(parents=True, exist_ok=True)
     areas, groups = reachable(zone_report, event_groups)
+    arena = arena_groups(prg) if prg is not None else {}
     counted, area = dq5monlimits.compositions, dq5monlimits.area
 
     def scoped_area(r, n, *rest):
@@ -324,11 +354,14 @@ def build(dq5, rom, work, zone_report, event_groups):
             found, skipped = counted(r, n_areas)
         finally:
             dq5monlimits.area = area
-        return {k: w for k, w in found.items() if w.startswith('구역 ') or w in groups}, skipped
+        kept = {k: w for k, w in found.items() if w.startswith('구역 ') or w in groups}
+        for k, w in arena.items():
+            kept.setdefault(k, w)
+        return kept, skipped
     # 이 롬의 조우에 아직 나오지 않는 몬스터(뒷 장 구역에만 나옴)는 한도를 셀 수 없어 그 장을 옮길 때 넣는다
     appear = {m for found in scoped(Rom(bytes(rom)))[0] for m, _, _ in found}
     source = doc(Rom(dq5.read_bytes()), work / 'pictures', appear)
-    later = sorted(m for m in [*PORT.values(), *EVENT.values()] if m not in appear)
+    later = sorted(m for _, _, users in entries() for m in users if not users & appear)
     if later:
         print('dq4monport: 조우에 아직 없어 그림을 넣지 않은 번호 ' + ' '.join(f'{m:02X}' for m in later), file=sys.stderr)
     dq5monlimits.compositions = scoped
@@ -344,17 +377,24 @@ def build(dq5, rom, work, zone_report, event_groups):
 
 
 def picture_writes(original, dq5_of):
-    """NUMBERED 번호마다 그림 레코드 포인터(dq5mongfx.record_table 의 2바이트)를 대역(dq5_of)의 것으로: 그림·색이 지금
-    대역과 같아 무리 조합 한도(dq5monlimits)도 대역과 같다."""
+    """그림 레코드 포인터(dq5mongfx.record_table 의 2바이트) 쓰기: ART 의 FC 몬스터를 쓰는 번호(art_users)는 빌린 번호의
+    것으로(빌드가 거기에 NDS 그림을 덮음), 나머지 NUMBERED 번호는 대역(dq5_of)의 것으로(그림·색·무리 조합 한도가 지금 대역과
+    같음)."""
     import dq5mongfx
     from dq5map import Rom, lorom
     table, bank = dq5mongfx.record_table(Rom(original))
+    pairs = [(fc, m, ART.get(fc, dq5_of.get(fc))) for fc, (m, _) in NUMBERED.items()]
+    pairs += [(fc, m, d) for fc, d in ART.items() for m in sorted(art_users(fc)) if fc not in NUMBERED or
+              m != NUMBERED[fc][0]]
     out = []
-    for fc, (m, _) in NUMBERED.items():
-        at, src = table + m * 2, table + dq5_of[fc] * 2
+    for fc, m, d in pairs:
+        if m == d:
+            continue
+        at, src = table + m * 2, table + d * 2
         new, orig = original[lorom(src):lorom(src) + 2], original[lorom(at):lorom(at) + 2]
+        what = '빌린' if fc in ART else '대역'
         out.append({'at': f'{at >> 16:02X}:{at & 0xFFFF:04X}', 'hex': new.hex(' '), 'orig': orig.hex(' '),
-                    'note': f'FC {fc:02X} 몬스터 그림을 대역 {dq5_of[fc]:02X} 의 것으로'})
+                    'note': f'FC {fc:02X} 몬스터 그림을 {what} {d:02X} 의 것으로'})
     return out
 
 
