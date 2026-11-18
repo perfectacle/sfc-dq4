@@ -54,6 +54,12 @@ SEGMENTS = [
      {'map': TOWN, 'cell': (10, 53), 'maxf': 3200,
       'set': f'{gold(5000)};{lakanaba.STOCK_AT & 0xFFFF:04X}=01;{(lakanaba.STOCK_AT + 2) & 0xFFFF:04X}=01',
       'bytes': {'GOLD0': (5000 - 350) & 0xFF, 'GOLD1': (5000 - 350) >> 8}}),
+    # 집 맨 윗줄 (10,00)의 빈 가게 사람은 FC 에서도 닿지 않는 가운데 빈 땅(X 08~19)에 선다. 두 방에서 그쪽 벽으로
+    # 밀어도 벽 앞 칸에서 멈춰야 한다(넘으면 FC 에 없는 말 걸기가 생김). 낮 네네는 묶는다
+    ('house_left', 'warp', f'{ch3.HOUSE},{2 * 3},{2 * 1}', {'map': ch3.HOUSE, 'poke': lakanaba.NENE_HOLD}),
+    ('wall_left', 'walk', 'right:200', {'map': ch3.HOUSE, 'cell': (2 * 6, 2 * 1 + 1), 'poke': lakanaba.NENE_HOLD}),
+    ('house_right', 'warp', f'{ch3.HOUSE},{2 * 29},{2 * 2}', {'map': ch3.HOUSE, 'poke': lakanaba.NENE_HOLD}),
+    ('wall_right', 'walk', 'left:200', {'map': ch3.HOUSE, 'cell': (2 * 27, 2 * 2 + 1), 'poke': lakanaba.NENE_HOLD}),
 ]
 
 # 레이크나바 무기점 첫 출근: 문 칸이나 문 밖 칸에 들어서면 꾸지람(02F3) 뒤 카운터 안 (4,53)으로 걸려 들어가 031D. 문 밖

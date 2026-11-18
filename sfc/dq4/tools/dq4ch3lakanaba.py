@@ -164,7 +164,7 @@ NENE_LAST = 0x7E21A2           # 집 맵에서만: bit7 이면 bit0-1 이 네네
 # 한다(걸음 자체는 검사 nene_walk 가 본다). 자리만 되돌리면 말 상대 판정이 따라오지 않았다(실측)
 NENE_SLOT = 0x0B
 NENE_HOLD = f'7E{0x3300 + NENE_SLOT:04X}=00'
-NENE_INTERVAL = 5             # 한 차례 = 명령 3개 × 5 × 8프레임 ≈ 120프레임 + 걸음(FC 128프레임마다 한 걸음)
+NENE_INTERVAL = 1             # 한 차례의 때는 FRAME 으로 잡으므로(nene_walk) 명령 사이 기다림은 가장 짧게(0 은 멈춤)
 # FC 16/01 낮 목록의 둘째 네네(슬롯 07, 돌아다님). FC 는 첫머리 뒤 이쪽만 두지만, 첫머리 자리 (1B,04) 의 네네를 남기고 이쪽을
 # 뺀다(한 사람만 서게, 말 거는 자리가 검사·첫머리 인물과 같게)
 NENE_WALKER = (HOUSE, 'day', cell(0x21, 0x02))
@@ -425,6 +425,17 @@ def _nene_step(at):
         a(0xBF, *_al(src), 0x9F, *_al(dst))
     a.label('out')
     return a.bytes() + LEAVE
+
+
+# NMI 가 프레임마다 1 씩 올리는 수. 같이 오르는 $075B·$0993·$0995 는 난수·다른 코드가 덮어써 쓸 수 없고, 이 칸은
+# 롬에서 그 INC 하나만 쓴다
+FRAME = 0x7E0994
+
+
+def _frame_bit(on):
+    """인물 명령 05: FRAME 의 bit6 이 on(켜짐/꺼짐)이면 0. 켜짐 → 꺼짐을 차례로 기다리면 128프레임 경계가 된다."""
+    a = Asm()(ENTER, 0xE2, 0x30, lda(FRAME), 0x29, 0x40).br(BNE if on else BEQ, 'go')
+    return a(POLL_END[1]).label('go')(POLL_END[0]).bytes()
 
 
 def _someone_at(c):
@@ -709,6 +720,8 @@ def native(ctx):
     put('dog_home', _someone_at(DOG_HOME))
     put('nene_cells', nene_cells_table())
     put('nene_step', _nene_step(at))
+    put('nene_hi', _frame_bit(True))
+    put('nene_lo', _frame_bit(False))
     put('arrive', _arrive())
     put('set_talk', _set_talk(talk))
     put('prep', _prep(at))
@@ -936,11 +949,14 @@ def scripts(ctx):
                 _cmd('16', label='stay'), *hide]
     # 아들은 본몰 감옥에서 풀려난 뒤에만(FC 1C:$A29A 가 $6280&04 로 목록을 고침), 아래층 주인은 출근 중에만(1C:$A326)
     # 개를 빌려주면 위로 한 칸 비켜 아래를 보고, 돌려받으면 (다시) 비켜 있다가 개가 우리에 닿으면 제자리로 돌아와 왼쪽을 본다
-    # 낮 네네: FC 블록 2B 처럼 한 차례에 한 걸음(nene_step), 도착을 기다려 되풀이. FC 는 맵에 든 뒤 첫 차례도 128프레임
-    # 뒤라($7040 = 88) 처음 방향(아래)을 다시 보는 명령 셋으로 첫 걸음을 그만큼 늦춘다(맵에 들자마자 말을 거는 검사가 서
-    # 있는 네네를 만남). 명령 00 은 스크립트를 멈춘다
-    nene_walk = [_cmd('1E', WALK_SPEED), _cmd('2F', 0x44), _cmd('2F', 0x44), _cmd('2F', 0x44),
-                 call(at['nene_step']) | {"label": "step"}, _cmd('14'), _cmd('03', target='step')]
+    # 낮 네네: FC 블록 2B 처럼 128프레임마다 한 차례(FC 는 16프레임 차례 × 머리 바이트 80 의 8). 인물 이동 간격으로는
+    # 128 이 나오지 않아(간격 5 는 한 차례 약 61프레임, 8 이상은 엔진이 차례를 엇갈려 40·81프레임으로 들쭉날쭉, 실측)
+    # 프레임 수(FRAME)의 bit6 이 켜졌다 꺼지는 때(128프레임마다)를 기다려 한 걸음(nene_step), 도착을 기다림. FC 는 맵에
+    # 든 뒤 첫 차례도 128프레임 뒤라($7040 = 88) 첫 걸음은 경계를 하나 더 기다린다(128~256프레임, 맵에 들자마자 말을
+    # 거는 검사가 서 있는 네네를 만남)
+    nene_walk = [_cmd('1E', WALK_SPEED), poll(at['nene_hi']), poll(at['nene_lo']),
+                 poll(at['nene_hi']) | {"label": "step"}, poll(at['nene_lo']),
+                 call(at['nene_step']), _cmd('14'), _cmd('03', target='step')]
     son = [_if_off(SON_FREED, 'hide'), _cmd('1E', WALK_SPEED), _cmd('1C'), _if_on(ch3.DOG, 'lent'),
            _wait_on(ch3.DOG), _cmd('13', *SON_ASIDE), _cmd('14'), _cmd('2F', 0x44),
            _cmd('09', ch3.DOG[0], ch3.DOG[1], label='lent'), _cmd('13', *SON_ASIDE), _cmd('14'), _cmd('2F', 0x44),
