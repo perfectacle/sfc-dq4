@@ -88,6 +88,9 @@ ARENA_MATCHES, ARENA_LEVELS, ARENA_SIZE = 0x23DA97, 0x23DC27, 50
 # 놓이는 시합은 이 집합에서 뺀다(차례를 바꿔도 놓이지 않는 것만 남김)
 ARENA_WIDE = {6, 17}
 ONE_SHOT_AT = _CH3_VARS2 + _CH3_SLOTS['L'].vars2[0]     # 한 번 쓰는 키 바이트(레이크나바 몫)
+# 그 바이트는 3장 밖에서 DQ5 맡긴 동료 칸 48 의 바이트라(dq4ch3slots), 3장 진행 중(dq4ch3event.CHAPTER3, 7E:2208 bit3)일
+# 때만 한 번 쓰는 키로 본다. 우연히 F0~F7 인 동료 바이트로 엉뚱한 가게를 열고 그 바이트를 지우지 않게
+ONE_SHOT_GATE = (0x7E2208, 0x08)
 # Sellers who come only with a chapter's event (dq4shop.npc_lists 「목록 플래그 n&m」): FC map -> the person list that
 # brings them. The event that switches the map to that list puts the seller; here its shop list goes under the map's
 # key so that the seller's talk number (event_sellers) opens it. テンペ's shop opens once the monster is beaten
@@ -360,7 +363,7 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
         {"at": _cpu(INN_BANK_OPERAND), "hex": f"{inn_at >> 16:02X}", "orig": "04", "note": "여관 표 뱅크(DB)"},
         {"at": _cpu(INN_ADDR_OPERAND), "hex": f"{inn_at & 0xFF:02X} {inn_at >> 8 & 0xFF:02X}", "orig": "6D FD",
          "note": "여관 표 주소"},
-        *dq4shopkey.writes(key_at, rows, ONE_SHOT_AT),
+        *dq4shopkey.writes(key_at, rows, ONE_SHOT_AT, ONE_SHOT_GATE),
         *dq4itemport.writes(rom, prg, prices),
     ]
     if coin:

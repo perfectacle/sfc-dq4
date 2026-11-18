@@ -18,14 +18,17 @@ ROWS = [(0x36, 0, 2, 0x60), (0x36, 3, 5, 0x61), (0x37, 0, 0x1F, 0x62)]
 ONE_SHOT_AT = 0x7E1F00
 
 
-def rom_with_hooks(one_shot_at=None):
+GATE = (0x7E1F10, 0x08)
+
+
+def rom_with_hooks(one_shot_at=None, gate=None):
     rom = bytearray(0x200000)
 
     def put(addr, data):
         at = (addr >> 16 & 0x7F) << 15 | addr & 0x7FFF
         rom[at:at + len(data)] = data
 
-    for w in hook.writes(AT, ROWS, one_shot_at):
+    for w in hook.writes(AT, ROWS, one_shot_at, gate):
         bank, addr = w["at"].split(":")
         put(int(bank, 16) << 16 | int(addr, 16), bytes.fromhex(w["hex"]))
     # What follows each original pair (06:DC3C JSR $DFBA, 06:F57A the price loop) only returns here.
@@ -168,6 +171,38 @@ class OneShotTest(unittest.TestCase):
         self.assertEqual(hook.ONE_SHOT.start % len(hook.ONE_SHOT), 0)
         with self.assertRaises(ValueError):
             hook.table([(0x36, 0, 0, hook.ONE_SHOT.start)])
+
+
+class GateTest(unittest.TestCase):
+    """한 번 쓰는 키 바이트는 3장 몫이고 3장 밖에서는 DQ5 맡긴 동료 칸의 바이트라, 문(3장 flag)이 꺼져 있으면 F0~F7 이어도
+    지도 키로 열고 바이트를 건드리지 않는다."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.rom = rom_with_hooks(ONE_SHOT_AT, GATE)
+
+    def shop(self, one_shot, gate_on):
+        wram = bytearray(0x20000)
+        wram[0xBC], wram[0xBD], wram[0x0F25], wram[0x0F26] = 0x36, 0x04, 0x77, 0x77
+        wram[ONE_SHOT_AT & 0xFFFF] = one_shot
+        # 꺼짐: 그 비트만 끈 바이트(다른 비트는 켜 둠), 켜짐: 그 비트만
+        wram[GATE[0] & 0xFFFF] = GATE[1] if gate_on else ~GATE[1] & 0xFF
+        cpu = Cpu(self.rom, wram)
+        cpu.pbr, cpu.dbr, cpu.p, cpu.a, (cpu.x, cpu.y) = 0x06, 0x7E, 0x20, 0xAB00, (0x1234, 0x5678)
+        cpu.jsr(hook.SHOP_SITE, max_steps=2000)
+        self.assertEqual((cpu.x, cpu.y, cpu.p & 0x30, cpu.s), (0x1234, 0x5678, 0x20, 0x1FF))
+        return cpu.wram[0x0F25], cpu.wram[ONE_SHOT_AT & 0xFFFF]
+
+    def test_gate_off_ignores_the_byte(self):
+        self.assertEqual(self.shop(0xF3, gate_on=False), (0x61, 0xF3))
+
+    def test_gate_on_takes_the_key(self):
+        self.assertEqual(self.shop(0xF3, gate_on=True), (0xF3, 0))
+
+    def test_port_gates_with_chapter3(self):
+        import dq4ch3event as ev
+        import dq4shopport as port
+        self.assertEqual(port.ONE_SHOT_GATE, (0x7E2190 + ev.CHAPTER3[0], ev.CHAPTER3[1]))
 
 
 if __name__ == "__main__":
