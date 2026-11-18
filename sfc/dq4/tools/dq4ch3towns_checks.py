@@ -47,7 +47,7 @@ POKER_DECK = 0x7E1280                # dq4fcpoker !deck(앞 다섯이 손)
 POKER_RIG = 0x7E1265                 # 더블 업 손질 차례 셋(FC $83~$85)
 SLOT_POS = 0x7E1224                  # dq4fcslot !fc_pos(릴마다 띠 칸)
 ARENA = W.cell(0x08, 0x0A)
-ARENA_RNG = '7E075B=11;7E075C=22;7E075D=33'
+ARENA_RNG = '7E075B=77;7E075C=22;7E075D=33'
 # 시합 동안 셋째 몬스터(몬스터 칸 2, 7E:07C0 + 칸 × 16 의 +2 HP)를 999 로 묶어 난수와 상관없이 셋째가 이기게 한다
 ARENA_STRONG = '7E07E2=E7;7E07E3=03'
 MAGIC_WATER = 0xA9              # DQ5 まほうのせいすい(FC 경품 첫 줄 5A)
@@ -79,11 +79,12 @@ PRINCE_HOLD = '7E3308=00'
 SEGMENTS = [
     # 격투장(DQ5 대화 0E, 시합은 FC 3장 표). 게임 난수(7E:075B~075D)는 매 프레임 굴러(가만히 서 있어도 30프레임에
     # 4A, 31프레임에 4B) 코어마다 늦는 프레임 수가 달라 시합 고르기·승패가 갈린다. 말 거는 동안은 난수를 묶어 시합을
-    # FC 4번(슬라임 5.0·오두방정메뚜기 5.3·가위 사슴 벌레 3.9·슬라임 베스 3.9)으로 정하고, 시합 동안은 난수를 풀고
+    # FC 4번(셋째 가위 사슴 벌레, 이 난수에서 배율 4.0)으로 정하고, 시합 동안은 난수를 풀고
     # (내내 묶으면 전투가 같은 고리에서 멈춤) 셋째 HP 를 묶어(ARENA_STRONG) 셋째가 이기게 한다. 수 창에서 위 한 번에
-    # 2장씩 늘어 위 넷이면 9장: 셋째에 걸면 이겨 91 + 9 × 3.9(반올림 35) = 126, 첫째에 걸면 져 91. 시합을 여는 A 는
+    # 2장씩 늘어 위 넷이면 9장: 셋째에 걸면 이겨 91 + 9 × 4.0 = 127, 첫째에 걸면 져 91. 시합 수가 바뀌면 같은 난수가
+    # 다른 시합을 고르니 다시 잰다. 시합을 여는 A 는
     # 시합 구간에 둔다(앞 구간에서 전투에 들면 dq4peoplesample 이 시합을 전투로 세지 못함)
-    *(seg for k, (pick, coins) in enumerate(((2, 126), (0, 91)))
+    *(seg for k, (pick, coins) in enumerate(((2, 127), (0, 91)))
       for seg in ((f'towns_arena_{("win", "lose")[k]}_side', 'warp', f'{W.CASINO},{ARENA[0]},{ARENA[1] + 1}',
                    {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
                   (f'towns_arena_{("win", "lose")[k]}', 'walk',
