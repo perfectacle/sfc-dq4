@@ -119,7 +119,7 @@ Setup:
     SEP #$20
     LDX.w #$0000
 -   STZ !oam,X
-    LDA.b #$E0 : STA !oam+1,X
+    LDA.b #$F0 : STA !oam+1,X          ; y E0 는 화면 아래 끝(224줄째)에 걸쳐 보인다
     INX : INX : INX : INX
     CPX.w #$0200 : BCC -
     LDX.w #$0000
@@ -166,7 +166,7 @@ HandAt:
     LDA.b #$30 : STA !oam+3 : STA !oam+7
     RTS
 HandOff:
-    LDA.b #$E0 : STA !oam+1 : STA !oam+5
+    LDA.b #$F0 : STA !oam+1 : STA !oam+5
     RTS
 
 ; ── 그리기 ───────────────────────────────────────────────────────────────────
