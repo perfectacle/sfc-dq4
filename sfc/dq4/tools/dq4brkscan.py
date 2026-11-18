@@ -106,9 +106,11 @@ def blobs():
     # 자리와 길이는 같다(표는 코드 뒤). 진입점마다 그 훅 자리의 M·X 폭
     import dq4fieldencounter as fe
     lists = ([(0, 1)], [(0, 1)])
-    blob, at = fe.ch3_code([0] * len(fe.CH3_FIELD), [(0, 0, 0, 0, {'day': lists, 'night': lists})],
-                           [(0, 0)] * fe.DROP_SLOTS)
-    widths = {'encounter': (True, False), 'pick': (True, False), 'count': (True, False), 'pick2': (True, False),
+    data = {'monsters': [0] * 14, 'codes': 0, 'formations': {12: [(0, 1, 0)] * 4}}
+    tables = {k: [0] * 8 for k in ('extra_max', 'extra_p', 'solo_add', 'solo_cnt', 'surprise')}
+    blob, at = fe.ch3_code([0] * len(fe.CH3_FIELD), [(0, 0, 0, 0, {'day': lists, 'night': lists}, data)],
+                           [(0, 0)] * fe.DROP_SLOTS, tables)
+    widths = {'encounter': (True, False), 'pick': (True, False), 'surprise_hook': (True, True),
               'wake': (True, False), 'drop': (True, True), 'talk': (True, True)}
     out.append(('ch3monsters', fe.CH3_CODE_AT, blob, [(at[k], m8, x8) for k, (m8, x8) in widths.items()]))
     # 입구별 도착·맵별 필드 자리 훅(dq4entrancehook, 뱅크 5B). 표 내용과 상관없이 코드는 같다. 3장 본몰 모듈의 입구 훅이

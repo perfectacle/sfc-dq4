@@ -486,7 +486,7 @@ def record(prg, dq5, z, dungeon=None, kinds=LAND_KINDS, field_fixed=None):
     rate = field_rate_index(prg, dq5, rec["rate"], kinds) if dungeon is None else dungeon_rate_index(prg, dq5, rec["rate"])
     return {"level": rec["b1"], "slots": slots, "fixed": fixed_slot,
             "species_weights": [3, 1 if w[14] else 0, 1 if w[15] else 0], "rate_index": rate,
-            "flag_1000": 0, "flag_1010": False, "fixed_night_only": False}, dropped
+            "flag_1000": rec.get("b0", 0) & 3, "flag_1010": False, "fixed_night_only": False}, dropped
 
 
 def docs(prg, dq5, enc, dungeon=()):
@@ -605,10 +605,13 @@ CH3_CODE_END = 0x4EC000     # 몬스터·상인 몫의 끝. 4E:C000~ 은 3장 �
 PICK = 0x7E1A92
 NIGHT_SITE, NIGHT_ORIG = 0x23E8EE, bytes((0xA0, 0xFF, 0xFF, 0x8C, 0x01, 0x10))
 PICK_SITE, PICK_ORIG = 0x23E8FE, bytes((0xDA, 0xA0, 0x00, 0x00, 0x64, 0x0F))
-COUNT_SITE, COUNT_ORIG = 0x23E9B4, bytes((0x84, 0x0A, 0xA0, 0x00, 0x00))
-SECOND_SITE, SECOND_ORIG = 0x23EAA7, bytes((0xDA, 0xA0, 0x00, 0x00, 0x64, 0x0F))
-FIRST_LOOP, FIRST_CHOSEN, NO_ENCOUNTER = 0x23E904, 0x23E93F, 0x23E91D
-COUNT_CHOSEN, SECOND_LOOP = 0x23E9E8, 0x23EAAD
+FIRST_LOOP, NO_ENCOUNTER = 0x23E904, 0x23E91D
+FORMED = 0x23EA40          # PLB / PLP / SEC / RTL: 무리를 다 지은 끝
+# 26:832E STZ $71 / LDA $1000: 선제·기습 두 난수(rand(32) < 27:8043 쌍)를 FC 18:$A20E 의 rand(33) 하나와 문턱 둘로
+SURPRISE_SITE, SURPRISE_ORIG = 0x26832E, bytes((0x64, 0x71, 0xAD, 0x00, 0x10))
+SURPRISE_DONE = 0x26835B
+BATTLE_FLAGS = 0x7E1000
+RAND8, SURPRISE_RANGE = 0x00953A, 0x21     # A = n → 0~n-1(M·X 8비트), FC BRK 17 0F 에 A = 21
 RNG_LOW, RNG_HIGH = 0x0993, 0x0995     # 23:EAFD 의 32비트 난수(뱅크 23 의 WRAM 거울로 읽음)
 RNG_ADD = 0x15AD
 IS_NIGHT = 0x218000
@@ -688,17 +691,122 @@ def merchant_zones(report):
     return [report[f'{z:02X}']['zone'] for z in CH3_FIELD]
 
 
-def pick_lists(prg, z, origin, mode):
-    """FC 구역 z 의 (첫 무리 목록, 둘째 무리부터의 목록): FC 칸 차례로 [(DQ5 칸, FC 무게)]. mode 의 FC 마스크
-    (dq4encounter.MASK_FIRST·MASK_SECOND)와 FF 칸, DQ5 에 놓이지 않은 FC 칸(origin 에 없음)을 뺀다."""
+def pick_lists(prg, z, mode, data=None):
+    """FC 구역 z 의 (첫 무리 목록, 둘째 무리부터의 목록): FC 칸 차례로 [(FC 칸, FC 무게)]. mode 의 FC 마스크
+    (dq4encounter.MASK_FIRST·MASK_SECOND)와 FF 칸을 빼고, data(zone_data)를 주면 그 자료에 없는 칸(DQ5 몬스터가
+    없는 고정 편성)도 뺀다."""
     enc = _fc(prg)
     rec = enc.zone(prg, z)
     s, w = rec['slots'], enc.weights(prg, rec['row'])
-    at = {fc: k for k, fc in origin.items()}
+
+    def usable(i):
+        return data is None or (i in data['formations'] if i >= FORMATION_SLOT else True)
 
     def live(mask, n):
-        return [(at[i], w[i]) for i in range(n) if mask >> i & 1 and s[i] != 0xFF and i in at]
+        return [(i, w[i]) for i in range(n) if mask >> i & 1 and s[i] != 0xFF and usable(i)]
     return live(enc.MASK_FIRST[mode], 14), live(enc.MASK_SECOND[mode], 5)
+
+
+def zone_data(prg, z, monsters=None):
+    """FC 구역 z 의 무리 짓기 자료: {'monsters': FC 칸 0~13 의 DQ5 몬스터(FF 없음, 칸 12·13 은 FF), 'codes': 무게 줄
+    바이트 16·17(칸 6~10 의 마릿수 부호 3비트씩), 'formations': {12·13: [(DQ5 몬스터 또는 FF, 바탕, 폭)] 넷}}."""
+    enc = _fc(prg)
+    rec = enc.zone(prg, z)
+    s, w = rec['slots'], enc.weights(prg, rec['row'])
+    to = MONSTERS if monsters is None else monsters
+    monsters = [0xFF if i >= FORMATION_SLOT or s[i] == 0xFF else to[s[i]] for i in range(14)]
+    forms = {}
+    for i in (12, 13):
+        if s[i] == 0xFF:
+            continue
+        a = enc.rw(prg, enc.FORMATION) + 6 * s[i]
+        r = [enc.rd(prg, a + k) for k in range(6)]
+        members = []
+        for g in range(4):
+            c = r[g >> 1] >> (3 if g & 1 else 0) & 7
+            members.append((0xFF if r[2 + g] == 0xFF else to.get(r[2 + g]), enc.rd(prg, enc.FORM_ADD + c),
+                            enc.rd(prg, enc.FORM_CNT + c)))
+        # 아직 DQ5 몬스터가 없는 FC 몬스터가 든 편성(5장 マネマネ 등)은 두지 않고 그 칸을 고르지 않는다
+        if None not in (mon for mon, _, _ in members):
+            forms[i] = members
+    return {'monsters': monsters, 'codes': w[16] | w[17] << 8, 'formations': forms}
+
+
+def fc_tables(prg):
+    """FC 18 뱅크의 표: {'extra_max': $A464, 'extra_p': $A46C, 'solo_add': $A335, 'solo_cnt': $A32D,
+    'surprise': $A45C(기습·선제 문턱 둘씩 넷)}(8칸씩)."""
+    enc = _fc(prg)
+    return {k: [enc.rd(prg, a + i) for i in range(8)] for k, a in (('extra_max', enc.EXTRA_MAX), ('extra_p', enc.EXTRA_P),
+                                                                  ('solo_add', enc.SOLO_ADD), ('solo_cnt', enc.SOLO_CNT),
+                                                                  ('surprise', enc.AMBUSH))}
+
+
+def row_monsters(row):
+    """pick_rows 의 한 줄에서 무리 짓기가 낼 수 있는 DQ5 몬스터(낮·밤 목록의 칸과 고정 편성 구성원)."""
+    *_, modes, data = row
+    out = set()
+    for first, second in modes.values():
+        for slot, _ in first + second:
+            if slot < FORMATION_SLOT:
+                out.add(data['monsters'][slot])
+            else:
+                out |= {m for m, _, _ in data['formations'][slot] if m != 0xFF}
+    return out
+
+
+def fc_surprise(thresholds, k, r):
+    """FC 18:$A20E: 문턱 번호 k, r = rand(33) 일 때 $1000 아래 두 비트(DQ5 뜻: 0 보통, 1 기습, 2 선제)."""
+    t0, t1 = thresholds[2 * k], thresholds[2 * k + 1]
+    return 0 if r <= t0 else 1 if r <= t1 else 2
+
+
+def fc_formation(row, tables, k, night, state):
+    """FC 18:$9D6B~$9F78 의 무리 짓기 모형: ([(DQ5 몬스터, 마릿수)] 무리 차례, 다음 난수 상태). row 는 pick_rows 의 한 줄,
+    k 는 장 번호($615A, 1장 0), 난수는 rng_next 를 차례로. 고를 칸이 없으면 ([], state)."""
+    _, _, third, fourth, modes, data = row
+    first, second = modes['night' if night else 'day']
+    mons = data['monsters']
+
+    def rnd():
+        nonlocal state
+        state, r = rng_next(state)
+        return r
+
+    def rand(n):
+        return n * rnd() >> 8
+
+    slot = fc_pick(first, rnd())
+    if slot is None:
+        return [], state
+    groups = []
+    if slot < 5:
+        groups = [[mons[slot], 1]]
+        for limit in (None, third, fourth):
+            if limit is not None and rnd() >= limit:
+                break
+            s2 = fc_pick(second, rnd())
+            if s2 is None:
+                break
+            groups.append([mons[s2], 1])
+        total, at = len(groups), 0
+        while total < tables['extra_max'][k] and rnd() < tables['extra_p'][k]:
+            at = 0 if at >= len(groups) else at
+            groups[at][1] += 1
+            at, total = at + 1, total + 1
+    elif slot == 5:
+        groups = [[mons[5], 1]]
+        s2 = fc_pick(second, rnd())
+        if s2 is not None:
+            groups.append([mons[s2], 3 + rand(5)])
+    elif slot < 11:
+        c = data['codes'] >> 3 * (slot - 6) & 7
+        groups = [[mons[slot], tables['solo_add'][c] + rand(tables['solo_cnt'][c])]]
+    elif slot == 11:
+        groups = [[mons[11], 1]]
+    else:
+        # 18:$9E2D 는 몬스터가 FF 인 무리도 마릿수를 굴린다
+        groups = [[m, n] for m, n in [(m, add + rand(cnt)) for m, add, cnt in data['formations'][slot]] if m != 0xFF]
+    return [tuple(g) for g in groups], state
 
 
 def fc_pick(entries, rnd):
@@ -737,7 +845,7 @@ def rng_next(state):
 
 
 def pick_rows(prg, report):
-    """[(DQ5 구역, FC 구역, 셋째 /256, 넷째 /256, {낮·밤: (첫 목록, 둘째 목록)})]: docs 가 레코드를 쓰는 구역 모두(필드·
+    """[(DQ5 구역, FC 구역, 셋째 /256, 넷째 /256, {낮·밤: (첫 목록, 둘째 목록)}, zone_data)]: docs 가 레코드를 쓰는 구역 모두(필드·
     던전·바다). 필드·바다는 FC 낮·밤 마스크, 던전은 dungeon 마스크를 낮·밤 모두에. report 는 docs 의 보고."""
     enc = _fc(prg)
     zones = [(r['zone'], int(fc, 16), dict(r['origin']), r['kind'] == 'dungeon') for fc, r in report.items()]
@@ -745,10 +853,12 @@ def pick_rows(prg, report):
     taken = {r['zone'] for r in report.values()}
     zones += [(area, SEA_ZONE, sea, False) for area in SEA_AREAS if area not in taken]
     out = []
-    for area, z, origin, dungeon in sorted(zones):
+    for area, z, _, dungeon in sorted(zones):
         w = enc.weights(prg, enc.zone(prg, z)['row'])
         modes = ('dungeon', 'dungeon') if dungeon else ('day', 'night')
-        out.append((area, z, w[14], w[15], {k: pick_lists(prg, z, origin, m) for k, m in zip(('day', 'night'), modes)}))
+        data = zone_data(prg, z)
+        out.append((area, z, w[14], w[15], {k: pick_lists(prg, z, m, data) for k, m in zip(('day', 'night'), modes)},
+                    data))
     return out
 
 
@@ -756,13 +866,16 @@ def _long(v):
     return v.to_bytes(3, 'little')
 
 
-PICK_BLOCK = 6     # 낮·밤 묶음: 셋째 /256, 넷째 /256, 첫 목록 주소, 둘째 목록 주소
+PICK_BLOCK = 8     # 낮·밤 묶음: 셋째 /256, 넷째 /256, 첫 목록 주소, 둘째 목록 주소, 구역 자료 주소
 
 
-def ch3_code(merchant, picks, items, at=CH3_CODE_AT):
-    """(코드, 라벨). merchant 는 merchant_zones, picks 는 pick_rows, items 는 DQ5 물건 16칸(dq5_drop_items)."""
+def ch3_code(merchant, picks, items, tables, at=CH3_CODE_AT):
+    """(코드, 라벨). merchant 는 merchant_zones, picks 는 pick_rows, items 는 DQ5 물건 16칸(dq5_drop_items), tables 는
+    fc_tables."""
     from dq4environmentrom import _Asm
+    import dq4ch2event
     flag, bit = chapter3_flag()
+    flag2, bit2 = FLAG_BASE + dq4ch2event.CHAPTER2[0], dq4ch2event.CHAPTER2[1]
     a = _Asm(at)
     bank = at >> 16
     # 23:E8EE 에서: M 8비트, X 16비트, DB 23, X = 구역 × 22
@@ -792,25 +905,59 @@ def ch3_code(merchant, picks, items, at=CH3_CODE_AT):
     a.b(0x18, 0x69, PICK_BLOCK, 0x00)                                        # CLC / ADC #묶음(밤)
     a.label('pick_mode').b(0x8F, *_long(PICK), 0xAA)                         # STA PICK / TAX
     a.b(0xBF, 0x02, 0x00, bank, 0xAA, 0xE2, 0x20)                           # LDA 첫 목록 / TAX / SEP #$20
-    a.word(0x20, 'pickl').rel(0x90, 'pick_none')                            # JSR pickl / BCC
-    a.label('pick_slot').b(0xC2, 0x20, 0x29, 0xFF, 0x00, 0xA8, 0xE2, 0x20)   # Y = 칸
-    a.b(0xFA, 0x68, 0x68, 0x68, 0x5C, *_long(FIRST_CHOSEN))                  # PLX / 버림 / JML 23:E93F
+    a.word(0x20, 'pickl').rel(0xB0, 'pick_slot')                            # JSR pickl / BCS
     a.label('pick_none').b(0xFA, 0x68, 0x68, 0x68, 0x5C, *_long(NO_ENCOUNTER))
-    # 23:E9B4 에서(첫 무리가 칸 0~4): Y = 첫 칸. 셋째는 난수 < 바이트 14, 그다음 넷째는 난수 < 바이트 15
-    a.label('count').b(0x84, 0x0A, 0xDA, 0xC2, 0x20, 0xAF, *_long(PICK), 0xAA, 0xE2, 0x20)  # STY $0A / PHX / X = PICK
-    a.b(0xE0, 0xFF, 0xFF).rel(0xF0, 'count_orig')                           # CPX #FFFF / BEQ
-    a.b(0x64, 0x0C).word(0x20, 'rnd').b(0xDF, 0x00, 0x00, bank).rel(0xB0, 'count_done')  # STZ $0C / 난수 < 셋째
-    a.b(0xE6, 0x0C).word(0x20, 'rnd').b(0xDF, 0x01, 0x00, bank).rel(0xB0, 'count_done')  # INC $0C / 난수 < 넷째
-    a.b(0xE6, 0x0C)
-    a.label('count_done').b(0x64, 0x0D, 0xFA, 0x68, 0x68, 0x68, 0x5C, *_long(COUNT_CHOSEN))  # STZ $0D / PLX / 버림
-    a.label('count_orig').b(0xFA, 0xA0, 0x00, 0x00, 0x6B)                    # PLX / LDY #0 / RTL
-    # 23:EAA7 에서(JSR 로 불림, 돌아가면 23:EAAB 의 RTS): A = 칸·carry, 고를 칸이 없으면 CLC
-    a.label('pick2').b(0xDA, 0xC2, 0x20, 0xAF, *_long(PICK), 0xAA)           # PHX / REP #$20 / X = PICK
-    a.b(0xE0, 0xFF, 0xFF).rel(0xF0, 'pick2_orig')
-    a.b(0xBF, 0x04, 0x00, bank, 0xAA, 0xE2, 0x20)                           # LDA 둘째 목록 / TAX / SEP #$20
-    a.word(0x20, 'pickl')
-    a.label('pick2_done').b(0xFA, 0x6B)                                      # PLX / RTL
-    a.label('pick2_orig').b(0xE2, 0x20, 0xFA, 0x68, 0x68, 0x68, *SECOND_ORIG, 0x5C, *_long(SECOND_LOOP))
+    # FC 18:$9E0D 처럼 고른 FC 칸으로 무리(7E:1001~ 몬스터, 1005~ 마릿수)를 짓고 23:EA40(PLB PLP SEC RTL)으로 끝낸다.
+    # DP $00~$0F 는 23:E7C2 가 덮어쓰는 자리: $04 칸, $06 돌아가며 더할 무리, $08 장(k), $0A 구역 자료, $0C 무리 수,
+    # $0E 마릿수 합, $0F 넣을 마릿수(16비트로 읽는 칸은 위 바이트를 0 으로 둔다)
+    a.label('pick_slot').b(0x85, 0x04, 0x64, 0x05, 0x64, 0x07, 0x64, 0x09, 0x64, 0x0C, 0x64, 0x0D)
+    a.b(0x9C, 0x09, 0x10, 0x9C, 0x0A, 0x10, 0x9C, 0x0B, 0x10)               # 줄 번호 $1009~$100B = 0
+    a.b(0xC2, 0x20, 0xAF, *_long(PICK), 0xAA, 0xBF, 0x06, 0x00, bank, 0x85, 0x0A, 0xE2, 0x20)  # $0A = 구역 자료
+    a.b(0x64, 0x08, 0xAF, *_long(flag2), 0x29, bit2).rel(0xF0, 'k_ch3').b(0xA9, 0x01, 0x85, 0x08)
+    a.label('k_ch3').b(0xAF, *_long(flag), 0x29, bit).rel(0xF0, 'k_done').b(0xA9, 0x02, 0x85, 0x08)
+    a.label('k_done').b(0xA5, 0x04, 0xC9, 0x05, 0xB0, 0x03).word(0x4C, 'f_group').b(0xD0, 0x03).word(0x4C, 'f_lead')
+    a.b(0xC9, 0x0B, 0xB0, 0x03).word(0x4C, 'f_solo').b(0xD0, 0x03).word(0x4C, 'f_one').word(0x4C, 'f_form')
+    # 칸 0~4: 그 칸과 둘째 무리, 바이트 14·15 확률로 셋째·넷째(18:$9EB9), 그 뒤 합 < $A464[k] 이고 난수 < $A46C[k] 인
+    # 동안 첫 무리부터 돌아가며 한 마리씩(18:$9F04)
+    a.label('f_group').word(0x20, 'mon').word(0x20, 'add1')
+    a.word(0x20, 'pick2').rel(0x90, 'g_extra').word(0x20, 'mon').word(0x20, 'add1')
+    for k in (0, 1):
+        a.b(0xC2, 0x20, 0xAF, *_long(PICK), 0xAA, 0xE2, 0x20).word(0x20, 'rnd')
+        a.b(0xDF, k, 0x00, bank).rel(0xB0, 'g_extra')
+        a.word(0x20, 'pick2').rel(0x90, 'g_extra').word(0x20, 'mon').word(0x20, 'add1')
+    a.label('g_extra').b(0xA5, 0x0C, 0x85, 0x0E, 0x64, 0x06)
+    a.label('g_loop').b(0xA6, 0x08, 0xA5, 0x0E).long(0xDF, 'extra_max').rel(0xB0, 'f_done')
+    a.word(0x20, 'rnd').b(0xA6, 0x08).long(0xDF, 'extra_p').rel(0xB0, 'f_done')
+    a.b(0xA5, 0x06, 0xC5, 0x0C).rel(0x90, 'g_inc').b(0x64, 0x06)
+    a.label('g_inc').b(0xA6, 0x06, 0xFE, 0x05, 0x10, 0xE6, 0x06, 0xE6, 0x0E).rel(0x80, 'g_loop')
+    # 칸 5: 그 칸 한 마리와 둘째 무리 3 + rand(5)(18:$9F5D)
+    a.label('f_lead').word(0x20, 'mon').word(0x20, 'add1')
+    a.word(0x20, 'pick2').rel(0x90, 'f_done').word(0x20, 'mon').b(0x48, 0xA9, 0x05).word(0x20, 'randn')
+    a.b(0x18, 0x69, 0x03, 0x85, 0x0F, 0x68).word(0x20, 'add').rel(0x80, 'f_done')
+    # 칸 6~10: 부호 c 로 $A335[c] + rand($A32D[c])(18:$9E7B). 부호는 구역 자료 +14~+18
+    a.label('f_solo').word(0x20, 'mon').b(0x48, 0xA5, 0x04, 0x18, 0x69, 14 - 6).word(0x20, 'mon')
+    a.b(0xC2, 0x20, 0x29, 0xFF, 0x00, 0xAA, 0xE2, 0x20).long(0xBF, 'solo_cnt').word(0x20, 'randn')
+    a.b(0x18).long(0x7F, 'solo_add').b(0x85, 0x0F, 0x68).word(0x20, 'add').rel(0x80, 'f_done')
+    # 칸 11: 한 마리(18:$9E70)
+    a.label('f_one').word(0x20, 'mon').word(0x20, 'add1')
+    a.label('f_done').b(0xFA, 0x68, 0x68, 0x68, 0x5C, *_long(FORMED))
+    # 칸 12·13: 고정 편성 [몬스터, 바탕, 폭] 넷. 몬스터가 FF 인 무리도 마릿수를 굴린다(18:$9E2D)
+    a.label('f_form').b(0x38, 0xE9, 12, 0x0A, 0x18, 0x69, 19, 0xC2, 0x20, 0x29, 0xFF, 0x00, 0x18, 0x65, 0x0A, 0xAA)
+    a.b(0xBF, 0x00, 0x00, bank, 0xAA, 0xE2, 0x20, 0xA9, 0x04, 0x85, 0x06)
+    a.label('m_loop').b(0xDA, 0xBF, 0x02, 0x00, bank).word(0x20, 'randn').b(0xFA, 0x18, 0x7F, 0x01, 0x00, bank)
+    a.b(0x85, 0x0F, 0xBF, 0x00, 0x00, bank, 0xC9, 0xFF).rel(0xF0, 'm_next').b(0xDA).word(0x20, 'add').b(0xFA)
+    a.label('m_next').b(0xE8, 0xE8, 0xE8, 0xC6, 0x06).rel(0xD0, 'm_loop').rel(0x80, 'f_done')
+    # A = 구역 자료의 칸 → 그 바이트
+    a.label('mon').b(0xC2, 0x20, 0x29, 0xFF, 0x00, 0x18, 0x65, 0x0A, 0xAA, 0xE2, 0x20, 0xBF, 0x00, 0x00, bank, 0x60)
+    # 무리 하나: A = 몬스터, $0F = 마릿수(add1 은 1)
+    a.label('add1').b(0x48, 0xA9, 0x01, 0x85, 0x0F, 0x68)
+    a.label('add').b(0xA6, 0x0C, 0x9D, 0x01, 0x10, 0xA5, 0x0F, 0x9D, 0x05, 0x10, 0xE6, 0x0C, 0x60)
+    # 둘째 무리부터의 칸(A, SEC). 없으면 CLC
+    a.label('pick2').b(0xC2, 0x20, 0xAF, *_long(PICK), 0xAA, 0xBF, 0x04, 0x00, bank, 0xAA, 0xE2, 0x20)
+    a.word(0x4C, 'pickl')
+    # rand(A) = A × 난수 >> 8(FC 10:$A1F6)
+    a.label('randn').b(0x48).word(0x20, 'rnd').b(0xEB, 0x68, 0x8D, 0x02, 0x42, 0xEB, 0x8D, 0x03, 0x42)
+    a.b(0xEA, 0xEA, 0xEA, 0xEA, 0xAD, 0x17, 0x42, 0x60)
     # 목록 X([개수][칸 무게]…)에서 FC 18:$9DDE 로 고른 칸(A, SEC). DP $00~$03 은 원래 고르기도 덮어쓰는 자리
     a.label('pickl').b(0xBF, 0x00, 0x00, bank).rel(0xF0, 'pickl_none')     # LDA 개수 / BEQ
     a.b(0x85, 0x03, 0x64, 0x00, 0xDA)                                        # STA $03 / STZ $00 / PHX
@@ -885,6 +1032,15 @@ def ch3_code(merchant, picks, items, at=CH3_CODE_AT):
     a.label('hit').long(0xBF, 'items').b(0x85, 0x46, 0x64, 0x42)             # LDA items,X / STA $46 / STZ $42
     back = DROP_ITEM - 1
     a.b(0xC2, 0x20, 0xA9, back & 0xFF, back >> 8 & 0xFF, 0x83, 0x01, 0xE2, 0x20, 0x6B)  # 돌아갈 곳 / RTL
+    # 26:832E 에서(M·X 8비트): FC 18:$A20E 처럼 r = rand(33) 하나로 r ≤ T0 이면 보통, r ≤ T1 이면 기습(bit0), 그 위는
+    # 선제(bit1). 문턱 번호는 구역 레코드 +4 bit6-7 이 옮겨 온 $1000 아래 두 비트(record 의 flag_1000 = FC k)
+    a.label('surprise_hook').b(0xAF, *_long(BATTLE_FLAGS), 0x29, 0x03, 0x0A, 0xAA, 0xA9, SURPRISE_RANGE)
+    a.b(0x22, *_long(RAND8)).long(0xDF, 'surprise', 0).rel(0x90, 's_normal').rel(0xF0, 's_normal')
+    a.long(0xDF, 'surprise', 1).rel(0x90, 's_ambush').rel(0xF0, 's_ambush').b(0xA9, 0x02).rel(0x80, 's_set')
+    a.label('s_normal').b(0xA9, 0x00).rel(0x80, 's_set')
+    a.label('s_ambush').b(0xA9, 0x01)
+    a.label('s_set').b(0x85, 0x71, 0xAF, *_long(BATTLE_FLAGS), 0x29, 0xFC, 0x05, 0x71, 0x8F, *_long(BATTLE_FLAGS))
+    a.b(0x5C, *_long(SURPRISE_DONE))
     a.label('zones')
     for zone in merchant:
         a.b(*(zone * CH3_ZONE_RECORD).to_bytes(2, 'little'))
@@ -892,27 +1048,38 @@ def ch3_code(merchant, picks, items, at=CH3_CODE_AT):
     a.b(*(t for t, _ in items))
     a.label('items')
     a.b(*(m for _, m in items))
-    # 구역마다 [구역 × 22][낮 묶음][밤 묶음], 묶음은 [셋째][넷째][첫 목록][둘째 목록]. 같은 목록은 한 벌
+    # 구역마다 [구역 × 22][낮 묶음][밤 묶음], 묶음은 [셋째][넷째][첫 목록][둘째 목록][구역 자료]. 같은 목록은 한 벌
     lists = {}
-    for *_, modes in picks:
+    for *_, modes, _ in picks:
         for first, second in modes.values():
             for entries in (first, second):
                 lists.setdefault(tuple(entries), f'list{len(lists)}')
     a.label('picks')
-    for zone, _, third, fourth, modes in picks:
+    for n, (zone, _, third, fourth, modes, _) in enumerate(picks):
         a.b(*(zone * CH3_ZONE_RECORD).to_bytes(2, 'little'))
         for mode in ('day', 'night'):
             first, second = modes[mode]
-            a.b(third, fourth).word(None, lists[tuple(first)]).word(None, lists[tuple(second)])
+            a.b(third, fourth).word(None, lists[tuple(first)]).word(None, lists[tuple(second)]).word(None, f'zd{n}')
     for entries, name in lists.items():
         a.label(name).b(len(entries), *(v for pair in entries for v in pair))
+    # 구역 자료: FC 칸 0~13 의 DQ5 몬스터, 칸 6~10 의 마릿수 부호, 칸 12·13 고정 편성 [몬스터, 바탕, 폭] 넷의 주소
+    for n, (*_, data) in enumerate(picks):
+        codes = [data['codes'] >> 3 * k & 7 for k in range(5)]
+        a.label(f'zd{n}').b(*data['monsters'], *codes)
+        for slot in (12, 13):
+            a.word(None, f'zf{n}_{slot}') if slot in data['formations'] else a.b(0, 0)
+        for slot, members in data['formations'].items():
+            a.label(f'zf{n}_{slot}').b(*(v for member in members for v in member))
+    for name, values in tables.items():
+        a.label(name).b(*values)
     return a.assemble()
 
 
 def ch3_inputs(prg, dq5, report):
     """ch3_code 의 (merchant, picks, items)."""
     table = fc_drop_table(prg)
-    return merchant_zones(report), pick_rows(prg, report), list(zip((t for t, _ in table), dq5_drop_items(prg, dq5)))
+    return (merchant_zones(report), pick_rows(prg, report), list(zip((t for t, _ in table), dq5_drop_items(prg, dq5))),
+            fc_tables(prg))
 
 
 def ch3_labels(prg, dq5, report, at=CH3_CODE_AT):
@@ -942,10 +1109,11 @@ def ch3_writes(prg, dq5, report, at=CH3_CODE_AT):
     out = [{'at': f'{at >> 16:02X}:{at & 0xFFFF:04X}', 'hex': blob.hex(' ').upper(),
             'note': 'FC 무리 고르기 표, 3장 떠돌이 상인과 3장 전용 전투 뒤 물건'},
            put(NIGHT_SITE, jsl('encounter') + b'\xEA\xEA', NIGHT_ORIG, '3장 필드 조우의 1/10 은 떠돌이 상인'),
-           put(PICK_SITE, jsl('pick') + b'\xEA\xEA', PICK_ORIG, '첫 무리 칸을 FC 무게·마스크로'),
-           put(COUNT_SITE, jsl('count') + b'\xEA', COUNT_ORIG, '여러 종 무리의 셋째·넷째를 FC 확률로'),
-           put(SECOND_SITE, jsl('pick2') + b'\x60\xEA', SECOND_ORIG, '둘째 무리부터의 칸을 FC 무게·마스크로')]
+           put(PICK_SITE, jsl('pick') + b'\xEA\xEA', PICK_ORIG, '무리 짓기를 FC 18:$9D6B~$9F78 대로'),
+]
     out.append(put(DROP_SITE, jsl('drop') + bytes((0xD0, 0x04, 0xEA)), DROP_ORIG, '3장이면 전투 뒤 물건을 FC 3장 표로'))
+    out.append(put(SURPRISE_SITE, bytes((0x5C, *_long(labels['surprise_hook']), 0xEA)), SURPRISE_ORIG,
+                   '걸음 전투의 기습·선제를 FC 문턱으로'))
     out.append(put(WAKE_SITE, jsl('wake'), WAKE_ORIG, '필드 여관(떠돌이 상인)에서 깨면 그룹 01 갈래로 가지 않음'))
     return out
 
