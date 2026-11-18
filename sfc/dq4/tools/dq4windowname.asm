@@ -2512,26 +2512,6 @@ QpFrame:
     CLC
     RTL
 
-; 네네 보기 창 위 테두리 둘째 칸에 다음 쪽이 있으면 ▶(커서 타일)를 커서 깜박임 박자($0AD9 bit7)로 번갈아 쓴다(FC 의 깜빡이는
-; 「→」). 끄는 박자와 마지막 쪽에는 옆 칸의 테두리 타일을 쓴다. M = 8, X = 16
-NeneArrow:
-    PHP
-    LDA.l $7E0F20
-    CMP #!nene_view_more
-    BNE .off
-    LDA.w $0AD9
-    BMI .off
-    REP #$20
-    LDA.w #$207C
-    BRA .put
-.off
-    REP #$20
-    LDA.l !nene_arrow+2
-.put
-    STA.l !nene_arrow
-    PLP
-    RTS
-
 ; 개수 창 칸을 ▲ / 숫자 / ▼ 세 줄로 고쳐 쓴다(M = 8, X = 16). 원래 창은 다섯 자리를 하나씩 고르는 은행용이라
 ; 「0000N」 에 커서 자리가 ✱ 와 번갈아 깜박인다. 가게는 끝 자리만 쓰므로 높이 5 의 ShopQtyRec 으로 열고(ShopOpenRes)
 ; 숫자 위·아래에 더 갈 수 있는 쪽 화살표만 둔다(▲ 는 ▼ 타일을 위아래로 뒤집어 쓴다).
@@ -2591,6 +2571,26 @@ QpWindow:
     STA.l !qp_down
     SEP #$20
     PLX
+    RTS
+
+; 네네 보기 창 위 테두리 둘째 칸에 다음 쪽이 있으면 ▶(커서 타일)를 커서 깜박임 박자($0AD9 bit7)로 번갈아 쓴다(FC 의 깜빡이는
+; 「→」). 끄는 박자와 마지막 쪽에는 옆 칸의 테두리 타일을 쓴다. M = 8, X = 16
+NeneArrow:
+    PHP
+    LDA.l $7E0F20
+    CMP #!nene_view_more
+    BNE .off
+    LDA.w $0AD9
+    BMI .off
+    REP #$20
+    LDA.w #$207C
+    BRA .put
+.off
+    REP #$20
+    LDA.l !nene_arrow+2
+.put
+    STA.l !nene_arrow
+    PLP
     RTS
 
 ; 04:9C46 등(M = 16, X = 16 = 창 번호 × 2, DB = 04). 덮은 LDA $EB48,X / STA $DA 를 하되(A 도 레코드로 남김), 가게 개수 창
