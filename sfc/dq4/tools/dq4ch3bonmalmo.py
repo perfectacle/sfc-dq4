@@ -336,12 +336,15 @@ FOREST_FADE_FROM = 0x0B
 
 
 def _fade_in_hook():
-    """밝히기 루틴 들머리. JAIL_SENT 면 끄고 그 루틴 대신 FC 박자로 밝힌 뒤 루틴의 RTS 로, 여우 장면의 숲이면 밝기를
+    """밝히기 루틴 들머리. JAIL_SENT 이고 3F/01 이면 끄고 그 루틴 대신 FC 박자로 밝힌 뒤 루틴의 RTS 로, 여우 장면의 숲이면 밝기를
     FOREST_FADE_FROM 에서 시작하게 하고 루틴으로, 아니면 그대로 루틴으로."""
     from dq4chapterbox import wait
     g, n = (int(v, 16) for v in FOREST.split('/'))
     sent = 0x7E2190 + JAIL_SENT[0]
+    jg, jn = (int(v, 16) for v in JAIL_OUT[0].split('/'))
+    # 이 훅은 모든 장의 롬에 들고 7E:2204 는 3장 밖에서는 DQ5 바이트 변수 자리라(dq5-flags 21C2~2206) 도착 맵까지 본다
     a = Asm()(0x08, 0xE2, 0x20, lda(sent), 0x29, JAIL_SENT[1]).br(BEQ, 'fox')
+    a(0xAF, 0xBC, 0x00, 0x7E, 0xC9, jg).br(BNE, 'fox')(0xAF, 0xBD, 0x00, 0x7E, 0xC9, jn).br(BNE, 'fox')
     a(lda(sent), 0x29, ~JAIL_SENT[1] & 0xFF, sta(sent), ENTER, wait(JAIL_LIGHT_WAIT))
     for k, v in enumerate(JAIL_LIGHT):
         a(0xA5, 0x1D, 0x29, 0x80, 0x09, v, 0x85, 0x1D)

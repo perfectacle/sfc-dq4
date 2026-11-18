@@ -180,6 +180,9 @@ class BridgeTest(unittest.TestCase):
         flag = 0x7E2190 + bm.JAIL_SENT[0]
         self.assertTrue(code.startswith(bytes((0x08, 0xE2, 0x20, 0xAF, *bm._al(flag), 0x29, bm.JAIL_SENT[1]))))
         self.assertIn(bytes((0x29, ~bm.JAIL_SENT[1] & 0xFF, 0x8F, *bm._al(flag))), code)     # 한 번만
+        # 7E:2204 는 3장 밖에서 DQ5 바이트 변수 자리라 도착 맵 3F/01 까지 본다
+        self.assertIn(bytes((0xAF, 0xBC, 0x00, 0x7E, 0xC9, 0x3F)), code)
+        self.assertIn(bytes((0xAF, 0xBD, 0x00, 0x7E, 0xC9, 0x01)), code)
         self.assertIn(wait(bm.JAIL_LIGHT_WAIT), code)
         for v in bm.JAIL_LIGHT:
             self.assertIn(bytes((0xA5, 0x1D, 0x29, 0x80, 0x09, v, 0x85, 0x1D)), code)
