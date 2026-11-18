@@ -142,7 +142,7 @@ class Cell:
     start: int
     step: int
     width: int | None          # 찍는 칸(그림이 덮는 칸). None = 모름
-    inner_cover: bool = False  # 코드 안에서 이름(5칸 그림)을 찍고 4칸만 나아가 바로 뒤 상태 표시가 다섯째 칸을 덮음
+    inner_cover: bool = False  # 코드 안에서 이름(5칸 그림)을 찍고 4칸만 나아가 바로 뒤 글자가 다섯째 칸을 덮음
 
 
 @dataclass
@@ -337,8 +337,9 @@ def parse(data, n, widths, rec=None, addr=None):
                 # 이름을 안에 찍는 묶음 코드(DC·C7·DF·F1)는 이름 뒤 바이트가 자기 레코드의 다음 바이트가 아니라
                 # 04:B79B 를 부를 때 X 가 가리키는 그 다음 바이트라, WnList 는 창 번호(45·46)로만 5칸을 고른다
                 kind = CODE_WIDTHS.get(b, (None, None))[widths.kind == 'hack']
-                # DC·C7 은 이름 뒤가 빈칸 01 둘이라 덮지 않는다. DF·F1 은 상태 표시(04:BA18)가 바로 붙는다
-                if widths.kind == 'hack' and kind == 'name+8' and name_step(widths, n, nxt) < NAME_CELLS['hack']:
+                # 처리기 안에서 이름 바로 뒤에 찍는 빈칸은 이름 다섯째 칸을 지운다(교회 기록 목록 5D 「크리프ㅡ」, 화면 실측).
+                # 레코드 바이트로 오는 빈칸은 지우지 않는다(아래 covered)
+                if widths.kind == 'hack' and kind in ('dc', 'dc+2', 'name+8') and name_step(widths, n, nxt) < NAME_CELLS['hack']:
                     cells[-1].inner_cover = True
                 i += 1
             x += cells[-1].step
@@ -403,7 +404,7 @@ def row_end(cells):
 
 def covered(cells):
     """이름 그림의 다섯째 칸을 뒤 내용이 덮는 자리 [(이름 코드, 덮은 코드)]."""
-    out = [(c.code, 0x7E) for c in cells if c.inner_cover]
+    out = [(c.code, 0x01) for c in cells if c.inner_cover]
     for k, c in enumerate(cells):
         if c.width is not None and c.step < c.width:
             for d in cells[k + 1:]:

@@ -1091,10 +1091,14 @@ WnList:
     BEQ ++
     CMP #$CC
     BEQ ++
-    ; 대열 바꾸기 창(46·45)은 이름 뒤에 「Lv:」 가 붙는다. 지금 그리는 창 번호($0A00)로 가른다
-    ; (dq4windowname.NAME_STEP5_WINDOWS)
+    ; 대열 바꾸기 창(46·45)은 이름 뒤에 「Lv:」, 모험의 서 기록 목록(5D·61)은 DC·C7 이 이름 바로 뒤에 빈칸·「Lv」 를 찍는다.
+    ; 지금 그리는 창 번호($0A00)로 가른다(dq4windowname.NAME_STEP5_WINDOWS)
     LDA.w $0A00
     CMP #$45
+    BEQ ++
+    CMP #$5D
+    BEQ ++
+    CMP #$61
     BEQ ++
     CMP #$46
     BNE +
