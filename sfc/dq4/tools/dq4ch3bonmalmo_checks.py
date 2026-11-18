@@ -13,6 +13,7 @@ FLAGS = {
     'BM_LETTER1': wc.flag(bm.LETTER1),
     'BM_LETTER2': wc.flag(bm.LETTER2),
     'BM_FOX_SCENE': wc.flag(bm.FOX_SCENE),
+    'BM_SPOTTED': wc.flag(bm.SPOTTED),
     # 톨네코 물건 칸 2(칸 0 옷, 칸 1 도시락 다음): 사건 물건을 두고 빠지는지 보는 칸
     'BM_SLOT2': (0x7E2056 + 2, 0xFF),
     'BM_BAG_LETTER': (0x7E2250 + bm.PRINCE_LETTER, 0xFF),
@@ -39,12 +40,34 @@ BM_GATE = (0x11 * 2, 0x1E * 2 + 1)
 BM_FIELD_GATE = (0x74 * 2, 0x47 * 2)
 BM_WEST = (0x6E * 2, 0x4F * 2)
 BM_EAST = (0x71 * 2, 0x4F * 2)
+# 3F/00 낮 목록에서 감옥 병사 둘이 받는 인물 칸 0C·0D 의 이동 간격(7E:3300 + 칸)을 0 으로: 순찰 스크립트가 멈춘다
+BM_GUARDS_HOLD = '7E330C=00;7E330D=00'
+# 맵을 불러온 뒤 가운데 방 (05,0C)에서 기다렸다가 문 (05,09) → 줄 08 → 열 0B 로 내려간다. 순찰은 두 병사가 반 바퀴씩
+# 떨어져 420프레임마다 같은 모양이고, 맵을 불러온 뒤 361~441 프레임에 나서면 들키지 않았다(461 부터는 윗줄 병사가 줄 08
+# 에서 봄, 입력 프로브 실측). 걷기 검사는 토막 앞에 77프레임을 써서 기다림은 그만큼 뺀다. 아들 앞에 서면 다음 병사가
+# 열 0A 를 내려오며 보므로(FC 도 같음) 닿은 뒤 바로 끝낸다
+JAIL_SNEAK_WAIT = 330
+JAIL_SNEAK_PATH = f'up:100;right:125;{bm.SON_SIDE[0]},{bm.SON_SIDE[1]}'
 SEGMENTS = [
     # 감옥: 창살 너머 아들에게 오른쪽을 보고 말을 걸어 키메라의 날개를 준다. 「아니요」 면 0841 뒤 다시 묻고(두 번),
     # 「예」 면 날개가 빠지고 아들이 사라진다
+    # 그 칸은 열 0A 를 도는 병사의 옆 줄이라 붙들지 않으면 들킨다(FC 도 같음). 아들과의 대화만 보도록 병사 둘을 붙든다
     ('bm_prison_no', 'warp', f'{bm.PRISON},{bm.SON[0] - 4},{bm.SON[1] - 1}',
-     {'map': bm.PRISON, 'set': f'{BM_SLOT2}={bm.WINGS:02X}', 'poke': wc.DAY}),
+     {'map': bm.PRISON, 'set': f'{BM_SLOT2}={bm.WINGS:02X}', 'poke': f'{wc.DAY};{BM_GUARDS_HOLD}'}),
     ('bm_son_no', 'walk', f'right:8;wait:30;{BM_NO};{BM_NO};{BM_YES};{taps(8)};{CLOSE}',
+     {'want': ['BM_SON_FREED'], 'bytes': {'BM_SLOT2': 0xFF}, 'poke': f'{wc.DAY};{BM_GUARDS_HOLD}'}),
+    # 감옥 병사: 같은 칸에 서 있기만 하면 순찰하던 병사가 옆 줄의 일행을 보고 0307 → 맞닿은 칸까지 다가와 034A →
+    # 본몰 성 FC (19,02). 두 창은 A 없이 닫힌다
+    ('bm_jail_spot_side', 'warp', f'{bm.PRISON},{bm.SON[0] - 4},{bm.SON[1] - 1}', {'map': bm.PRISON, 'poke': wc.DAY}),
+    ('bm_jail_spot', 'walk', 'wait:1200',
+     {'map': bm.JAIL_OUT[0], 'cell': bm.cell(*bm.JAIL_OUT[1]), 'changes': 1, 'after': 120, 'poke': wc.DAY}),
+    # 들키지 않고 아들 앞까지: 벽에 둘러싸인 가운데 방에서 기다렸다가 두 병사가 윗줄·열 0A 위쪽에 없을 때 나간다
+    # 들어가는 길에 들키면 조작이 막혀 말을 걸지 못한다
+    ('bm_jail_sneak_side', 'warp', f'{bm.PRISON},{bm.cell(0x05, 0x0C)[0]},{bm.cell(0x05, 0x0C)[1]}',
+     # 앞 구간이 켠 아들을 풀어 줌을 끈다(켜져 있으면 아들이 숨음)
+     {'map': bm.PRISON, 'set': f'{BM_SLOT2}={bm.WINGS:02X};{0x2190 + bm.SON_FREED[0]:04X}&{~bm.SON_FREED[1] & 0xFF:02X}',
+      'poke': wc.DAY}),
+    ('bm_jail_sneak', 'walk', f'wait:{JAIL_SNEAK_WAIT};{JAIL_SNEAK_PATH};right:8;wait:30;{BM_YES};{taps(8)};wait:60',
      {'want': ['BM_SON_FREED'], 'bytes': {'BM_SLOT2': 0xFF}, 'poke': wc.DAY}),
     # 여우 마을 촌장: 개가 없으면 「예」·「예」 로 묵고 숲에서 아침에 깬다
     ('bm_inn_town', 'warp', f'{bm.FOX_TOWN},{bm.CHIEF[0] - 2},{bm.CHIEF[1] - 1}', {'map': bm.FOX_TOWN, 'poke': wc.NIGHT}),
