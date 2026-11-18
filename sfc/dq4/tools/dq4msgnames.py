@@ -46,6 +46,9 @@ def korean_names(data):
         names = dq4windowtext.rom_names(data, kind)
         out[kind] = {n: ko[dq4windowtext.kana_key(x)] for n, x in enumerate(names)
                      if x and dq4windowtext.kana_key(x) in ko and set(ko[dq4windowtext.kana_key(x)]) <= known}
+        # FC 에 빌려준 DQ5 칸(주문 1D 피오림·38 햐다인 등)은 롬 이름이 아직 DQ5 것이라 창 글자·전투 글처럼 번호로 덮는다
+        out[kind].update({n: k for n, k in dq4windowtext.numbered_names(window=False).get(kind, {}).items()
+                          if set(k) <= known})
     return out
 
 
