@@ -468,13 +468,13 @@ class Walker:
         return {'name': name, 'status': 'failed' if problems else 'passed', 'problems': problems, 'maps': maps,
                 'flags': [k for k, v in flags.items() if v], 'frame': self.c.n}
 
-    def ending(self):
-        """끝 서술 둘을 넘기고 끝 상자에서 누른 뒤(ENDING_PRE) 리셋되어 타이틀이 다시 뜨고 소리가 나는지."""
+    def ending(self, scene='end'):
+        """끝 서술 둘을 넘기고 끝 상자에서 누른 뒤(dq4ch1walkcheck.ending_pre) 리셋되어 타이틀이 다시 뜨고 소리가 나는지."""
         self.c.poke(sets(wc.rng_for(self.seed)))
         bright = []
         k = 0
         start = len(self.rms)
-        for b, f in (tok.split(':') for tok in wc.ENDING_PRE.split(',')):
+        for b, f in (tok.split(':') for tok in wc.ending_pre(scene).split(',')):
             for _ in range(int(f)):
                 self.step(set() if b == 'wait' else {b})
                 k += 1
@@ -502,7 +502,7 @@ class Walker:
             seed = 0 if i == 0 else self.seed
             self.pokes = [(int(a, 16), int(v, 16)) for a, v in re.findall(r'(\w+)=(\w+)', wc.battle_poke(opt, seed))]
             if how == 'ending':
-                r = {**self.ending(), 'name': name}
+                r = {**self.ending(arg or 'end'), 'name': name}
             else:
                 # 걷기 검사와 같이 구간을 시작할 때 난수·시각(묶음 첫 구간이면 앞 구간들의 깃발·물건도)을 둔다
                 first, mates = (extra, party) if k == 0 else ('', '')

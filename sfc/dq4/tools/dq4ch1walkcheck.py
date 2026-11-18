@@ -497,6 +497,20 @@ def watch_flags(flags=None):
     return ';'.join(f'{k}=7E{a & 0xFFFF:04X}:1' for k, (a, _) in flags.items()) + f';ITEMS0={ITEMS:X}:6;ITEMS1={ITEMS + 6:X}:6;BE=7E00BE:1'
 
 
+def ending_hold(scene):
+    """끝 상자 scene(이름)이 먼저 부르는 「완」 상자(before)의 띄우는 프레임(없으면 0)."""
+    import dq4chapter1
+    scenes = {s.name: s for s in dq4chapter1.scenes(True)}
+    before = getattr(scenes[scene], 'before', None)
+    return (scenes[before].hold or 0) if before else 0
+
+
+def ending_pre(scene):
+    """끝 상자에서 누르는 입력(dq5msg PRE 꼴). 「완」 상자가 먼저 뜨면 그동안의 버튼은 먹지 않아 그만큼 더 누른다."""
+    hold = ending_hold(scene)
+    return ENDING_PRE if not hold else ','.join(['wait:52', 'a:8'] * (14 + -(-hold // 60) + 1)) + ',wait:900'
+
+
 def ending(mesence, rom, state, dest, seed=0, scene='end'):
     """끝 상자(dq4chapterbox 장면 이름 scene)에서 버튼을 눌러 리셋한 뒤의 호출 차례를 본다."""
     import dq4chapter1
@@ -504,7 +518,9 @@ def ending(mesence, rom, state, dest, seed=0, scene='end'):
     end_box = box.entry_points(scenes)[scene]
     acked = box.boot_points(scenes)['acked']
     calls = [end_box, RESET, acked, DRIVER_UPLOAD, DRIVER_HELLO, AFTER_SOUND]
-    why = run(mesence, rom, MSG, dest, {'STATE': str(state), 'PRE': ENDING_PRE, 'MAXF': '2400', 'SET': rng_for(seed),
+    hold = ending_hold(scene)
+    why = run(mesence, rom, MSG, dest, {'STATE': str(state), 'PRE': ending_pre(scene), 'MAXF': str(2400 + hold + 60),
+                                        'SET': rng_for(seed),
                                         'CALLS': ','.join(f'{a:06X}' for a in calls)}, 200)
     text = (dest / 'msg.txt').read_text(encoding='utf-8') if (dest / 'msg.txt').exists() else ''
     # 견주는 것은 지난 PC 와 그 프레임뿐이다. 리셋 뒤 X 는 소리 CPU 가 포트에 둔 값이라 앞서 걸은 길에 따라 다르다
