@@ -70,8 +70,9 @@ def nine_windows():
     return dq4windowname.NINE_WINDOWS + tuple(range(NENE_KEYS, NENE_KEYS + NENE_PAGES))
 FIXED_PREFIX, PIECE_PREFIX = 0x9E, 0x9F      # 9E k = 고정 문구 k(dq4windowtext), 9F n k = 메뉴 패치 그림 조각 n 열
 NAME_CELLS = {'base': 4, 'hack': 5}
-# 가게 동료 창 3A 의 상태 칸(CC). 원래 04:B6EA → BC08 아홉 자 고정. 상태 칸을 줄이는 고침은 이 값을 같이 바꾼다
-SHOP_STATE_CELLS = 9          # 일행 이름: 가나 넉 자 / Galmuri9 한글 넉 자(40점)
+# 가게 동료 창 3A 의 상태 칸(CC). 원래는 04:B6EA → BC08 아홉 자, 이 해킹은 이 창에서 여덟 자(dq4windowname.SHOP_STATE_CELLS)
+import dq4windowname as _wn  # noqa: E402
+SHOP_STATE_CELLS = _wn.SHOP_STATE_CELLS
 
 # 코드 → (원래 칸, 이 해킹의 칸, 근거). 칸은 그 코드가 찍고 나아가는 칸 수. 'name' 은 일행 이름(NAME_CELLS, 나아감은
 # name_step), ('table', 종류, 원래 칸) 은 이름 표 문자열(이 해킹은 색인 그림 열 수의 최대, 한글이 없으면 가나 글자 수).
@@ -151,8 +152,6 @@ _SUBSTITUTE = ('C7 はるかぜのフルート: 상자 이식이 あやかしの
                '(3D/00) 상자에 든다(빌드 롬 상자 표, 1~3장 기준. 그 상자에 걸어 닿는지는 화면 미확인). 한글 이름이 없어 가나 열 칸 그림뿐(아홉 칸 그림 없음). DQ4 열쇠 물건 자리를 따로 두거나 '
                '대체 물건 이름을 あやかしのふえ 의 한글로 하는 고침이 지운다')
 ALLOW = {
-    (0x3A, '변 어긋남'): ('#1245 가 3A 를 x 1·너비 30(열 1~30)으로 넓혀, 원래 열 2~29 로 맞던 메시지 창 00 의 왼쪽·오른쪽 변과 가게 창 33(열 22~29)의 '
-                         '오른쪽 변이 1칸씩 어긋남(세 줄). 한 사람 몫을 13칸으로 줄여 3A 를 원래 x 2·너비 28 로 되돌리는 고침이 지운다'),
     **{(n, kind): _SUBSTITUTE for n, kind in ((0x2E, '제목'), (0x44, '제목'),
                                               *((NENE_KEYS + k, '창 밖') for k in range(NENE_PAGES)))},
     (0x7D, '제목'): '제목 사람 이름 5칸(자리 1, 너비 6). 롬에 BRK 95 7D 가 없고 LDA #7D 도 창 열기가 아님. 메뉴 표로 여는 길은 미확인',

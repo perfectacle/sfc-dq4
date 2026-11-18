@@ -41,14 +41,17 @@ def kinds(found, n):
 
 
 class RowTest(unittest.TestCase):
-    def test_two_names_and_states_overflow_a_29_wide_window(self):
-        found = wl.check(rom({0x3A: SHOP_MEMBERS}, SHOP_TITLES))
-        self.assertEqual(kinds(found, 0x3A), ['창 밖'] * 4)
-        self.assertIn('28칸 > 안쪽 27칸', found[0][2])
+    def width(self, w):
+        return SHOP_MEMBERS[:2] + bytes((w,)) + SHOP_MEMBERS[3:]
 
-    def test_two_names_and_states_fit_a_30_wide_window(self):
-        wide = SHOP_MEMBERS[:1] + bytes((SHOP_MEMBERS[1], 0x1E)) + SHOP_MEMBERS[3:]
-        self.assertEqual(wl.check(rom({0x3A: wide}, SHOP_TITLES)), [])
+    def test_two_names_and_states_overflow_a_27_wide_window(self):
+        # 한 사람 몫 = 이름 5칸 + 상태 SHOP_STATE_CELLS(8)칸, 둘이면 26칸
+        found = wl.check(rom({0x3A: self.width(0x1B)}, SHOP_TITLES))
+        self.assertEqual(kinds(found, 0x3A), ['창 밖'] * 4)
+        self.assertIn('26칸 > 안쪽 25칸', found[0][2])
+
+    def test_two_names_and_states_fit_the_original_28_wide_window(self):
+        self.assertEqual(wl.check(rom({0x3A: self.width(0x1C)}, SHOP_TITLES)), [])
 
     def test_original_widths_fit_the_original_28_wide_window(self):
         orig = bytes.fromhex('020f1c4b0a1804') + SHOP_MEMBERS[7:]
