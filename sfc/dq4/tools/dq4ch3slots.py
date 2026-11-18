@@ -75,6 +75,9 @@ SPARE = {
 }
 # 엔돌 카지노 FC 슬롯(dq4fcslot: 코드·화면·무늬·릴 띠). 4E 라 BRK 없이 JSL 만 쓴다
 CASINO_CODE = (0x4ED000, 0x4F0000)
+# 엔돌 카지노 FC 포커(dq4fcpoker): 코드·표·타일 뒤쪽(47 의 타이틀 몫 47:8000~9DBF 뒤)과 타일 앞 512칸
+POKER_CODE = (0x47A000, 0x480000)
+POKER_TILES = (0x548000, 0x54C000)
 # 여신상 동굴의 배(dq4raft, S 가 hooks 로 둠). S 몫 코드 자리가 차서 따로 둔다. 5D:8000~ 은 dq4windowtext 몬스터 자료
 RAFT_CODE = (0x5DF000, 0x5DF800)
 # 뱅크 4E 의 몫: 3장 몬스터·떠돌이 상인(dq4fieldencounter.CH3_CODE_AT 부터, 사건 모듈 밖), 엔돌(E 의 far), 나머지 예비(SPARE).

@@ -67,7 +67,10 @@ org !hook_at
 
 org !code_at
 Entry:
-    CMP.b #!first_machine
+    CMP.b #!poker
+    BCC +
+    JML !poker_body                 ; FC 포커(dq4fcpoker)
++   CMP.b #!first_machine
     BCS FcBody
     PHP : PHB : REP #$10
     JML !hook_back

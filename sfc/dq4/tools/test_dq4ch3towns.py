@@ -42,7 +42,7 @@ class RegisterTest(unittest.TestCase):
         code, at = W.native(ctx())
         start, end = ev.SLOTS['W'].code
         self.assertLessEqual(start + len(code), end)
-        self.assertEqual(set(W.CALLS), {*W.OUT_TO, 'armor_buy', *W.SLOTS})
+        self.assertEqual(set(W.CALLS), {*W.OUT_TO, 'armor_buy', *W.SLOTS, 'poker'})
 
     def test_every_talk_has_a_body_and_every_message_is_used(self):
         c = ctx()
