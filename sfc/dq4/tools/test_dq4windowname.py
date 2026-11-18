@@ -318,9 +318,14 @@ class ApplyTests(unittest.TestCase):
         # 전투 상태 창은 맨 오른쪽 사람의 이름 다섯째 칸이 테두리 열을 덮지 않게 한 칸 넓힌다(위치·위쪽 비트는 그대로)
         for w in wn.BATTLE_STATUS:
             self.assertEqual(self.head(w)[:3], bytes((0x02, F, 0xE7)), f'{w:02X}')
-        for w in wn.NAME_LISTS + (wn.SHOP_MEMBERS, wn.TACTIC_WINDOW):
+        for w in wn.NAME_LISTS + (wn.TACTIC_WINDOW,):
             b, a = self.head(w, before), self.head(w, after)
             self.assertEqual((a[0], a[2]), (b[0] - 1, b[2] + 1), f'{w:02X}')
+        # 가게 동료 창은 한 줄에 이름이 둘이라 두 칸
+        b, a = self.head(wn.SHOP_MEMBERS, before), self.head(wn.SHOP_MEMBERS, after)
+        self.assertEqual((a[0], a[2]), (b[0] - 1, b[2] + 2))
+        o, p = window(before, wn.SHOP_MEMBERS), window(after, wn.SHOP_MEMBERS)
+        self.assertEqual(after[p + 4], before[o + 4] + 1)
         self.assertEqual(self.head(wn.SPELL_WINDOW)[2], 8 + 2)
         for w, h, left in wn.FORMATION:
             self.assertEqual(self.head(w)[:3], bytes((h[0] - left, h[1], h[2] + 1)))
