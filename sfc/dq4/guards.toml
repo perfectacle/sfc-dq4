@@ -19,6 +19,9 @@ paths = [
   "sfc/dq4/tools/dq4entrancehook.py",
   # 에뮬레이터를 띄우는 길과 코어, 그 설정
   "sfc/dq4/tools/dq4mesen.py",
+  # 모든 실행 앞에 붙는 창 모습 기록과 그 판정(실행마다 창 테두리·창 밖 글자를 봄)
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4libretro.py",
   "sfc/dq4/tools/dq4cores.py",
@@ -59,6 +62,8 @@ paths = [
   "sfc/dq4/tools/lua/dq4readset.lua",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "tools/mesence_settings.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/wc && DQ4_WINDOWNAME_SYMBOLS=$PWD/work/wc/wn.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/wc/menu.sfc && rm -rf work/wc/out && uv run --locked python sfc/dq4/tools/dq4windowcheck.py --rom work/ch1/dq4-ch1.sfc --symbols work/wc/wn.sym --symbols-rom work/wc/menu.sfc --out work/wc/out --jobs 4 --every"
@@ -75,6 +80,8 @@ paths = [
   "sfc/dq4/tools/dq4readsetcheck.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/lua/dq4readsetsynth.lua",
   "sfc/dq4/tools/lua/dq4readseterr.lua",
   "sfc/dq4/tools/lua/dq4readsetcb.lua",
@@ -127,6 +134,8 @@ paths = [
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "rm -rf work/compat-probe && uv run --locked python sfc/dq4/tools/dq4compatcheck.py probe --rom work/ch1/dq4-ch1-full.sfc --out work/compat-probe"
 needs = ["rom", "MESENCE", "LIBDIR"]
@@ -183,6 +192,8 @@ paths = [
   "sfc/dq4/tools/dq4menupatch.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
   "sfc/dq4/tools/dq4nameentry.py",
@@ -299,6 +310,8 @@ paths = [
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/compat-walk && uv run --locked python sfc/dq4/tools/dq4compatcheck.py walk --rom work/ch1/dq4-ch1-full.sfc --out work/compat-walk"
 needs = ["rom", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]
@@ -344,6 +357,8 @@ paths = [
   "sfc/dq4/tools/dq4msglabels.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4prologuecheck.py",
   "sfc/dq5/tools/dq5exitcheck.py",
   "sfc/dq4/tools/dq4build.py",
@@ -424,6 +439,8 @@ paths = [
   "sfc/dq4/tools/dq4ch2walkcheck.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
   "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/npcwalk && uv run --locked python sfc/dq4/tools/dq4npcwalkcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/npcwalk --seeds 0,5,9"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝·2장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -473,6 +490,8 @@ paths = [
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/fieldsave && uv run --locked python sfc/dq4/tools/dq4fieldsavecheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/fieldsave"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
@@ -510,6 +529,8 @@ paths = [
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/savefixture && uv run --locked python sfc/dq4/tools/dq4savefixture.py check --rom work/ch1/dq4-ch1-full.sfc --out work/savefixture"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
@@ -548,6 +569,8 @@ paths = [
   "sfc/dq4/tools/dq4msglabels.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4fieldencountercheck.py",
   "sfc/dq4/tools/dq4fieldport.py",
   "sfc/dq4/tools/dq4heroblockcheck.py",
@@ -702,6 +725,8 @@ paths = [
   "sfc/dq4/tools/dq4josa.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4outside.py",
   "sfc/dq4/tools/dq4prologue.py",
   "sfc/dq4/tools/dq4prologuecheck.py",
@@ -772,6 +797,8 @@ paths = [
   "sfc/dq4/tools/dq4prologuecheck.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4ch1event.py",
   "sfc/dq4/tools/dq4ch2battle.py",
   "sfc/dq4/tools/dq4ch2event.py",
@@ -829,6 +856,8 @@ paths = [
   "sfc/dq4/tools/dq4msglabels.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4balance.py",
   "sfc/dq4/tools/dq4ch1event.py",
   "sfc/dq5/tools/dq5gfx.py",
@@ -975,6 +1004,8 @@ paths = [
   "sfc/dq4/tools/dq4menupatch.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
   "sfc/dq4/tools/dq4nameentry.py",
@@ -1088,6 +1119,8 @@ paths = [
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4battlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/partyspells --seeds 0,1,2 --scenes party2piorimu,party2hyadain && rm -rf work/fieldspell && uv run --locked python sfc/dq4/tools/dq4fieldspellcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fieldspell"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "MESENCE", "LIBDIR", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
@@ -1202,6 +1235,8 @@ paths = [
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/sfxscene && uv run --locked python sfc/dq4/tools/dq4sfxscene.py --rom work/ch1/dq4-ch1-full.sfc --out work/sfxscene --jobs 4"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
@@ -1248,6 +1283,8 @@ paths = [
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/titlescene && uv run --locked python sfc/dq4/tools/dq4titlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/titlescene"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
@@ -1272,6 +1309,8 @@ paths = [
   "sfc/dq4/tools/dq4msglabels.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4heroblockcheck.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
   "sfc/dq4/tools/dq4environmentart.py",
@@ -1398,6 +1437,8 @@ paths = [
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/doorstand && uv run --locked python sfc/dq4/tools/dq4doorstandcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/doorstand"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -1429,6 +1470,8 @@ paths = [
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq5/tools/lua/dq5warptrace.lua",
   "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/doorcheck && uv run --locked python sfc/dq4/tools/dq4doorcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/doorcheck"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -1455,6 +1498,8 @@ paths = [
   "sfc/dq5/tools/lua/dq5battle.lua",
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq5/tools/lua/dq5warptrace.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/storyitem && uv run --locked python sfc/dq4/tools/dq4storyitemcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/storyitem"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -1535,6 +1580,8 @@ paths = [
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq5/tools/lua/dq5warptrace.lua",
   "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/signcheck && uv run --locked python sfc/dq4/tools/dq4signcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/signcheck --jobs 4"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
@@ -1572,6 +1619,8 @@ paths = [
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq5/tools/lua/dq5warptrace.lua",
   "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-groups && uv run --locked python sfc/dq4/tools/dq4chestcheck.py --build work/dq4-groups --out work/fresh-groups/chest && uv run --locked python sfc/dq4/tools/dq4fieldcheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-groups/field && uv run --locked python sfc/dq4/tools/dq4fieldencountercheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-groups/encounter && uv run --locked python sfc/dq4/tools/dq4fieldtravelcheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-groups/travel"
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -1601,6 +1650,8 @@ paths = [
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
   "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4battlemsgcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-battlemsg"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -1635,6 +1686,8 @@ paths = [
   "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4eventchecks.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4msgbankcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-msgbank"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -1665,6 +1718,8 @@ paths = [
   "sfc/dq5/tools/lua/dq5battle.lua",
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-wellreset && uv run --locked python sfc/dq4/tools/dq4wellresetcheck.py --rom work/ch1/dq4-ch1-full.sfc --load-rom work/dq4-groups/groups.sfc --out work/fresh-wellreset"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -1685,6 +1740,8 @@ paths = [
   "sfc/dq4/tools/dq4readset.py",
   "sfc/dq4/tools/lua/dq4readset.lua",
   "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-namegame && uv run --locked python sfc/dq4/tools/dq4namegamecheck.py --rom work/ch1/menu.sfc --out work/fresh-namegame"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -1712,6 +1769,8 @@ paths = [
   "sfc/dq4/tools/lua/dq4environmentdump.lua",
   "sfc/dq4/tools/lua/dq4shipstate.lua",
   "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4environment.py -k CounterTests 2>&1 | tee work/environment-collision.log | tail -1 | grep -qx OK"
 needs = ["rom"]
@@ -1732,6 +1791,8 @@ paths = [
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/lua/dq4environmentdump.lua",
   "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4environment.py -k LayeredTests 2>&1 | tee work/stairs-layer.log | tail -1 | grep -qx OK"
 needs = ["rom"]
@@ -1773,6 +1834,8 @@ paths = [
   "sfc/dq4/tools/lua/dq4environmentdump.lua",
   "sfc/dq4/tools/lua/dq4shipstate.lua",
   "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4environment.py -k UnportedGateTests 2>&1 | tee work/unported-gates.log | tail -1 | grep -qx OK"
 needs = ["rom"]
@@ -1854,6 +1917,8 @@ paths = [
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "test $( (uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4npcport.py -k HiddenPeopleTest -k SleeperTalkTest -k StandingTalkTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4shopscene.py -k ShopPlaceTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4sleepertalk.py -v) 2>&1 | tee work/map-people-rom-tests.log | grep -c ' \\.\\.\\. ok$') -eq 25"
 needs = ["rom"]
@@ -1881,6 +1946,8 @@ paths = [
   "sfc/dq4/tools/lua/dq4holdwalk.lua",
   "sfc/dq5/tools/dq5npcrecordcheck.py",
   "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-npc-talk && uv run --locked python sfc/dq4/tools/dq4npccheck.py --build work/dq4-groups --out work/guard-npc-talk"
 parts = 4
@@ -1908,6 +1975,8 @@ paths = [
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq5/tools/lua/dq5warptrace.lua",
   "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-group-links && uv run --locked python sfc/dq4/tools/dq4groupcheck.py --rom work/dq4-groups/groups.sfc --out work/guard-group-links"
 parts = 4
@@ -1935,6 +2004,8 @@ paths = [
   "sfc/dq4/tools/dq4readset.py",
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-envrom && uv run --locked python sfc/dq4/tools/dq4environmentromcheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-envrom"
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -1965,6 +2036,8 @@ paths = [
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq5/tools/lua/dq5warptrace.lua",
   "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-gates && uv run --locked python sfc/dq4/tools/dq4gatecheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-gates"
 needs = ["rom", "MESENCE", "LIBDIR", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -1995,6 +2068,8 @@ paths = [
   "sfc/dq5/tools/lua/dq5battle.lua",
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-dungeon && uv run --locked python sfc/dq4/tools/dq4dungeonencountercheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-dungeon --jobs 2"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -2036,6 +2111,8 @@ paths = [
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq5/tools/dq5progresscheck.py",
   "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/mapsong && uv run --locked python sfc/dq4/tools/dq4mapsongcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/mapsong --jobs 4"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -2087,6 +2164,8 @@ paths = [
   "sfc/dq4/tools/dq4menumsg.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
   "sfc/dq4/tools/dq4nameentry.py",
@@ -2149,6 +2228,8 @@ paths = [
   "sfc/dq4/tools/lua/dq4shipstate.lua",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4build.py",
   "sfc/dq5/tools/lua/dq5warp.lua",
   "sfc/dq4/tools/dq4readset.py",
@@ -2249,6 +2330,8 @@ paths = [
   "sfc/dq5/tools/dq5npcrecordcheck.py",
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/sleepercheck-ch1 work/sleepercheck-groups && uv run --locked python sfc/dq4/tools/dq4sleepercheck.py --rom work/ch1/dq4-ch1-full.sfc --build work/dq4-groups --chapter1 --out work/sleepercheck-ch1 && uv run --locked python sfc/dq4/tools/dq4sleepercheck.py --rom work/dq4-groups/groups.sfc --build work/dq4-groups --out work/sleepercheck-groups"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -2272,6 +2355,8 @@ paths = [
   "sfc/dq4/tools/dq4wellswitch.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq5/tools/dq5exitcheck.py",
   "sfc/dq5/tools/dq5sram.py",
   "sfc/dq5/tools/lua/dq5msg.lua",
@@ -2408,6 +2493,8 @@ paths = [
   "sfc/dq4/tools/dq4menupatch.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
   "sfc/dq4/tools/dq4nameentry.py",
@@ -2532,6 +2619,8 @@ paths = [
   "sfc/dq4/tools/dq4menupatch.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
   "sfc/dq4/tools/dq4nameentry.py",
@@ -2718,6 +2807,8 @@ paths = [
   "sfc/dq4/tools/dq4menupatch.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
   "sfc/dq4/tools/dq4nameentry.py",
@@ -2943,6 +3034,8 @@ paths = [
   "sfc/dq4/tools/dq4mercenary.py",
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/lrreadset && uv run --locked python sfc/dq4/tools/dq4libretroreadsetcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/lrreadset"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "코어(dq4cores 가 빌드, 또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]
@@ -2984,6 +3077,8 @@ paths = [
   "sfc/dq4/tools/dq4menupatch.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
   "sfc/dq4/tools/dq4nameentry.py",
@@ -3071,6 +3166,8 @@ paths = [
   "sfc/dq4/tools/dq4titlelayers.asm",
   "sfc/dq4/tools/dq4titlelayerpatch.py",
   "sfc/dq4/tools/dq4art/**",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/screens && uv run --locked python sfc/dq4/tools/dq4screencheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/screens"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "코어(dq4cores 가 빌드, 또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]
@@ -3084,6 +3181,8 @@ paths = [
   "sfc/dq4/tools/dq4menucursorcheck.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/lua/dq4menucursorcheck.lua",
   "sfc/dq4/tools/lua/dq4openbus.lua",
   "tools/mesence_settings.py",
@@ -3099,6 +3198,8 @@ paths = [
   "sfc/dq4/tools/dq4namecursorcheck.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/lua/dq4namecursorcheck.lua",
   "sfc/dq4/tools/lua/dq4openbus.lua",
   "tools/mesence_settings.py",
@@ -3114,6 +3215,8 @@ paths = [
   "sfc/dq4/tools/dq4msgcountcheck.py",
   "sfc/dq4/tools/lua/dq4msgcount.lua",
   "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/msgcount-walk work/fresh-msgcount && uv run --locked python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1.sfc --out work/msgcount-walk --units && uv run --locked python sfc/dq4/tools/dq4msgcountcheck.py --rom work/ch1/dq4-ch1.sfc --messages work/ch1/messages.json --states work/msgcount-walk --out work/fresh-msgcount"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -3126,6 +3229,8 @@ paths = [
   "sfc/dq4/tools/dq4peoplecheck.py",
   "sfc/dq4/tools/lua/dq4peopledump.lua",
   "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/people-walk work/fresh-people && uv run --locked python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/people-walk --units && uv run --locked python sfc/dq4/tools/dq4peoplecheck.py --rom work/ch1/dq4-ch1-full.sfc --states work/people-walk --out work/fresh-people"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -3147,6 +3252,8 @@ paths = [
   "@ch3-modules",
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4eventchecks.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/peopleevent1 work/peopleevent2 work/peopleevent3 && uv run --locked python sfc/dq4/tools/dq4peopleeventcheck.py --chapter 1 --rom work/ch1/dq4-ch1-full.sfc --out work/peopleevent1 --json work/peopleevent/ch1.json && uv run --locked python sfc/dq4/tools/dq4peopleeventcheck.py --chapter 2 --rom work/ch2/dq4-ch1-full.sfc --out work/peopleevent2 --json work/peopleevent/ch2.json && uv run --locked python sfc/dq4/tools/dq4peopleeventcheck.py --chapter 3 --rom work/ch3/dq4-ch1-full.sfc --out work/peopleevent3 --json work/peopleevent/ch3.json"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
@@ -3160,6 +3267,8 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/lua/dq4nameentrycheck.lua",
   "sfc/dq4/tools/lua/dq4openbus.lua",
 ]
@@ -3436,6 +3545,8 @@ ch1-walk = [
   "sfc/dq4/tools/dq4monspecial.py",
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4slottext.py",
   "sfc/dq4/tools/dq4fcslot.py",
@@ -3561,6 +3672,8 @@ paths = [
   "sfc/dq5/tools/lua/dq5battle.lua",
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq5/tools/lua/dq5warptrace.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/guard-night-rom --chapter2 && rm -rf work/guard-night && uv run --locked python sfc/dq4/tools/dq4environmentnightcheck.py --rom work/guard-night-rom/dq4-ch1-full.sfc --out work/guard-night"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]

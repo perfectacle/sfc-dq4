@@ -573,6 +573,8 @@ def _run(mesence, rom_path, script, dest, env, timeout, extra, log, cwd, tag, ac
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_bytes(data)
         store.touch(key, hit)
+        # 펼친 장면의 창 모습도 실행한 장면처럼 판정한다(판정 코드는 캐시 키에 들지 않아 지금 코드로 다시 본다)
+        mesen.winwatch.verdict(Path(env.get('SHOT_DIR') or dest), rom_path, label=str(dest))
         info = {'cached': True, 'returncode': hit.get('returncode'), 'timed_out': False,
                 'readset': sum(n for _, n in unpack(hit['ranges'])), 'ranges': len(unpack(hit['ranges'])),
                 'key': key}
