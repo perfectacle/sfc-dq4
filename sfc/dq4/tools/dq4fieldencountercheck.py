@@ -239,10 +239,11 @@ def main():
     def rate_report(data, prg, grid, fc, zone, rows):
         """Per walked FC block kind: 23:E7C2's Y and FC's day and night factors, the steps, and the mean cells to a
         fight in DQ5 and FC; ok when every step's Y is a factor of its kind times dq4balance.ENCOUNTER and its chance
-        at 23:E8B7 is dq5_chance."""
+        at 23:E8B7 is dq5_chance of the coefficient the coef hook gives (own_coefs, else the record's)."""
         import dq5encounter
         from dq5map import Rom
-        coef = dq5encounter.area(Rom(data), zone)["coef"]
+        record = dq5encounter.area(Rom(data), zone)["coef"]
+        coef = dict(dq4fieldencounter.own_coefs(prg, report)).get(zone, record)
         base = dq4encounter.zone(prg, fc)["rate"]
         want = dq4fieldencounter._coefs(args.dq5.read_bytes())[report[f"{fc:02X}"]["rate_index"]]
         seen, wrong, step = {}, [], None
@@ -266,8 +267,8 @@ def main():
             if y not in ours or y != row["y"] or chance != dq4fieldencounter.dq5_chance(coef, y, s):
                 wrong.append({"kind": kind, "y": y, "1A9A": s, "chance": chance})
             step = None
-        return {"coefficient": coef, "fc_base": base, "chances": seen, "wrong": wrong[:10],
-                "ok": bool(seen) and coef == want and not wrong}
+        return {"coefficient": coef, "record_coefficient": record, "fc_base": base, "chances": seen, "wrong": wrong[:10],
+                "ok": bool(seen) and record == want and not wrong}
 
     def run_no_fight(name):
         """FC 블록 종류마다 걸은 셀 수와 그 셀의 Y·23:E7C2 횟수. ok 는 타일 8 이상 셀이 있고 모두 Y 0·판정 없음, 풀밭

@@ -449,6 +449,24 @@ class PickTests(unittest.TestCase):
                     cpu.jsl(labels['surprise_hook'])
                 self.assertEqual(cpu.wram[0x1000], 0x40 | m.fc_surprise(tables['surprise'], k, r), (k, r))
 
+    def test_coef_hook_gives_own_coefficient_only_to_its_zone(self):
+        # 23:E892 훅: 기본 조우율 28 의 구역 08 만 계수 31(셈: FC 풀밭 31.3셀에 33.3셀, 표의 2B 는 35.8셀), 다른 구역은
+        # 원래처럼 표 23:EA44[$01]. 돌아갈 때 A 위 바이트 0
+        coefs = m.own_coefs(self.prg, self.report)
+        self.assertEqual(coefs, [(self.report['08']['zone'], 0x31)])
+        table = self.dq5[m._lorom(m.RATE_COEF):m._lorom(m.RATE_COEF) + 8]
+        blob, labels = m.ch3_code(m.merchant_zones(self.report), self.picks, [(0, 0)] * m.DROP_SLOTS,
+                                  m.fc_tables(self.prg), coefs)
+        for zone in sorted({r['zone'] for r in self.report.values()}):
+            for index in range(8):
+                cpu = self.dq5_cpu(blob, 1)
+                cpu.x, cpu.a = zone * m.CH3_ZONE_RECORD, 0x1234
+                cpu.wram[0x01] = index
+                cpu.jsl(labels['coef'])
+                want = 0x31 if zone == coefs[0][0] else table[index]
+                self.assertEqual(cpu.a, want, (zone, index))
+        self.assertGreater(m.rate_error(self.prg, 28, 0x2B), 2 * m.rate_error(self.prg, 28, 0x31))
+
     def test_table_has_every_zone_and_fits(self):
         # docs 가 레코드를 쓰는 구역 모두(바다 81·82 포함), 목록 무게 합은 8비트
         zones = [r[0] for r in self.picks]
