@@ -14,7 +14,9 @@
 -- PRG="3C000=BF;7C000=BF" 는 메모리상 PRG 바이트(오프셋)를 바꾼다(예: 디버그 스위치 $C000 bit6 = Start 를 누를 때만 조우).
 -- SHOT=1 이면 시행이 끝날 때 화면을 tNN.png 로 남긴다.
 -- 한 시행은 무리가 정해지고 CONT 프레임이 지나거나 LIMIT 프레임이 지나면 끝난다. TRIALS 번 하고 멈춘다.
--- enc.txt 는 시행마다 다시 쓴다(한 번에 많이 돌리다 멈춰도 그때까지 기록이 남게).
+-- enc.txt 는 시행마다 다시 쓴다(한 번에 많이 돌리다 멈춰도 그때까지 기록이 남게). TRIALS 를 다 돌면 끝에 「end N」 을
+-- 적는다. MesenCE --testrunner 는 100초에 끝나므로(종료 코드 255) 그 줄이 없으면 도중에 잘린 것이다. 1장 필드 시행은
+-- 2초쯤이라 한 번에 40번 안쪽으로 나눠 돌린다.
 -- enc.txt 줄:
 --   stp  $41 $63 $64 $44 $45 $6E05 $42 $43 $0515            18:$9BE6 걸음마다 조우 루틴에 들어옴
 --   shp  X Y 지도 값(A) $07 마지막으로 $07 을 쓴 PRG 오프셋     18:$9C81 배($0515=1)일 때 구역 대신 $07 을 읽는 곳
@@ -187,6 +189,7 @@ emu.addEventCallback(function()
     if os.getenv("SHOT") then L.shot(string.format("t%02d.png", trial)) end
     L.write("enc.txt", table.concat(log, "\n") .. "\n")
     if trial >= trials then
+      L.write("enc.txt", table.concat(log, "\n") .. string.format("\nend %d\n", trial))
       emu.stop(0)
       return
     end

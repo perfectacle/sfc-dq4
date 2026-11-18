@@ -622,6 +622,40 @@ DROP_SITE, DROP_ORIG = 0x258966, bytes((0xAD, 0x16, 0x11, 0xC9, 0xFF, 0xD0, 0x03
 DROP_ITEM = 0x2589AA        # LDA $46 / CMP #$FF: 떨어뜨릴 물건
 RANDOM = 0x00953E           # A(16비트) = n → 0~n-1
 CANDIDATE, KILLS = 0x7E1116, 0x7E111A
+# 떨어뜨림 후보: DQ5 는 처음 쓰러뜨린 종류($1116, 20:A346)이고 다른 종류를 쓰러뜨리면 FF(20:A363, 섞인 무리는 떨어뜨림
+# 없음), 물건·확률·이름은 마지막으로 빠진 몬스터 종류($1113, 20:A170)의 칸에서 읽는다(25:8970). FC 는 마지막으로 쓰러뜨린
+# 몬스터 칸($7200, 11:$91F1)의 물건이다(실측). 20:A363 을 쓰러뜨릴 때마다 $1116·$1113 = 그 종류로 바꾼다
+LAST_KILL_SITE = 0x20A363
+LAST_KILL_ORIG = bytes.fromhex('ad 16 11 c9 ff f0 09 c5 46 f0 05 a9 ff 8d 16 11')
+LAST_KILL = bytes.fromhex('a5 46 8d 16 11 8d 13 11') + bytes((0xEA,) * 8)
+# 떨어뜨림 메시지(25:89BF BRK 9E B1 / 다음 BRK 9E 00 의 첫 바이트): FC 12:$9246 는 무리가 모두 한 종류면 01C7「…は
+# たからばこを もっていた！」, 아니면 01C8「まもののむれは たからばこを もっていた！」. 0B1 의 한글을 FC 뜻으로 두고, 섞인
+# 무리면 1A8. BRK 가 부른 뱅크를 DB 로 쓰므로 WRAM 거울이 있는 뱅크 0B(dq4monspecial 코드 뒤)에 둔다
+DROP_MSG_SITE, DROP_MSG_ORIG, DROP_MSG_NEXT = 0x2589BF, bytes.fromhex('00 9e b1 00'), 0x2589C5
+DROP_MSG_AT = 0x0BFFA0
+# 전투가 끝날 때 무리(7E:1001~)는 비어 있어, 전투에 실은 몬스터 그림의 종류 넷(7E:117C~, 부른 몬스터도 더해짐)으로 본다
+BATTLE_SPECIES = 0x7E117C
+MSG_DROP, MSG_DROP_GROUP = 0x0B1, 0x1A8
+
+
+def drop_msg_code(at=DROP_MSG_AT):
+    """(바이트, 라벨): 전투의 몬스터 종류 7E:117C~117F 의 FF 아닌 것이 모두 같으면 BRK 9E B1, 아니면 BRK 9F A8, 그 뒤 원래의
+    BRK 9E 00 과 25:89C5. M·X 8비트."""
+    from dq4environmentrom import _Asm
+    a = _Asm(at)
+    a.label('drop_msg').b(0xA0, 0xFF, 0xA2, 0x00)
+    a.label('dm_loop').b(0xBF, *_long(BATTLE_SPECIES), 0xC9, 0xFF).rel(0xF0, 'dm_next')
+    a.b(0xC0, 0xFF).rel(0xD0, 'dm_cmp').b(0xA8).rel(0x80, 'dm_next')
+    a.label('dm_cmp').b(0x48, 0x98, 0xC3, 0x01).rel(0xF0, 'dm_same').b(0x68).rel(0x80, 'dm_group')
+    a.label('dm_same').b(0x68)
+    a.label('dm_next').b(0xE8, 0xE0, 0x04).rel(0x90, 'dm_loop')
+    a.b(0x00, 0x9E, MSG_DROP).rel(0x80, 'dm_tail')
+    a.label('dm_group').b(0x00, 0x9F, MSG_DROP_GROUP & 0xFF)
+    a.label('dm_tail').b(0x00, 0x9E, 0x00, 0x5C, *_long(DROP_MSG_NEXT))
+    data, labels = a.assemble()
+    if at + len(data) > 0x0C0000:
+        raise ValueError('떨어뜨림 메시지 코드가 뱅크 0B 끝을 넘음')
+    return data, labels
 TORNEKO_LEVEL = 0x7E2052    # 일행 기록 0(7E:2040) + 12. 3장 일행 기록 0 은 톨네코
 
 # 떠돌이 상인(FC 18:$9D12): 3장 필드 조우의 1/10 은 싸우지 않고 여관(rand(256) < 16)이나 도구점
@@ -1115,6 +1149,12 @@ def ch3_writes(prg, dq5, report, at=CH3_CODE_AT):
     out.append(put(SURPRISE_SITE, bytes((0x5C, *_long(labels['surprise_hook']), 0xEA)), SURPRISE_ORIG,
                    '걸음 전투의 기습·선제를 FC 문턱으로'))
     out.append(put(WAKE_SITE, jsl('wake'), WAKE_ORIG, '필드 여관(떠돌이 상인)에서 깨면 그룹 01 갈래로 가지 않음'))
+    out.append(put(LAST_KILL_SITE, LAST_KILL, LAST_KILL_ORIG, '떨어뜨림 후보는 마지막으로 쓰러뜨린 종류(FC)'))
+    msg, msg_labels = drop_msg_code()
+    out.append({'at': f'{DROP_MSG_AT >> 16:02X}:{DROP_MSG_AT & 0xFFFF:04X}', 'hex': msg.hex(' ').upper(),
+                'note': '떨어뜨림 메시지: 섞인 무리면 마물 무리(FC 01C8)'})
+    out.append(put(DROP_MSG_SITE, bytes((0x5C, *_long(msg_labels['drop_msg']))), DROP_MSG_ORIG,
+                   '떨어뜨림 메시지를 FC 처럼 무리 종류로'))
     return out
 
 
