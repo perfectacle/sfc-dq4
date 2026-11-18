@@ -67,7 +67,7 @@ def sales_set(n):
 
 
 # 가게 칸 0~2 에 강철 검(2000G) 둘·물건 01(50G)
-STOCK_SET = ';'.join(f'{(ch3.VARS2_AT + ch3.SLOTS["E"].vars2[0] + shop.STOCK + k) & 0xFFFF:04X}={item + 1:02X}'
+STOCK_SET = ';'.join(f'{shop.stock_addr(k) & 0xFFFF:04X}={item + 1:02X}'
                      for k, item in enumerate((endor.STEEL_SWORD, endor.STEEL_SWORD, CHEAP)))
 # 카운터 위에서 말을 건다. 물음은 창 상태로 넘긴다(dq4walk.lua ask·cursor)
 TALK_DOWN = 'down:8;wait:30;a:8;wait:60;a:8;wait:60'
@@ -76,15 +76,17 @@ YES, NO = 'ask:600;cursor:0;a:8', 'ask:600;cursor:1;a:8'
 # 창이 뜬 프레임에는 커서(7E:0AD7)가 앞 창 값이고 뒤이어 첫 칸으로 놓여, 잠깐 기다린 뒤 칸 2(강철 검)를 고른다.
 # 036F 「예」, 0371 「아니요」, 0374 「아니요」 → 0375
 ITEM_LIST = 0x0F
-COUNTER_WALK = f'{TALK_DOWN};{YES};open:{ITEM_LIST};wait:30;cursor:2;a:8;{YES};{NO};{NO};{wc.taps(1, 90)};{CLOSE}'
+COUNTER_WALK = f'{TALK_DOWN};{YES};open:{ITEM_LIST};settle:8;cursor:2;a:8;{YES};{NO};{NO};{wc.taps(1, 90)};{CLOSE}'
 # 036B 「예」(매상 없음), 물건 창을 B 로 그만두고 0374 「예」 → 가게 물건 창(BRK 95 0F)을 B 로 닫고 0375
 VIEW_WALK = f'{TALK_DOWN};{YES};wait:150;b:8;{YES};wait:150;b:8;wait:60;{wc.taps(1, 90)};{CLOSE}'
 # 톨네코 소지품이 없으면 0334 → 0374 「예」 → 가게가 비었으면 0376 만
 EMPTY_WALK = f'{TALK_DOWN};{YES};{YES};{wc.taps(1, 90)};{CLOSE}'
 NO_ITEMS = ';'.join(f'{(ch3.PARTY_ITEMS & 0xFFFF) + k:04X}=FF' for k in range(12)) + \
     f';{(ch3.PARTY_ITEMS - 2) & 0xFFFF:04X}=00;{(ch3.PARTY_ITEMS - 1) & 0xFFFF:04X}=00'
-NO_STOCK = ';'.join(f'{(ch3.VARS2_AT + ch3.SLOTS["E"].vars2[0] + shop.STOCK + k) & 0xFFFF:04X}=00'
-                    for k in range(shop.STOCK_SLOTS))
+NO_STOCK = ';'.join(f'{shop.stock_addr(k) & 0xFFFF:04X}=00' for k in range(shop.STOCK_SLOTS))
+# 120칸이 다 찼으면(FC 15:$9EC8 ≥ 78) 036B 「예」 → 0377(끝에 보기 물음) 「아니요」 → 0375
+FULL_STOCK = ';'.join(f'{shop.stock_addr(k) & 0xFFFF:04X}={endor.STEEL_SWORD + 1:02X}' for k in range(shop.STOCK_SLOTS))
+FULL_WALK = f'{TALK_DOWN};{YES};{NO};{wc.taps(1, 90)};{CLOSE}'
 
 # (이름, 방법, 인자, 선택): dq4ch3walkcheck.SEGMENTS 와 같은 꼴. 순간이동 구간마다 묶음이고, 묶음 첫 구간 set 이 flag 를 둔다
 SEGMENTS = [
@@ -132,6 +134,9 @@ SEGMENTS = [
     ('nene_empty_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(NO_ITEMS, NO_STOCK, sales_set(0)))}),
     ('nene_empty', 'walk', EMPTY_WALK, {'map': endor.TOWN, 'bytes': {'NENE_STOCK0': 0}}),
+    ('nene_full_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
+     {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(FULL_STOCK, sales_set(0)))}),
+    ('nene_full', 'walk', FULL_WALK, {'map': endor.TOWN, 'bytes': {'NENE_STOCK0': endor.STEEL_SWORD + 1}}),
     # 잠으로 날이 바뀌면 가게 칸마다 rand < C0 이면 값 × (96 + ⌊r × 33/256⌋)/64 가 매상으로. 난수를 고정하면 셋 다 팔려
     # 8043(값 합 4050 의 2배 8100 이하, 1.5배 6075 이상)
     ('nene_day_side', 'warp', f'{endor.TOWN},{endor.NENE_SIDE[1][0]},{endor.NENE_SIDE[1][1] - 1}',
@@ -231,6 +236,7 @@ MESSAGES = {
     'nene_day': ['nene_rest', 'nene_night'],
     'nene_view': ['nene_counter_ask', 'nene_pick', 'nene_done', 'nene_cheer'],
     'nene_empty': ['nene_counter_ask', 'nene_nothing', 'nene_done', 'nene_empty'],
+    'nene_full': ['nene_counter_ask', 'nene_full', 'nene_cheer'],
     'nene_unsold': ['nene_rest', 'nene_night'],
     'nene_counter': ['nene_counter_ask', 'nene_sales', 'nene_pick', 'nene_item', 'nene_offer', 'nene_put', 'nene_more',
                      'nene_done', 'nene_cheer'],

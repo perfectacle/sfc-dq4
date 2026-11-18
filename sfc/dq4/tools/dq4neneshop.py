@@ -21,15 +21,19 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 import dq4chapter1 as ch1  # noqa: E402
 import dq4ch2event as ch2  # noqa: E402
 import dq4ch3event as ch3  # noqa: E402
-from dq4ch3slots import LOW_STUBS  # noqa: E402
+from dq4ch3slots import LOW_STUBS, STOCK_AT, STOCK_PER_SLOT  # noqa: E402
+from dq4ch3slots import STOCK_SLOTS as _STOCK_SLOTS  # noqa: E402
 from dq4chapterbox import ENTER, LEAVE  # noqa: E402
 
 narrate = ch1.narrate
 pages = ch2._speaker_pages
 
-# 둘째 변수 칸 +0~+2 매상(3바이트), +3~+14 가게 물건(물건 번호 + 1, 0 은 빈 칸). 칸 수는 톨네코 물건 칸 수와 같아야
-# 「보기」(nene_view)가 한 번에 맞바꿔 보여 줄 수 있다
-SALES, STOCK, STOCK_SLOTS = 0, 3, 12
+# 둘째 변수 칸 +0~+2 매상(3바이트), +3~+16 「보기」 동안 맡아 두는 톨네코 물건 12칸·장비 비트. 가게 물건은
+# dq4ch3slots.STOCK_SLOTS(맡긴 동료 칸 다섯의 +1~+24, 물건 번호 + 1, 0 은 빈 칸)
+SALES, SAVE = 0, 3
+ITEM_SLOTS = 12
+STOCK_SLOTS = len(_STOCK_SLOTS) * STOCK_PER_SLOT
+STOCK_END = STOCK_AT + 26 * len(_STOCK_SLOTS)        # 마지막 칸 다음 덩어리 건너뛰기 뒤의 주소
 # FC 15:$9F9E 의 r < C0. DQ5 00:953A 는 (r × A) >> 8 이라 A = 4 로 받아 3 보다 작으면 같은 갈래가 된다
 SELL_QUARTERS = 3
 SELL_BASE, SELL_SPAN = 96, 33                  # 값 × (96 + ⌊r × 33/256⌋)/64
@@ -48,7 +52,7 @@ BRKS = {
 PICKER_RESET = 0x06DFB6                        # JSR DFBA / RTL: 창을 고르기 전에 DQ5 가게가 부르는 것
 GOLD_AT = ch2.GOLD_AT
 TEMP = 0x7E1BD6                                # 7E:1BBE~ 의 DQ5 가 쓰지 않는 자리(1장·용병 SCRATCH 가 1BD5 까지, 1BE0~ 이름 입력)
-PICK = TEMP + 7                                # 고른 빈 가게 칸 · 소지품 칸 · 물건 번호
+PICK = TEMP + 6                                # 고른 빈 가게 칸 주소(2바이트) · 소지품 칸 · 물건 번호
 
 
 def low_stubs(at):
@@ -69,17 +73,42 @@ def _asm():
     return Asm()
 
 
+def _w(v):
+    return (v & 0xFFFF).to_bytes(2, 'little')
+
+
+LONG = bytes((0x00, 0x00, 0x7E))                     # $7E0000,X(X16 = 가게 칸 주소 하위)
+
+
+def stock_addr(k):
+    """가게 칸 k(0~119)의 WRAM 주소."""
+    return STOCK_AT + 26 * (k // STOCK_PER_SLOT) + k % STOCK_PER_SLOT
+
+
+def _first(a):
+    """X16·Y16: X = 첫 가게 칸 주소, Y = 그 덩어리에 남은 칸 수."""
+    a(0xA2, *_w(STOCK_AT), 0xA0, STOCK_PER_SLOT, 0x00)
+
+
+def _next(a, tag):
+    """다음 가게 칸. 덩어리 끝이면 다음 칸의 +25·+0 을 건너뛴다(칸 +0 은 DQ5 의 찬 칸 표시라 쓰지 않음)."""
+    from dq4ch2endor import BNE
+    a(0xE8, 0x88).br(BNE, tag)(0xE8, 0xE8, 0xA0, STOCK_PER_SLOT, 0x00).label(tag)
+
+
 def _day(vars2):
     """날이 바뀜(JSL, 아무 모드): 가게 칸마다 rand < C0 이면 값 × (96 + ⌊r × 33/256⌋)/64 를 매상에 더하고 칸을 비운다.
     셈 칸 TEMP 는 뱅크 00 거울(7E:0000~1FFF)이라 DB 0 에서 절대 주소로 쓴다."""
     from dq4ch2endor import BCC, BCS, BEQ, BNE, lda, sta
     p, acc, cnt = TEMP & 0xFFFF, (TEMP + 3) & 0xFFFF, (TEMP + 6) & 0xFFFF
     w = lambda op, addr: bytes((op, addr & 0xFF, addr >> 8))  # noqa: E731
-    a = _asm()(ENTER, 0xE2, 0x30, 0xA2, 0x00)
-    a.label('slot')(0xBF, *_al(vars2 + STOCK)).br(BNE, 'item').brl('next').label('item')
-    a(0xDA, 0x3A, 0x48, 0xA9, 4, 0x22, *_al(RANDOM), 0xC9, SELL_QUARTERS).br(BCC, 'sold')(0x68, 0xFA).brl('next')
-    # 값 p(3바이트) = 바이트 × 10^(배율 & 3)
-    a.label('sold')(0x68, 0xAA, 0xBF, *_al(PRICE_BASE), w(0x8D, p),
+    a = _asm()(ENTER, 0xE2, 0x20, 0xC2, 0x10)
+    _first(a)
+    a.label('slot')(0xBF, *LONG).br(BNE, 'item').brl('next').label('item')
+    a(0xDA, 0x5A, 0x3A, 0x48, 0xA9, 4, 0x22, *_al(RANDOM), 0xC9, SELL_QUARTERS).br(BCC, 'sold')
+    a(0x68, 0x7A, 0xFA).brl('next')
+    # 값 p(3바이트) = 바이트 × 10^(배율 & 3). X = 물건 번호(16비트)
+    a.label('sold')(0x68, 0xC2, 0x20, 0x29, 0xFF, 0x00, 0xAA, 0xE2, 0x20, 0xBF, *_al(PRICE_BASE), w(0x8D, p),
                     w(0x9C, p + 1), w(0x9C, p + 2))
     a(0xBF, *_al(PRICE_SCALE), 0x29, 0x03).br(BEQ, 'scaled')(w(0x8D, cnt))
     # p × 10 = 2p + 8p
@@ -97,8 +126,10 @@ def _day(vars2):
         a(w(0x4E, acc + 2), w(0x6E, acc + 1), w(0x6E, acc))
     a(0x18, lda(vars2 + SALES), w(0x6D, acc), sta(vars2 + SALES), lda(vars2 + SALES + 1), w(0x6D, acc + 1))
     a(sta(vars2 + SALES + 1), lda(vars2 + SALES + 2), w(0x6D, acc + 2), sta(vars2 + SALES + 2))
-    a(0xFA, 0xA9, 0x00, 0x9F, *_al(vars2 + STOCK))
-    a.label('next')(0xE8, 0xE0, STOCK_SLOTS).br(BCS, 'end').brl('slot')
+    a(0x7A, 0xFA, 0xA9, 0x00, 0x9F, *LONG)
+    a.label('next')
+    _next(a, 'turn')
+    a(0xE0, *_w(STOCK_END)).br(BCS, 'end').brl('slot')
     a.label('end')
     return a.bytes() + LEAVE
 
@@ -123,8 +154,11 @@ def _room(vars2):
     """대화 호출: 가게 칸에 빈 칸이 있으면 결과 flag 켬."""
     from dq4ch2endor import BCC, BEQ, lda, sta
     r = 0x7E2190 + ch3.RESULT[0]
-    a = _asm()(ENTER, 0xE2, 0x30, lda(r), 0x29, ~ch3.RESULT[1] & 0xFF, sta(r), 0xA2, 0x00)
-    a.label('scan')(0xBF, *_al(vars2 + STOCK)).br(BEQ, 'free')(0xE8, 0xE0, STOCK_SLOTS).br(BCC, 'scan').br(0x80, 'end')
+    a = _asm()(ENTER, 0xE2, 0x20, 0xC2, 0x10, lda(r), 0x29, ~ch3.RESULT[1] & 0xFF, sta(r))
+    _first(a)
+    a.label('scan')(0xBF, *LONG).br(BEQ, 'free')
+    _next(a, 'turn')
+    a(0xE0, *_w(STOCK_END)).br(BCC, 'scan').br(0x80, 'end')
     a.label('free')(lda(r), 0x09, ch3.RESULT[1], sta(r))
     a.label('end')
     return a.bytes() + LEAVE
@@ -158,33 +192,36 @@ def _stock(vars2, m, brk):
     a = _asm()(ENTER, 0xF4, 0x7E, 0x7E, 0xAB, 0xAB, 0xE2, 0x30, lda(r), 0x29, ~ch3.RESULT[1] & 0xFF, sta(r))
     # 대화에서 가게로 넘어갈 때와 같이(06:C26C 의 JSL 04:D977, 06:DC0B) 창 상태를 가게 쪽으로 바꾼다. 빼면 BRK 95 가 04:DADA 에서 돈다
     a(0x22, *_al(SHOP_ENTER), 0xE2, 0x30, j('window'), j('close'))
-    a.label('round')(0xA2, 0x00)
-    a.label('scan')(0xBF, *_al(vars2 + STOCK)).br(BEQ, 'free')(0xE8, 0xE0, STOCK_SLOTS).br(BCC, 'scan')
-    a(lda(r), 0x09, ch3.RESULT[1], sta(r)).brl('end')
-    a.label('free')(0x8E, *(PICK & 0xFFFF).to_bytes(2, 'little'))
+    a.label('round')(0xC2, 0x10)
+    _first(a)
+    a.label('scan')(0xBF, *LONG).br(BEQ, 'free')
+    _next(a, 'turn')
+    a(0xE0, *_w(STOCK_END)).br(BCC, 'scan')
+    a(0xE2, 0x10, lda(r), 0x09, ch3.RESULT[1], sta(r)).brl('end')
+    a.label('free')(0x8E, *_w(PICK), 0xE2, 0x10)
     a(0x64, 0x42, j('count'), 0xA5, 0x46).br(BNE, 'has')
     _show(a, m['nene_nothing'])
     a.brl('end')
     a.label('has')
     _show(a, m['nene_pick'])
     a(0x22, *_al(PICKER_RESET), 0x64, 0xE4, j('items'), 0xA5, 0xE8).br(0x10, 'picked').brl('quit').label('picked')
-    a(0x85, 0x43, 0x8D, *((PICK + 1) & 0xFFFF).to_bytes(2, 'little'), 0x64, 0x42, j('item'))
-    a(0xA5, 0x46, 0x48, j('close'), 0x68, 0x8D, *((PICK + 2) & 0xFFFF).to_bytes(2, 'little'), 0x85, 0xF5)
+    a(0x85, 0x43, 0x8D, *_w(PICK + 2), 0x64, 0x42, j('item'))
+    a(0xA5, 0x46, 0x48, j('close'), 0x68, 0x8D, *_w(PICK + 3), 0x85, 0xF5)
     a(j('sellable')).br(0x90, 'sellable')
     _show(a, m['nene_precious'])
     a.brl('more')
     a.label('sellable')
     _show(a, m['nene_item'])
     # 값 × 1.5 → $F5~$F7(FC 15:$9F07 LDA #$60 / JSR A638 = × 60/40)
-    a(0xAD, *((PICK + 2) & 0xFFFF).to_bytes(2, 'little'), 0x85, 0x42, j('price'))
+    a(0xAD, *_w(PICK + 3), 0x85, 0x42, j('price'))
     a(0xA5, 0x48, 0x4A, 0x85, 0xF7, 0xA5, 0x47, 0x6A, 0x85, 0xF6, 0xA5, 0x46, 0x6A, 0x18, 0x65, 0x46, 0x85, 0xF5)
     a(0xA5, 0xF6, 0x65, 0x47, 0x85, 0xF6, 0xA5, 0xF7, 0x65, 0x48, 0x85, 0xF7)
     _show(a, m['nene_offer'])
     a(j('ask'), 0xA5, 0xE8, 0x48, j('close'), 0x68).br(BEQ, 'put')
     _show(a, m['nene_keep'])
     a.brl('more')
-    a.label('put')(0xAE, *(PICK & 0xFFFF).to_bytes(2, 'little'), 0xAD, *((PICK + 2) & 0xFFFF).to_bytes(2, 'little'))
-    a(0x1A, 0x9F, *_al(vars2 + STOCK), 0x64, 0x42, 0xAD, *((PICK + 1) & 0xFFFF).to_bytes(2, 'little'), 0x85, 0x43)
+    a.label('put')(0xC2, 0x10, 0xAE, *_w(PICK), 0xAD, *_w(PICK + 3), 0x1A, 0x9F, *LONG, 0xE2, 0x10)
+    a(0x64, 0x42, 0xAD, *_w(PICK + 2), 0x85, 0x43)
     a(j('drop'))
     _show(a, m['nene_put'])
     a.label('more')
@@ -204,33 +241,51 @@ def hooks(ctx):
 
 
 def _view(vars2, brk):
-    """대화 호출(FC 0374 「예」, 15:$9F55): 가게 칸이 비었으면 결과 flag 끔. 아니면 켜고, 가게 칸과 톨네코 물건 칸을 맞바꾸고
-    (가게 칸 = 물건 + 1 이라 ±1 로 바꾸면 빈 칸 FF ↔ 0 도 그대로 오간다) 장비 비트를 잠시 0 으로 둔 채 DQ5 필드 도구 창
-    (BRK 95 0F, $E4 = 사람 0)을 연다. 창은 이름만 보이고 A·B 어느 쪽으로든 닫는다. 닫은 뒤 다시 맞바꿔 되돌린다."""
-    from dq4ch2endor import BCC, BNE, lda, sta
+    """대화 호출(FC 0374 「예」, 15:$9F55): 가게 칸이 비었으면 결과 flag 끔. 아니면 켜고, 톨네코 물건 12칸·장비 비트를
+    둘째 변수 칸 SAVE~ 에 맡겨 두고, 비지 않은 가게 물건을 차례로 12개씩 톨네코 칸에 채워(가게 칸 = 물건 + 1) DQ5 필드
+    도구 창(BRK 95 0F, $E4 = 사람 0)을 쪽마다 연다(FC 는 8줄 쪽마다 A, 15:$9F68 JSR $C8CC). 창은 A 로 다음 쪽, B 로
+    그만둔다. 물건이 다하면 끝내고 톨네코 칸·장비를 되돌린다. 가게 칸은 읽기만 한다."""
+    from dq4ch2endor import BCC, BCS, BEQ, BNE, lda, sta
 
     def j(name):
         return bytes((0x22, *_al(brk[name])))
     r = 0x7E2190 + ch3.RESULT[0]
     items, equip = ch3.PARTY_ITEMS, ch3.PARTY_ITEMS - 2
-    saved = TEMP & 0xFFFF
+    save = vars2 + SAVE
+    it, itc, k = TEMP & 0xFFFF, (TEMP + 2) & 0xFFFF, (TEMP + 4) & 0xFFFF   # 가게 칸 주소·덩어리에 남은 수·쪽 안 차례
 
-    def swap(a):
-        a(0xA2, 0x00).label(f'swap{len(a.items)}')
-        top = a.items[-1][1]
-        a(0xBF, *_al(items), 0x1A, 0x48, 0xBF, *_al(vars2 + STOCK), 0x3A, 0x9F, *_al(items), 0x68, 0x9F, *_al(vars2 + STOCK))
-        a(0xE8, 0xE0, STOCK_SLOTS).br(BCC, top)
-
-    a = _asm()(ENTER, 0xF4, 0x7E, 0x7E, 0xAB, 0xAB, 0xE2, 0x30, lda(r), 0x29, ~ch3.RESULT[1] & 0xFF, sta(r), 0xA2, 0x00)
-    a.label('scan')(0xBF, *_al(vars2 + STOCK)).br(BNE, 'some')(0xE8, 0xE0, STOCK_SLOTS).br(BCC, 'scan').brl('end')
-    a.label('some')(lda(r), 0x09, ch3.RESULT[1], sta(r))
+    a = _asm()(ENTER, 0xF4, 0x7E, 0x7E, 0xAB, 0xAB, 0xE2, 0x20, 0xC2, 0x10, lda(r), 0x29, ~ch3.RESULT[1] & 0xFF, sta(r))
+    _first(a)
+    a.label('scan')(0xBF, *LONG).br(BNE, 'some')
+    _next(a, 'turn')
+    a(0xE0, *_w(STOCK_END)).br(BCC, 'scan').brl('end')
+    a.label('some')(0xE2, 0x10, lda(r), 0x09, ch3.RESULT[1], sta(r))
     a(0x22, *_al(SHOP_ENTER), 0xE2, 0x30, j('window'), j('close'))
-    swap(a)
-    a(lda(equip), 0x8D, *saved.to_bytes(2, 'little'), lda(equip + 1), 0x8D, *(saved + 1).to_bytes(2, 'little'))
+    for i in range(ITEM_SLOTS + 2):                       # 톨네코 물건 12칸 + 장비 2바이트
+        src = items + i if i < ITEM_SLOTS else equip + i - ITEM_SLOTS
+        a(lda(src), sta(save + i))
+    a(0xC2, 0x10)
+    _first(a)
+    a(0x8E, *_w(it), 0x8C, *_w(itc))
+    a.label('page')(0xE2, 0x30, 0x9C, *_w(k))
+    a.label('fill')(0xC2, 0x10, 0xAE, *_w(it), 0xAC, *_w(itc))
+    a.label('find')(0xE0, *_w(STOCK_END)).br(BCS, 'none')(0xBF, *LONG).br(BNE, 'got')
+    _next(a, 'skip')
+    a.br(0x80, 'find')
+    a.label('got')(0x3A, 0x48)
+    _next(a, 'past')
+    a(0x68).br(0x80, 'keep')
+    a.label('none')(0xA9, 0xFF)
+    a.label('keep')(0x8E, *_w(it), 0x8C, *_w(itc), 0xE2, 0x10, 0xAE, *_w(k), 0x9F, *_al(items), 0xE8, 0x8E, *_w(k))
+    a(0xE0, ITEM_SLOTS).br(BCC, 'fill')
+    a(lda(items), 0xC9, 0xFF).br(BEQ, 'done')
     a(0xA9, 0x00, sta(equip), sta(equip + 1))
-    a(0x22, *_al(PICKER_RESET), 0x64, 0xE4, j('items'), j('close'))
-    a(0xAD, *saved.to_bytes(2, 'little'), sta(equip), 0xAD, *(saved + 1).to_bytes(2, 'little'), sta(equip + 1))
-    swap(a)
+    a(0x22, *_al(PICKER_RESET), 0x64, 0xE4, j('items'), 0xA5, 0xE8, 0x48, j('close'), 0x68).br(0x30, 'done')
+    a.brl('page')
+    a.label('done')(0xE2, 0x30)
+    for i in range(ITEM_SLOTS + 2):
+        dst = items + i if i < ITEM_SLOTS else equip + i - ITEM_SLOTS
+        a(lda(save + i), sta(dst))
     a.label('end')
     return a.bytes() + LEAVE
 

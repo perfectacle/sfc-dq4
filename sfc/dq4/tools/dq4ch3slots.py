@@ -30,6 +30,13 @@ VARS_SIZE = 25
 VARS2_SLOT = 48
 VARS2_AT = 0x7E2332 + VARS2_SLOT * 26 + 1
 VARS2_SIZE = 25
+# 네네 가게 물건(E, dq4neneshop): 맡긴 동료 칸 43~47 의 +1~+24, 칸마다 24개로 모두 120(FC $61DB 의 칸 수, 헤드리스 실측
+# 119개면 036E·120개면 0377). 칸 0~33 은 dq4battlemsg 가 전투 글 그림자로 쓰고, 칸 +0 은 DQ5 가 찬 칸 표시로 읽어 늘 0 이다
+STOCK_SLOTS = (43, 44, 45, 46, 47)
+STOCK_PER_SLOT = 24
+STOCK_AT = 0x7E2332 + STOCK_SLOTS[0] * 26 + 1
+# 3장 끝(4장 넘김)에 0 으로 되돌릴 자리: 가게 물건과 변수 칸 48·49. 5장에서 진짜 맡긴 동료 칸으로 쓰일 수 있다
+CHAPTER_END_CLEAR = (0x7E2332 + STOCK_SLOTS[0] * 26, 0x7E2332 + (VARS_SLOT + 1) * 26)
 
 # 빌릴 인물 스크립트는 이 해킹이 가지 않는 DQ5 맵 목록에서 스크립트가 있고 한 시간대(낮 또는 밤)에만 놓이는 칸이다.
 # 낮·밤 두 벌 레코드를 빌리면 dq5npcrelocate 가 받지 않는다.
