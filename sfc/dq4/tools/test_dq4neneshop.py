@@ -113,21 +113,30 @@ class ViewTest(unittest.TestCase):
             cpu.rtl()
             return True
 
+        # BRK 받침(BRK … / RTL)은 BRK 처리기가 DB 를 받침 뱅크로 둔 채 돌아온다(헤드리스 쓰기 감시: 보기 동안 절대 주소
+        # STA $2824 가 WRAM 에 닿지 않았음). 받침 뒤의 절대 주소 쓰기가 7E:2000 이상을 놓치면 표지 시험이 실패한다
+        def stub(cpu):
+            cpu.rtl()
+            cpu.dbr = slots.LOW_STUBS[0] >> 16
+            return True
+
         def window(cpu):
             seen.append((bytes(cpu.wram[it:it + 12]), cpu.wram[it - 2] | cpu.wram[it - 1] << 8))
             kinds.append(cpu.wram[shop.SHOP_KIND])
             lines.append(cpu.wram[shop.VIEW_COUNT])
             self.assertEqual(cpu.wram[shop.VIEW_MARK], cpu.wram[shop.SHOP_KIND])
             cpu.wram[0xE8] = next(answers, 0)            # 0 = A(다음 쪽), 80 = B(그만둠)
-            return rtl(cpu)
-        for a in (shop.SHOP_ENTER, shop.PICKER_RESET, *where.values()):
+            return stub(cpu)
+        for a in (shop.SHOP_ENTER, shop.PICKER_RESET):
             c.hooks[a] = rtl
+        for a in where.values():
+            c.hooks[a] = stub
         c.hooks[where['pick']] = window
         gold = []
 
         def gold_window(cpu):
             gold.append(1)
-            return rtl(cpu)
+            return stub(cpu)
         c.hooks[where['window']] = gold_window
         c.jsl(FAR, max_steps=500000)
         result = bool(c.wram[(0x2190 + ch3.RESULT[0])] & ch3.RESULT[1])

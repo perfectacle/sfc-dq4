@@ -12,6 +12,7 @@ FLAGS = {
     **{f'NENE_SALES{k}': (ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + shop.SALES + k, 0xFF) for k in range(3)},
     'NENE_STOCK0': (shop.stock_addr(0), 0xFF),
     'NENE_MARK': (0x7E0000 | shop.VIEW_MARK, 0xFF),     # 보기 표지는 보기 밖에서 늘 0
+    'NENE_LINES': (0x7E0000 | shop.VIEW_COUNT, 0xFF),   # 보기 쪽 줄 수(창 높이)
     # 따라 걷는 첫 칸의 그림 번호(인물 표 7E:3220 + 슬롯 1). 용병은 dq4people 이 NDS 병사·시인을 싣는 그림
     'FOLLOWER1': (0x7E3221, 0xFF),
 }
