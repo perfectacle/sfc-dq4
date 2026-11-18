@@ -825,7 +825,10 @@ def _build(pool, dq5, dq4, out, with_people):
     _, shops, inn_writes, shop_report = dq4shopport.port(dq5, dq4, INN_AT, SHOP_KEY_AT, with_people)
     _save(out / "shop-report.json", shop_report)
     step("dq5progresswrite.py", "shops", {"format": "dq5progress/1", "shops": shops}, dq5, *SHOP_AT)
-    manifests.append(_save(out / "inn.dq5patch.json", {"format": "dq5patch/1", "name": "dq4-inns-shop-keys", "writes": inn_writes}))
+    import dq4bankfee
+    # 맡기는 곳 수수료 훅도 가게 묶음에 넣는다(장 빌드는 dq4chapter1.GROUP_PATCHES 의 파일만 덧댐)
+    manifests.append(_save(out / "inn.dq5patch.json", {"format": "dq5patch/1", "name": "dq4-inns-shop-keys",
+                                                       "writes": [*inn_writes, *dq4bankfee.writes()]}))
 
     dumps["exits-orig"].result()
     exits = json.loads((out / "exits-orig.json").read_text(encoding="utf-8"))
