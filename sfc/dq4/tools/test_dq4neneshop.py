@@ -106,8 +106,8 @@ class ViewTest(unittest.TestCase):
         w[shop.SHOP_KIND] = 0x05
         before = [w[shop.stock_addr(i) & 0xFFFF] for i in range(shop.STOCK_SLOTS)]
         c = Cpu(bytes(rom), w)
-        seen, kinds, answers = [], [], iter(answers)
-        self.kinds = kinds
+        seen, kinds, lines, answers = [], [], [], iter(answers)
+        self.kinds, self.lines = kinds, lines
 
         def rtl(cpu):
             cpu.rtl()
@@ -116,18 +116,26 @@ class ViewTest(unittest.TestCase):
         def window(cpu):
             seen.append((bytes(cpu.wram[it:it + 12]), cpu.wram[it - 2] | cpu.wram[it - 1] << 8))
             kinds.append(cpu.wram[shop.SHOP_KIND])
+            lines.append(cpu.wram[shop.VIEW_COUNT])
             self.assertEqual(cpu.wram[shop.VIEW_MARK], cpu.wram[shop.SHOP_KIND])
             cpu.wram[0xE8] = next(answers, 0)            # 0 = A(다음 쪽), 80 = B(그만둠)
             return rtl(cpu)
         for a in (shop.SHOP_ENTER, shop.PICKER_RESET, *where.values()):
             c.hooks[a] = rtl
         c.hooks[where['pick']] = window
+        gold = []
+
+        def gold_window(cpu):
+            gold.append(1)
+            return rtl(cpu)
+        c.hooks[where['window']] = gold_window
         c.jsl(FAR, max_steps=500000)
         result = bool(c.wram[(0x2190 + ch3.RESULT[0])] & ch3.RESULT[1])
         after = (bytes(c.wram[it:it + 12]), c.wram[it - 2] | c.wram[it - 1] << 8)
         self.assertEqual([c.wram[shop.stock_addr(i) & 0xFFFF] for i in range(shop.STOCK_SLOTS)], before, '가게 칸')
         self.assertEqual(c.wram[shop.SHOP_KIND], 0x05, '가게 종류 되돌림')
         self.assertEqual(c.wram[shop.VIEW_MARK], 0, '표지 지움')
+        self.assertEqual(gold, [], 'FC 처럼 골드 창을 열지 않음')
         return result, seen, after
 
     def test_pages_of_eight_skip_holes(self):
@@ -141,6 +149,7 @@ class ViewTest(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(seen, [(bytes(range(1, 9)) + b'\xff' * 4, 0), (bytes(range(9, 16)) + b'\xff' * 5, 0)])
         self.assertEqual(self.kinds, [shop.VIEW_MORE, shop.VIEW_MORE + 1])
+        self.assertEqual(self.lines, [8, 7])
         self.assertEqual(after, (bytes(items), 0x0001))
 
     def test_b_stops_after_the_first_page(self):
@@ -161,12 +170,15 @@ class ViewTest(unittest.TestCase):
         _, seen, _ = self.run_view(stock, [0xFF] * 12, 0)
         self.assertEqual(len(seen), 1)
         self.assertEqual(self.kinds, [shop.VIEW_MORE + 1])
+        self.assertEqual(self.lines, [8])
 
     def test_view_marker_matches_the_window_patch(self):
         import dq4windowname
         self.assertEqual(shop.VIEW_MORE, dq4windowname.NENE_VIEW_MORE)
-        self.assertEqual(shop.VIEW_MARK, shop.TEMP + 5 & 0xFFFF)
+        self.assertEqual(shop.VIEW_MARK, VARS2 + shop.MARK & 0xFFFF)
         self.assertEqual(0x7E0000 | shop.VIEW_MARK, dq4windowname.NENE_MARK)
+        self.assertEqual(0x7E0000 | shop.VIEW_COUNT, dq4windowname.NENE_LINES)
+        self.assertEqual(shop.VIEW_COUNT, VARS2 + shop.LINES & 0xFFFF)
 
     def test_empty_stock_opens_nothing(self):
         result, seen, after = self.run_view([None] * shop.STOCK_SLOTS, [0x42] + [0xFF] * 11, 0x0001)
@@ -188,8 +200,8 @@ class ShapeTest(unittest.TestCase):
             at = where[name] - slots.LOW_STUBS[0]
             self.assertEqual(code[at:at + len(args) + 2], bytes((0x00, *args, 0x6B)), name)
         stock = shop._stock(VARS2, {k: 0x1234 for k in shop.MESSAGES}, where) + shop._view(VARS2, where)
-        # pick(팔기 창 95 37)은 네네가 쓰지 않고 dq4ch3towns 가 빌려 쓴다
-        jsl = {bytes((0x22, a & 0xFF, a >> 8 & 0xFF, a >> 16)) for n, a in where.items() if n != 'pick'}
+        # window(골드 창 95 34)는 네네가 쓰지 않고(FC 에 골드 창 없음) dq4ch3towns 가 빌려 쓴다
+        jsl = {bytes((0x22, a & 0xFF, a >> 8 & 0xFF, a >> 16)) for n, a in where.items() if n != 'window'}
         self.assertTrue(all(j in stock for j in jsl), '받침을 모두 씀')
 
     def test_picker_is_the_field_item_window(self):

@@ -329,5 +329,26 @@ class Dq5RomTest(unittest.TestCase):
                     self.assertIn(times[lst, i], ('day', 'night'), f'{k} {lst} 칸 {i}')
 
 
+class LowWramTest(unittest.TestCase):
+    def test_nene_temp_sits_between_the_other_low_users(self):
+        import dq4ch1event
+        import dq4neneshop as shop
+        import dq4prologue
+        self.assertEqual(shop.TEMP, slots.NENE_TEMP[0])
+        self.assertGreater(slots.NENE_TEMP[0], dq4ch1event.SCRATCH + 0x0F)       # SCRATCH 는 1BD5 까지
+        self.assertLessEqual(slots.NENE_TEMP[1], 0x7E1BE0)                       # 이름 입력 방향 상태
+        self.assertLessEqual(slots.NENE_TEMP[1], dq4prologue.ROUTE_BUF)
+        self.assertTrue(slots.NENE_TEMP[0] & 0xFFFF <= shop.PICK & 0xFFFF < slots.NENE_TEMP[1] & 0xFFFF)
+
+    def test_view_marks_stay_out_of_dq5_and_scratch(self):
+        # 보기 표지·줄 수는 모든 고르기 창이 매 프레임 읽으므로 DQ5 사람 자리 표·날 바뀜이 쓰는 TEMP 밖에, E 둘째 변수 칸 안에
+        import dq4neneshop as shop
+        e = slots.SLOTS['E'].vars2
+        for at in (shop.VIEW_MARK, shop.VIEW_COUNT):
+            self.assertFalse(slots.DQ5_PEOPLE[0] & 0xFFFF <= at < slots.DQ5_PEOPLE[1] & 0xFFFF)
+            self.assertFalse(slots.NENE_TEMP[0] & 0xFFFF <= at < slots.NENE_TEMP[1] & 0xFFFF)
+            self.assertTrue(slots.VARS2_AT + e[0] & 0xFFFF <= at < slots.VARS2_AT + e[1] & 0xFFFF)
+        self.assertGreaterEqual(shop.MARK, shop.SAVE + shop.ITEM_SLOTS + 2)
+
 if __name__ == '__main__':
     unittest.main()

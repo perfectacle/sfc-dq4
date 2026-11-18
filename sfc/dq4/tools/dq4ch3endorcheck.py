@@ -140,7 +140,8 @@ SEGMENTS = [
     ('nene_pages_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(_items(endor.STEEL_SWORD), PAGE_STOCK, sales_set(0)))}),
     ('nene_pages', 'walk', PAGES_WALK,
-     {'map': endor.TOWN, 'items': [0x42, parts.BENTO, endor.STEEL_SWORD], 'bytes': {'NENE_STOCK0': 0x02, 'EQUIP0': 0x01}}),
+     {'map': endor.TOWN, 'items': [0x42, parts.BENTO, endor.STEEL_SWORD],
+      'bytes': {'NENE_STOCK0': 0x02, 'EQUIP0': 0x01, 'NENE_MARK': 0}}),
     ('nene_empty_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(NO_ITEMS, NO_STOCK, sales_set(0)))}),
     ('nene_empty', 'walk', EMPTY_WALK, {'map': endor.TOWN, 'bytes': {'NENE_STOCK0': 0}}),
@@ -154,7 +155,7 @@ SEGMENTS = [
       'poke': RNG_PIN}),
     ('nene_day', 'walk', talk_yes('right', 8),
      {'map': endor.TOWN, 'poke': RNG_PIN, 'changes': 1, 'after': 600,
-      'bytes': {'NENE_SALES0': 0x6B, 'NENE_SALES1': 0x1F, 'NENE_SALES2': 0, 'NENE_STOCK0': 0}}),
+      'bytes': {'NENE_SALES0': 0x6B, 'NENE_SALES1': 0x1F, 'NENE_SALES2': 0, 'NENE_STOCK0': 0, 'NENE_MARK': 0}}),
     # 안 팔린 날: 강철 검 하나를 두고 난수를 C0 으로 고정하면 굴림이 3/4 밖이라 칸에 남고 매상은 0(00·40·80·FF 는 팔림)
     ('nene_unsold_side', 'warp', f'{endor.TOWN},{endor.NENE_SIDE[1][0]},{endor.NENE_SIDE[1][1] - 1}',
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(STOCK_SET.split(';')[0], sales_set(0))), 'poke': UNSOLD_PIN}),
