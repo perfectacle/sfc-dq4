@@ -73,6 +73,10 @@ KANA_LIMITS = {5: 0xD8}         # 종류마다 가나 대체할 번호 상한(�
 MONSTER_KIND, MONSTER_BANK, MONSTER_DATA = 4, 0x5D, 0x8000
 # 창 열 수를 넘는 한글 이름을 띄어쓰기를 빼고 다시 재는 종류. 몬스터 목록(창 1B)의 「슬라임 베호마즌」(10열 → 9열)
 SQUEEZE_KINDS = (4,)
+# 아홉 글자 고정 창(전투 몬스터·도구 창, 코인 교환 목록)은 열 열 이름을 그릴 자리가 없다. 물건(5)의 열 열 이름은 그림 바로
+# 뒤에 띄어쓰기를 뺀 아홉 열 그림을 붙여 두고, dq4windowname.asm WnText 가 그 창에서는 둘째 그림을 쓴다. 한글이 없어 가나로
+# 그린 이름은 열 수 0 한 바이트를 붙여 그 창에서 원래 가나로 둔다
+NINE_KIND, NINE_COLS = 5, 10
 KANA_LIMIT = KANA_LIMITS[5]
 NARROW_FONT = 'galmuri7'
 SHIFT = 6                       # render 의 띠(한글 윗줄 = 1줄)를 위 줄 7줄로 내림
@@ -600,6 +604,11 @@ def build(data, font, banks=None):
                     raise ValueError(f'{ko!r}: {len(cols)}열, 창은 {limit}열')
                 continue
             blob = bytes((len(cols),)) + b''.join(cols)
+            if kind == NINE_KIND and len(cols) == NINE_COLS:
+                nine = [] if ko == name else columns(font, ko.replace(' ', ''))
+                if len(nine) >= NINE_COLS:
+                    raise ValueError(f'{ko!r}: 띄어쓰기를 빼도 {len(nine)}열, 아홉 글자 고정 창에 들어가지 않음')
+                blob += bytes((len(nine),)) + b''.join(nine)
             at = mplace(blob) if banks is not None and kind == MONSTER_KIND else place(blob)
             index[kind * 0x200 + n * 2:kind * 0x200 + n * 2 + 2] = at.to_bytes(2, 'little')
             done += 1

@@ -285,6 +285,13 @@ class Chapter2ShopTest(unittest.TestCase):
     def test_no_missing_items(self):
         self.assertEqual([m for m in self.report["missing_items"] if m[:2] in ("3D", "40", "45")], [])
 
+    def test_casino_prizes(self):
+        # FC 경품 표 15:$B375 여섯 모두: DQ5 에 없는 ほほえみのつえ·はぐれメタルのたて 는 빌린 자리(dq4itemport.BORROWED)
+        self.assertFalse([m for m in self.report["missing_items"] if m.startswith("카지노")])
+        self.assertEqual(self.report["casino"]["coins"], [30, 500, 1000, 2500, 4000, 50000])
+        self.assertIn(0x37, self.report["casino"]["items"])
+        self.assertIn(0x84, self.report["casino"]["items"])
+
     def test_event_sellers(self):
         # 텐페 괴물을 이긴 뒤의 도구점(FC (4,26), 낮)과 팔찌를 넘긴 뒤 프레놀 무기점((28,11), 낮)
         self.assertEqual(self.report["event_sellers"]["3D/03"], {"4,26,day": 2})

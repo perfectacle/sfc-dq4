@@ -1778,7 +1778,8 @@ WnText:
     LDA.l $7E0000|!wn_stage
     AND #$00FF
     STA.w !wt_cols
-    ; 아홉 글자 고정(전투 몬스터·도구 창)은 자리가 아홉 칸이라 열 칸 이름(도구 9개)은 가나로 둔다
+    ; 아홉 글자 고정(전투 몬스터·도구 창)은 자리가 아홉 칸이다. 열 칸 물건 이름은 빌드가 그림 바로 뒤(1 + 열 × 9)에
+    ; 붙인 띄어쓰기 없는 아홉 칸 그림으로 바꾸고(dq4windowtext NINE_KIND, 열 수 0 이면 없음), 그 밖의 열 칸 이름은 가나로 둔다
     LDA.w !wt_mode
     AND #$00FF
     CMP #$0009
@@ -1786,7 +1787,28 @@ WnText:
     LDA.w !wt_cols
     CMP #$000A
     BCC +
+    LDA.b $43
+    AND #$00FF
+    CMP #$0005
+    BEQ ++
     JMP .full
+++
+    LDA.l $7E0000|!wt_ptr
+    CLC
+    ADC #1+10*9
+    TAX
+    LDA.l !wt_bank<<16,X
+    AND #$00FF
+    BNE ++
+    JMP .full
+++
+    TXA
+    STA.l $7E0000|!wt_ptr
+    LDX #$0000
+    JSR WtFetchPic
+    LDA.l $7E0000|!wn_stage
+    AND #$00FF
+    STA.w !wt_cols
 +
     ; 원래 루틴이 나아가는 칸 수: 탁점 바이트(84·83)는 위 줄에 탁점만 찍고 칸을 나아가지 않는다.
     ; 04:B808 은 $00 바이트를, 04:B8F3·04:BC08 은 탁점이 아닌 글자 다섯·아홉을 찍는다
