@@ -116,6 +116,7 @@ class ViewTest(unittest.TestCase):
         def window(cpu):
             seen.append((bytes(cpu.wram[it:it + 12]), cpu.wram[it - 2] | cpu.wram[it - 1] << 8))
             kinds.append(cpu.wram[shop.SHOP_KIND])
+            self.assertEqual(cpu.wram[shop.VIEW_MARK], cpu.wram[shop.SHOP_KIND])
             cpu.wram[0xE8] = next(answers, 0)            # 0 = A(다음 쪽), 80 = B(그만둠)
             return rtl(cpu)
         for a in (shop.SHOP_ENTER, shop.PICKER_RESET, *where.values()):
@@ -126,6 +127,7 @@ class ViewTest(unittest.TestCase):
         after = (bytes(c.wram[it:it + 12]), c.wram[it - 2] | c.wram[it - 1] << 8)
         self.assertEqual([c.wram[shop.stock_addr(i) & 0xFFFF] for i in range(shop.STOCK_SLOTS)], before, '가게 칸')
         self.assertEqual(c.wram[shop.SHOP_KIND], 0x05, '가게 종류 되돌림')
+        self.assertEqual(c.wram[shop.VIEW_MARK], 0, '표지 지움')
         return result, seen, after
 
     def test_pages_of_eight_skip_holes(self):
@@ -163,6 +165,8 @@ class ViewTest(unittest.TestCase):
     def test_view_marker_matches_the_window_patch(self):
         import dq4windowname
         self.assertEqual(shop.VIEW_MORE, dq4windowname.NENE_VIEW_MORE)
+        self.assertEqual(shop.VIEW_MARK, shop.TEMP + 5 & 0xFFFF)
+        self.assertEqual(0x7E0000 | shop.VIEW_MARK, dq4windowname.NENE_MARK)
 
     def test_empty_stock_opens_nothing(self):
         result, seen, after = self.run_view([None] * shop.STOCK_SLOTS, [0x42] + [0xFF] * 11, 0x0001)

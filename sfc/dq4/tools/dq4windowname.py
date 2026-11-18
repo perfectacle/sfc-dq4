@@ -76,7 +76,11 @@ SHOP_SPOT, SHOP_SPOT_END = 0x04FF40, 0x050000
 # 3장 네네 가게 보기 창(dq4neneshop._view): 창 37 을 열 때 $0F20 이 이 값(다음 쪽 있음)이나 +1(마지막 쪽)이면 FC 창 66 꼴
 # 레코드(자리 NENE_VIEW_XY, 8줄, 커서 없음)를 주고, 다음 쪽이 있으면 위 테두리에 ▶ 를 깜박인다. 가게 종류(0~3)·맡기는 곳(6) 밖의 값
 NENE_VIEW_MORE = 7
-NENE_VIEW_XY = (18, 2)
+# 그 표지(낮은 WRAM, dq4neneshop.TEMP + 5). 보기 동안만 7·8 이고 끝나면 0. $0F20 은 가게 밖에서 아무 값이나 남아 있어
+# 그것만 보면 다른 창에서도 ▶ 자리를 덮어썼다(dq4-window-check talk07·talk0A)
+NENE_MARK = 0x7E1BDB
+# 타일맵 버퍼 줄 y 가 화면에서는 한 줄 위(y − 1)에 보인다(BG3 세로 스크롤). FC 창 66 의 위 테두리가 화면 타일 2줄이라 y = 3
+NENE_VIEW_XY = (18, 3)
 # 그 레코드와 별칭 갈래 자리. 창 제목 목록(04:AD78~, 제목 43개)을 dq4windowtext.fixed_records 가 한국어로 줄이고 뒤 코드
 # (04:AE7C) 앞까지 FF 로 채운 곳이라 제목 번호로는 닿지 않는다. 제목을 쓴 뒤 FF 인지 본다
 NENE_SPOT, NENE_SPOT_END = 0x04AE21, 0x04AE50
@@ -355,7 +359,7 @@ def apply(data, font=None, asar=None):
             f'!shop_sell_spot = ${SELL_SPOT:06X}\n!shop_sell_end = ${SELL_SPOT_END:06X}\n'
             f'!nene_view_more = {NENE_VIEW_MORE}\n!nene_view_last = {NENE_VIEW_MORE + 1}\n'
             f'!nene_view_x = {NENE_VIEW_XY[0]}\n!nene_view_y = {NENE_VIEW_XY[1]}\n'
-            f'!nene_arrow = $7E{qp_cell(NENE_VIEW_XY[0] + 1, NENE_VIEW_XY[1]):04X}\n!nene_spot = ${NENE_SPOT:06X}\n')
+            f'!nene_arrow = $7E{qp_cell(NENE_VIEW_XY[0] + 1, NENE_VIEW_XY[1]):04X}\n!nene_spot = ${NENE_SPOT:06X}\n!nene_mark = ${NENE_MARK:06X}\n')
     defs += dq4battlemsg.apply(d, font or dq4menupatch.Font('galmuri9'), dq4menupatch.render,
                                len(ne.GLYPHS) + len(kana))
     with tempfile.TemporaryDirectory() as tmp:

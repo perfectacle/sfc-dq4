@@ -34,6 +34,7 @@ SALES, SAVE = 0, 3
 ITEM_SLOTS = 12
 VIEW_LINES = 8                                 # FC 보기 창 66 의 한 쪽 줄 수(15:$9F68)
 VIEW_MORE = 7                                  # dq4windowname.NENE_VIEW_MORE 와 같아야 함(시험이 견줌)
+VIEW_MARK = 0x1BDB                             # = TEMP + 5, dq4windowname.NENE_MARK. 보기 동안 VIEW_MORE·+1, 끝나면 0
 STOCK_SLOTS = len(_STOCK_SLOTS) * STOCK_PER_SLOT
 STOCK_END = STOCK_AT + 26 * len(_STOCK_SLOTS)        # 마지막 칸 다음 덩어리 건너뛰기 뒤의 주소
 # FC 15:$9F9E 의 r < C0. DQ5 00:953A 는 (r × A) >> 8 이라 A = 4 로 받아 3 보다 작으면 같은 갈래가 된다
@@ -265,7 +266,7 @@ def _view(vars2, brk):
     """대화 호출(FC 0374 「예」, 15:$9F55): 가게 칸이 비었으면 결과 flag 끔. 아니면 켜고, 톨네코 물건 12칸·장비 비트를
     둘째 변수 칸 SAVE~ 에 맡겨 두고, 비지 않은 가게 물건을 차례로 8개씩(FC 창 66 의 한 쪽) 톨네코 칸에 채워 창 37 을 쪽마다
     연다($E4 = 사람 0). 그동안 가게 종류 $0F20 을 VIEW_MORE(다음 쪽 있음)·+1(마지막 쪽)로 두면 dq4windowname 이 창 37 을
-    FC 꼴(x 18 y 2, 8줄, 커서 없음)로 열고 다음 쪽이 있을 때 위 테두리에 ▶ 를 깜박인다. A 로 다음 쪽(FC 15:$9F68 JSR $C8CC),
+    FC 꼴(위 테두리 x 18 y 2, 8줄, 커서 없음)로 열고 다음 쪽이 있을 때 위 테두리에 ▶ 를 깜박인다. A 로 다음 쪽(FC 15:$9F68 JSR $C8CC),
     B 로 그만둔다. 물건이 다하면 끝내고 톨네코 칸·장비·$0F20 을 되돌린다. 가게 칸은 읽기만 한다."""
     from dq4ch2endor import BCC, BCS, BEQ, BNE, lda, sta
 
@@ -310,7 +311,7 @@ def _view(vars2, brk):
     a.br(0x80, 'peek')
     a.label('more')(0xA9, VIEW_MORE).br(0x80, 'kind')
     a.label('last')(0xA9, VIEW_MORE + 1)
-    a.label('kind')(0xE2, 0x30, 0x8D, *_w(SHOP_KIND))
+    a.label('kind')(0xE2, 0x30, 0x8D, *_w(SHOP_KIND), 0x8D, *_w(VIEW_MARK))
     a(0xA9, 0x00, sta(equip), sta(equip + 1))
     a(0x22, *_al(PICKER_RESET), 0x64, 0xE4, j('pick'), 0xA5, 0xE8, 0x48, j('close'), 0x68).br(0x30, 'done')
     a.brl('page')
@@ -318,7 +319,7 @@ def _view(vars2, brk):
     for i in range(ITEM_SLOTS + 2):
         dst = items + i if i < ITEM_SLOTS else equip + i - ITEM_SLOTS
         a(lda(save + i), sta(dst))
-    a(0x68, 0x8D, *_w(SHOP_KIND))
+    a(0x68, 0x8D, *_w(SHOP_KIND), 0x9C, *_w(VIEW_MARK))
     a.label('end')
     return a.bytes() + LEAVE
 

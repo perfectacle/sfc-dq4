@@ -640,19 +640,26 @@ ShopListRes:
     LDA.w $EB48,X
     RTS
 
-; 3장 네네 가게 보기(dq4neneshop._view 가 $0F20 을 !nene_view_more·!nene_view_last 로 두고 창 37 을 연다). FC 창 66 처럼
-; x 18 y 2, 8줄(높이 18), 줄에 커서 자리 FE 가 없어 ▶ 가 그려지지 않는다. 입력 갈래(끝 83)는 그대로라 A·B 를 받는다.
+; 3장 네네 가게 보기(dq4neneshop._view 가 $0F20(가게 갈래를 비키게)과 표지 !nene_mark 를 !nene_view_more·!nene_view_last 로 두고
+; 창 37 을 연다. 끝나면 표지를 0 으로). FC 창 66 처럼
+; x 18 y 3(화면 위 테두리 2줄), 8줄(높이 18), 줄에 커서 자리 FE 가 없어 ▶ 가 그려지지 않는다. 입력 갈래(끝 83)는 그대로라 A·B 를 받는다.
 ; 가게 몫 자리가 차서 메뉴 패치가 창 문자열을 줄이고 남긴 빈자리(!nene_spot, dq4windowname.NENE_SPOT)에 둔다
 pushpc
 org !nene_spot
 NeneViewRec:
     db $40|!nene_view_x, !nene_view_y, $8D, $B2, $00, $81, $01, $D3, $FF, $83
 NeneListRes:
-    CMP.w #!nene_view_more
-    BCC +
+    LDA.l !nene_mark
+    AND #$00FF
+    SEC
+    SBC.w #!nene_view_more
+    CMP.w #$0002
+    BCS +
     SEP #$20
-    LDA #!nene_view_x       ; 별칭 창은 레코드 X 대신 $0A43 을 쓴다(가게 갈래와 같음)
+    LDA #!nene_view_x       ; 별칭 창은 레코드 자리 대신 별칭 레코드(89 02 0F)의 x·y 가 든 $0A43·$0A44 를 쓴다
     STA.w $0A43
+    LDA #!nene_view_y
+    STA.w $0A44
     REP #$20
     LDA.w #NeneViewRec
     RTS
@@ -2494,9 +2501,11 @@ QpFrame:
     LDA.l $7E0F2C
     AND #$40
     BNE .shop
-    LDA.l $7E0F20
-    CMP #!nene_view_more
-    BCC +
+    LDA.l !nene_mark          ; 네네 보기 표지(7·8)일 때만. 다른 때 $0F20 은 가게 밖 값이라 표지로 쓰지 않는다
+    SEC
+    SBC #!nene_view_more
+    CMP #$02
+    BCS +
     JSR NeneArrow
 +
     LDA.w $0AD9
@@ -2574,12 +2583,12 @@ QpWindow:
     RTS
 
 ; 네네 보기 창 위 테두리 둘째 칸에 다음 쪽이 있으면 ▶(커서 타일)를 커서 깜박임 박자($0AD9 bit7)로 번갈아 쓴다(FC 의 깜빡이는
-; 「→」). 끄는 박자와 마지막 쪽에는 옆 칸의 테두리 타일을 쓴다. M = 8, X = 16
+; 「→」). 끄는 박자와 마지막 쪽에는 테두리 타일을 쓴다. M = 8, X = 16
 NeneArrow:
     PHP
-    LDA.l $7E0F20
-    CMP #!nene_view_more
-    BNE .off
+    LDA.l !nene_mark
+    CMP #!nene_view_last
+    BEQ .off
     LDA.w $0AD9
     BMI .off
     REP #$20
@@ -2587,7 +2596,7 @@ NeneArrow:
     BRA .put
 .off
     REP #$20
-    LDA.l !nene_arrow+2
+    LDA.w #$208D            ; 위 테두리 가로 칸. 옆 칸은 한글 줄의 윗부분이 테두리와 한 타일로 그려져 있어 베끼면 안 된다
 .put
     STA.l !nene_arrow
     PLP
