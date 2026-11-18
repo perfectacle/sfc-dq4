@@ -56,3 +56,40 @@ paths = [
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3raft && uv run --locked python sfc/dq4/tools/dq4raftcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3raft"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
+name = "dq4-swamp-death"
+why = "독늪에서 쓰러짐(dq4swampdeath, FC 1E:$99E1): 3장 톨네코 혼자 HP 2 면 쓰러짐 메시지 586 → 금화 반 → 전멸 처리 01:88EF 한 번 → 교회, 철 금고를 가지면 금화 그대로, 용병 スコット 만 쓰러지면 586·관·금화 그대로. 06:80A1 훅이 빠지면 DQ5 처럼 HP 1 에서 멈추고, 스크립트 표시를 끄지 않으면 교회에서 다시 쓰러져 금화가 거듭 깎인다. 1장(라이안 혼자·호이민 동행)은 dq4-ch1-save 의 swamp-* 장면"
+paths = [
+  "@ch3-modules",
+  "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4ch3partytalk*.tsv",
+  "sfc/dq4/tools/dq4ch2partytalkcheck.py",
+  "sfc/dq4/tools/dq4dungeonencountercheck.py",
+  "sfc/dq4/tools/dq4freshstate.py",
+  "sfc/dq4/tools/dq4npccheck.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/lua/dq4holdwalk.lua",
+  "sfc/dq4/tools/lua/dq4partytalk.lua",
+  "sfc/dq4/tools/lua/dq4shipstate.lua",
+  "sfc/dq5/tools/dq5npcrecordcheck.py",
+  "sfc/dq5/tools/dq5progresscheck.py",
+  "sfc/dq5/tools/lua/dq5battle.lua",
+  "sfc/dq5/tools/lua/dq5npcrecordcheck.lua",
+  "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
+  "sfc/dq4/tools/dq4swampdeath.py",
+  "sfc/dq4/tools/dq4swampdeathcheck.py",
+  "sfc/dq4/tools/dq4sysmsg.py",
+  "sfc/dq4/tools/dq4ch3partytalkcheck.py",
+  "sfc/dq4/tools/dq4mercenary.py",
+  "sfc/dq4/tools/dq4ch3walkcheck.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/lua/dq4walk.lua",
+  "sfc/dq4/tools/dq4groupcheck.py",
+  "sfc/dq5/tools/lua/dq5warptrace.lua",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/swampdeath && uv run --locked python sfc/dq4/tools/dq4swampdeathcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/swampdeath"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]

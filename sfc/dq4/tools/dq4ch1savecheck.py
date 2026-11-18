@@ -7,6 +7,7 @@
          같은지 본다. 리셋 뒤 뜬 메시지 번호와 저장할 때·이어 한 뒤의 화면(sNNNNN.png)을 남긴다
   wipe   호이민 합류 뒤 우물 아래 3B/00 으로 가 일행 HP 를 1, 걸음마다 전투(dq4dungeonencountercheck.rates)로 두고
          싸워 전멸한다. 1장 귀환 자리(교회 신부 앞) 하나로 돌아오는지, 깃발이 그대로인지, 금화가 반이 되는지 본다
+  swamp-*  필드 독늪에서 쓰러짐(SWAMP_SCENES): 혼자·둘 다면 전멸 처리·교회·금화 반, 호이민만이면 쓰러짐 메시지·관·금화 그대로
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1.sfc --out work/ch1walk
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4ch1savecheck.py --rom work/ch1/dq4-ch1.sfc --states work/ch1walk \\
@@ -66,6 +67,12 @@ WIPE_TO = '3B/00,6,43'
 # 갈리므로, 고정하지 않으면 전투와 무관한 창 코드만 바뀌어도 HP 1 인 일행이 이겨 버리는 일이 생겼다
 WIPE_RNG = '075B=55;075C=AA'
 GOLD = 1000
+# 독늪에서 쓰러짐(dq4swampdeath, FC 1E:$99E1): (구간 끝 상태, 레코드마다 HP, 쓰러질 레코드, 전멸). FC 는 혼자면 전투 전멸과
+# 같은 길(금화 반 → 저장 교회), 한 사람만이면 「…は しんでしまった！」 뒤 관이 따라오고 금화 그대로(실측)
+SWAMP_START = (0x7E, 0x41)
+SWAMP_SHOTS = ','.join(str(f) for f in range(600, 1200, 30))     # 쓰러짐 메시지가 뜨는 동안
+SWAMP_SCENES = {'swamp-alone': ('night_child', (2,), (), True), 'swamp-hoimin': ('hoimin', (0x30, 2), (1,), False),
+                'swamp-both': ('hoimin', (2, 2), (), True)}
 # 1장 귀환 자리(dq4chapter1.return_places): 전멸하면 마지막에 들어간 마을($195E)의 교회 신부 앞
 RETURNS = {'36/00': [10, 45], '37/00': [50, 9]}
 
@@ -216,13 +223,57 @@ def wipe_scene(mesence, rom, states, out):
                   'gold': gold_after, 'party': party, 'hp': hps}
 
 
+def swamp_scene(mesence, rom, states, out, name):
+    """SWAMP_SCENES[name]: 구간 끝 상태에서 독늪(필드 줄 41 의 80~82) 왼쪽 언덕 (7E,41)에 서서 오른쪽으로 걷는다. 조우 없음,
+    난수 고정. 레코드마다 HP 를 두고, 쓰러진 레코드(+1 bit7 꺼짐)·관(7E:1978 bit7)·쓰러짐 메시지·전멸 처리 01:88EF·돌아온
+    자리·금화를 본다."""
+    import dq4fieldport
+    state, hps, dead, wipe = SWAMP_SCENES[name]
+    dq4groupcheck.WARP = DQ5_TOOLS / 'lua' / 'dq5warptrace.lua'
+    cell = dq4fieldport.stand(*SWAMP_START)
+    gold = f'2019={GOLD & 0xFF:02X};201A={GOLD >> 8:02X};201B=00'
+    hp = ';'.join(f'{0x2042 + 42 * n:04X}={v:02X};{0x2043 + 42 * n:04X}=00' for n, v in enumerate(hps))
+    got = dq4groupcheck.scene(mesence, rom, states / state / 'end.mss', out, name, FIELD='{},{}'.format(*cell),
+                              ROMPATCH=f'{dq4fieldport.warp_patch(rom.read_bytes(), *cell)};{walk.NO_ENCOUNTERS}',
+                              TEST='idle:16,' + ','.join(['right:40,wait:40,a:8'] * 40), MAXF='4500',
+                              SET=f'{gold};{hp}', POKE=WIPE_RNG, SHOTS=SWAMP_SHOTS, TRACE=f'{MESSAGE},0188EF', LOG='7E201D')
+    rows = list(enc.lines(out / name / 'trace.txt')) if (out / name / 'trace.txt').exists() else []
+    ram = (out / name / 'final.wram').read_bytes() if (out / name / 'final.wram').exists() else bytes(0x20000)
+    gold_after = ram[0x2019] | ram[0x201A] << 8 | ram[0x201B] << 16
+    messages = [int(kv['A'], 16) & 0xFFFF for _, pc, kv in rows if pc == MESSAGE]
+    dead_now = [n for n in range(len(hps)) if not ram[0x2041 + 42 * n] & 0x80]
+    coffins = [n for n in range(ram[0x1967]) if ram[0x1978 + n] & 0x80]
+    wiped = any(pc == '0188EF' for _, pc, _ in rows)
+    problems = []
+    import dq4swampdeath
+    want = [dq4swampdeath.DIED]
+    if not set(want) <= set(messages):
+        problems.append(f'메시지 {[f"{m:03X}" for m in want]} 이 뜨지 않음({[f"{m:03X}" for m in messages[:8]]})')
+    if wiped != wipe:
+        problems.append(f'전멸 처리 01:88EF {"를 지나지 않음" if wipe else "를 지남"}')
+    if wipe:
+        # 교회 신부 앞에 선 뒤에도 오른쪽을 누르므로 줄(Y)만 본다
+        back = RETURNS.get(got.get('map'))
+        if not back or back[1] != (got.get('cell') or [None, None])[1]:
+            problems.append(f'돌아온 자리 {got.get("map")} {got.get("cell")}')
+        if gold_after != GOLD // 2 or sum(pc == '0188EF' for _, pc, _ in rows) != 1:
+            problems.append(f'금화 {gold_after}(기대 {GOLD // 2}), 전멸 처리 {sum(pc == "0188EF" for _, pc, _ in rows)}번')
+    else:
+        if dead_now != list(dead) or coffins != list(dead):
+            problems.append(f'쓰러진 레코드 {dead_now}·관 {coffins}(기대 {list(dead)})')
+        if gold_after != GOLD:
+            problems.append(f'금화 {gold_after}(기대 {GOLD}, 한 사람만 쓰러지면 그대로)')
+    return name, {'status': 'failed' if problems else 'passed', 'problems': problems, **got, 'gold': gold_after,
+                  'dead': dead_now, 'coffins': coffins, 'messages': [f'{m:03X}' for m in messages[:12]]}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--rom', required=True, type=Path)
     ap.add_argument('--states', required=True, type=Path, help='dq4ch1walkcheck.py 의 출력 폴더')
     ap.add_argument('--out', required=True, type=Path)
     ap.add_argument('--jobs', type=int, default=3)
-    ap.add_argument('--only', nargs='+', help='이 장면만(prologue night hoimin boss report wipe)')
+    ap.add_argument('--only', nargs='+', help='이 장면만(prologue night hoimin boss report wipe swamp-alone swamp-hoimin swamp-both)')
     args = ap.parse_args()
     mesence = Path(os.environ['MESENCE'])
     out = args.out.resolve()
@@ -232,11 +283,12 @@ def main():
     rom = out / 'c.sfc'
     shutil.copyfile(args.rom.resolve(), rom)
     states = args.states.resolve()
-    keep = set(args.only or [n for n, _ in POINTS] + ['wipe'])
+    keep = set(args.only or [n for n, _ in POINTS] + ['wipe', *SWAMP_SCENES])
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         jobs = [pool.submit(save_scene, mesence, rom, states, out, n, s) for n, s in POINTS if n in keep]
         if 'wipe' in keep:
             jobs.append(pool.submit(wipe_scene, mesence, rom, states, out))
+        jobs += [pool.submit(swamp_scene, mesence, rom, states, out, n) for n in SWAMP_SCENES if n in keep]
         results = dict(f.result() for f in jobs)
     ok = all(r['status'] == 'passed' for r in results.values())
     report = {'status': 'passed' if ok else 'failed', 'scenes': results}

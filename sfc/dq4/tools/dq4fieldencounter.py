@@ -636,7 +636,7 @@ def zone_monsters(prg, zones):
 
 # 코드와 표. 뱅크 4E 는 다른 도구가 쓰지 않는다
 CH3_CODE_AT = 0x4E8000
-CH3_CODE_END = 0x4EC000     # 몬스터·상인 몫의 끝. 4E:C000~ 은 3장 엔돌 몫(dq4ch3slots)
+CH3_CODE_END = 0x4EBC00     # 몬스터·상인 몫의 끝. 4E:BC00~ 은 독늪 쓰러짐(dq4swampdeath), 4E:C000~ 은 3장 엔돌 몫(dq4ch3slots)
 # 23:E8FE 에서 고른 이번 조우의 낮·밤 칸 묶음 주소(16비트, 뱅크 CH3_CODE_AT, FFFF = 표에 없는 구역). 7E:1A86~1A97 은 전원부터
 # 배·필드·전투까지 아무도 읽지 않는 자리이고(dq4dungeonrate.RAM), 1A86~1A91 은 던전 걸음 훅, 1A94~1A97 은 소리 패치가 쓴다
 PICK = 0x7E1A92

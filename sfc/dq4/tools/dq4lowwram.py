@@ -25,6 +25,7 @@ LIVES = ('routine', 'message', 'window', 'scene', 'persistent')
 CELLS = (
     (0x1A94, 0x1A98, 'dq4soundpatch', 'KEEP_BUSY·KEEP_SONG', 'persistent'),
     (0x1ABC, 0x1ABD, 'dq4bg3slot', 'SHOWN', 'persistent'),
+    (0x1ABD, 0x1ABE, 'dq4swampdeath', 'WHO', 'message'),
     (0x1AC0, 0x1BB0, 'dq4menupatch', 'SHARED_WRAM', 'persistent'),
     (0x1BB0, 0x1BB1, 'dq4menupatch', 'MENU_FLAG', 'persistent'),
     (0x1BC0, 0x1BC2, 'dq4josa', 'LAST', 'message'),
