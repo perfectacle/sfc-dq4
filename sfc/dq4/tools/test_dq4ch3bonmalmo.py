@@ -145,7 +145,7 @@ class BridgeTest(unittest.TestCase):
         self.assertTrue(code.startswith(bytes((0xC2, 0x30, 0xA2, 0x14, 0x39, 0xA0, 0x14, 0x3B))))
         self.assertIn(bytes((0xA9, bm.FLASHES)), code)
         self.assertEqual(code.count(bytes((0x09, 0x02, 0x8D, 0x1A, 0x00))), 2)       # $1A bit1: 회색·원래 색
-        self.assertEqual(bm.FADE_LEVELS[-1], 0)
+        self.assertEqual(-(-15 // bm.FADE_STEP), 8)                                    # FC 9프레임쯤
         self.assertIn(bytes((0xA9, 0x00, 0x8D, 0x1D, 0x00)), code)
         native, at = bm.native(_ctx())
         self.assertIn(code, native)
@@ -336,6 +336,78 @@ class ListTest(unittest.TestCase):
     def test_start_messages_are_module_messages(self):
         ctx = _ctx()
         self.assertTrue(set(bm.start_messages(ctx).values()) <= set(ctx.msg.values()))
+
+
+class JailStepTest(unittest.TestCase):
+    """jail_step 을 w65816 으로: 병사가 오른쪽 열 FC (0A,0B)에 닿아 아래를 봄, 주인공은 왼쪽 위."""
+    SLOT_X, SLOT_Y = 0x3020, 0x3080
+
+    def setUp(self):
+        self.cpu, self.at = machine({0x00E808: b'\x6b'})
+        self.w = self.cpu.wram
+        self.w[0x0A00] = 0xFF
+        self.hero(4, 15)
+
+    def hero(self, x, y):
+        self.w[self.SLOT_X], self.w[self.SLOT_Y] = x, y
+
+    def guard(self, slot, x=20, y=23):
+        w = self.w
+        w[0x90] = slot
+        w[0x3020 + slot], w[0x3080 + slot], w[0x3560 + slot], w[0x35A0 + slot] = x, y, x, y
+        w[0x3360 + slot], w[0x31E0 + slot] = bm.PATROL_SPEED, 0x40
+
+    def step(self, tick):
+        self.w[bm.TICK] = tick
+        self.cpu.p, self.cpu.dbr, self.cpu.d = 0x30, 0x7E, 0
+        self.cpu.jsl(self.at['jail_step'], max_steps=20000)
+        return self.cpu.a & 0xFFFF
+
+    def test_rests_then_leaves_after_the_tile_frames(self):
+        self.guard(0x0C)
+        self.assertEqual(self.step(0x10), 1)                       # 닿은 첫 부름
+        self.assertEqual(self.w[0x336C], bm.REST_SPEED)
+        self.w[0x21A2] = 0x10
+        # (0A,0B): x + y 가 홀수라 34프레임
+        self.assertEqual(self.step(0x10 + bm.TILE_FRAMES[1] - 1), 1)
+        self.assertEqual(self.w[0x35AC], 23)
+        self.assertEqual(self.step(0x10 + bm.TILE_FRAMES[1]), 0)
+        self.assertEqual(self.w[0x35AC], 25)                      # 다음 칸 (0A,0C)
+        self.assertEqual(self.w[0x336C], bm.PATROL_SPEED)
+        self.assertTrue(self.w[0x328C] & 0x80)
+        self.assertEqual(self.w[0x21A2] & 0x3F, (0x10 + bm.TILE_FRAMES[1]) & 0x3F)
+
+    def test_even_tile_rests_shorter_and_second_guard_keeps_the_spotted_bits(self):
+        self.guard(0x0D, y=25)                                    # (0A,0C): 짝수
+        self.step(0x00)
+        self.w[0x21A4] = 0x80 | 0x3E
+        self.assertEqual(self.step((0x3E + bm.TILE_FRAMES[0] - 1) & 0xFF), 1)
+        self.assertEqual(self.step((0x3E + bm.TILE_FRAMES[0]) & 0xFF), 0)
+        self.assertEqual(self.w[0x21A4] & 0xC0, 0x80)
+        self.assertEqual(self.w[0x21A4] & 0x3F, (0x3E + bm.TILE_FRAMES[0]) & 0x3F)
+        self.assertEqual(self.w[0x21A3], 0)                       # 공용 ANSWERED 의 바이트
+
+    def test_sees_ahead_and_marks_the_guard(self):
+        self.guard(0x0D)
+        self.hero(20, 27)                                         # 두 칸 아래
+        self.step(0x00)
+        self.assertEqual(self.w[flag_at(bm.SPOTTED)] & 0xC0, bm.SPOTTED[1] | bm.SPOTTER_BIT)
+        self.assertEqual(self.step(0x01), 0)                       # 들킴 갈래로
+
+    def test_temps_are_the_reserved_map_bytes(self):
+        from dq4ch3slots import MAP_TEMPS
+        used = {0x7E0000 | a for a in bm.LEAVE_AT} | {0x7E0000 | flag_at(bm.SPOTTED)}
+        self.assertLessEqual(used, set(MAP_TEMPS['B'][bm.PRISON]))
+        self.assertNotIn(0x7E0000 | flag_at(ch2.ANSWERED), used)
+        self.assertEqual(sum(bm.TILE_FRAMES) / len(bm.TILE_FRAMES), 33)        # FC 병사 칸당 33프레임
+
+    def test_patrol_stays_on_one_poll_and_walks_with_14(self):
+        guard = next(s for s in bm.scripts(_ctx()) if s['address'] == bm.SCRIPTS['guard'][2])['commands']
+        ops = [c['op'] for c in guard]
+        self.assertEqual(ops[:3], ['1E', '1D', '37'])
+        self.assertGreater(guard[1]['args'][0] >> 4, 0)                        # 이동 간격 0 이면 스크립트가 서 버림
+        k = next(i for i, c in enumerate(guard) if c.get('label') == 'patrol')
+        self.assertEqual(ops[k:k + 4], ['05', '06', '14', '03'])
 
 
 class ScriptTest(unittest.TestCase):

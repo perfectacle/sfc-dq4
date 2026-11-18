@@ -63,6 +63,12 @@ SLOTS = {
     'P': Slot('동료 대화(はなす) 3장 줄', 'dq4ch3partytalk', (), flags=(), lists='ch3_party_'),
 }
 
+# 맵을 옮기면 지워지는 맵 안 임시 바이트(sfc/dq5/docs/dq5-flags.md: 219F·21A0·21A2~21A4·21C2~21C5·21EE)를 통째로 쓰는
+# 몫: {키: {맵: (바이트, …)}}. 맵마다 따로라 다른 맵에서는 같은 바이트를 다른 뜻으로 쓴다. 21A3 은 공용 ANSWERED(bit0)가
+# 말을 거는 맵마다 써서 통째로 주지 않는다
+MAP_TEMPS = {
+    'B': {'3F/00': (0x7E21A2, 0x7E21A4)},
+}
 # 공용 장치(dq4ch3event)의 몫: flag 바이트 6F(대화 호출 결과·동행 비트), 변수 칸 +0~+3(날수 둘·시계)
 COMMON_FLAGS = (0x6F,)
 COMMON_VARS = (0, 4)

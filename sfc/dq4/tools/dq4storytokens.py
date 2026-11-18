@@ -8,10 +8,12 @@ WINDOW, CURSOR, TICK, LOCK = 0x7E0A00, 0x7E0AD7, 0x7E007F, 0x7E19AE
 W_COMMAND, W_MESSAGE, W_YESNO, W_STATUS, W_NONE = 0x01, 0x00, 0x32, 0x02, 0xFF
 PASS = {0x02, 0x34, 0x35, 0x58}
 STABLE, FREE, STUCK, TOKMAX = 8, 40, 900, 6000
+FACE_STILL = 4
+FACING = {'up': 0x80, 'down': 0x40, 'left': 0x20, 'right': 0x10}
 # 코어에서 받지 않는 토막
 HOOKED = ('msg', 'meet', 'fight')
 KINDS = ('cell', 'dir', 'wait', 'face', 'talk', 'cmd', 'free', 'yes*', 'yes', 'no', 'serve', 'await', 'win', 'map',
-         'field', 'pace', 'rest', 'see', 'close', 'near', 'pick', 'push') + HOOKED
+         'field', 'pace', 'stand', 'rest', 'see', 'close', 'near', 'pick', 'push') + HOOKED
 
 
 class Failed(Exception):
@@ -120,10 +122,24 @@ class Runner:
                 yield {kind}
             return
         if kind == 'face':
-            for k in range(24):
-                yield {arg} if k < 8 else set()
+            yield from self._face(arg)
             return
         yield from getattr(self, '_' + kind.replace('*', '_all'))(arg)
+
+    def _face(self, arg):
+        """Lua face 와 같음: 주인공 셀이 FACE_STILL 프레임 그대로일 때 8프레임 누르고, 16프레임 뒤 방향이 맞지 않으면 세 번까지."""
+        want = FACING.get(arg)
+        for _ in range(3):
+            at, still = None, 0
+            while still < FACE_STILL:
+                here = (self.rd(0x7E3020), self.rd(0x7E3080))
+                still, at = (still + 1, at) if here == at else (0, here)
+                yield set()
+            for k in range(24):
+                yield {arg} if k < 8 else set()
+            if want is None or self.rd(0x7E31E0) & 0xF0 == want:
+                return
+        raise Failed(f'face {arg}: facing {self.rd(0x7E31E0):02X}')
 
     def cell(self, cx, cy, nxt, into=False):
         best, since, stuck, last, side, tries, prefer, waited = None, 0, 0, None, 0, 0, None, 0
@@ -296,6 +312,12 @@ class Runner:
             if self.quiet():
                 b = {d1 if (t // 32) % 2 == 0 else d2}
             yield b
+
+    def _stand(self, arg):
+        s, x, y = arg.split(',')
+        slot, at = int(s, 16), (int(x), int(y), 0)
+        while (self.rd(0x7E3020 + slot), self.rd(0x7E3080 + slot), self.rd(0x7E3280 + slot) & 0x80) != at:
+            yield set()
 
     def _rest(self, arg):
         a, n = arg.split(',')

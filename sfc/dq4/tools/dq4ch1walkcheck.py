@@ -64,7 +64,7 @@ WALK_STATE = HERE / 'lua' / 'dq4walkstate.lua'
 # 창·인물 상태를 보고 넘기는 경유점 토큰(until:N·cursor:K·ask:N·pick:K·gone:S 등)이 든 걷기는 dq4 판 걷기(walk.lua 에
 # 그 토큰을 더한 것)로 돈다
 DQ4_WALK = HERE / 'lua' / 'dq4walk.lua'
-WINDOW_TOKEN = re.compile(r'(^|;)(until|cursor|ask|pick|open|done|settle|gone):\d+(;|$)')
+WINDOW_TOKEN = re.compile(r'(^|;)((until|cursor|ask|pick|open|done|settle|gone):\d+|stand:[0-9A-Fa-f]+,\d+,\d+)(;|$)')
 # 창 상태 토큰이 보는 칸(lua/dq4walk.lua 와 dq4compatcheck.Walker 가 같은 값을 씀): 창 번호, 고르기 커서, 물음 창 번호,
 # DQ5 가게 사기 목록에서 고른 물건
 WINDOW, CURSOR, ASK_WINDOW, PICK = 0x7E0A00, 0x7E0AD7, 0x32, 0x7E0F22
@@ -76,6 +76,8 @@ NO_WINDOW, STATUS_WINDOW, COMMAND_WINDOW, LOCK, FIELD_TICK = 0xFF, 0x02, 0x01, 0
 DONE_CALM, SETTLE_MAX = 30, 300
 # gone:S 가 보는 인물 표 X(7E:3020 + 슬롯), 빠진 인물의 X(명령 52), 기다릴 상한(lua/dq4walk.lua 와 같은 값)
 NPC_X, GONE_X, GONE_MAX = 0x7E3020, 0x80, 6000
+# stand:SS,X,Y 가 보는 인물 표 Y·걷는 중(bit7), 기다릴 상한(lua/dq4walk.lua 와 같은 값)
+NPC_Y, NPC_WALK, STAND_MAX = 0x7E3080, 0x7E3280, 6000
 
 
 def walk_driver(waypoints):
