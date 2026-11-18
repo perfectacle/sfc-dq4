@@ -11,6 +11,8 @@ indoor step (01:84CF, run by 00:82AB) reads the map's zone at 01:8518; the hook 
 FC clears $6E05 on loading a game and on reviving after a wipe-out (1E:$A5AD), and FLAG is saved with the game, so
 two more hooks clear it: one in 25:8278, which continuing a game runs once the slot is loaded (25:824F), and one at
 the start of the wipe-out (01:88ED, after a lost fight), which every way back to a restart place follows.
+The same routine also fills the arena's last eight matches ($6E31~$6E38) with FF, so both hooks zero their SFC copy
+(dq4ch3slots.ARENA_RECENT, match + 1 with 0 for none) too.
 """
 
 import sys
@@ -23,6 +25,12 @@ for path in (TOOLS, FC_TOOLS):
         sys.path.insert(0, str(path))
 
 from dq4environmentrom import _Asm  # noqa: E402
+from dq4ch3slots import ARENA_RECENT  # noqa: E402
+
+# Bytes the hooks zero besides FLAG: the arena record (dq4fcslot ArenaPick). The routine that zeroes them sits apart from
+# the switch code (3C:FF00 has 22 bytes left) at the end of bank 5B, past the chest tables (5B:C000~, dq4groupbuild)
+ZEROED = (ARENA_RECENT, 8)
+ZERO_AT = 0x5BFF00
 
 FC_GROUP, FC_MAPS = 0x3A, (0, 3)
 # A DQ5 bit nothing reads (sfc/dq5/docs/dq5-flags.md). Saved with the game, so LOAD and WIPE clear it.
@@ -67,7 +75,7 @@ def code(at, dq5_group, rows):
     asm.label("done").b(0xFA, 0xAF, *flag, 0x29, FLAG[1]).rel(0xD0, "plain").b(0xA9, 0xFF).rel(0x80, "test")
     asm.label("plain").b(0xAD, 0x98, 0x1A)
     asm.label("test").b(0xC9, 0xFF, 0x6B)
-    clear = (0xAF, *flag, 0x29, ~FLAG[1] & 0xFF, 0x8F, *flag)
+    clear = (0xAF, *flag, 0x29, ~FLAG[1] & 0xFF, 0x8F, *flag, 0x22, *ZERO_AT.to_bytes(3, "little"))
     asm.label("load").b(*LOAD_ORIG[:2], *clear, *LOAD_ORIG[2:], 0x6B)
     asm.label("wipe").b(0x08, 0xE2, 0x20, 0x48, *clear, 0x68, 0x28, 0x5C, *WIPE_ORIG[1:])
     table = b"".join(bytes(row) for row in rows) + b"\xFF"
@@ -75,6 +83,13 @@ def code(at, dq5_group, rows):
         raise ValueError("switch table longer than an 8-bit index walks")
     asm.label("table").b(*table)
     return asm.assemble()
+
+
+def zero_code():
+    """PHP / REP #$30 / PHA / LDA #0 / STA long × (bytes / 2) / PLA / PLP / RTL: keeps A, X, Y and P."""
+    at, n = ZEROED
+    body = b"".join(bytes((0x8F, *(at + k).to_bytes(3, "little"))) for k in range(0, n, 2))
+    return bytes((0x08, 0xC2, 0x30, 0x48, 0xA9, 0x00, 0x00)) + body + bytes((0x68, 0x28, 0x6B))
 
 
 def writes(at, prg, place):
@@ -91,6 +106,8 @@ def writes(at, prg, place):
          "orig": LOAD_ORIG.hex(" ").upper(), "note": "기록을 불러올 때 우물 아래 조우 깃발을 끔"},
         {"at": _cpu(WIPE), "hex": bytes((0x22, *labels["wipe"].to_bytes(3, "little"))).hex(" ").upper(),
          "orig": WIPE_ORIG.hex(" ").upper(), "note": "전멸할 때 우물 아래 조우 깃발을 끔"},
+        {"at": _cpu(ZERO_AT), "hex": zero_code().hex(" ").upper(),
+         "note": "불러올 때·전멸할 때 격투장 최근 기록을 지움(FC 1E:$A5AD)"},
     ]
 
 

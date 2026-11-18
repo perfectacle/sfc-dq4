@@ -51,13 +51,22 @@ math pri on
 !BTN_UP = $0800
 !BTN_LEFT = $0200
 !BTN_RIGHT = $0100
-!REELS_OAM = $0000
+!REELS_OAM = $0100                  ; 무늬 8x8 48개(릴 셋 × 화면 행 넷 × 넷)
 !LAMPS_OAM = $0030
 !DIGITS_OAM = $0044
 !COVER_OAM = $0060
-!COUNT_LEAD = 149                   ; 판정에서 첫 코인까지(맞음 글·소리 동안)
+; 판정 뒤 글 창 차례(FC 헤드리스 실측, 판정 17:$9FAC 에서 센 프레임)
+!WIN_TEXT = 8                       ; 맞음: 「축하합니다」 가 뜨기까지
+!COUNT_LEAD = 149                   ; 맞음: 첫 코인까지
 !COUNT_GAP = 9                      ; 코인 한 장마다
-!COUNT_TAIL = 193                   ; 마지막 코인에서 「한 번 더」 까지
+!COUNT_TAIL = 193-9                 ; 마지막 코인에서 창을 지우기까지(193) 가운데 그 코인의 9프레임 뒤
+!LOSE_CLEAR = 4                     ; 안 맞음: 창을 지우기까지
+!LOSE_TEXT = 10                     ; 안 맞음: 「아쉽네요!」 가 뜨기까지
+!LOSE_HOLD = 74                     ; 안 맞음: 그 글을 지우기까지
+!ASK_GAP = 4                        ; 창을 지운 뒤 「한 번 더?」 까지
+; 무늬 8점 줄은 FC y 43~139 일 때만 보인다(17:$A409 가 8C 이상을 F7 로 숨김, 실측 y 43~138). SNES y = FC y − 7
+!REEL_TOP = 43-7
+!REEL_BOTTOM = 139-7
 
 macro ix()                          ; X ← A 낮은 바이트
     REP #$20 : AND #$00FF : TAX : SEP #$20
@@ -219,8 +228,6 @@ HideAll:
     LDX #$0000
 -   STZ !oam_hi,X
     INX : CPX #$0020 : BCC -
-    LDA #$AA                        ; 릴 무늬 12개(OAM 0~11)는 16x16
-    STA !oam_hi : STA !oam_hi+1 : STA !oam_hi+2
     RTS
 
 TextPal: dw $0000, $7FFF, $0000, $7FFF
@@ -448,10 +455,11 @@ Judge:
     JMP .lose
 +
     ; FC 17:$9DFA: 배당 합을 알리는 글(0475)과 맞음 소리 뒤에 세기 시작
+    LDA.b #!WIN_TEXT : JSR Wait
     JSR Clear
     %text($05CC, !str_win)
     JSR SfxWin
-    LDA.b #!COUNT_LEAD : JSR Wait
+    LDA.b #!COUNT_LEAD-!WIN_TEXT : JSR Wait
     ; FC 17:$9EDA: 맞은 줄마다 한 장씩 세며 장마다 소리. 세는 동안 배당 표의 그 무늬 줄을 32프레임마다 8프레임 숨기고
     ; 그 줄 램프는 16프레임마다 한 프레임 흰 램프(17:$9E9D, 차례 $83 은 줄마다 0 부터, 매 프레임 1씩)
     STZ !fc_ln
@@ -476,11 +484,17 @@ Judge:
     INC !fc_ln : LDA !fc_ln : CMP #$05 : BCC .cline
     STZ !fc_cnt
     LDA.b #!COUNT_TAIL : JSR Wait
+    JSR Clear
+    LDA.b #!ASK_GAP : JSR Wait
     RTS
 .lose
+    LDA.b #!LOSE_CLEAR : JSR Wait
     JSR Clear
+    LDA.b #!LOSE_TEXT-!LOSE_CLEAR : JSR Wait
     %text($05CC, !str_lose)
-    LDA #$5A : JSR Wait
+    LDA.b #!LOSE_HOLD-!LOSE_TEXT : JSR Wait
+    JSR Clear
+    LDA.b #!ASK_GAP : JSR Wait
     RTS
 
 ; 「한 번 더?」 예면 C 켬
@@ -513,8 +527,9 @@ DrawCursor:
     RTS
 
 ; ── 그리기(OAM 그림자) ─────────────────────────────────────────────────────────
-DrawReels:                          ; 릴마다 화면 행 -1~2(위→아래)의 16x16 넷, y = 48 + 32 × 행 + 밀림.
-                                    ; FC 격자 행 0(띠 pos)이 아래라 화면 행 i 는 띠 pos + 2 − i
+DrawReels:                          ; 릴마다 화면 행 -1~2(위→아래)의 무늬를 8x8 넷으로, y = 48 + 32 × 행 + 밀림.
+                                    ; FC 격자 행 0(띠 pos)이 아래라 화면 행 i 는 띠 pos + 2 − i. 8점 줄마다
+                                    ; !REEL_TOP~!REEL_BOTTOM 밖이면 숨긴다(16x16 이면 창 밖 반쪽이 코인 상자 위에 비침)
     LDX #$0000
     LDY.w #!REELS_OAM
 .reel
@@ -524,16 +539,28 @@ DrawReels:                          ; 릴마다 화면 행 -1~2(위→아래)의
     LDA.l ReelX,X : STA !fc_rx
     LDA #$FF : STA !fc_ry
 .row
-    LDA !fc_rx : STA !oam,Y
-    LDA !fc_ry : ASL : ASL : ASL : ASL : ASL : CLC : ADC.b #48 : CLC : ADC !fc_ro : STA !oam+1,Y
+    LDA !fc_ry : ASL : ASL : ASL : ASL : ASL : CLC : ADC.b #48 : CLC : ADC !fc_ro : STA !fc_num+1
     LDA !fc_rp : CLC : ADC.b #2 : SEC : SBC !fc_ry : JSR Symbol
     PHA
-    DEC : ASL : STA !oam+2,Y
+    DEC : ASL : STA !fc_num
     PLA : PHX : %ix() : LDA.l SymPal,X : PLX
-    ASL : ORA #$20 : STA !oam+3,Y
-    INY : INY : INY : INY
+    ASL : ORA #$20 : STA !fc_num+2
+    LDA !fc_num+1 : JSR ReelHalf
+    LDA !fc_num : CLC : ADC.b #$10 : STA !fc_num
+    LDA !fc_num+1 : CLC : ADC.b #8 : JSR ReelHalf
     INC !fc_ry : LDA !fc_ry : CMP #$03 : BNE .row
     INX : CPX #$0003 : BCC .reel
+    RTS
+
+ReelHalf:                           ; A = 8점 줄 y. 왼쪽·오른쪽 8x8 둘(타일 !fc_num·+1, 속성 !fc_num+2)을 Y 에 쓰고 Y += 8
+    CMP.b #!REEL_TOP : BCC +
+    CMP.b #!REEL_BOTTOM+1 : BCC ++
++   LDA.b #$F0
+++  STA !oam+1,Y : STA !oam+5,Y
+    LDA !fc_rx : STA !oam,Y : CLC : ADC.b #8 : STA !oam+4,Y
+    LDA !fc_num : STA !oam+2,Y : INC : STA !oam+6,Y
+    LDA !fc_num+2 : STA !oam+3,Y : STA !oam+7,Y
+    INY : INY : INY : INY : INY : INY : INY : INY
     RTS
 
 ; 세는 줄 무늬의 배당 표 줄(6칸)을 !fc_bt 0~7 동안 FC 바탕 칸 8F 의 OBJ 로 덮음(FC 17:$9EB4 → $9E80 이 그 줄 BG 를 8F 로
