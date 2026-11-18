@@ -30,7 +30,7 @@ pages = ch2._speaker_pages
 
 # 둘째 변수 칸 +0~+2 매상(3바이트), +3~+16 「보기」 동안 맡아 두는 톨네코 물건 12칸·장비 비트. 가게 물건은
 # dq4ch3slots.STOCK_SLOTS(맡긴 동료 칸 다섯의 +1~+24, 물건 번호 + 1, 0 은 빈 칸)
-SALES, SAVE, MARK, LINES = 0, 3, 17, 18   # 둘째 변수 칸 오프셋: 매상 3바이트, 보기 동안 맡긴 톨네코 칸 14바이트, 보기 표지·쪽 줄 수
+SALES, SAVE, MARK, LINES, SPLIT = 0, 3, 17, 18, 19   # 둘째 변수 칸 오프셋: 매상 3바이트, 보기 동안 맡긴 톨네코 칸 14바이트, 보기 표지·쪽 줄 수·겹친 쪽 물건 수
 ITEM_SLOTS = 12
 VIEW_LINES = 8                                 # FC 보기 창 66 의 한 쪽 줄 수(15:$9F68)
 VIEW_MORE = 7                                  # dq4windowname.NENE_VIEW_MORE 와 같아야 함(시험이 견줌)
@@ -38,6 +38,7 @@ VIEW_MORE = 7                                  # dq4windowname.NENE_VIEW_MORE �
 # 창에서 읽히므로 날 바뀜 루틴이 쓰는 TEMP 나 DQ5 사람 자리 표(7E:1BC5~1BFC, dq4ch3slots.DQ5_PEOPLE)에 두면 안 된다
 VIEW_MARK = ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + MARK & 0xFFFF    # = dq4ch3slots.NENE_VIEW_MARK
 VIEW_COUNT = ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + LINES & 0xFFFF   # = dq4ch3slots.NENE_VIEW_LINES
+VIEW_SPLIT = ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + SPLIT & 0xFFFF   # = dq4ch3slots.NENE_VIEW_SPLIT
 STOCK_SLOTS = len(_STOCK_SLOTS) * STOCK_PER_SLOT
 STOCK_END = STOCK_AT + 26 * len(_STOCK_SLOTS)        # 마지막 칸 다음 덩어리 건너뛰기 뒤의 주소
 # FC 15:$9F9E 의 r < C0. DQ5 00:953A 는 (r × A) >> 8 이라 A = 4 로 받아 3 보다 작으면 같은 갈래가 된다
@@ -280,6 +281,7 @@ def _view(vars2, brk):
     items, equip = ch3.PARTY_ITEMS, ch3.PARTY_ITEMS - 2
     save = vars2 + SAVE
     it, itc, k = TEMP & 0xFFFF, (TEMP + 2) & 0xFFFF, (TEMP + 4) & 0xFFFF   # 가게 칸 주소·덩어리에 남은 수·쪽 안 차례
+    pg = (TEMP + 5) & 0xFFFF                                                 # 보인 쪽 수
 
     a = _asm()(ENTER, 0xF4, 0x7E, 0x7E, 0xAB, 0xAB, 0xE2, 0x20, 0xC2, 0x10, lda(r), 0x29, ~ch3.RESULT[1] & 0xFF, sta(r))
     _first(a)
@@ -294,7 +296,7 @@ def _view(vars2, brk):
     a(0xAD, *_w(SHOP_KIND), 0x48)
     a(0xC2, 0x10)
     _first(a)
-    a(0x8E, *_w(it), 0x8C, *_w(itc))
+    a(0x8E, *_w(it), 0x8C, *_w(itc), 0x9C, *_w(pg))
     a.label('page')(0xE2, 0x30, 0x9C, *_w(k))
     a.label('fill')(0xC2, 0x10, 0xAE, *_w(it), 0xAC, *_w(itc))
     a.label('find')(0xE0, *_w(STOCK_END)).br(BCS, 'none')(0xBF, *LONG).br(BNE, 'got')
@@ -303,15 +305,23 @@ def _view(vars2, brk):
     a.label('got')(0x3A, 0x48)
     _next(a, 'past')
     a(0x68).br(0x80, 'keep')
-    a.label('none')(0xA9, 0xFF)
+    # 물건이 다했을 때: 첫 쪽이면 남은 줄을 비우고, 뒤 쪽이면 FC 15:$9F68 처럼 짧은 창을 앞 쪽 위에 겹친다(아래 short)
+    a.label('none')(0xAD, *_w(pg)).br(BEQ, 'blank').brl('short')
+    a.label('blank')(0xA9, 0xFF)
     a.label('keep')(0x8E, *_w(it), 0x8C, *_w(itc), 0xE2, 0x10, 0xAE, *_w(k), 0x9F, *_al(items), 0xE8, 0x8E, *_w(k))
     a(0xE0, VIEW_LINES).br(BCC, 'fill')
     a.label('pad')(0xA9, 0xFF, 0x9F, *_al(items), 0xE8, 0xE0, ITEM_SLOTS).br(BCC, 'pad')
     a(0xA2, 0x00)
     a.label('count')(0xBF, *_al(items), 0xC9, 0xFF).br(BEQ, 'counted')(0xE8, 0xE0, VIEW_LINES).br(BCC, 'count')
     # 표지·줄 수(7E:2824~)는 뱅크 00 거울(7E:0000~1FFF) 밖이고 BRK 받침을 지나면 DB 가 7E 가 아니므로 긴 주소로 쓴다
-    a.label('counted')(0x8A, sta(0x7E0000 | VIEW_COUNT))
-    a(lda(items), 0xC9, 0xFF).br(BEQ, 'done')
+    a.label('counted')(0x8A, sta(0x7E0000 | VIEW_COUNT), 0xA9, 0x00, sta(0x7E0000 | VIEW_SPLIT)).brl('shown')
+    # 겹친 쪽: 톨네코 칸 n 개 뒤에는 앞 쪽 물건이 남아 있다(FF 칸은 목록이 건너뛰어 줄이 당겨지므로 비우지 않음). 창은 8줄
+    # 높이로 열고, n + 1 번째 줄 자리에 n 줄 창의 아래 테두리를 그린다(dq4windowname NeneArrow 가 그 줄 윗 타일 줄은 빈칸,
+    # 아랫 줄은 테두리로 덮음). 한글 줄은 FC 보다 6점 위라 테두리를 한 줄 위로 올리면 n + 1 번째 줄 글자 윗점이 잘려, 그 줄은
+    # 가린다(FC 는 그 줄도 보임). n = 0 이면 앞 쪽에서 물건이 끝난 것이라 끝낸다
+    a.label('short')(0xE2, 0x30, 0xAE, *_w(k)).br(BNE, 'split').brl('done')
+    a.label('split')(0x8A, sta(0x7E0000 | VIEW_SPLIT), 0xA9, VIEW_LINES, sta(0x7E0000 | VIEW_COUNT))
+    a.label('shown')(lda(items), 0xC9, 0xFF).br(BEQ, 'done')
     # 다음 쪽이 있는지(남은 가게 칸에 물건이 있나)로 위 테두리 ▶ 를 정한다
     a(0xC2, 0x10, 0xAE, *_w(it), 0xAC, *_w(itc))
     a.label('peek')(0xE0, *_w(STOCK_END)).br(BCS, 'last')(0xBF, *LONG).br(BNE, 'more')
@@ -322,12 +332,12 @@ def _view(vars2, brk):
     a.label('kind')(0xE2, 0x30, 0x8D, *_w(SHOP_KIND), sta(0x7E0000 | VIEW_MARK))
     a(0xA9, 0x00, sta(equip), sta(equip + 1))
     a(0x22, *_al(PICKER_RESET), 0x64, 0xE4, j('pick'), 0xA5, 0xE8, 0x48, j('close'), 0x68).br(0x30, 'done')
-    a.brl('page')
+    a(0xEE, *_w(pg)).brl('page')
     a.label('done')(0xE2, 0x30)
     for i in range(ITEM_SLOTS + 2):
         dst = items + i if i < ITEM_SLOTS else equip + i - ITEM_SLOTS
         a(lda(save + i), sta(dst))
-    a(0x68, 0x8D, *_w(SHOP_KIND), 0xA9, 0x00, sta(0x7E0000 | VIEW_MARK))
+    a(0x68, 0x8D, *_w(SHOP_KIND), 0xA9, 0x00, sta(0x7E0000 | VIEW_MARK), sta(0x7E0000 | VIEW_SPLIT))
     a.label('end')
     return a.bytes() + LEAVE
 

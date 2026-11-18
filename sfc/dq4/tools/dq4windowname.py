@@ -82,7 +82,7 @@ SHOP_SPOT, SHOP_SPOT_END = 0x04FF40, 0x050000
 NENE_VIEW_MORE = 7
 # 그 표지. 보기 동안만 7·8 이고 끝나면 0. $0F20 은 가게 밖에서 아무 값이나 남아 있어 그것만 보면 다른 창에서도 화살표
 # 자리를 덮어썼다(dq4-window-check talk07·talk0A). 3장 밖에서는 이 자리(DQ5 몬스터 맡김 칸 48)가 0 이다
-from dq4ch3slots import NENE_VIEW_MARK as NENE_MARK, NENE_VIEW_LINES as NENE_LINES  # noqa: E402  쪽 줄 수(1~8)는 창 높이를 고른다
+from dq4ch3slots import NENE_VIEW_MARK as NENE_MARK, NENE_VIEW_LINES as NENE_LINES, NENE_VIEW_SPLIT as NENE_SPLIT  # noqa: E402,E501  쪽 줄 수(1~8)는 창 높이를 고른다
 # 타일맵 버퍼 줄 y 가 화면에서는 한 줄 위(y − 1)에 보인다(BG3 세로 스크롤). FC 창 66 의 위 테두리가 화면 타일 2줄이라 y = 3
 NENE_VIEW_XY = (18, 3)
 # 그 레코드와 별칭 갈래 자리. 창 제목 목록(04:AD78~, 제목 43개)을 dq4windowtext.fixed_records 가 한국어로 줄이고 뒤 코드
@@ -373,7 +373,7 @@ def apply(data, font=None, asar=None):
             f'!shop_sell_spot = ${SELL_SPOT:06X}\n!shop_sell_end = ${SELL_SPOT_END:06X}\n'
             f'!nene_view_more = {NENE_VIEW_MORE}\n!nene_view_last = {NENE_VIEW_MORE + 1}\n'
             f'!nene_view_x = {NENE_VIEW_XY[0]}\n!nene_view_y = {NENE_VIEW_XY[1]}\n'
-            f'!nene_arrow = $7E{qp_cell(NENE_VIEW_XY[0] + 1, NENE_VIEW_XY[1]):04X}\n!nene_spot = ${NENE_SPOT:06X}\n!nene_mark = ${NENE_MARK:06X}\n!nene_lines = ${NENE_LINES:06X}\n')
+            f'!nene_arrow = $7E{qp_cell(NENE_VIEW_XY[0] + 1, NENE_VIEW_XY[1]):04X}\n!nene_spot = ${NENE_SPOT:06X}\n!nene_mark = ${NENE_MARK:06X}\n!nene_lines = ${NENE_LINES:06X}\n!nene_split = ${NENE_SPLIT:06X}\n')
     defs += dq4battlemsg.apply(d, font or dq4menupatch.Font('galmuri9'), dq4menupatch.render,
                                len(ne.GLYPHS) + len(kana))
     with tempfile.TemporaryDirectory() as tmp:

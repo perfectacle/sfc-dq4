@@ -106,8 +106,8 @@ class ViewTest(unittest.TestCase):
         w[shop.SHOP_KIND] = 0x05
         before = [w[shop.stock_addr(i) & 0xFFFF] for i in range(shop.STOCK_SLOTS)]
         c = Cpu(bytes(rom), w)
-        seen, kinds, lines, answers = [], [], [], iter(answers)
-        self.kinds, self.lines = kinds, lines
+        seen, kinds, lines, splits, answers = [], [], [], [], iter(answers)
+        self.kinds, self.lines, self.splits = kinds, lines, splits
 
         def rtl(cpu):
             cpu.rtl()
@@ -124,6 +124,7 @@ class ViewTest(unittest.TestCase):
             seen.append((bytes(cpu.wram[it:it + 12]), cpu.wram[it - 2] | cpu.wram[it - 1] << 8))
             kinds.append(cpu.wram[shop.SHOP_KIND])
             lines.append(cpu.wram[shop.VIEW_COUNT])
+            splits.append(cpu.wram[shop.VIEW_SPLIT])
             self.assertEqual(cpu.wram[shop.VIEW_MARK], cpu.wram[shop.SHOP_KIND])
             cpu.wram[0xE8] = next(answers, 0)            # 0 = A(다음 쪽), 80 = B(그만둠)
             return stub(cpu)
@@ -144,6 +145,7 @@ class ViewTest(unittest.TestCase):
         self.assertEqual([c.wram[shop.stock_addr(i) & 0xFFFF] for i in range(shop.STOCK_SLOTS)], before, '가게 칸')
         self.assertEqual(c.wram[shop.SHOP_KIND], 0x05, '가게 종류 되돌림')
         self.assertEqual(c.wram[shop.VIEW_MARK], 0, '표지 지움')
+        self.assertEqual(c.wram[shop.VIEW_SPLIT], 0, '겹친 쪽 표지 지움')
         self.assertEqual(gold, [], 'FC 처럼 골드 창을 열지 않음')
         return result, seen, after
 
@@ -156,10 +158,28 @@ class ViewTest(unittest.TestCase):
         items = [0x42, 0xBB, 0x0C] + [0xFF] * 9
         result, seen, after = self.run_view(stock, items, 0x0001)
         self.assertTrue(result)
-        self.assertEqual(seen, [(bytes(range(1, 9)) + b'\xff' * 4, 0), (bytes(range(9, 16)) + b'\xff' * 5, 0)])
+        # 둘째 쪽 여덟째 칸에는 첫 쪽 물건(8)이 남는다(그 줄은 겹친 창 테두리가 가림)
+        self.assertEqual(seen, [(bytes(range(1, 9)) + b'\xff' * 4, 0), (bytes(range(9, 16)) + b'\x08' + b'\xff' * 4, 0)])
         self.assertEqual(self.kinds, [shop.VIEW_MORE, shop.VIEW_MORE + 1])
-        self.assertEqual(self.lines, [8, 7])
+        # 둘째 쪽은 앞 쪽 위에 겹친 7줄 창: 8줄 높이로 열고 여덟째 줄 칸을 비워 테두리 자리로
+        self.assertEqual(self.lines, [8, 8])
+        self.assertEqual(self.splits, [0, 7])
         self.assertEqual(after, (bytes(items), 0x0001))
+
+    def test_short_last_page_lies_over_the_page_before(self):
+        # 11개 → 8 + 3. FC 창 66 처럼 둘째 쪽 3줄 창 아래로 첫 쪽 5~8번째 줄이 보인다. 4번째 줄(첫 쪽 물건 4)은 아래 테두리가 가린다
+        stock = [k + 1 for k in range(11)] + [None] * (shop.STOCK_SLOTS - 11)
+        _, seen, _ = self.run_view(stock, [0xFF] * 12, 0)
+        self.assertEqual(seen[1][0], bytes([9, 10, 11, 4, 5, 6, 7, 8]) + b'\xff' * 4)
+        self.assertEqual(self.lines, [8, 8])
+        self.assertEqual(self.splits, [0, 3])
+        self.assertEqual(self.kinds, [shop.VIEW_MORE, shop.VIEW_MORE + 1])
+
+    def test_one_short_page_does_not_lie_over(self):
+        stock = [k + 1 for k in range(3)] + [None] * (shop.STOCK_SLOTS - 3)
+        _, seen, _ = self.run_view(stock, [0xFF] * 12, 0)
+        self.assertEqual(seen, [(bytes([1, 2, 3]) + b'\xff' * 9, 0)])
+        self.assertEqual((self.lines, self.splits), ([3], [0]))
 
     def test_b_stops_after_the_first_page(self):
         stock = [7] * 30 + [None] * (shop.STOCK_SLOTS - 30)

@@ -88,6 +88,8 @@ SPARE = {
 # 모든 고르기 창에서 매 프레임 읽는다. 3장 밖에서는 DQ5 몬스터 맡김 칸 48 이라 0 이다
 NENE_VIEW_MARK = VARS2_AT + SLOTS['E'].vars2[0] + 17
 NENE_VIEW_LINES = NENE_VIEW_MARK + 1
+# 마지막 쪽을 앞 쪽 위에 겹칠 때 그 쪽 물건 수 n(1~7, 겹치지 않으면 0): E 둘째 변수 칸 +19(dq4neneshop.SPLIT)
+NENE_VIEW_SPLIT = NENE_VIEW_MARK + 2
 # 엔돌 카지노 FC 슬롯(dq4fcslot: 코드·화면·무늬·릴 띠). 4E 라 BRK 없이 JSL 만 쓴다
 CASINO_CODE = (0x4ED000, 0x4F0000)
 # 엔돌 카지노 FC 포커(dq4fcpoker): 코드·표·타일 뒤쪽(47 의 타이틀 몫 47:8000~9DBF 뒤)과 타일 앞 512칸

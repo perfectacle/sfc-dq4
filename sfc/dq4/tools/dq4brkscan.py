@@ -32,6 +32,31 @@ FORBIDDEN = {
     0x16: '효과음을 넣고 24:FE44 로 기다림. FE44 가 대기열 $1D91·$1D93 을 DB 기준으로 읽음(dq4prologue._effect 로 대신)',
     0x95: '창 열기. 00:9085 가 창 번호를 STA $0A00(DB 기준)으로 씀(dq4ch1event 의 창 열기 네이티브로 대신)',
 }
+# 절대 주소(DB 기준) 쓰기. 3장 모듈은 BRK 받침(낮은 뱅크)을 JSL 로 부르면 DB 가 받침 뱅크로 바뀐 채 돌아오므로, 그 뒤에
+# 7E:2000 이상의 예약 칸(reserved_cells)을 절대 주소로 쓰면 WRAM 거울(0000~1FFF) 밖이라 사라진다(네네 보기 표지 NENE_VIEW_MARK 가
+# 그랬음). DB 가 7E 로 알려진 때(PEA $7E7E / PLB / PLB, LDA #$7E / PHA / PLB 뒤, 다른 부르기 전)만 괜찮다
+ABS_WRITES = {0x8D: 'STA', 0x8E: 'STX', 0x8C: 'STY', 0x9C: 'STZ', 0x9D: 'STA', 0x99: 'STA', 0x9E: 'STZ', 0xEE: 'INC',
+              0xCE: 'DEC', 0xFE: 'INC', 0xDE: 'DEC', 0x0C: 'TSB', 0x1C: 'TRB'}
+
+
+def reserved_cells():
+    """dq4ch3slots 가 3장 모듈에 나눠 준 7E:2000 이상 WRAM 칸(낮은 16비트) 집합."""
+    import dq4ch3slots as s
+    cells = set()
+    for slot in s.SLOTS.values():
+        cells.update(0x2190 + f for f in slot.flags)
+        if slot.vars:
+            cells.update(range((s.VARS_AT & 0xFFFF) + slot.vars[0], (s.VARS_AT & 0xFFFF) + slot.vars[1]))
+        if slot.vars2:
+            cells.update(range((s.VARS2_AT & 0xFFFF) + slot.vars2[0], (s.VARS2_AT & 0xFFFF) + slot.vars2[1]))
+    cells.update(0x2190 + f for f in s.COMMON_FLAGS)
+    cells.update(range((s.VARS_AT & 0xFFFF) + s.COMMON_VARS[0], (s.VARS_AT & 0xFFFF) + s.COMMON_VARS[1]))
+    cells.update(range(s.STOCK_AT & 0xFFFF, (s.STOCK_AT & 0xFFFF) + 26 * len(s.STOCK_SLOTS)))
+    cells.update(range(s.ARENA_RECENT & 0xFFFF, (s.ARENA_RECENT & 0xFFFF) + 10))
+    cells.update(range(s.NENE_VIEW_MARK & 0xFFFF, (s.NENE_VIEW_SPLIT & 0xFFFF) + 1))
+    return {c for c in cells if c >= 0x2000}
+
+
 RETURNS = {0x60, 0x6B, 0x40}                    # RTS RTL RTI
 JUMPS = {0x4C, 0x5C, 0x80, 0x82}                # JMP abs, JML long, BRA, BRL
 CALLS = {0x20, 0x22}                            # JSR abs, JSL long
@@ -129,12 +154,14 @@ def blobs():
     return out
 
 
-def scan(base, blob, entries, others=()):
+def scan(base, blob, entries, others=(), cells=frozenset()):
     """({BRK 명령: [주소]}, [문제], {덩어리 밖 대상}). entries 는 주소(M·X 8비트로 들어옴) 또는 (주소, m8, x8).
     others 는 따로 훑는 다른 덩어리의 (시작, 끝).
-    뱅크 40 이상인데 어느 덩어리에도 없는 곳으로 나가면 훑지 못한 높은 뱅크 코드라 문제로 친다."""
+    뱅크 40 이상인데 어느 덩어리에도 없는 곳으로 나가면 훑지 못한 높은 뱅크 코드라 문제로 친다.
+    cells 는 DB 가 7E 로 알려지지 않은 채 절대 주소로 쓰면 안 되는 칸(ABS_WRITES, reserved_cells)."""
     found, problems, seen, exits = {}, [], set(), set()
-    work = [(e, True, True, ()) if isinstance(e, int) else (*e, ()) for e in entries]
+    # 일감: (pc, m8, x8, P 쌓기, DB(알면 뱅크, 모르면 None), 바이트 쌓기(알면 값, 모르면 None))
+    work = [(e, True, True, (), None, ()) if isinstance(e, int) else (*e, (), None, ()) for e in entries]
 
     def inside(a):
         return base <= a < base + len(blob)
@@ -145,9 +172,10 @@ def scan(base, blob, entries, others=()):
             problems.append(f'{how} {a:06X}: 훑지 않은 높은 뱅크 코드로 나감')
 
     while work:
-        pc, m8, x8, pstack = work.pop()
-        while inside(pc) and (pc, m8, x8) not in seen:
-            seen.add((pc, m8, x8))
+        pc, m8, x8, pstack, db, bstack = work.pop()
+        a8 = None                                   # LDA #즉값(8비트)으로 알려진 A
+        while inside(pc) and (pc, m8, x8, db) not in seen:
+            seen.add((pc, m8, x8, db))
             op = blob[pc - base]
             if op == 0x00:
                 if not inside(pc + 1):
@@ -162,11 +190,40 @@ def scan(base, blob, entries, others=()):
                     problems.append(f'{pc:06X}: BRK {cmd:02X} 는 확인되지 않은 명령(열린 버스 프로브 뒤 ALLOWED 에 더함)')
                     break
                 pc += 2 + ALLOWED[cmd]
+                db, a8 = pc >> 16, None              # BRK 처리기는 DB 를 BRK 가 놓인 뱅크로 둔다
                 continue
             mn, md = OPS[op]
             n = (1 if m8 else 2) if md == 'immm' else (1 if x8 else 2) if md == 'immx' else SIZE[md]
             arg = int.from_bytes(blob[pc - base + 1:pc - base + 1 + n], 'little')
             nxt = pc + 1 + n
+            if op in ABS_WRITES and md in ('abs', 'absx', 'absy') and arg in cells and db != 0x7E:
+                problems.append(f'{pc:06X}: {ABS_WRITES[op]} ${arg:04X} — DB '
+                                f'{"모름" if db is None else f"{db:02X}"} 에서 절대 주소라 7E:{arg:04X} 에 닿지 않음(긴 주소로)')
+            # DB·바이트 쌓기 따라가기(우리 코드가 쓰는 꼴만): PEA, LDA #/PHA, PHB, PLB. 그 밖의 쌓기는 모르는 값
+            if op == 0xF4:
+                bstack = bstack + (arg >> 8, arg & 0xFF)
+            elif op == 0xA9:
+                a8 = arg if m8 else None
+            elif op == 0x48:
+                bstack = bstack + ((a8,) if m8 else (None, None))
+            elif op == 0x8B:
+                bstack = bstack + (db,)
+            elif op == 0xAB:
+                db, bstack = (bstack[-1], bstack[:-1]) if bstack else (None, ())
+            elif op in (0xDA, 0x5A):
+                bstack = bstack + ((None,) if x8 else (None, None))
+            elif op in (0x0B, 0xD4, 0x62):
+                bstack = bstack + (None, None)
+            elif op in (0x68, 0xFA, 0x7A):
+                k = 1 if (m8 if op == 0x68 else x8) else 2
+                bstack = bstack[:-k] if len(bstack) >= k else ()
+            elif op == 0x2B:
+                bstack = bstack[:-2] if len(bstack) >= 2 else ()
+            elif op in (0x22, 0x20, 0xFC):
+                db = None                            # 부른 쪽(BRK 받침 등)이 DB 를 바꾸었을 수 있다
+            if op not in (0xA9,) and mn.startswith(('LDA', 'PLA', 'TXA', 'TYA', 'ADC', 'SBC', 'AND', 'ORA', 'EOR',
+                                                    'INC', 'DEC', 'ASL', 'LSR', 'ROL', 'ROR', 'XBA', 'TDC', 'TSC')):
+                a8 = None
             if op == 0xC2:
                 m8, x8 = m8 and not arg & 0x20, x8 and not arg & 0x10
             elif op == 0xE2:
@@ -189,7 +246,7 @@ def scan(base, blob, entries, others=()):
                     pc = target
                     continue
                 else:
-                    work.append((target, m8, x8, pstack))
+                    work.append((target, m8, x8, pstack, db, bstack))
                 if op == 0x80:
                     break
             elif op == 0x82:
@@ -208,7 +265,7 @@ def scan(base, blob, entries, others=()):
                     pc = target
                     continue
                 else:
-                    work.append((target, m8, x8, ()))
+                    work.append((target, m8, x8, (), None, ()))
             elif op in (0x5C, 0x22):
                 if not inside(arg):
                     leave(arg, 'JML' if op == 0x5C else 'JSL')
@@ -218,7 +275,7 @@ def scan(base, blob, entries, others=()):
                     pc = arg
                     continue
                 else:
-                    work.append((arg, m8, x8, ()))
+                    work.append((arg, m8, x8, (), None, ()))
             pc = nxt
     return found, problems, exits
 
@@ -228,7 +285,7 @@ def main():
     all_blobs = blobs()
     spans = [(b, b + len(blob)) for _, b, blob, _ in all_blobs]
     for name, base, blob, entries in all_blobs:
-        found, problems, exits = scan(base, blob, entries, spans)
+        found, problems, exits = scan(base, blob, entries, spans, reserved_cells() if name.startswith('ch3') else ())
         cmds = ' '.join(f'{c:02X}×{len(v)}' for c, v in sorted(found.items(), key=lambda kv: kv[0] or 0))
         print(f'{name} {base:06X}+{len(blob)} 진입점 {len(entries)}: {cmds or "BRK 없음"}')
         outside = sorted(f'{e:06X}' if isinstance(e, int) else e for e in exits)

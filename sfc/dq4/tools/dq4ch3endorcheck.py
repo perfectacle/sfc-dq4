@@ -90,6 +90,7 @@ PAGES_WALK = (f'{TALK_DOWN};{YES};wait:150;b:8;{YES};open:{VIEW_PAGE};wait:60;a:
 WIDE_ITEMS = (0x0B, 0x29, 0x2A, 0x61, 0x84, 0xCD)
 WIDE_STOCK = ';'.join(f'{shop.stock_addr(k) & 0xFFFF:04X}={item + 1:02X}' for k, item in enumerate(WIDE_ITEMS))
 PAGE_OPEN_WALK = f'{TALK_DOWN};{YES};wait:150;b:8;{YES};open:{VIEW_PAGE};wait:60'
+PAGE_TWO_WALK = f'{PAGE_OPEN_WALK};a:8;wait:150;open:{VIEW_PAGE};wait:60'
 # 톨네코 소지품이 없으면 0334 → 0374 「예」 → 가게가 비었으면 0376 만
 EMPTY_WALK = f'{TALK_DOWN};{YES};{YES};{wc.taps(1, 90)};{CLOSE}'
 NO_ITEMS = ';'.join(f'{(ch3.PARTY_ITEMS & 0xFFFF) + k:04X}=FF' for k in range(12)) + \
@@ -152,7 +153,16 @@ SEGMENTS = [
     ('nene_page_open_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(_items(endor.STEEL_SWORD), PAGE_STOCK, sales_set(0)))}),
     ('nene_page_open', 'walk', PAGE_OPEN_WALK,
-     {'map': endor.TOWN, 'bytes': {'NENE_MARK': shop.VIEW_MORE, 'NENE_LINES': shop.VIEW_LINES}}),
+     {'map': endor.TOWN, 'bytes': {'NENE_MARK': shop.VIEW_MORE, 'NENE_LINES': shop.VIEW_LINES, 'NENE_SPLIT': 0,
+                                   'NENE_CELL_18_3': 0x8C, 'NENE_CELL_19_4': 0x01, 'NENE_CELL_18_20': 0x8B}}),
+    # 둘째 쪽(물건 3개)은 FC 창 66 처럼 앞 쪽 위에 겹친 3줄 창: 8줄 높이 창의 버퍼 줄 10 에 3줄 창의 아래 테두리(8B), 그
+    # 위 줄 9 는 가린 4번째 줄의 윗 타일 줄이라 빈칸, 창 아래 끝 줄 20 은 앞 쪽 창의 아래 테두리
+    ('nene_page_two_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
+     {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(_items(endor.STEEL_SWORD), PAGE_STOCK, sales_set(0)))}),
+    ('nene_page_two', 'walk', PAGE_TWO_WALK,
+     {'map': endor.TOWN, 'bytes': {'NENE_MARK': shop.VIEW_MORE + 1, 'NENE_LINES': shop.VIEW_LINES, 'NENE_SPLIT': 3,
+                                   'NENE_CELL_18_3': 0x8C, 'NENE_CELL_18_10': 0x8B, 'NENE_CELL_19_9': 0x01,
+                                   'NENE_CELL_18_20': 0x8B}}),
     # 같은 열린 첫 쪽에서 창 오른쪽 테두리 열(화면 x 29)의 타일이 줄마다 테두리이고 바깥 열(x 30)은 창 밖인지(검사
     # NENE_RIGHT*). 열 칸 이름이 그대로 그려지면 테두리를 덮는다
     ('nene_wide_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
@@ -266,6 +276,7 @@ MESSAGES = {
     'nene_view': ['nene_counter_ask', 'nene_pick', 'nene_done', 'nene_cheer'],
     'nene_pages': ['nene_counter_ask', 'nene_pick', 'nene_done', 'nene_cheer'],
     'nene_page_open': ['nene_counter_ask', 'nene_pick', 'nene_done'],
+    'nene_page_two': ['nene_counter_ask', 'nene_pick', 'nene_done'],
     'nene_wide': ['nene_counter_ask', 'nene_pick', 'nene_done'],
     'nene_empty': ['nene_counter_ask', 'nene_nothing', 'nene_done', 'nene_empty'],
     'nene_full': ['nene_counter_ask', 'nene_full', 'nene_cheer'],

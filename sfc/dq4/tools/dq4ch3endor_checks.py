@@ -13,6 +13,10 @@ FLAGS = {
     'NENE_STOCK0': (shop.stock_addr(0), 0xFF),
     'NENE_MARK': (0x7E0000 | shop.VIEW_MARK, 0xFF),     # 보기 표지는 보기 밖에서 늘 0
     'NENE_LINES': (0x7E0000 | shop.VIEW_COUNT, 0xFF),   # 보기 쪽 줄 수(창 높이)
+    'NENE_SPLIT': (0x7E0000 | shop.VIEW_SPLIT, 0xFF),   # 앞 쪽 위에 겹친 쪽의 물건 수(겹치지 않으면 0)
+    # 보기 창 꼴(타일맵 버퍼 7E:5000 의 칸 아래 바이트, dq4windowname NENE_VIEW_XY = (18, 3)): 왼쪽 위 모서리 8C, 줄 머리 칸
+    # (x 19)은 커서 없는 빈칸 01, 아래 테두리 8B. 표지가 써지지 않으면 창 37 이 DQ5 팔기 목록 꼴(x 9, ▶ 커서)로 떠 어긋난다
+    **{f'NENE_CELL_{x}_{y}': (0x7E5000 + (y * 32 + x) * 2, 0xFF) for x, y in ((18, 3), (19, 4), (18, 20), (18, 10), (19, 9))},
     # 보기 창 타일맵 버퍼(7E:5000, 칸마다 낱말)의 오른쪽 테두리 열 x 29: 줄 k(위 테두리 y 3 아래 y 4 + 2k)의 아래 바이트는
     # 테두리 8E. 바깥 x 30 은 창 밖 빈칸(위 바이트 2C)
     **{f'NENE_RIGHT{k}': (0x7E5000 + ((4 + 2 * k) * 32 + 29) * 2, 0xFF) for k in range(8)},
