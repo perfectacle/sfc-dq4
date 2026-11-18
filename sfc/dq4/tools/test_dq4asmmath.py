@@ -9,10 +9,6 @@ sys.path.insert(0, str(HERE))
 
 import dq4asmmath as m  # noqa: E402
 
-# 왼쪽부터 셈해 값이 달라진 채 조립되는 식. 고치면 화면 동작이 바뀌므로 그 화면의 실측과 함께 따로 고친다.
-# 고친 뒤 이 목록에서 지운다(목록에 있는데 식이 없어도 실패)
-KNOWN = {('sfc/dq4/tools/dq4windowname.asm', 'LDX.w #$5000+(18*32+3)*2')}
-
 
 def scan(text):
     with tempfile.TemporaryDirectory() as tmp:
@@ -30,10 +26,7 @@ class RepoTests(unittest.TestCase):
 
     def test_no_mixed_precedence_where_math_pri_is_off(self):
         # 값이 같아도 괄호로 뜻을 고정한다: 정의 값이나 숫자 하나가 바뀌면 왼쪽부터 셈이 조용히 다른 값을 낸다
-        rows = [r for r in m.mixed() if not r.pri]
-        bad = [r for r in rows if (r.file, r.text) not in KNOWN]
-        self.assertEqual(bad, [])
-        self.assertEqual({(r.file, r.text) for r in rows}, KNOWN)
+        self.assertEqual([r for r in m.mixed() if not r.pri], [])
 
 
 class CheckerTests(unittest.TestCase):

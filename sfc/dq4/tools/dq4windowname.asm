@@ -67,7 +67,7 @@ org $00FF08
     NOP #2
 ; 게임이 $0BEC 에 쓰는 곳은 셋뿐이다(롬 정적 훑기): 2KB 요청 04:9D39 LDA #$0080 / 9D3C STA(루틴 04:9D35), 위·아래 줄 요청
 ; 04:9D64 LDA #$40 / 9D66 STA(루틴 04:9D5E), 보낸 뒤 지우는 00:8E90 STZ. 2KB 요청 뒤 게임은 바로 NMI 를 기다리므로 버퍼가
-; 다음 NMI 까지 그대로다. WhReq 가 그 버퍼로 묶음 그림·가림을 미리 짠다(원래 바이트는 dq4windowname.WH_REQ_ORIG 로 확인)
+; 다음 NMI 까지 그대로다. WhReq 가 그 버퍼로 묶음 그림 DMA 표를 미리 짠다(원래 바이트는 dq4windowname.WH_REQ_ORIG 로 확인)
 org !wh_req_site
     JSL WhReq
     NOP
@@ -810,11 +810,9 @@ org $24A5E9
 !wt_restore_line = 250      ; 게이트가 이 주사선 앞에서만 슬롯을 하나 더 되돌린다(하나에 다섯 줄까지)
 !wh_with_line = 245        ; WhWith 가 이 주사선 앞에서만 창 타일맵(1920바이트, 열한 줄 남짓)을 대신 보낸다
 !wh_dma_line = 260          ; 묶음 그림 DMA 하나(160바이트까지, 한 줄 남짓)를 이 주사선 앞에서만 시작한다
-!wh_mask_line = 261         ; 가림 두 칸 묶음을 이 주사선 앞에서만 쓴다(두 칸에 반 줄이 안 됨)
-!wh_budget = 670           ; WhReq 가 짜는 한 NMI 몫(바이트). 그림 바이트에 DMA 하나마다 !wh_dma_cost, 가림 한 칸마다
-                            ; !wh_mask_cost 를 더해 센다. 넘는 것은 다음 NMI 로(WhNmi). 실제 상한은 WhWith 의 주사선 확인
+!wh_budget = 670           ; WhReq 가 짜는 한 NMI 몫(바이트). 그림 바이트에 DMA 하나마다 !wh_dma_cost 를 더해 센다.
+                            ; 넘는 것은 다음 NMI 로(WhNmi). 실제 상한은 WhWith 의 주사선 확인
 !wh_dma_cost = 64
-!wh_mask_cost = 24          ; 가림 한 칸(VRAM 주소·값 쓰기)
 !wh_ndma = 9                ; DMA 표 칸 수
 ; 묶음 버퍼(WhStash·WhRelease) 자리. 7F:8300~ 은 1장 이어 걷기·창 검사 장면에서 읽는 곳이 없고 맵을 불러올 때 지우기만 함
 !wh_magic = $7F8300
@@ -824,29 +822,15 @@ org $24A5E9
 !wh_go    = $7F8308         ; 보내도 되는 항목 수(창 타일맵을 보낸 NMI 에 그때까지 쌓인 수로 정함)
 !wh_msgwin = $7F830A        ; 0 = 마지막으로 보낸 창 타일맵에 메시지 창 테두리가 없음(캔버스 칸이 화면에 안 보임)
 !wh_pend  = $7F830C         ; 1 = WhWith 가 게임의 창 타일맵 요청을 한 NMI 붙잡아 둠(다음 NMI 에 다시 함)
-!wh_maskthis = $7F830E      ; 이 NMI 에 WhWith 가 쓴 가림 칸 수(NMI 끝 WhMsgWin 이 보고 지움)
 !wh_dma   = $7FA210         ; WhReq 가 짠 DMA 표([VRAM 워드][원본][길이][묶음 안 자리] 8바이트씩, VRAM 워드 FFFF 로 끝)
-!wh_mask  = $7FA260         ; WhReq 가 짠 가림 표([타일맵 VRAM 워드][값] 4바이트씩, FFFF 로 끝, !wh_nmask 개까지)
 !wh_snap  = $7FA2E0         ; WhReq 가 잴 때의 !wh_rd·!wh_count(그사이 NMI 가 묶음을 보냈으면 WhWith 가 표를 쓰지 않음)
 !wh_snapn = $7FA2E2
 ; WhReq(본 흐름) 전용 임시 칸. NMI 가 쓰는 칸을 빌리면 그사이 NMI 가 덮는다
 !wh_tmpn = $7FA2E4
 !wh_tmpl = $7FA2E6
 !wh_tmpb = $7FA2E8
-!wh_tmpv = $7FA2EA
-!wh_tmpm = $7FA2EC
-!wh_tmpx = $7FA2EE
-!wh_tmpk = $7FA2F0
-!wh_tmpc = $7FA2F2
-!wh_tmpd = $7FA2F4
-!wh_tmpt = $7FA2F6
-!wh_tmpi = $7FA2F8
-!wh_tmpe = $7FA2FA
 !wh_tmpr = $7FA2FC          ; WhReq: DMA 표에 넣은 칸 수
-!wh_tmpq = $7FA2FE          ; WhReq: 건너뛴 항목 VRAM 워드 수
-!wh_skip = $7FA300          ; WhReq: 건너뛴 항목 VRAM 워드(8개까지)
 !wh_tmps = $7FA310          ; WhShown(본 흐름: WhStash·WhReq). 7E 의 우리 칸(!wn_*)은 이름을 그리는 동안만 비어 있다
-!wh_nmask = 24
 !wt_stc   = $7F8310         ; 후보 둘 × [버퍼 칸 주소, 타일, 버퍼 칸 주소, 타일] 워드. 찾기가 적고 게이트가 비교만 함
 !wh_buf   = $7F8320
 !wh_size  = $1EF0
@@ -859,8 +843,7 @@ org $24A5E9
                             ; bit1·0 = 전투에 들어가면 되돌릴 가나 칸 덩이 수(필드에서 가나 칸 슬롯을 쓰면 3),
                             ; bit3 = 이 NMI 의 창 타일맵은 이미 한 번 미룬 것,
                             ; bit4 = 그 NMI 에 게임이 새 요청을 걸지 않아 버퍼가 미룰 때 잰 그대로,
-                            ; bit5 = 다음 NMI 첫머리에 WhWith 가 창 타일맵과 묶음 그림·가림을 함께 보냄(WhReq 가 켬),
-                            ; bit2 = 화면 타일맵에 가림(WhWith)이 들어 있음. 가린 슬롯을 되돌리면 타일맵을 다시 보냄(WhUnmask)
+                            ; bit5 = 다음 NMI 첫머리에 WhWith 가 창 타일맵과 묶음 그림을 함께 보냄(WhReq 가 켬)
 !wq_buf   = $3EB0           ; 대기열 7E:3EB0~3FFF. 항목 [VRAM 워드 2][방식 1][칸 수 1][그림]
 !wq_size  = $0150
 !wq_left  = $A982           ; NMI 안에서만: 남은 항목 수
@@ -4445,7 +4428,6 @@ WqClean:
     BCS .out
     JMP .slot
 .out
-    JSR WhUnmask
     SEP #$20
     PLB
     ; 원래 명령: PHB / PHK / PLB(DB = 00) / LDA #$7E
@@ -4739,7 +4721,6 @@ WtLine:
 
 ; 슬롯 X 의 그림을 메시지 캔버스로 되돌리고 비운다(M = 16, DB = 7E)
 WtRestoreSlot:
-    JSR WhUnmask
     LDA.l WtBitLo,X
     EOR #$FFFF
     AND.w !wt_dirty
@@ -4893,11 +4874,11 @@ assert pc() <= !wn_code2_end
 pushpc
 org !wh_extra
 ; NMI 첫머리(WqNmiEntry, M = 8, X·Y 보존). WhReq 가 켜 두었으면(!wq_defer bit5) 게임이 요청한 창 타일맵 2KB 를 여기서 먼저
-; 보내고, 남은 VBlank 에 WhReq 가 짠 묶음 그림 DMA 와 가림을 이어 보낸다. 타일맵과 그림이 한 NMI 에 가므로 창이 뜬 프레임에
+; 보내고, 남은 VBlank 에 WhReq 가 짠 묶음 그림 DMA 를 이어 보낸다. 타일맵과 그림이 한 NMI 에 가므로 창이 뜬 프레임에
 ; 이름이 함께 보이고(빈칸 없음) 옛 타일맵이 새 그림을 보이는 프레임도 없다(비침 없음). 화면 239줄 모드라 VBlank 는 주사선
 ; 240~261 이고, 게임의 2KB 전송은 게이트 일 뒤에 시작해 VBlank 끝까지 차므로 그 뒤로는 남지 않는다. 그래서 게이트보다 앞에서
 ; 보내고, 화면 밖 30·31줄 128바이트는 보내지 않는다(게임의 위·아래 줄 전송도 29줄까지). 게임 전송 뒤의 일(00:8840, NMI 전송
-; 목록 고르기)도 대신 한다. 그림 DMA·가림은 칸마다 주사선을 보고 늦으면 남긴다(남은 그림은 WhNmi 가 다음 NMI 부터 보냄)
+; 목록 고르기)도 대신 한다. 그림 DMA 는 하나마다 주사선을 보고 늦으면 남긴다(남은 그림은 WhNmi 가 다음 NMI 부터 보냄)
 WhWith:
     LDA.l $7E0000|!wq_defer
     BIT #$20
@@ -4999,10 +4980,10 @@ WhWith:
     LDX #$0000
 .dma
     LDA.w !wh_dma&$FFFF,X
-    BMI .mask
+    BMI .done
     JSR WtLine
     CMP.w #!wh_dma_line
-    BCS .mask
+    BCS .done
     LDA.w !wh_dma&$FFFF,X
     STA.l $002116
     LDA.w (!wh_dma&$FFFF)+2,X
@@ -5022,43 +5003,10 @@ WhWith:
     ADC #$0008
     TAX
     BRA .dma
-.mask
-    ; 가림: 메시지 창이 살아 있는 슬롯 칸을 가리키는 타일맵 자리를 빈 바탕 칸(001)으로. 버퍼는 그대로 둔다
-    STZ.w !wh_maskthis&$FFFF
-    LDX #$0000
-.mgroup
-    LDA.w !wh_mask&$FFFF,X
-    BMI .done
-    JSR WtLine
-    CMP.w #!wh_mask_line
-    BCS .done
-    LDY #$0002
-.mone
-    LDA.w !wh_mask&$FFFF,X
-    BMI .done
-    STA.l $002116
-    LDA.w (!wh_mask&$FFFF)+2,X
-    STA.l $002118
-    INC.w !wh_maskthis&$FFFF
-    INX
-    INX
-    INX
-    INX
-    DEY
-    BNE .mone
-    BRA .mgroup
 .done
-    ; 이 NMI 의 요청과 미룬 요청(bit7·6)·켬(bit5)을 지운다(같은 버퍼를 방금 보냄). 가림을 썼으면 bit2
-    LDA.w !wh_maskthis&$FFFF
+    ; 이 NMI 의 요청과 미룬 요청(bit7·6)·켬(bit5)을 지운다(같은 버퍼를 방금 보냄)
     SEP #$20
-    BEQ +
     LDA.l $7E0000|!wq_defer
-    ORA #$04
-    BRA ++
-+
-    LDA.l $7E0000|!wq_defer
-    AND #$FB
-++
     AND #$1F
     STA.l $7E0000|!wq_defer
     LDA #$00
@@ -5082,29 +5030,11 @@ WhWith:
     STA.w !wh_go&$FFFF
     BRL .out
 
-; 가린 슬롯을 되돌렸으면(WtRestoreSlot·WqClean) 화면 타일맵이 버퍼와 다르게 001 을 가리키고 있으므로, 다음 NMI 에 버퍼를
-; 다시 보내게 한다(!wq_defer bit7 = 미룬 요청). 게임이 더 요청하지 않아도 메시지 글자가 가려진 채 남지 않게
-WhUnmask:
-    PHP
-    SEP #$20
-    LDA.l $7E0000|!wq_defer
-    BIT #$04
-    BEQ +
-    AND #$FB
-    ORA #$80
-    STA.l $7E0000|!wq_defer
-+
-    PLP
-    RTS
-
 ; 04:9D39(게임이 창 타일맵 2KB 전송을 요청하는 LDA #$0080 / STA $0BEC(9D3C) 자리, M = X = 16, NMI 켜짐). 원래 두 명령을
 ; 하기 전에, 지금 버퍼로 다음 NMI 의 WhWith 가 할 일을 짠다. 요청 뒤 게임은 바로 NMI 를 기다리므로 버퍼가 그대로다. 표를 다
 ; 짠 뒤에만 bit5 를 켜므로 그사이 NMI 가 와도 반쯤 짠 표를 쓰지 않는다. 그사이 NMI 가 묶음을 보냈으면 !wh_snap 이 달라
 ; WhWith 가 쉰다
-;  - 묶음 그림: 예산(!wh_budget)까지. 메시지 창이 가리키는 항목(함께 보내면 메시지 창에 비침)은 건너뛰고 뒤를 계속 본다.
-;    건너뛴 항목과 같은 VRAM 워드의 뒤 항목은 보내지 않는다(나중에 옛 그림이 새 그림을 덮지 않게)
-;  - 가림: 그림을 올린 캔버스 슬롯 칸을 메시지 창이 가리키는 자리. 창이 아래 줄부터 닫히며(두 줄씩) 메시지 창 줄이 드러날 때,
-;    아직 보이는 같은 슬롯의 이름이 메시지 창에도 보였다. 슬롯 키 자리(이름이 보이는 곳)는 빼고
+;  묶음 그림을 앞에서부터 예산(!wh_budget)·DMA 표 칸 수까지 표에 넣는다
 WhReq:
     PHP
     PHB
@@ -5143,16 +5073,13 @@ WhReq:
     ; !wh_pend 는 지우지 않는다. 게임이 매 NMI 다시 요청하는 창에서 지우면, 늦은 NMI 가 이어질 때 타일맵을 끝없이 붙잡았다
     LDA #$FFFF
     STA.w !wh_dma&$FFFF
-    STA.w !wh_mask&$FFFF
     LDA.w !wh_rd&$FFFF
     STA.w !wh_snap&$FFFF
     LDA.w !wh_count&$FFFF
     STA.w !wh_snapn&$FFFF
     LDA.w #!wh_budget
     STA.w !wh_tmpb&$FFFF    ; 남은 예산
-    JSR WhReqMask
     STZ.w !wh_tmpr&$FFFF
-    STZ.w !wh_tmpq&$FFFF
     LDA.w !wh_count&$FFFF
     BNE +
     JMP .done
@@ -5177,10 +5104,6 @@ WhReq:
     LDA.w !wh_buf&$FFFF,X
     CMP #$FFFF
     BEQ .next
-    JSR WhEntShown
-    BCS .skipit
-    JSR WhSkipped
-    BCS .next
     LDA.w !wh_tmpr&$FFFF
     CMP.w #!wh_ndma
     BCS .done
@@ -5207,18 +5130,6 @@ WhReq:
     LDA #$FFFF
     STA.w !wh_dma&$FFFF,Y
     INC.w !wh_tmpr&$FFFF
-    BRA .next
-.skipit
-    LDA.w !wh_tmpq&$FFFF
-    CMP #$0008
-    BCS .done
-    PHY
-    ASL
-    TAY
-    LDA.w !wh_buf&$FFFF,X
-    STA.w !wh_skip&$FFFF,Y
-    PLY
-    INC.w !wh_tmpq&$FFFF
 .next
     TXA
     CLC
@@ -5232,10 +5143,7 @@ WhReq:
 .done
     ; 할 일이 있으면 다음 NMI 첫머리의 WhWith 를 켠다(!wq_defer bit5)
     LDA.w !wh_dma&$FFFF
-    BPL +
-    LDA.w !wh_mask&$FFFF
     BMI .out
-+
     SEP #$20
     LDA.l $7E0000|!wq_defer
     ORA #$20
@@ -5249,27 +5157,6 @@ WhReq:
     LDA #$0080
     STA.l $000BEC
     RTL
-
-; WhReq 안(DB = 7F, X = 항목 자리). 이 항목의 VRAM 워드가 앞에서 건너뛴 항목과 같으면 C = 1. X·Y 를 지킨다
-WhSkipped:
-    PHY
-    LDA.w !wh_tmpq&$FFFF
-    ASL
-    TAY
--
-    DEY
-    DEY
-    BMI +
-    LDA.w !wh_skip&$FFFF,Y
-    CMP.w !wh_buf&$FFFF,X
-    BNE -
-    PLY
-    SEC
-    RTS
-+
-    PLY
-    CLC
-    RTS
 
 ; NMI 끝(WhMsgWin 안, M = X = 16, DB = 7E). WhWith 가 보내고 죽인 항목이 묶음 앞에 이어 있으면 걷어 낸다(!wh_rd 를 넘기고
 ; 항목 수·보내도 되는 수를 줄임). 비면 머리를 처음으로
@@ -5319,120 +5206,6 @@ WhTrim:
     STA.l !wh_go
 .out
     RTS
-
-; WhReq 안(M = X = 16, DB = 7F). 그림을 올린 캔버스 슬롯마다 칸(글자 줄·위 줄)을 메시지 창이 가리키는 버퍼 자리를 찾아
-; !wh_mask 에 [타일맵 VRAM 워드][(원래 값 & FC00) | 001] 로 적고, 그만큼 !wh_tmpb(예산)를 줄인다. 슬롯 키 두 줄(그 슬롯
-; 이름이 보이는 자리)은 뺀다
-WhReqMask:
-    LDA.l $7E1ABC
-    EOR #$001C
-    AND #$00FC
-    XBA
-    STA.w !wh_tmpv&$FFFF    ; 타일맵 VRAM 기준 워드
-    STZ.w !wh_tmpm&$FFFF    ; 가림 표 자리
-    LDX.w #!wt_nkana*2
-.slot
-    LDA.l WtBitLo,X
-    AND.l $7E0000|!wt_dirty
-    BNE +
-    LDA.l WtBitHi,X
-    AND.l $7E0000|(!wt_dirty+2)
-    BEQ .next
-+
-    LDA.l $7E0000|!wt_ages,X
-    BEQ .next
-    JSR WhShown
-    BCC .next
-    STX.w !wh_tmpx&$FFFF
-    LDA.l $7E0000|!wt_keys,X
-    STA.w !wh_tmpk&$FFFF
-    LDA.l WtClassF,X
-    AND #$0003
-    ASL
-    TAX
-    LDA.l WhColsOf,X
-    STA.w !wh_tmpc&$FFFF    ; 열 수
-    ASL
-    STA.w !wh_tmpd&$FFFF    ; 열 × 2(키 줄의 바이트)
-    LDX.w !wh_tmpx&$FFFF
-    LDA.l WtSlotF,X
-    JSR .run
-    LDX.w !wh_tmpx&$FFFF
-    LDA.l WtUpperF,X
-    BEQ +
-    JSR .run
-+
-    LDX.w !wh_tmpx&$FFFF
-.next
-    INX
-    INX
-    CPX.w #!wt_nslot*2
-    BCC .slot
-    RTS
-; A = 첫 칸, !wh_tmpc 칸. 칸마다 메시지 창 자리가 그 칸이고 키 두 줄 밖이면 가림 표에 더한다
-.run
-    STA.w !wh_tmpt&$FFFF
-    LDA.w !wh_tmpc&$FFFF
-    STA.w !wh_tmpi&$FFFF
-.cell
-    LDA.w !wh_tmpt&$FFFF
-    SEC
-    SBC #$0096
-    BCC .rnext
-    CMP #$00EA
-    BCS .rnext
-    JSR WhCellOf
-    TAX
-    LDA.l $7E0000,X
-    AND #$03FF
-    CMP.w !wh_tmpt&$FFFF
-    BNE .rnext
-    ; 칸 자리 − 키 를 부호 없이 견준다. 키 앞쪽 칸이면 뺄셈이 FFxx 로 돌아 「열 × 2 이상」 이 되어 범위 밖으로 친다.
-    ; 64 를 더하면 키 한 줄 위(위 줄)에서부터 잰 거리가 된다
-    TXA
-    SEC
-    SBC.w !wh_tmpk&$FFFF
-    CMP.w !wh_tmpd&$FFFF
-    BCC .rnext
-    CLC
-    ADC #$0040
-    CMP.w !wh_tmpd&$FFFF
-    BCC .rnext
-    LDA.w !wh_tmpm&$FFFF
-    CMP.w #!wh_nmask*4
-    BCS .rnext
-    LDA.w !wh_tmpb&$FFFF
-    SEC
-    SBC.w #!wh_mask_cost
-    BCC .rnext
-    STA.w !wh_tmpb&$FFFF
-    LDY.w !wh_tmpm&$FFFF
-    TXA
-    SEC
-    SBC #$5000
-    LSR
-    CLC
-    ADC.w !wh_tmpv&$FFFF
-    STA.w !wh_mask&$FFFF,Y
-    LDA.l $7E0000,X
-    AND #$FC00
-    ORA #$0001
-    STA.w (!wh_mask&$FFFF)+2,Y
-    INY
-    INY
-    INY
-    INY
-    STY.w !wh_tmpm&$FFFF
-    LDA #$FFFF
-    STA.w !wh_mask&$FFFF,Y
-.rnext
-    INC.w !wh_tmpt&$FFFF
-    DEC.w !wh_tmpi&$FFFF
-    BNE .cell
-    RTS
-
-WhColsOf:
-    dw 4, 7, 10, 0
 
 ; WtAlloc 안(M = X = 16, DB = 7E, X = 슬롯 × 2). 같은 자리를 다른 크기로 다시 그림: 옛 슬롯은 비운다. 다만 화면에 보이는
 ; 슬롯(WtVis bit0)은 새 창 타일맵이 갈 때까지 옛 타일맵이 그 칸을 가리키므로 남겨 두고, 다음 창 타일맵 전송(2KB·위아래 줄
@@ -5604,89 +5377,6 @@ WhStashCopy:
     PLX
     RTS
 
-; 묶음 항목 X(바이트 자리)의 첫 칸·끝 칸 가운데 하나라도 버퍼의 메시지 창이 가리키면 C = 1. 죽인 항목은 C = 0(M = X = 16)
-WhEntShown:
-    LDA.l !wh_buf,X
-    CMP #$FFFF
-    BEQ .no
-    SEC
-    SBC #$1000
-    LSR
-    LSR
-    LSR
-    PHA
-    JSR WhTileShown
-    PLA
-    BCS .yes
-    STA.l !wh_tmpe
-    LDA.l !wh_buf+2,X
-    XBA
-    AND #$00FF
-    DEC
-    CLC
-    ADC.l !wh_tmpe
-    JMP WhTileShown
-.yes
-    SEC
-    RTS
-.no
-    CLC
-    RTS
-
-; A = BG3 칸. 캔버스 칸(096~17F)이고 버퍼 7E:5000 의 메시지 창 자리(WhCellOf)가 그 칸이면 C = 1. A·X 를 지킨다(M = X = 16)
-WhTileShown:
-    CMP #$0096
-    BCC .no
-    CMP #$0180
-    BCS .no
-    PHA
-    PHX
-    SEC
-    SBC #$0096
-    JSR WhCellOf
-    TAX
-    LDA.l $7E0000,X
-    PLX
-    AND #$03FF
-    CMP $01,S
-    BEQ +
-    PLA
-    CLC
-    RTS
-+
-    PLA
-    SEC
-    RTS
-.no
-    CLC
-    RTS
-
-; A = 캔버스 안 차례(칸 − 096, 0~233) → 메시지 창(화면 18~26줄·3~28열, 한 줄 26칸)이 그 칸을 가리키는 7E:5000 버퍼 자리.
-; 본 흐름(WhReq)에서만 부르므로 표 대신 26 을 빼 가며 줄을 센다(코드 자리가 모자람). M = X = 16, X 를 지킨다
-WhCellOf:
-    PHX
-    LDX.w #$5000+(18*32+3)*2
--
-    CMP.w #26
-    BCC +
-    SBC.w #26
-    PHA
-    TXA
-    CLC
-    ADC #$0040
-    TAX
-    PLA
-    BRA -
-+
-    ASL
-    PHA
-    TXA
-    CLC
-    ADC $01,S
-    PLX
-    PLX
-    RTS
-
 ; 슬롯 X(× 2)의 글자 줄·위 줄 첫·끝 칸 가운데 하나라도 버퍼의 메시지 창이 가리키면 C = 1(WtMsgCellF). X 를 지킨다(M = X = 16, 본 흐름에서만)
 WhShown:
     PHX
@@ -5741,25 +5431,6 @@ WhMsgWin:
     RTS
 +
     JSR WhTrim
-    ; 이 전송이 WhWith 의 가림 없이 갔는데 화면에 가림이 남았으면(bit2): 2KB 였으면 다 덮였고, 위·아래 줄만이었으면
-    ; 덮이지 않은 18~20줄 가림이 남을 수 있어 2KB 를 다시 요청한다(bit7)
-    LDA.l !wh_maskthis
-    BNE +
-    SEP #$20
-    LDA.w !wq_defer
-    BIT #$04
-    BEQ ++
-    AND #$FB
-    BIT.w !wq_head          ; bit7 = 2KB 를 보냄
-    BMI +++
-    ORA #$80
-+++
-    STA.w !wq_defer
-++
-    REP #$20
-+
-    LDA #$0000
-    STA.l !wh_maskthis
     ; 왼쪽(2열)과 오른쪽(29열) 테두리가 같은 줄에 함께 있어야 메시지 창이다. 2열에서 시작하는 다른 창(상태 창 등)도 같은
     ; 테두리 칸을 써, 한쪽만 보면 메시지 창이 없는 화면에서도 이름을 묶어 목록 줄이 몇 프레임 비었다
     LDX.w #((18*32)+2)*2
