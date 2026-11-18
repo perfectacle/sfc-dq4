@@ -89,10 +89,10 @@ LINKS = {
     # Chapter 2: サントハイム castle, テンペ and フレノール. フレノール's FC arrival is on the map's top row. 03/00's song
     # byte 0A is 呪われし塔 in the sound port: the castle (FC map branch 0) takes the castle song 01 and the two
     # villages (branch 1) the town song 06.
-    # テンペ's block is the only field link between the castle's side and フレノール's. FC leaves onto the entrance
-    # block itself (08:$B06A) and walks on either way; the port leaves onto one neighbour (below), and a DQ5 town
-    # block cannot be walked across (its bottom cells enter). "leave_rows" leaves by the town's top edge (the road
-    # north past the altar) onto the block above instead: stepping off the top row, the hero cell row is FF.
+    # テンペ's block is the only field link between the castle's side and フレノール's. FC leaves onto the block one
+    # step beside the entrance in the leaving direction (08:$B06A); the port leaves onto one neighbour (below), and a
+    # DQ5 town block cannot be walked across (its bottom cells enter). "leave_rows" leaves by the town's top edge (the
+    # road north past the altar) onto the block above instead: stepping off the top row, the hero cell row is FF.
     0x3D: [{"fc": 0x01, "arrival": (0x0F, 0x1B), "attrs": "03/00", "music": 0x01, "field": [(0x27, 0x49)], "out": "down:64",
             "chapter": 2},
            {"fc": 0x0E, "arrival": (0x0A, 0x2C), "attrs": "03/00", "music": 0x06, "field": [(0x47, 0x39)], "out": "down:64",

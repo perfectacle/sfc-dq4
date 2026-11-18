@@ -335,6 +335,22 @@ class FlyTest(unittest.TestCase):
         self.assertEqual(code.count(bytes((0xA9, 0x0B, 0x20))), ev.KIDS_WALKING)
         self.assertEqual(code[-1], 0x60)
 
+    def test_basket_leaves_only_the_leader_walking(self):
+        # 2장 텐페 제단 flag 동안(일행이 바구니 안)은 걷는 그림을 주인공 하나로. 꺼지면 그대로
+        from dq4ch2event import TEMPE_ALTAR
+        from w65816 import Cpu
+        code = ev._followers(ev.CODE_AT)
+        rom = bytearray(0x400000)
+        o = ev.lorom(ev.CODE_AT)
+        rom[o:o + len(code)] = code
+        for flag, want in ((TEMPE_ALTAR[1], 1), (0, 3)):
+            cpu = Cpu(bytes(rom), bytearray(0x20000))
+            cpu.wram[0x2190 + TEMPE_ALTAR[0]], cpu.wram[0x1967] = flag, 3
+            cpu.p = 0x30
+            cpu.jsl(ev.CODE_AT)
+            self.assertEqual(cpu.wram[0x1967], want)
+            self.assertEqual(cpu.p & 0x30, 0x30)
+
     def test_party_changes_redraw_the_walkers(self):
         _, at = ev.native()
         refresh = {'op': '37', 'args': ev._long(at['refresh'])}

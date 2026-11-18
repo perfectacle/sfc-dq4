@@ -6,6 +6,11 @@ sets the backdrop) with the palette the build should give: the map's day variant
 FC darkens that map (dq4environmentrom.fc_night) and the day variant otherwise. Cases run in parallel; each starts from
 the same state with the same time, so the result does not depend on the order or on the clock.
 
+The event case `tempe-altar` takes the way a player does: it enters テンペ with the substitute flag on, so the priest's
+script runs the basket event (night set before the move), and taps through the narration. A ROM patch ends the event
+right after its move onto the altar (the first pause becomes FF) so the boss battle does not repaint CGRAM; the BG
+lines at the end must be テンペ's night lines. --no-event leaves it out.
+
   python sfc/dq4/tools/dq4environmentnightcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/nightcheck [--maps 3D/03 …]
 """
 
@@ -71,12 +76,41 @@ def run_case(mesence, rom, state, out, name, target, time, want, cell):
     return label, {"map": name, "target": target, "time": f"{time:04X}", "colour_differences": diff}
 
 
+EVENT_MAP = "3D/03"
+
+
+def event_patch(data):
+    """ROMPATCH that ends the テンペ altar event at its first pause after the move (dq4ch2tempe ALTAR_WARP + C2)."""
+    import dq4ch2tempe
+    at = data.find(dq4ch2tempe.ALTAR_WARP + b"\xc2")
+    if at < 0 or data.find(dq4ch2tempe.ALTAR_WARP + b"\xc2", at + 1) >= 0:
+        raise SystemExit("텐페 제단 이벤트의 옮기기 + 쉼이 롬에 하나가 아님")
+    return f"{at + len(dq4ch2tempe.ALTAR_WARP):X}=FF"
+
+
+def event_case(mesence, rom, state, out, want):
+    """The basket event (dq4mapsongcheck tempe-basket's flags and taps) ending on the altar: BG lines 1-7 at night."""
+    import dq4groupcheck
+    import dq4mapsongcheck
+    got = dq4groupcheck.scene(mesence, rom, state, out, "tempe-altar", TO=f"{EVENT_MAP},42,77",
+                              SET=dq4mapsongcheck.TEMPE_GONE, TEST=f"{dq4mapsongcheck.BASKET_TEST},wait:200",
+                              ROMPATCH=event_patch(rom.read_bytes()), MAXF=4000)
+    final = out / "tempe-altar"
+    if "error" in got:
+        return "tempe-altar", {"map": EVENT_MAP, "error": got["error"], "colour_differences": -1}
+    wram, cgram = (final / "final.wram").read_bytes(), (final / "final.cgram").read_bytes()
+    diff = sum(a != b for a, b in zip(colours(cgram[0x20:0x100]), colours(want)))
+    return "tempe-altar", {"map": EVENT_MAP, "where": got, "time": f"{wram[0x075E] | wram[0x075F] << 8:04X}",
+                           "colour_differences": diff if got.get("map") == EVENT_MAP else -1}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--rom", required=True, type=Path)
     ap.add_argument("--dq4", default="rom/dq4.nes", type=Path)
     ap.add_argument("--maps", nargs="+", default=DEFAULT, help="DQ5 맵(GG/MM), 기본은 2장 맵과 1장 마을 둘")
     ap.add_argument("--jobs", type=int, default=6)
+    ap.add_argument("--no-event", action="store_true", help="テンペ 바구니 이벤트 장면을 빼기")
     dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
     args = ap.parse_args()
@@ -96,7 +130,10 @@ def main():
         cell = arrival(prg, name)
         jobs += [(name, target, DAY, day, cell), (name, target, NIGHT, night, cell)]
     with ThreadPoolExecutor(args.jobs) as pool:
-        results = dict(pool.map(lambda j: run_case(mesence, rom, state, out, *j), jobs))
+        cases = [pool.submit(run_case, mesence, rom, state, out, *j) for j in jobs]
+        if not args.no_event:
+            cases.append(pool.submit(event_case, mesence, rom, state, out, expected(prg, by_target[EVENT_MAP])[1]))
+        results = dict(c.result() for c in cases)
     for target in args.maps:
         name = by_target[target]
         results[f"{target.replace('/', '')}-night"]["fc_night"] = fc_night(prg, fc_source(prg, name))

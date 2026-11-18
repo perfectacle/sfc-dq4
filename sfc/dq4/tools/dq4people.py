@@ -40,7 +40,7 @@ DQ5_TOOLS = HERE.parents[1] / 'dq5' / 'tools'
 sys.path[:0] = [str(HERE), str(DQ5_TOOLS)]
 
 import dq4chapterbox  # noqa: E402
-from dq4ch2event import ALENA_PICTURE, BREY_PICTURE, CHAPTER2, KIRYL_PICTURE  # noqa: E402
+from dq4ch2event import ALENA_PICTURE, BREY_PICTURE, CHAPTER2, KIRYL_PICTURE, TEMPE_ALTAR  # noqa: E402
 from dq4ch3event import CHAPTER3, LAWRENCE_PICTURE, SCOTT_PICTURE, TORNEKO_PICTURE  # noqa: E402
 
 # 전용 줄 깃발 → 그 줄을 덮는 장(dq4groupbuild.LINKS 의 chapter). 표에 없는 깃발은 2장
@@ -87,6 +87,11 @@ DARK_L, DARK_SHARE = 15, 0.34                    # Lab 밝기 15 아래를 눈·
 PROLOGUE = dq4chapterbox.PROLOGUE.where[0]       # 서장 마을(FC 14/00, 5장 첫머리도 같은 마을)
 COMPANION_PICTURES = '05:D9D5'                     # 사람 동료 그림 표(인물 번호 → 그림)
 LEADER_PICTURES = (0x2B, 0x2E)                     # 일행 0번: 실내 02:CA5A, 바깥 05:D98F
+# 사건 동안 일행 0번을 사람 대신 물건으로 그리는 (flag, 세트, 맵, 줄). FC 1C 이벤트 01·02 는 일행을 바구니 안에 두고
+# 바구니만 그린다. 텐페 제단 flag 동안은 DQ5 세트 3F(엮은 바구니, 원래 그림 A5)를 쓴다. 인물 훅에서 장 주인공 줄보다
+# 앞에 둔다. 색은 그 맵의 줄(장 주인공의 전용 줄, 주인공이 바구니인 동안은 비어 있음)을 flag 가 켜졌을 때 그 세트의
+# DQ5 원래 줄 색으로 덮는다. 그룹 공용 줄은 그룹 인물의 색이라 바구니가 다른 색으로 그려졌다(실측)
+LEADER_STANDINS = ((TEMPE_ALTAR, 0x3F, '3D/03', 7),)
 
 
 def mirror_sides(cells):
@@ -1137,7 +1142,7 @@ def hook(entries):
 
 def hook_entries(rom):
     """원래 표와 다른 세트를 쓰는 인물의 (그림 번호, 맵 그룹, 깃발, 세트). 깃발·맵 그룹을 보는 줄을 앞에 둔다."""
-    out = []
+    out = [(g, None, flag, s) for flag, s, _, _ in LEADER_STANDINS for g in LEADER_PICTURES + (ALENA_PICTURE,)]
     for p in PEOPLE:
         if p.flag is not None and p.leader:
             out += [(g, None, p.flag, target(p, rom)[0]) for g in LEADER_PICTURES]
@@ -1145,6 +1150,16 @@ def hook_entries(rom):
         # 그림 번호가 곧 빌린 그림이면 원래 표가 이미 바꾼 세트를 가리킨다
         if (p.new_set is not None or p.spare is not None) and p.pictures != (p.spare,):
             out += [(g, p.group, None, target(p, rom)[0]) for g in p.pictures]
+    return out
+
+
+def standin_palettes(rom):
+    """LEADER_STANDINS 의 맵 팔레트 항목: flag 가 켜진 동안 그 줄을 세트의 DQ5 원래 줄(레코드 +2 bit6-7) 색으로."""
+    out = []
+    for flag, s, where, line in LEADER_STANDINS:
+        colors = S.obj_palettes(rom)[S.set_record(rom, s)['palette']]
+        out.append({'map': where, 'line': f'{0x08 + line:02X}', 'flag': f'{flag[0]:02X}', 'mask': f'{flag[1]:02X}',
+                    'colors': colors[1:]})
     return out
 
 
@@ -1458,7 +1473,8 @@ def assemble(base, dq5, assets, out, work, squeeze):
     base_lines = {line: board[(home, line)] for g, line in board if g == home}
     pal_doc = {'format': 'dq5objpalette/1',
                'palettes': [{'palette': n, 'colors': bgr(pal)} for n, pal in sorted({**base_lines, **fixed}.items())],
-               'sets': [{'set': f'{s:02X}', 'palette': line} for _, s, _, _, _, _, line, _ in rows]}
+               'sets': [{'set': f'{s:02X}', 'palette': line} for _, s, _, _, _, _, line, _ in rows] +
+                       [{'set': f'{s:02X}', 'palette': line} for _, s, _, line in LEADER_STANDINS]}
     # 그룹 36~ 은 DQ4 롬에만 있으므로 맵 팔레트 줄은 곡 롬을 기준으로 따로 만든다
     map_doc = {'format': 'dq5objpalette/1',
                'new_map_palettes': [{'map': f'{g:02X}/FF', 'line': f'{0x08 + line:02X}', 'flag': 'FF', 'mask': '00',
@@ -1467,6 +1483,8 @@ def assemble(base, dq5, assets, out, work, squeeze):
                                      'mask': f'{p.flag[1]:02X}', 'colors': bgr(pal)}
                                     for p, _, _, _, _, _, line, pal in rows if p.flag is not None
                                     for m in flag_maps(p.flag)]
+    # 표 끝 항목이 나중에 적용되므로 같은 줄을 덮는 장 주인공 항목 뒤에 둔다
+    map_doc['new_map_palettes'] += standin_palettes(Rom(original))
     maps = dq5objpalette.patch(Rom(base.read_bytes()), map_doc, MAP_PALETTES_AT)
     (work / 'maps.dq5patch.json').write_text(json.dumps(maps, ensure_ascii=False, indent=1) + '\n')
     palettes = dq5objpalette.patch(Rom((work / 'mid.sfc').read_bytes()), pal_doc, PALETTES_AT)
