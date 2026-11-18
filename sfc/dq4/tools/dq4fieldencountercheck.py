@@ -13,6 +13,9 @@ dq5warp.lua FIELD with dq5warptrace.lua).
          23:E8B7 gets is dq4fieldencounter.dq5_chance of the coefficient, Y and the steps since the last fight
          ($1A9A). The report gives each walked kind's mean cells to a fight in DQ5 (dq5_steps) and twice FC's mean
          steps (fc_steps)
+  nofight walk from grass over an FC block of kind 8 and up (bridge, castle-top rocky path, NO_FIGHT_SCENES) to the
+         grass beyond and back: on its cells 01:84CF's Y is 0 and 23:E7C2 is never called, as FC checks no
+         encounter there (18:$9CB2); on the grass cells Y is not 0 and every step is checked
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4fieldencountercheck.py --rom work/dq4-groups/groups.sfc \\
       --out work/dq4-encountercheck
@@ -67,6 +70,12 @@ RATE_TRACE = "23E7C2,23E8B7"
 EXITS = {"23E9B0": "single", "23EA40": "mixed", "23E98F": "fixed"}
 TERRAIN_DAY, TERRAIN_NIGHT = dq4encounter.TERRAIN_DAY, dq4encounter.TERRAIN_NIGHT
 GRASS = 0x02
+# FC 은 타일 8 이상에서 조우 판정을 하지 않는다(18:$9CB2). FC 1장 필드에서 다리 (6F,4F) 134걸음·성 위 돌길 (99,44)~(9A,44)
+# 252걸음에 판정 0번, 옆 풀밭은 걸음마다 판정이었다. 장면 -> (FC 블록 (x, y) 에서 오른쪽으로, 걷는 프레임): 풀밭에서 그 칸을
+# 지나 반대쪽 풀밭까지 오가며 00:82AF(01:84CF 뒤)의 Y 와 23:E7C2 를 적는다. 계수를 0 으로 둬 싸우지 않고 끝까지 걷는다.
+NO_FIGHT_SCENES = {"nofight-bridge": ((0x6E, 0x4F), 40), "nofight-castle": ((0x98, 0x44), 56)}
+NO_FIGHT_RATES = "11EA44=0000000000000000"
+NO_FIGHT_TRACE = "0082AF,23E7C2"
 
 
 def stand(grid, props, cell):
@@ -162,6 +171,7 @@ def main():
     dq4freshstate.add_argument(ap)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument("--only", help="이 이름으로 시작하는 장면만(쉼표로 여럿, 예: nofight)")
     args = ap.parse_args()
     mesence = Path(os.environ["MESENCE"])
     out = args.out.resolve()
@@ -259,9 +269,45 @@ def main():
         return {"coefficient": coef, "fc_base": base, "chances": seen, "wrong": wrong[:10],
                 "ok": bool(seen) and coef == want and not wrong}
 
+    def run_no_fight(name):
+        """FC 블록 종류마다 걸은 셀 수와 그 셀의 Y·23:E7C2 횟수. ok 는 타일 8 이상 셀이 있고 모두 Y 0·판정 없음, 풀밭
+        셀도 있고 모두 Y 가 0 이 아니고 판정함."""
+        (x, y), frames = NO_FIGHT_SCENES[name]
+        grid, _ = dq4fieldport.fc_field(prg, 0)
+        walk = "idle:16," + ",".join([f"right:{frames},left:{frames}"] * 6)
+        cell = dq4fieldport.stand(x, y)
+        got = dq4groupcheck.scene(mesence, rom, state, out, name, FIELD="{},{}".format(*cell),
+                                  ROMPATCH=f"{dq4fieldport.warp_patch(data, *cell)};{NO_FIGHT_RATES}",
+                                  TEST=walk, MAXF="2600", TRACE=NO_FIGHT_TRACE, LOG="7E00B6,7E00B8")
+        kinds, kind = {}, None
+        for _, pc, kv in lines(out / name / "trace.txt"):
+            if pc == "0082AF":
+                cx, cy = int(kv["7E00B6"], 16), int(kv["7E00B8"], 16)
+                # 00:82AF 는 워프 전 출발 맵의 걸음에서도 돈다: 걷는 줄의 셀만 센다
+                if cy != cell[1] or abs(cx - cell[0]) > 16:
+                    kind = None
+                    continue
+                kind = f"{grid[cy >> 1][cx >> 1]:02X}"
+                row = kinds.setdefault(kind, {"cells": 0, "y": [], "checks": 0})
+                row["cells"] += 1
+                if (int(kv["Y"], 16) & 0xFF) not in row["y"]:
+                    row["y"].append(int(kv["Y"], 16) & 0xFF)
+            elif pc == "23E7C2" and kind is not None:
+                kinds[kind]["checks"] += 1
+        high = {k: v for k, v in kinds.items() if int(k, 16) >= dq4fieldport.FIGHT_KINDS}
+        grass = kinds.get(f"{GRASS:02X}")
+        ok = bool(high) and all(v["y"] == [0] and v["checks"] == 0 for v in high.values()) \
+            and grass is not None and 0 not in grass["y"] and grass["checks"] == grass["cells"]
+        return name, {"blocks": [x, y], "got": got, "kinds": kinds, "ok": ok}
+
+    def chosen(name):
+        return not args.only or name.startswith(tuple(args.only.split(",")))
+
     jobs = [(name, False, d) for name in ZONES for d in DELAYS] + [(name, True) for name in RATE_SCENES]
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        results = dict(f.result() for f in [pool.submit(run, *j) for j in jobs])
+        futures = [pool.submit(run, *j) for j in jobs if chosen(j[0])] + \
+            [pool.submit(run_no_fight, n) for n in NO_FIGHT_SCENES if chosen(n)]
+        results = dict(f.result() for f in futures)
     ok = all(r["ok"] for r in results.values())
     result = {"status": "passed" if ok else "failed", "scenes": dict(sorted(results.items()))}
     (out / "results.json").write_text(json.dumps(result, ensure_ascii=False, indent=1) + "\n")

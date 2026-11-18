@@ -4,7 +4,8 @@ assets.
 Each FC field art (dq4environmentmap.FIELD_ART) with the DQ5 block it borrows becomes a DQ5 block of its own from
 511 (dq4fieldport.new_blocks), so DQ5's own blocks stay as they are. A new block keeps the terrain nibble of the
 DQ5 block it borrows (dq4fieldport.BLOCKS, FIELD_BLOCKS), and each of its tiles the attribute of that block's tile in the same quarter, so
-walking, ship and encounters stay those of the borrowed block. The art is drawn on the lower layer; the upper layer
+walking, ship and encounters stay those of the borrowed block. Only an FC kind of 8 and up that would borrow a
+fighting terrain takes the no-fight terrain of dq4fieldport.NO_FIGHT_KIND instead, as FC never fights there. The art is drawn on the lower layer; the upper layer
 is empty (tile 0, 00:BCA8 then reads the lower tile's attribute).
 
 Colours are DQ5's own world-0 field palette: each 8x8 tile takes palette line 2 or 3 (nibble 0 or 1) and colours
@@ -208,6 +209,11 @@ def generate(rom):
         return found[key]
 
     blocks = []
+    fight = {terrain(r, dq4fieldport.borrowed(f, k)) for f in dq4fieldport.WORLDS
+             for k in range(dq4fieldport.FIGHT_KINDS)}
+    no_fight = terrain(r, dq4fieldport.BLOCKS[dq4fieldport.NO_FIGHT_KIND])
+    if no_fight in fight:
+        raise ValueError(f"terrain {no_fight:X} of kind {dq4fieldport.NO_FIGHT_KIND:02X} is a fighting terrain")
     for number, kind, borrowed in dq4fieldport.new_blocks():
         lower, upper = block_tiles(r, BLOCK_LOWER, borrowed), block_tiles(r, BLOCK_UPPER, borrowed)
         quarter_attrs = [o["tile_attributes"][u or lo] for lo, u in zip(lower, upper)]
@@ -217,7 +223,10 @@ def generate(rom):
         else:
             new_lower = [tile(p, a) for p, a in zip(quarters(art(FIELD_ART[kind][0])), quarter_attrs)]
             new_upper = [0, 0, 0, 0]
-        blocks.append({"index": number, "lower": new_lower, "upper": new_upper, "terrain": terrain(r, borrowed)})
+        ground = terrain(r, borrowed)
+        if kind >= dq4fieldport.FIGHT_KINDS and ground in fight:
+            ground = no_fight
+        blocks.append({"index": number, "lower": new_lower, "upper": new_upper, "terrain": ground})
     for (raw, nibble, attr), t in found.items():
         tiles[t * 32:t * 32 + 32] = raw
         nibbles[t] = nibble
