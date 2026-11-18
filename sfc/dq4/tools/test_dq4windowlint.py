@@ -158,7 +158,7 @@ class SceneTest(unittest.TestCase):
 
 @unittest.skipUnless(DQ5_ROM.is_file() and wl.FC_ROM.is_file(), 'rom/dq5.sfc 와 rom/dq4.nes 가 필요')
 class ReachableItemTest(unittest.TestCase):
-    """아홉 칸 창에서 빼는 가나 열 칸 물건이 넓은 예외가 아니게: 빼는 물건은 DQ4 명칭표에 없고 DQ4 데이터가 주는 물건
+    """아홉 칸 창에서 빼는 가나 열 칸 물건이 넓은 예외가 아니게: 빼는 물건은 DQ4 명칭표에 없고 FC 물건 표 전체가 옮겨 오는 물건
     (reachable_items: 이름 대조 + 상자 대체)과 하나도 겹치지 않는다. 겹치는 DQ5 전용 물건은 빼지 않고 검사가 넘침으로 건다."""
 
     def test_excluded_items_never_come_from_dq4_data(self):
@@ -167,7 +167,7 @@ class ReachableItemTest(unittest.TestCase):
         self.assertGreater(len(reach), 90)
         excluded = {n for n in range(0xD8) if widths.excludable(n)}
         self.assertEqual(sorted(excluded & reach), [])
-        self.assertIn(0x97, excluded)               # メタルキングヘルム: DQ4 에 없는 DQ5 물건
+        self.assertIn(0x97, excluded)               # メタルキングヘルム: FC 어느 장에도 없는 DQ5 물건
         self.assertNotIn(0xC7, excluded)            # はるかぜのフルート: あやかしのふえ 의 상자 대체
 
     def test_chest_substitutes_count_as_given(self):

@@ -37,9 +37,10 @@ DQ5_ROM = Path(__file__).resolve().parents[3] / 'rom' / 'dq5.sfc'
 
 
 def reachable_items(dq4, dq5=DQ5_ROM):
-    """DQ4 데이터가 줄 수 있는 DQ5 물건 번호. 가게·보물·몬스터가 떨어뜨림·초기 소지품·사건 지급을 옮기는 길은 모두 FC 물건을
-    이름이 같은 DQ5 물건으로 바꾸고(dq4shopport.dq5_items), 이름이 다른 것은 빌린 자리(dq4itemport.BORROWED·EVENT_ITEMS)에 둔다.
-    그래서 FC 물건 표 전체를 그 길로 바꾼 집합 밖의 물건은 1·2·3장 어디서도 나오지 않는다."""
+    """FC 물건 표 전체(1~5장)를 이식 길로 바꾼 DQ5 물건 번호. 가게·보물·몬스터가 떨어뜨림·초기 소지품·사건 지급을 옮기는 길은
+    FC 물건을 이름이 같은 DQ5 물건으로 바꾸고(dq4shopport.dq5_items), 이름이 다른 것은 빌린 자리(dq4itemport.BORROWED·
+    EVENT_ITEMS)나 상자 대체(dq4chestport.SUBSTITUTE)로 둔다. 이 집합 밖의 물건은 FC 어느 장의 데이터에서도 오지 않는다.
+    장마다 실제로 손에 드는 집합보다 넓다(5장 물건도 든다) — 창 너비를 넓게 잡으려는 것이다."""
     import dq4growth
     import dq4itemport
     import dq4shopport
@@ -147,7 +148,7 @@ NENE_SPOT, NENE_RECORD, NENE_PAGES = 0x04AE21, 10, 8   # dq4windowname.NENE_SPOT
 NENE_KEYS = EXTRA + 0x10
 
 _SUBSTITUTE = ('C7 はるかぜのフルート: 상자 이식이 あやかしのふえ 를 바꿔 넣는 물건(dq4chestport.SUBSTITUTE)으로 2장 サントハイム '
-               '(3D/00) 상자에 들어 손에 든다. 한글 이름이 없어 가나 열 칸 그림뿐(아홉 칸 그림 없음). DQ4 열쇠 물건 자리를 따로 두거나 '
+               '(3D/00) 상자에 든다(빌드 롬 상자 표, 1~3장 기준. 그 상자에 걸어 닿는지는 화면 미확인). 한글 이름이 없어 가나 열 칸 그림뿐(아홉 칸 그림 없음). DQ4 열쇠 물건 자리를 따로 두거나 '
                '대체 물건 이름을 あやかしのふえ 의 한글로 하는 고침이 지운다')
 ALLOW = {
     (0x3A, '변 어긋남'): ('#1245 가 3A 를 x 1·너비 30(열 1~30)으로 넓혀, 원래 열 2~29 로 맞던 메시지 창 00 의 왼쪽·오른쪽 변과 가게 창 33(열 22~29)의 '
@@ -270,7 +271,7 @@ class Widths:
                 if cols >= 10:
                     second = self.data[lorom(TEXT_BANK << 16 | at + 1 + cols * 9)]
                     if not second and self.excludable(n):
-                        # 한글이 없어 가나 그림만 있는 열 칸 이름은 DQ4 명칭표에 없고 DQ4 데이터가 주지 않는 DQ5 전용 물건이다
+                        # 한글이 없어 가나 그림만 있는 열 칸 이름은 DQ4 명칭표에 없고 FC 물건 표 전체에서도 오지 않는 DQ5 전용 물건이다
                         self.wide_items.append(n)
                         continue
                     cols = second or cols
@@ -291,11 +292,11 @@ class Widths:
         return self._tables['dq5only']
 
     def excludable(self, n):
-        """아홉 칸 창의 너비에서 뺄 수 있는 물건: DQ4 명칭표에 없고(dq5_only) DQ4 데이터가 주지 않는다(reachable)."""
+        """아홉 칸 창의 너비에서 뺄 수 있는 물건: DQ4 명칭표에 없고(dq5_only) FC 물건 표 전체에서도 오지 않는다(reachable)."""
         return n in self.dq5_only() and n not in self.reachable()
 
     def reachable(self):
-        """DQ4 에서 손에 들 수 있는 DQ5 물건 번호(reachable_items). FC 롬이 없으면 빈 집합이라 아무것도 빼지 않는다."""
+        """FC 물건 표 전체에서 올 수 있는 DQ5 물건 번호(reachable_items). FC 롬이 없으면 모든 번호로 보아 아무것도 빼지 않는다."""
         if 'reach' not in self._tables:
             self._tables['reach'] = reachable_items(self.dq4) if self.dq4 else None
         reach = self._tables['reach']
@@ -644,7 +645,7 @@ def main():
     ap.add_argument('--rom', required=True, help='빌드한 롬')
     ap.add_argument('--base', required=True, help='원래 DQ5 롬(모르는 코드가 든 줄의 보수 상한, 겹침의 원래 꼴)')
     ap.add_argument('--dump', action='store_true', help='창마다 줄 칸을 찍음')
-    ap.add_argument('--dq4', default=str(FC_ROM), help='FC 롬(DQ4 에서 손에 드는 물건을 셈)')
+    ap.add_argument('--dq4', default=str(FC_ROM), help='FC 롬(FC 물건 표 전체가 옮겨 오는 DQ5 물건을 셈)')
     args = ap.parse_args()
     data = Path(args.rom).read_bytes()
     base = Path(args.base).read_bytes()
