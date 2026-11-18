@@ -26,7 +26,7 @@ paths = [
   "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
   "sfc/dq4/tools/dq4cores.py",
   "sfc/dq4/tools/dq4libretro.py",
-  "sfc/dq4/tools/dq4ch3bridgescreen.py",
+  "sfc/dq4/tools/dq4bridgescreencheck.py",
   "sfc/dq4/tools/dq4screens.py",
   "sfc/dq4/tools/dq4screencheck.py",
   "sfc/dq4/tools/dq4fieldgfx.py",
@@ -37,6 +37,6 @@ paths = [
   "sfc/dq4/tools/lua/dq4screen.lua",
   "sfc/dq4/screens.toml",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/bridgescreen && uv run --locked python sfc/dq4/tools/dq4ch3bridgescreen.py --rom work/ch3/dq4-ch1-full.sfc --out work/bridgescreen"
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/bridgescreen && uv run --locked python sfc/dq4/tools/dq4bridgescreencheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/bridgescreen"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(3장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
 groups = ["ch1-build", "ch1-walk"]

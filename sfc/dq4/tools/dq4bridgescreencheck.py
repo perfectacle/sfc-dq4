@@ -6,7 +6,7 @@ sfc/dq4/docs/dq4-screen-baseline-format.md, 다리는 sfc/dq4/docs/dq4-chapter3-
   bridge-broken  고치기 전: 다리 서쪽 칸에서 오른쪽으로 걸어도 막혀 선 자리(끊긴 석교: 아래층 물, 위층 석교 조각)
   bridge-mended  고친 뒤: 다리를 건너 동쪽 섬에 선 자리에서 서쪽으로 되건넌 자리(석교)
 
-  uv run --locked python sfc/dq4/tools/dq4ch3bridgescreen.py --rom work/ch3/dq4-ch1-full.sfc --out work/bridgescreen
+  uv run --locked python sfc/dq4/tools/dq4bridgescreencheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/bridgescreen
   … --write-screens "까닭"     지금 화면으로 기준을 고친다
 """
 import argparse
