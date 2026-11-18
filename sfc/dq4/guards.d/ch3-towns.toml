@@ -36,6 +36,7 @@ paths = [
   "sfc/dq5/tools/dq5npcrecordcheck.py",
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4chapter1.py build --rom work/ch3/menu.sfc --keep work/ch3/keep --chapter3 --out work/ch3/npc.sfc && uv run --locked python sfc/dq4/tools/dq4ch3townscheck.py --keep work/ch3/keep --texts work/ch3/messages.json --rom work/ch3/dq4-ch1-full.sfc && rm -rf work/ch3towns && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter3 --rom work/ch3/npc.sfc --build work/ch3/keep/groups --layout work/ch3/keep/npc-layout.json --texts work/ch3/messages.json --out work/ch3towns --states towns_son_freed,towns_foxed,towns_letter,towns_prince,towns_chased,towns_shop,towns_casino --jobs 4"

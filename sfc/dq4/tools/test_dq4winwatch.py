@@ -76,7 +76,7 @@ class CheckTest(unittest.TestCase):
         self.m = [0x2C00] * 1024
 
     def rules(self):
-        return sorted({(r, c, rule) for r, c, rule, _ in ww.check(shot(self.m), self.ref)})
+        return sorted({(b[0], b[1], b[2]) for b in ww.check(shot(self.m), self.ref)})
 
     def test_whole_window_passes(self):
         draw(self.m, 15, 1, 25, 29)
@@ -115,6 +115,21 @@ class CheckTest(unittest.TestCase):
         self.m[27 * 32 + 15] = 0x2000 | V | ww.PROMPT
         self.assertEqual(self.rules(), [])
 
+    def test_closed_window_fragment(self):
+        draw(self.m, 4, 4, 8, 12)
+        self.m[20 * 32 + 3] = 0x2000 | 0x8E
+        self.assertEqual(self.rules(), [(20, 3, '잔상')])
+
+    def test_window_off_screen(self):
+        draw(self.m, 24, 4, 29, 12)
+        self.assertEqual(self.rules(), [(27, 4, '화면 밖')])
+
+    def test_overlapping_windows_one_cell_apart(self):
+        # 가게 동료 창 3A(1~30)와 뒤의 메시지 창(2~29)
+        draw(self.m, 17, 2, 27, 29)
+        draw(self.m, 15, 1, 25, 30)
+        self.assertEqual(self.rules(), [(15, 1, '변 어긋남'), (15, 30, '변 어긋남')])
+
     def test_other_screen_is_skipped(self):
         # 테두리 칸 그림이 롬과 다르면 창 화면이 아니다
         draw(self.m, 4, 4, 8, 12)
@@ -125,7 +140,7 @@ class CheckTest(unittest.TestCase):
 
 
 def record_s(id_, frame, cells, tiles):
-    out = struct.pack('<cIIHHHHHH', b'S', id_, frame, 0x1C00, 0x1000, 0, 0, len(cells), len(tiles))
+    out = struct.pack('<cIIHHHHHHHH', b'S', id_, frame, 0x1C00, 0x1000, 0, 0, len(cells), len(tiles), 0, 0)
     out += b''.join(struct.pack('<HH', i, w) for i, w in cells)
     out += b''.join(struct.pack('<H', t) + a for t, a in tiles)
     return out
@@ -133,6 +148,19 @@ def record_s(id_, frame, cells, tiles):
 
 def record_e(frame, id_):
     return struct.pack('<cIi', b'E', frame, id_)
+
+
+class RuleFilesTest(unittest.TestCase):
+    def test_every_rule_file_has_the_contract(self):
+        names = [m.NAME for m in ww.rules()]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertTrue({'테두리', '창 밖', '잔상', '화면 밖', '깨짐'} <= set(names))
+
+    def test_allow_needs_a_reason_and_matches_scene_and_cells(self):
+        a = ww.Allow('*/towns_slot_*', '슬롯 화면은 BG3 를 릴 그림에 씀', frozenset({(3, 4)}))
+        self.assertTrue(a.matches('work/ch3walk/towns_slot_win', 3, 4))
+        self.assertFalse(a.matches('work/ch3walk/towns_slot_win', 3, 5))
+        self.assertFalse(a.matches('work/ch3walk/towns_prize', 3, 4))
 
 
 class FileTest(unittest.TestCase):
@@ -143,7 +171,7 @@ class FileTest(unittest.TestCase):
         broken[18 * 32 + 29] = 0x2001
         chr_ = vram_chr()
         used = sorted({w & 0x3FF for w in m} | set(range(0x8B, 0x96)) | {1})
-        data = record_s(1, 10, list(enumerate(m)), [(t, chr_[t * 16:t * 16 + 16]) for t in used]) + record_e(10, 1)
+        data = b'V' + struct.pack('<H', ww.VERSION) + record_s(1, 10, list(enumerate(m)), [(t, chr_[t * 16:t * 16 + 16]) for t in used]) + record_e(10, 1)
         # 깨진 모습이 한 프레임만(전환 중) 보였다가, 다시 깨진 채 길게 보인다
         data += record_s(2, 20, [(18 * 32 + 29, 0x2001)], []) + record_e(20, 2) + record_e(21, 1) + record_e(40, 2)
         data += record_e(41, 1)
@@ -163,6 +191,8 @@ class FileTest(unittest.TestCase):
     def test_broken_file_is_an_error(self):
         with self.assertRaises(ValueError):
             ww.parse(b'X')
+        with self.assertRaises(ValueError):
+            ww.parse(b'V\x01\x00')
 
 
 if __name__ == '__main__':

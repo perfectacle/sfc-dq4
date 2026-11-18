@@ -1,33 +1,38 @@
-"""MesenCE 장면에서 화면에 보인 창의 테두리·창 밖 글자·깨진 칸을 찾는다.
+"""MesenCE 장면에서 화면에 보인 UI(창·글자·커서·스프라이트)가 깨진 곳을 찾는 판정 틀.
 
-형식은 sfc/dq4/docs/dq4-window-text-format.md 「창 테두리 검사」. lua/dq4winwatch.lua 가 장면 동안 BG3 이 바뀔 때마다 적은
-모습(타일맵 32 × 32, BG3 글자 칸 000~3FF 그림, 스크롤)을 읽는다. dq4mesen.py 가 모든 실행 뒤에 부른다.
+형식은 sfc/dq4/docs/dq4-window-text-format.md 「UI 깨짐 검사」. lua/dq4winwatch.lua 가 장면 동안 BG3 이 바뀔 때마다 적은
+모습(타일맵 32 × 32, BG3 글자 칸 000~3FF 그림, 스크롤, OAM, CGRAM)을 읽는다. dq4mesen.py 가 모든 실행 뒤에 부른다.
+
+규칙은 같은 폴더의 dq4winrule_<이름>.py 하나에 하나씩 둔다. 규칙 파일은 NAME(걸린 칸에 붙는 이름), MODE('report' 또는
+'fail'), ALLOW(예외 표: Allow 목록, 하나마다 까닭), check(screen) → [(줄, 열, 설명)] 을 둔다. screen 은 Screen 이고
+찾은 창(rects)·위 창(tops)·테두리 선 판정(stroke_ok) 등을 한 번만 셈해 규칙끼리 나눠 쓴다. 규칙을 더하는 일은 파일 하나를
+더하는 것이고 이 파일을 고치지 않는다.
 
 창 찾기: 모서리 타일(08C, 겹친 창의 이음 모서리 08B. 좌우·상하 뒤집기로 네 모서리)에서 위 변·왼쪽 변을 따라 맞은편
-모서리를 찾아 창 사각형을 정한다. 한쪽 모서리가 가려졌으면 다른 변으로 찾는다. 테두리 그림이 롬 04:E978(08B~095)과
-다른 모습(타이틀 등 BG3 을 창 밖 일에 쓰는 화면)은 보지 않는다.
+모서리를 찾아 창 사각형을 정한다. 한쪽 모서리가 가려졌으면 다른 변으로 찾는다. 네 변 모두 반 넘게 테두리 선이 보여야
+(위 창이 가린 칸은 보인 것으로 셈) 창이다. 두 모서리만 보이는 창은 옆 변을 따라가 위 창 안으로 들어간 자리를 가려진 변으로
+둔다. 겹친 두 창은 겹친 곳에서 테두리가 더 성한 쪽이 위다. 테두리 그림이 롬 04:E978(08B~095)과 다른 모습(BG3 을 창 밖
+일에 쓰는 화면)은 창 규칙에 빈 창 목록을 준다(screen.window_screen 이 거짓).
 
-  테두리  창 네 변의 칸마다, 그 자리에 와야 할 테두리 타일(모서리 08C, 위·아래 변 08D, 옆 변 08E 와 그 뒤집기)의 흰 선
-          점(색 1)이 화면 칸에도 모두 흰색이어야 한다. 이름 위 줄을 합성한 칸·탁점 붙은 변(092~095)·구분선 이음(08F)은
-          선이 그대로라 통과한다. 다른 창 V 의 사각형 안에 든 칸은, V 의 테두리 가운데 이 창 사각형 안에 든 칸이 모두
-          성하면(V 가 위에 있음) 가려진 것으로 친다. 메시지 창 아래 변 가운데의 넘김 표시(▼ 07B)는 원래 DQ5 가 변 위에
-          그리므로 아래 변에서는 통과한다.
-  창 밖   창 사각형 바로 바깥 한 칸 테두리(다른 창 사각형 밖)는 투명(색 0)이어야 한다. 글자가 창을 넘었다.
-  깨짐    창 안쪽 칸 그림에 투명한 점(색 0)이 있다. 창 바탕을 뚫은 쓰레기 타일이다.
-  가나    창 안쪽 칸 그림이 롬 가나(04:E528 1bpp, 둘째 평면 FF)와 같다. 옮기지 않은 일본어 글자다.
+STEADY 프레임보다 짧게 보인 모습은 판정하지 않는다. 화면에 보이는 줄(세로 스크롤로 224점 안)에 든 칸만 걸린다.
 
-화면에 보이는 줄(세로 스크롤로 224점 안)에 든 칸만 걸린다.
-
+  DQ4_WINDOW_WATCH  rules(기본): 규칙 파일의 MODE 대로. report: 모두 보고만. fail: 모두 실패로
   uv run --locked python sfc/dq4/tools/dq4winwatch.py --rom 롬 폴더…   (폴더의 winwatch.bin 을 판정해 찍는다)
 """
 import argparse
+from dataclasses import dataclass
+import fnmatch
+import functools
+import importlib
 import os
 from pathlib import Path
 import struct
 import sys
 
+HERE = Path(__file__).resolve().parent
 LOG = 'winwatch.log'
 DATA = 'winwatch.bin'
+VERSION = 2
 BORDER_ROM = 0x04E978           # 08B~095, 타일마다 평면 0 8바이트 + 평면 1 8바이트
 BORDER_FIRST, BORDER_LAST = 0x8B, 0x95
 KANA_ROM = 0x04E528             # 칸 01 부터 1bpp 8바이트
@@ -40,8 +45,7 @@ SCREEN_H = 224
 # 이만큼 이어 보인 모습만 판정한다. DQ5 는 메시지 창을 열 때 한두 프레임마다 아래에서 두 줄씩 키우며 그 줄의 옛 창을
 # 지워, 그 사이 모습은 옛 창 아래쪽이 없거나 새 창 위 변이 없다(원래 엔진의 동작, 한 모습이 2프레임까지 감)
 STEADY = 3
-# DQ4_WINDOW_WATCH: report 면 winwatch.log 와 표준 오류에만 적고, fail 이면 걸린 실행을 실패로 올린다
-MODES = ('report', 'fail')
+MODES = ('rules', 'report', 'fail')
 
 
 def lorom(addr):
@@ -49,22 +53,26 @@ def lorom(addr):
 
 
 class Shot:
-    __slots__ = ('id', 'frame', 'map', 'chr', 'hs', 'vs')
+    __slots__ = ('id', 'frame', 'map', 'chr', 'hs', 'vs', 'oam', 'cgram')
 
-    def __init__(self, id_, frame, words, chr_, hs, vs):
+    def __init__(self, id_, frame, words, chr_, hs, vs, oam=bytes(544), cgram=bytes(512)):
         self.id, self.frame, self.map, self.chr, self.hs, self.vs = id_, frame, words, chr_, hs, vs
+        self.oam, self.cgram = oam, cgram
 
 
 def parse(data):
-    """({모습 번호: Shot}, [(프레임, 모습 번호 또는 -1 = 화면 꺼짐)]). 모습 기록은 앞 모습과 달라진 낱말·칸 그림만 담아
-    차례로 덮어 간다. 한 번도 적지 않은 칸 그림은 0 으로 둔다(그 모습의 타일맵이 가리키지 않는 칸)."""
+    """({모습 번호: Shot}, [(프레임, 모습 번호 또는 -1 = 화면 꺼짐)]). 모습 기록은 앞 모습과 달라진 낱말·칸 그림·OAM·CGRAM
+    낱말만 담아 차례로 덮어 간다. 한 번도 적지 않은 칸 그림은 0 으로 둔다(그 모습의 타일맵이 가리키지 않는 칸)."""
     shots, events, o = {}, [], 0
-    head = struct.Struct('<IIHHHHHH')
-    words, chr_ = [0] * 1024, bytearray(TILES * 16)
+    if data[:1] != b'V' or struct.unpack_from('<H', data, 1)[0] != VERSION:
+        raise ValueError(f'winwatch 기록 판이 {VERSION} 이 아님')
+    o = 3
+    head = struct.Struct('<IIHHHHHHHH')
+    words, chr_, oam, cgram = [0] * 1024, bytearray(TILES * 16), bytearray(544), bytearray(512)
     while o < len(data):
         kind = data[o:o + 1]
         if kind == b'S':
-            id_, frame, _, _, hs, vs, ncell, ntile = head.unpack_from(data, o + 1)
+            id_, frame, _, _, hs, vs, ncell, ntile, noam, ncg = head.unpack_from(data, o + 1)
             o += 1 + head.size
             for _ in range(ncell):
                 i, w = struct.unpack_from('<HH', data, o)
@@ -74,7 +82,12 @@ def parse(data):
                 (t,) = struct.unpack_from('<H', data, o)
                 chr_[t * 16:t * 16 + 16] = data[o + 2:o + 18]
                 o += 18
-            shots[id_] = Shot(id_, frame, tuple(words), bytes(chr_), hs, vs)
+            for store, n in ((oam, noam), (cgram, ncg)):
+                for _ in range(n):
+                    i, w = struct.unpack_from('<HH', data, o)
+                    store[2 * i:2 * i + 2] = struct.pack('<H', w)
+                    o += 4
+            shots[id_] = Shot(id_, frame, tuple(words), bytes(chr_), hs, vs, bytes(oam), bytes(cgram))
         elif kind == b'E':
             frame, id_ = struct.unpack_from('<Ii', data, o + 1)
             events.append((frame, id_))
@@ -244,84 +257,122 @@ def visible(shot, r):
     return y < SCREEN_H or y > 256 - 8
 
 
-def check(shot, ref):
-    """[(줄, 열, 규칙, 설명)] 걸린 칸. 테두리 그림이 롬과 다른 모습(창 밖 일에 BG3 을 쓰는 화면)은 []."""
-    if any(vram_tile(shot.chr, t) != ref.border[t] for t in (CORNER, EDGE, SIDE)):
-        return []
-    memo = {}
+class Screen:
+    """한 모습의 판정 재료. 규칙끼리 나눠 쓰는 셈(창 찾기·위 창·테두리 선)은 처음 쓸 때 한 번만 한다."""
 
-    def stroke_ok(r, c, tile, h, v):
+    def __init__(self, shot, ref, scene=''):
+        self.shot, self.ref, self.scene = shot, ref, scene
+        self._stroke = {}
+
+    def word(self, r, c):
+        return word(self.shot, r, c)
+
+    def shown(self, r, c):
+        return shown(self.shot, word(self.shot, r, c))
+
+    def visible(self, r):
+        return visible(self.shot, r)
+
+    @functools.cached_property
+    def window_screen(self):
+        """BG3 테두리 칸 그림이 롬과 같은가(창을 그리는 화면인가)."""
+        return all(vram_tile(self.shot.chr, t) == self.ref.border[t] for t in (CORNER, EDGE, SIDE))
+
+    def stroke_ok(self, r, c, tile, h, v):
+        """(r, c) 칸에 테두리 타일 tile(뒤집기 h·v)의 흰 선 점이 모두 보이는가."""
         key = r, c, tile, h, v
-        if key not in memo:
-            px = shown(shot, word(shot, r, c))
-            memo[key] = px is not None and all(px[y][x] == 1 for y, x in ref.stroke(tile, h, v))
-        return memo[key]
+        if key not in self._stroke:
+            px = self.shown(r, c)
+            self._stroke[key] = px is not None and all(px[y][x] == 1 for y, x in self.ref.stroke(tile, h, v))
+        return self._stroke[key]
 
-    def frac(v, w):
+    def frac(self, v, w):
         """창 v 의 테두리 칸 가운데 w 사각형 안에 든 것의 성한 비율(든 칸이 없으면 None)."""
         over = [cell for cell in border_cells(v) if inside(w, cell[0], cell[1])]
-        return sum(stroke_ok(*cell) for cell in over) / len(over) if over else None
+        return sum(self.stroke_ok(*cell) for cell in over) / len(over) if over else None
 
-    def above(v, w):
+    def above(self, v, w):
         """v 가 w 위에 있다: 겹친 곳에서 v 의 테두리가 w 의 테두리보다 더 성하다(위 창의 테두리가 아래 창 위에 그려짐)."""
-        a, b = frac(v, w), frac(w, v)
+        a, b = self.frac(v, w), self.frac(w, v)
         return a is not None and (b is None or a > b)
 
-    # 서로 다른 창의 모서리를 이어 붙인 사각형은 어느 변이 거의 다 끊겨 있다. 네 변 모두 반 넘게 성한(위에 있는 다른 창에
-    # 가려진 칸은 성한 것으로 셈) 것만 창으로 본다. 가린 창이 먼저 정해져야 하므로 늘지 않을 때까지 되풀이
-    rects, left = [], windows(shot)
-    while True:
-        more = [w for w in left if all(
-            2 * sum(stroke_ok(*cell) or any(inside(v, cell[0], cell[1]) and above(v, w) for v in rects)
-                    for cell in side) > len(side) for side in sides(w))]
-        if not more:
-            break
-        rects += more
-        left = [w for w in left if w not in more]
-    rects += covered(shot, rects, stroke_ok)
-    tops = {w: [v for v in rects if v != w and above(v, w)] for w in rects}
-    bad = []
-    for w in rects:
-        for r, c, t, h, v in border_cells(w):
-            if stroke_ok(r, c, t, h, v) or any(inside(x, r, c) for x in tops[w]) or not visible(shot, r):
+    @functools.cached_property
+    def rects(self):
+        """[(위 줄, 왼쪽 열, 아래 줄, 오른쪽 열)] 이 모습의 창. 창 화면이 아니면 []."""
+        if not self.window_screen:
+            return []
+        # 서로 다른 창의 모서리를 이어 붙인 사각형은 어느 변이 거의 다 끊겨 있다. 네 변 모두 반 넘게 성한(위에 있는 다른
+        # 창에 가려진 칸은 성한 것으로 셈) 것만 창으로 본다. 가린 창이 먼저 정해져야 하므로 늘지 않을 때까지 되풀이
+        rects, left = [], windows(self.shot)
+        while True:
+            more = [w for w in left if all(
+                2 * sum(self.stroke_ok(*cell) or any(inside(v, cell[0], cell[1]) and self.above(v, w) for v in rects)
+                        for cell in side) > len(side) for side in sides(w))]
+            if not more:
+                break
+            rects += more
+            left = [w for w in left if w not in more]
+        return rects + covered(self.shot, rects, self.stroke_ok)
+
+    @functools.cached_property
+    def tops(self):
+        """{창: 그 창 위에 있는 창 목록}"""
+        return {w: [v for v in self.rects if v != w and self.above(v, w)] for w in self.rects}
+
+    def hidden(self, w, r, c):
+        """(r, c) 가 창 w 위의 다른 창에 가려졌는가."""
+        return any(inside(v, r, c) for v in self.tops[w])
+
+    def in_window(self, r, c):
+        return any(inside(w, r, c) for w in self.rects)
+
+
+@dataclass(frozen=True)
+class Allow:
+    """규칙 예외 하나. scene 은 장면 폴더 경로(라벨)에 맞추는 fnmatch 꼴, cells 는 (줄, 열) 모음(없으면 모든 칸).
+    why 는 왜 깨진 것이 아닌지(원래 DQ5 화면과 같음 등)."""
+    scene: str
+    why: str
+    cells: frozenset = None
+
+    def matches(self, scene, r, c):
+        return fnmatch.fnmatch(scene, self.scene) and (self.cells is None or (r, c) in self.cells)
+
+
+def rules():
+    """[규칙 모듈] dq4winrule_*.py, 이름 차례."""
+    if str(HERE) not in sys.path:
+        sys.path.insert(0, str(HERE))
+    out = []
+    for p in sorted(HERE.glob('dq4winrule_*.py')):
+        m = importlib.import_module(p.stem)
+        for attr in ('NAME', 'MODE', 'ALLOW', 'check'):
+            if not hasattr(m, attr):
+                raise ValueError(f'{p.name}: {attr} 가 없음')
+        if m.MODE not in ('report', 'fail'):
+            raise ValueError(f'{p.name}: MODE 는 report·fail')
+        if any(not a.why.strip() for a in m.ALLOW):
+            raise ValueError(f'{p.name}: 까닭 없는 예외')
+        out.append(m)
+    return out
+
+
+def check(shot, ref, scene='', only=None):
+    """[(줄, 열, 규칙 이름, 설명, 규칙 MODE)] 걸린 칸. 한 칸은 먼저 건 규칙(이름 차례) 하나만 적는다."""
+    screen = Screen(shot, ref, scene)
+    bad, marked = [], set()
+    for rule in rules():
+        if only and rule.NAME not in only:
+            continue
+        for r, c, why in rule.check(screen):
+            if (r, c) in marked or not screen.visible(r) or any(a.matches(scene, r, c) for a in rule.ALLOW):
                 continue
-            if t == EDGE and v and word(shot, r, c) & 0x3FF == PROMPT:
-                continue
-            edge = (('위', '아래')[r == w[2]] if r in (w[0], w[2]) else ('왼쪽', '오른쪽')[c == w[3]])
-            bad.append((r, c, '테두리', f'창 {w} 의 {edge} 변 칸이 {word(shot, r, c):04X}'))
-    seen = set()
-    for w in rects:
-        r1, c1, r2, c2 = w
-        ring = [(r1 - 1, c) for c in range(c1 - 1, c2 + 2)] + [(r2 + 1, c) for c in range(c1 - 1, c2 + 2)]
-        ring += [(r, c1 - 1) for r in range(r1, r2 + 1)] + [(r, c2 + 1) for r in range(r1, r2 + 1)]
-        for r, c in ring:
-            if not (0 <= r < 32 and 0 <= c < 32) or (r, c) in seen or any(inside(x, r, c) for x in rects):
-                continue
-            seen.add((r, c))
-            px = shown(shot, word(shot, r, c))
-            if (px is None or any(any(row) for row in px)) and visible(shot, r):
-                bad.append((r, c, '창 밖', f'창 {w} 바깥 칸이 {word(shot, r, c):04X}'))
-    marked = {(b[0], b[1]) for b in bad}
-    for w in rects:
-        r1, c1, r2, c2 = w
-        for r in range(r1 + 1, r2):
-            for c in range(c1 + 1, c2):
-                if (r, c) in marked or not visible(shot, r) or any(inside(v, r, c) for v in tops[w]):
-                    continue
-                wd = word(shot, r, c)
-                px = shown(shot, wd)
-                if px is None or any(0 in row for row in px):
-                    rule = '깨짐'
-                elif wd & 0x3FF in KANA and px == flip(ref.kana[wd & 0x3FF], wd & 0x4000, wd & 0x8000):
-                    rule = '가나'
-                else:
-                    continue
-                marked.add((r, c))
-                bad.append((r, c, rule, f'창 {w} 안 칸이 {wd:04X}'))
+            marked.add((r, c))
+            bad.append((r, c, rule.NAME, why, rule.MODE))
     return bad
 
 
-def analyze(folder, rom):
+def analyze(folder, rom, scene=None):
     """[(모습, 처음 프레임, 이어 보인 가장 긴 프레임 수, 걸린 칸)] winwatch.bin 이 없으면 None. STEADY 프레임보다 짧게 보인
     모습은 보지 않는다."""
     path = Path(folder) / DATA
@@ -329,6 +380,7 @@ def analyze(folder, rom):
         return None
     shots, events = parse(path.read_bytes())
     ref = Ref(rom)
+    scene = scene or str(folder)
     frames = {}
     for (f, i), nxt in zip(events, events[1:] + [(None, None)]):
         if i in shots:
@@ -341,7 +393,7 @@ def analyze(folder, rom):
         first, n = frames.get(i, (shot.frame, 0))
         if n < STEADY:
             continue
-        bad = check(shot, ref)
+        bad = check(shot, ref, scene)
         if bad:
             out.append((shot, first, n, bad))
     return out
@@ -349,9 +401,9 @@ def analyze(folder, rom):
 
 def picture(shot, bad, margin=1):
     """걸린 칸 둘레의 타일맵 낱말(걸린 칸은 * 표)."""
-    rows = sorted({r for r, *_ in bad})
-    cols = sorted({c for _, c, *_ in bad})
-    marks = {(r, c) for r, c, *_ in bad}
+    rows = sorted({b[0] for b in bad})
+    cols = sorted({b[1] for b in bad})
+    marks = {(b[0], b[1]) for b in bad}
     lines = []
     for r in range(max(0, rows[0] - margin), min(32, rows[-1] + margin + 1)):
         cells = []
@@ -362,25 +414,30 @@ def picture(shot, bad, margin=1):
 
 
 def report(folder, rom, label=None):
-    """winwatch.log 를 쓰고 걸린 모습 수를 돌려준다(기록이 없으면 None)."""
-    found = analyze(folder, rom)
+    """winwatch.log 를 쓰고 (걸린 모습 수, 실패로 치는 모습 수) 를 돌려준다(기록이 없으면 None)."""
+    found = analyze(folder, rom, label)
     if found is None:
         return None
-    lines = []
+    lines, failing = [], 0
+    force = mode()
     for shot, first, n, bad in found:
-        rules = sorted({b[2] for b in bad})
-        lines.append(f'모습 {shot.id} 프레임 {first}부터 {n}프레임 스크롤 {shot.hs},{shot.vs}: {len(bad)}칸 ({", ".join(rules)})')
-        lines += [f'  {r},{c} {rule}: {why}' for r, c, rule, why in bad[:40]]
+        rules_ = sorted({b[2] for b in bad})
+        fail = force == 'fail' or (force == 'rules' and any(b[4] == 'fail' for b in bad))
+        failing += fail
+        lines.append(f'모습 {shot.id} 프레임 {first}부터 {n}프레임 스크롤 {shot.hs},{shot.vs}: {len(bad)}칸 '
+                     f'({", ".join(rules_)}){" 실패" if fail else ""}')
+        lines += [f'  {r},{c} {rule}: {why}' for r, c, rule, why, _ in bad[:40]]
         lines += picture(shot, bad)
     (Path(folder) / LOG).write_text('\n'.join(lines) + ('\n' if lines else ''), encoding='utf-8')
     if found:
-        print(f'[winwatch] {label or folder}: 창 깨짐 {len(found)}개 모습(첫 프레임 {found[0][1]}, '
-              f'{found[0][3][0][2]} {found[0][3][0][0]},{found[0][3][0][1]}) — {Path(folder) / LOG}', file=sys.stderr)
-    return len(found)
+        first = found[0][3][0]
+        print(f'[winwatch] {label or folder}: UI 깨짐 {len(found)}개 모습(실패 {failing}, 첫 프레임 {found[0][1]}, '
+              f'{first[2]} {first[0]},{first[1]}) — {Path(folder) / LOG}', file=sys.stderr)
+    return len(found), failing
 
 
 def mode():
-    m = os.environ.get('DQ4_WINDOW_WATCH', 'report')
+    m = os.environ.get('DQ4_WINDOW_WATCH', 'rules')
     if m not in MODES:
         raise SystemExit(f'DQ4_WINDOW_WATCH 는 {"·".join(MODES)} 가운데 하나: {m}')
     return m
@@ -391,17 +448,20 @@ class WindowBroken(RuntimeError):
 
 
 def verdict(folder, rom_path, label=None):
-    """report 를 쓰고, fail 모드면 걸린 것이 있을 때 WindowBroken 을 올린다."""
+    """report 를 쓰고, 실패로 치는 모습이 있으면 WindowBroken 을 올린다. 걸린 모습 수를 돌려준다."""
     rom = Path(rom_path).read_bytes()
     try:
-        n = report(folder, rom, label)
+        got = report(folder, rom, label)
     except (ValueError, struct.error) as e:
         if mode() == 'fail':
             raise WindowBroken(f'winwatch 기록을 읽지 못함: {Path(folder) / DATA}: {e}') from e
         print(f'[winwatch] {label or folder}: 기록을 읽지 못함: {e}', file=sys.stderr)
         return None
-    if n and mode() == 'fail':
-        raise WindowBroken(f'창 깨짐 {n}개 모습: {Path(folder) / LOG}')
+    if got is None:
+        return None
+    n, failing = got
+    if failing:
+        raise WindowBroken(f'UI 깨짐 {failing}개 모습: {Path(folder) / LOG}')
     return n
 
 
@@ -413,12 +473,12 @@ def main():
     rom = a.rom.read_bytes()
     total = 0
     for f in a.folders:
-        n = report(f, rom)
-        if n is None:
+        got = report(f, rom)
+        if got is None:
             print(f'{f}: 기록 없음')
             continue
-        total += n
-        print(f'{f}: {n}개 모습')
+        total += got[0]
+        print(f'{f}: {got[0]}개 모습(실패 {got[1]})')
         text = (f / LOG).read_text(encoding='utf-8')
         if text:
             print(text, end='')
