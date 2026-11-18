@@ -41,6 +41,9 @@ END_SCENE = 'end3'              # dq4chapterbox.ENDING3 의 이름
 ENDING_SONG = 0x14
 SONG_STOP, SONG_PLAY = 0x24FE91, 0x24FE9A
 SONG_WAIT_MAX = 300             # 곡 자료를 SPC 로 보내는 데 약 120프레임(dq4ch2ending.SONG_WAIT_MAX 와 같음)
+# 장 끝 곡이 울기 시작한 뒤 검은 화면으로 둘 프레임: FC 는 곡을 튼 뒤 415프레임 기다렸다가(1A:$8071 이 $6BF9 를 봄)
+# 기록 물음(03BE)으로 간다. 이 해킹은 그 자리에 끝 상자를 띄운다
+ENDING_HOLD = 415
 HERO_X, HERO_Y = 0x7E3020, 0x7E3080
 FLAG_AT = 0x7E2190
 
@@ -70,13 +73,19 @@ MIGRANT_PATH = ((0x12, 0x04), (0x12, 0x06), (0x0A, 0x06), (0x0A, 0x0C), (0x05, 0
 # FC 나그네는 계단 (1F,02) 에서 숨지만, 그 칸에는 장 끝 인물이 서 있어 바로 아래 (1F,03) 에서 숨는다
 TRAVELER_PATH = ((0x13, 0x07), (0x13, 0x05), (0x1F, 0x05), (0x1F, 0x03))
 
-# 걷는 인물은 길 한 토막(목표 칸 하나)을 걷기 전에, 그 토막의 셀 사각형을 둘레 GAP 셀만큼 넓힌 곳에 주인공이 없을 때까지
-# 기다린다. 인물은 2×2 셀이라 셀 차가 2 보다 작으면 겹쳐 보이고, 걸음 도중에는 주인공 셀이 다음 셀로 먼저 바뀌므로 한 셀
-# 더 둔다. 엔진의 걸음 막기만 믿으면 주인공이 비키는 순간 인물이 그 칸으로 들어와 몇 프레임 겹쳤다(heroblock 실측 7프레임).
-# 이주민의 첫 토막은 맵에 들 때 시작해 주인공(도착 칸은 두 계단)이 닿을 수 없어 기다리지 않는다
+# 걷는 인물은 FC 처럼 한 칸(FC 칸, 셀 둘)씩 걷는다(pace). 걸음마다 지금 자리에서 그 토막 끝까지의 셀 사각형을 옆으로
+# GAP 셀, 앞으로 GAP 셀 넓힌 곳에 주인공이 있으면 기다린다. 인물은 2×2 셀이라 셀 차가 2 보다 작으면 겹쳐 보이고, 걸음
+# 도중에는 주인공 셀이 다음 셀로 먼저 바뀐다. 엔진의 걸음 막기만 믿으면 주인공이 비키는 순간 인물이 그 칸으로 들어와 몇
+# 프레임 겹쳤다(heroblock 실측 7프레임)
 GAP = 2
-MIGRANT_START = MIGRANTS[0]
-GATED = {'migrant': 1, 'traveler': 0}       # 이 토막부터 기다림
+# 한 칸에 드는 프레임(FC 실측: 이주민 96, 나그네 약 128). 한 칸 걸음(16프레임)이 끝나면 다음 이동 간격 차례에 pace 가 다음
+# 칸을 정해, 간격 하나에 한 칸 간다(실측: 간격 32 에 32프레임마다 한 칸). 그래서 간격 = 칸 프레임
+TILE_FRAMES = {'migrant': 96, 'traveler': 128}
+# 둘째 이주민은 첫째 한 칸 뒤 (17,04)에서 같은 스크립트로 걷는다. 길의 첫 칸을 그 칸으로 둔다
+WALKS = {'migrant': ((0x17, 0x04), MIGRANT_PATH), 'traveler': (TRAVELER, TRAVELER_PATH)}
+NPC_SLOT = 0x7E0090                         # 스크립트를 돌리는 인물 슬롯(01:C800 이 둠)
+NPC_X, NPC_X_HI, NPC_Y, NPC_Y_HI = 0x7E3020, 0x7E3040, 0x7E3080, 0x7E30A0
+GOAL_X, GOAL_X_HI, GOAL_Y, GOAL_Y_HI = 0x7E3560, 0x7E3580, 0x7E35A0, 0x7E35C0   # 명령 13 의 자리
 
 # 빌린 인물 스크립트(DQ5 04/03 목록 05:996C, dq4ch3slots T). 칸마다 (칸 번호, 스크립트 길이 바이트 주소, 그 길이)
 SCRIPT_LIST = '05:996C'
@@ -105,37 +114,91 @@ def _asm():
     return Asm()
 
 
-def _within(rect, far=1, near=0):
-    """인물 명령 05: 주인공 셀이 rect 안이면 A = near, 밖이면 far(인물 표 X·Y 의 bit7 은 지움)."""
-    from dq4ch2endor import BCC, BCS, BRA
-    x0, y0, x1, y1 = rect
-    a = _asm()(0x08, 0xE2, 0x30)
-    for table, lo, hi in ((HERO_X, x0, x1), (HERO_Y, y0, y1)):
-        a(0xAF, _al(table), 0x29, 0x7F, 0xC9, lo).br(BCC, 'out')(0xC9, hi + 1).br(BCS, 'out')
-    a(0xC2, 0x30, 0xA9, near, 0x00).br(BRA, 'end')
-    a.label('out')(0xC2, 0x30, 0xA9, far, 0x00)
-    a.label('end')(0x28, 0x6B)
-    return a.bytes()
-
-
 def legs(start, path):
-    """[(토막 시작 FC 칸, 끝 FC 칸)]."""
-    out, here = [], start
+    """[(토막 시작 셀, 끝 셀)]."""
+    out, here = [], cell(*start)
     for goal in path:
-        out.append((here, goal))
-        here = goal
+        out.append((here, cell(*goal)))
+        here = cell(*goal)
     return out
 
 
-def leg_rect(a, b):
-    """토막 a→b 의 셀 사각형을 GAP 셀 넓힌 (x0, y0, x1, y1)."""
-    (ax, ay), (bx, by) = cell(*a), cell(*b)
-    return (max(0, min(ax, bx) - GAP), max(0, min(ay, by) - GAP), max(ax, bx) + GAP, max(ay, by) + GAP)
+def tiles(walker):
+    """길 처음부터 끝까지의 FC 칸 수(스크립트가 pace 를 되풀이할 횟수)."""
+    return sum((abs(bx - ax) + abs(by - ay)) // 2 for (ax, ay), (bx, by) in legs(*WALKS[walker]))
 
 
-def _clear(rect):
-    """인물 명령 05: 주인공 셀이 rect 밖이면 A = 0(걸음), 안이면 1(기다림)."""
-    return _within(rect, far=0, near=1)
+def interval(walker):
+    return TILE_FRAMES[walker]
+
+
+def leg_rows(walker):
+    """pace 표의 토막 줄(5바이트): 움직이는 축(0 = X, 1 = Y), 고정 축 셀, 움직이는 축의 작은·큰 셀, 끝 셀."""
+    out = bytearray()
+    for (ax, ay), (bx, by) in legs(*WALKS[walker]):
+        along_y = ax == bx
+        fixed, start, goal = (ax, ay, by) if along_y else (ay, ax, bx)
+        out += bytes((int(along_y), fixed, min(start, goal), max(start, goal), goal))
+    return bytes(out) + b'\xff'
+
+
+def _pace(at, tables):
+    """인물 명령 05(표를 쓰는 공용 루틴과 걷는 인물마다 입구). 인물 자리가 놓인 토막(시작 칸 포함, 끝 칸 뺌)을 표에서
+    찾아, 주인공이 그 토막의 옆 GAP 셀 안이고 앞으로는 지금 자리부터 끝 + GAP 셀 안이면 A = 1(기다림). 아니면 걸어갈
+    자리(명령 13 의 자리)를 지금 자리에서 끝 쪽으로 한 칸(셀 둘) 두고 A = 0. 길 위가 아니면(끝 칸) 자리를 그대로 두고
+    A = 0 이라 뒤의 명령 14 가 곧바로 지나간다. at 은 이 코드가 놓일 주소, tables 는 {인물: 표 주소}(같은 뱅크).
+    (바이트, {인물: 입구 주소})."""
+    from dq4ch2endor import BCC, BEQ, BNE, BRA
+    BPL = 0x10
+    a = _asm()
+    entries = {}
+    names = list(tables)
+    t = lambda k: (min(tables.values()) + k) & 0xFFFF   # noqa: E731
+    base = min(tables.values())
+    for i, w in enumerate(names):
+        a.label(f'in_{w}')(0x08, 0xE2, 0x30, 0x8B, 0x4B, 0xAB, 0xA0, (tables[w] - base) & 0xFF)
+        if i + 1 < len(names):
+            a.brl('common')
+    a.label('common')(0xAF, _al(NPC_SLOT), 0xAA)
+    rd = lambda tab: (0xBF, _al(tab), 0x29, 0x7F)          # noqa: E731  LDA long,X / AND #$7F
+    hero = lambda tab: (0xAF, _al(tab), 0x29, 0x7F)        # noqa: E731
+    tb = lambda k: (0xB9, *t(k).to_bytes(2, 'little'))      # noqa: E731  LDA 표+k,Y
+    cmp = lambda k: (0xD9, *t(k).to_bytes(2, 'little'))     # noqa: E731  CMP 표+k,Y
+    a.label('loop')(*tb(0)).br(BPL, 'row').brl('none')
+    a.label('row').br(BNE, 'vert')
+    a(*rd(NPC_Y), *cmp(1)).br(BNE, 'next')(*hero(HERO_Y), 0x48, *hero(HERO_X), 0x48, *rd(NPC_X), 0x48).br(BRA, 'have')
+    a.label('skip')(0x68, 0x68, 0x68)
+    a.label('next')(0xC8, 0xC8, 0xC8, 0xC8, 0xC8).brl('loop')
+    a.label('vert')(*rd(NPC_X), *cmp(1)).br(BNE, 'next')(*hero(HERO_X), 0x48, *hero(HERO_Y), 0x48, *rd(NPC_Y), 0x48)
+    # 스택: 1,S 인물 자리, 2,S 주인공 움직이는 축, 3,S 주인공 옆 축
+    a.label('have')(0xA3, 0x01, *cmp(2)).br(BCC, 'skip')
+    a(*tb(3), 0xC3, 0x01).br(BCC, 'skip')
+    a(0xA3, 0x01, *cmp(4)).br(BEQ, 'skip')
+    a(0xA3, 0x03, 0x18, 0x69, GAP, *cmp(1)).br(BCC, 'go')
+    a(*tb(1), 0x18, 0x69, GAP, 0xC3, 0x03).br(BCC, 'go')
+    a(*tb(4), 0xC3, 0x01).br(BCC, 'dec')
+    a(0xA3, 0x02, 0xC3, 0x01).br(BCC, 'go')
+    a(*tb(4), 0x18, 0x69, GAP, 0xC3, 0x02).br(BCC, 'go').br(BRA, 'wait')
+    a.label('dec')(0xA3, 0x01, 0xC3, 0x02).br(BCC, 'go')
+    a(0xA3, 0x02, 0x18, 0x69, GAP, *cmp(4)).br(BCC, 'go')
+    a.label('wait')(0x68, 0x68, 0x68, 0xAB, 0xC2, 0x30, 0xA9, 0x01, 0x00, 0x28, 0x6B)
+    a.label('go')
+    for here, there in ((NPC_X, GOAL_X), (NPC_X_HI, GOAL_X_HI), (NPC_Y, GOAL_Y), (NPC_Y_HI, GOAL_Y_HI)):
+        a(0xBF, _al(here), 0x9F, _al(there))
+    for axis, goal in ((0, GOAL_X), (1, GOAL_Y)):
+        a.label(f'ax{axis}')
+        if axis == 0:
+            a(*tb(0)).br(BNE, 'ax1')
+        a(*tb(4), 0xC3, 0x01, 0xBF, _al(goal)).br(BCC, f'down{axis}')
+        a(0x18, 0x69, 0x02).br(BRA, f'put{axis}')
+        a.label(f'down{axis}')(0x38, 0xE9, 0x02)
+        a.label(f'put{axis}')(0x9F, _al(goal)).br(BRA, 'done')
+    a.label('done')(0x68, 0x68, 0x68)
+    a.label('none')(0xAB, 0xC2, 0x30, 0xA9, 0x00, 0x00, 0x28, 0x6B)
+    code = a.bytes()
+    # 입구마다 8바이트 앞머리와(마지막 입구 말고) common 으로 가는 BRL 3바이트
+    entries = {w: at + k * 11 for k, w in enumerate(names)}
+    return code, entries
 
 
 def hero_rect(x, y):
@@ -159,9 +222,6 @@ def _bump():
     return a.bytes()
 
 
-WALKS = {'migrant': (MIGRANT_START, MIGRANT_PATH), 'traveler': (TRAVELER, TRAVELER_PATH)}
-
-
 def _dark():
     """맵을 어둡게 한 뒤 주화면을 BG3(창)만으로: 검은 화면에 서술 창만 남는다. dq4prologue._darken 에서 곡 줄이기를
     뺀 것이다. FC 는 서술 동안 맵 곡을 그대로 두고, 서술이 끝난 뒤 장 끝 곡을 튼다."""
@@ -172,13 +232,24 @@ def _dark():
 
 def _ending_song():
     """맵 곡을 멈추고(1A) 장 끝 곡을 튼 뒤, 지금 곡($1D8B)이 그 곡이 될 때까지(상한 SONG_WAIT_MAX) 검은 화면으로 기다린다.
-    기다리지 않으면 끝 상자가 곡보다 먼저 뜬다(dq4ch2ending.native 와 같은 기다림)."""
+    기다리지 않으면 끝 상자가 곡보다 먼저 뜬다(dq4ch2ending.native 와 같은 기다림). 그 뒤 FC 처럼 ENDING_HOLD 프레임 더
+    검은 화면으로 둔다."""
     loop = (bytes((0xDA,)) + wait(1) + bytes((0xFA,                          # PHX / BRK 09 01 / PLX
             0xAD, 0x8B, 0x1D, 0xC9, ENDING_SONG, 0xF0, 0x03, 0xCA)))          # LDA $1D8B / CMP #곡 / BEQ 끝 / DEX
     return (ENTER + bytes((0x22,)) + _al(SONG_STOP) +                         # JSL 24:FE91
             bytes((0xA9, ENDING_SONG, 0x22)) + _al(SONG_PLAY) +               # LDA #곡 / JSL 24:FE9A
             bytes((0xE2, 0x20, 0xC2, 0x10, 0xA2, *SONG_WAIT_MAX.to_bytes(2, 'little'))) + loop +
-            bytes((0xD0, -(len(loop) + 2) & 0xFF)) + LEAVE)                   # BNE 고리
+            bytes((0xD0, -(len(loop) + 2) & 0xFF)) + _hold(ENDING_HOLD) + LEAVE)  # BNE 고리
+
+
+def _hold(frames):
+    """BRK 09 n(n ≤ 255)을 이어 frames 프레임 기다린다."""
+    out = b''
+    while frames:
+        n = min(frames, 255)
+        out += wait(n)
+        frames -= n
+    return out
 
 
 def _enter_hook():
@@ -204,11 +275,16 @@ def native(ctx):
                        ('enter', _enter_hook())):
         at[name] = ctx.code_at + len(out)
         out += code
-    for walker, (start, path) in WALKS.items():
-        for k, (a, b) in enumerate(legs(start, path)):
-            if k >= GATED[walker]:
-                at[f'{walker}{k}'] = ctx.code_at + len(out)
-                out += _clear(leg_rect(a, b))
+    # pace 루틴 뒤에 걷는 인물마다 표. 코드 길이는 표 주소와 상관없어(즉값 폭 고정) 한 번 세고 다시 짠다
+    rows = {w: leg_rows(w) for w in WALKS}
+    pace_at = ctx.code_at + len(out)
+    size = len(_pace(pace_at, {w: pace_at for w in WALKS})[0])
+    tables, k = {}, pace_at + size
+    for w, r in rows.items():
+        tables[w], k = k, k + len(r)
+    code, entries = _pace(pace_at, tables)
+    out += code + b''.join(rows.values())
+    at.update({f'{w}_pace': e for w, e in entries.items()})
     return bytes(out), at
 
 
@@ -302,13 +378,10 @@ def _cmd(op, *args, **kw):
 
 
 def _walk(ctx, walker):
-    start, path = WALKS[walker]
-    out = []
-    for k, (_, goal) in enumerate(legs(start, path)):
-        if k >= GATED[walker]:
-            out.append(_cmd('05', *_al(ctx.at[f'{walker}{k}'])))
-        out += [_cmd('13', *cell(*goal)), _cmd('14')]
-    return out
+    """FC 걸음 빠르기: 이동 간격을 칸 프레임으로 두고(1D), 셀마다 8프레임(1E 01) 걸음으로 pace → 도착 → 되풀이를
+    길의 칸 수만큼(02 n … 01). 남는 되풀이는 끝 칸에서 pace 가 자리를 그대로 두어 곧바로 지나간다."""
+    return [_cmd('1E', 0x01), _cmd('1D', interval(walker)), _cmd('02', tiles(walker)),
+            _cmd('05', *_al(ctx.at[f'{walker}_pace'])), _cmd('14'), _cmd('01')]
 
 
 def scripts(ctx):
@@ -322,7 +395,7 @@ def scripts(ctx):
         # 타이틀(돌아오지 않음)
         'ender': [_cmd('28'), _cmd('05', *_al(at['bump'])), _cmd('3F'), call(at['dark']),
                   _cmd('21', lo(msg['end']), hi(msg['end'])), call(at['ending_song']), call(end_box), _cmd('16')],
-        # 조작을 막지 않고 걷는다. 주인공이 다음 토막 둘레에 있으면 비킬 때까지 기다린다(위 GAP)
+        # 조작을 막지 않고 FC 빠르기로 한 칸씩 걷는다. 주인공이 앞 길 둘레에 있으면 비킬 때까지 기다린다(위 GAP)
         'migrant': _walk(ctx, 'migrant') + [_cmd('52'), _cmd('16')],
         'traveler': _walk(ctx, 'traveler') + [_cmd('52'), _cmd('16')],
         # 40/01 에 들 때 공사 재개 뒤면 소식이 옴

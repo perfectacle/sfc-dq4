@@ -331,6 +331,12 @@ class Walker:
                             buttons = {'b'} if n % 16 < 8 else set()
                         else:
                             buttons = {'a'} if n % 16 < 8 else set()
+                elif p[0] == 'gone':
+                    x = self.rd(wc.NPC_X + p[1])
+                    press = wc.GONE_MAX if press is None else press
+                    press -= 1
+                    if x == wc.GONE_X or press <= 0:
+                        press, wi = None, wi + 1
                 elif p[0] == 'settle':
                     c = self.rd(wc.CURSOR)
                     if press is None:

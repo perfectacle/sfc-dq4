@@ -124,19 +124,18 @@ class ScriptTest(unittest.TestCase):
         m = ctx.msg['end']
         self.assertEqual(ender[4]['args'], [m & 0xFF, m >> 8])
 
-    def test_walkers_keep_control_wait_for_the_hero_and_vanish(self):
+    def test_walkers_keep_control_pace_like_fc_and_vanish(self):
         ctx = _ctx()
         got = {s['address']: s['commands'] for s in tunnel.scripts(ctx)}
-        for name, path in (('migrant', tunnel.MIGRANT_PATH), ('traveler', tunnel.TRAVELER_PATH)):
+        for name in ('migrant', 'traveler'):
             cmds = got[tunnel.SCRIPTS[name][1]]
             ops = [c['op'] for c in cmds]
             self.assertNotIn('3F', ops)
-            self.assertEqual([tuple(c['args']) for c in cmds if c['op'] == '13'], [tunnel.cell(*p) for p in path])
-            self.assertEqual(ops[-2:], ['52', '16'])
-            # 기다리는 토막마다 05 바로 뒤 13
-            gates = [k for k, op in enumerate(ops) if op == '05']
-            self.assertEqual(len(gates), len(path) - tunnel.GATED[name])
-            self.assertTrue(all(ops[k + 1] == '13' for k in gates))
+            self.assertEqual(ops, ['1E', '1D', '02', '05', '14', '01', '52', '16'])
+            self.assertEqual(cmds[1]['args'], [tunnel.TILE_FRAMES[name]])
+            self.assertEqual(cmds[2]['args'], [tunnel.tiles(name)])
+            self.assertEqual(cmds[3]['args'], list(tunnel._al(ctx.at[f'{name}_pace'])))
+        self.assertEqual((tunnel.tiles('migrant'), tunnel.tiles('traveler')), (29, 23))
 
     def test_old_man_talk_follows_fc_06c(self):
         ctx = _ctx()
@@ -232,22 +231,53 @@ class RunTest(unittest.TestCase):
         self.assertEqual(self.bump(58, 5, right), 1)
         self.assertEqual(self.bump(62, 9, up), 1)
 
-    def clear(self, name, x, y):
-        cpu, at = machine()
-        cpu.wram[0x3020], cpu.wram[0x3080] = x, y
-        cpu.jsl(at[name], max_steps=200)
-        return cpu.a & 0xFFFF
+    SLOT = 8
 
-    def test_walkers_wait_while_the_hero_is_near_the_leg(self):
-        # 이주민 마지막 토막 (05,0C)→(05,0F) = 셀 x 10, y 25~31. 둘레 2셀 안이면 기다림
-        k = len(tunnel.MIGRANT_PATH) - 1
-        self.assertEqual(tunnel.leg_rect((0x05, 0x0C), (0x05, 0x0F)), (8, 23, 12, 33))
-        self.assertEqual(self.clear(f'migrant{k}', 10, 31), 1)      # 계단(도착 칸)
-        self.assertEqual(self.clear(f'migrant{k}', 8, 31), 1)       # 한 칸 비킨 중
-        self.assertEqual(self.clear(f'migrant{k}', 6, 31), 0)       # 두 칸 비킴
-        self.assertEqual(self.clear(f'migrant{k}', 10, 34), 0)
-        self.assertEqual(self.clear(f'migrant{k}', 10 | 0x80, 31), 1)
-        self.assertNotIn('migrant0', machine()[1])
+    def pace(self, name, npc, hero):
+        cpu, at = machine()
+        w = cpu.wram
+        w[0x0090] = self.SLOT
+        w[0x3020 + self.SLOT], w[0x3080 + self.SLOT] = npc
+        w[0x3040 + self.SLOT], w[0x30A0 + self.SLOT] = 0x01, 0x02
+        w[0x3020], w[0x3080] = hero
+        w[0x3560 + self.SLOT] = w[0x35A0 + self.SLOT] = 0xEE
+        cpu.p = 0x00
+        cpu.jsl(at[f'{name}_pace'], max_steps=3000)
+        goal = (w[0x3560 + self.SLOT], w[0x35A0 + self.SLOT], w[0x3580 + self.SLOT], w[0x35C0 + self.SLOT])
+        return cpu.a & 0xFFFF, goal, cpu.p
+
+    def test_pace_steps_one_tile_along_the_fc_path(self):
+        far = (0x3C, 0x05)
+        # 이주민 첫 토막 (17,04)→(12,04): 셀 (46,9) 에서 왼쪽 한 칸
+        self.assertEqual(self.pace('migrant', (46, 9), far)[:2], (0, (44, 9, 0x01, 0x02)))
+        self.assertEqual(self.pace('migrant', (44, 9), far)[:2], (0, (42, 9, 0x01, 0x02)))
+        # 토막 끝 (12,04) 은 다음 토막 (12,04)→(12,06) 의 시작: 아래로
+        self.assertEqual(self.pace('migrant', (36, 9), far)[:2], (0, (36, 11, 0x01, 0x02)))
+        # 마지막 토막 (05,0C)→(05,0F)
+        self.assertEqual(self.pace('migrant', (10, 25), far)[:2], (0, (10, 27, 0x01, 0x02)))
+        # 끝 칸 (05,0F): 자리를 건드리지 않음
+        self.assertEqual(self.pace('migrant', (10, 31), far)[:2], (0, (0xEE, 0xEE, 0, 0)))
+        # 나그네 (0C,07)→(13,07): 오른쪽, 끝 (1F,03) 에서 그대로
+        self.assertEqual(self.pace('traveler', (24, 15), far)[:2], (0, (26, 15, 0x01, 0x02)))
+        self.assertEqual(self.pace('traveler', (62, 7), (0, 0))[:2], (0, (0xEE, 0xEE, 0, 0)))
+        # bit7 이 켜진 자리도 셀로 본다
+        self.assertEqual(self.pace('migrant', (46 | 0x80, 9), far)[0], 0)
+
+    def test_pace_waits_while_the_hero_is_ahead_on_the_leg(self):
+        # 마지막 토막 (05,0C)→(05,0F) = 셀 x 10, y 25~31. 이주민이 (10,25) 일 때
+        npc = (10, 25)
+        for hero in ((10, 31), (8, 31), (12, 29), (10, 33), (10, 25)):
+            self.assertEqual(self.pace('migrant', npc, hero)[0], 1, hero)
+        for hero in ((7, 31), (13, 31), (10, 34), (10, 23), (6, 31)):
+            self.assertEqual(self.pace('migrant', npc, hero)[0], 0, hero)
+        # 왼쪽으로 가는 토막 (0A,0C)→(05,0C) = 셀 y 25, x 20→10. 이주민이 (16,25) 면 뒤(오른쪽)는 보지 않음
+        self.assertEqual(self.pace('migrant', (16, 25), (18, 25))[0], 0)
+        self.assertEqual(self.pace('migrant', (16, 25), (8, 25))[0], 1)
+        self.assertEqual(self.pace('migrant', (16, 25), (7, 25))[0], 0)
+
+    def test_pace_keeps_p(self):
+        for hero in ((0x3C, 0x05), (10, 31)):
+            self.assertEqual(self.pace('migrant', (10, 25), hero)[2], 0x00)
 
     def test_hook_jumps_to_the_routine(self):
         ctx = _ctx()
@@ -271,6 +301,10 @@ class RunTest(unittest.TestCase):
         self.assertIn(bytes((0xA9, tunnel.ENDING_SONG, 0x22, *tunnel._al(tunnel.SONG_PLAY))), song)
         self.assertIn(bytes((0x22, *tunnel._al(tunnel.SONG_STOP))), song)
         self.assertIn(bytes((0xAD, 0x8B, 0x1D, 0xC9, tunnel.ENDING_SONG)), song)
+        # 곡이 울기 시작한 뒤 FC 처럼 415프레임 더(BRK 09 n 을 이음)
+        import re
+        hold = song[song.rindex(bytes((0xCA,))) + 3:-len(tunnel.LEAVE)]
+        self.assertEqual(sum(n for n in re.findall(rb'\x00\x09(.)', hold, re.S) for n in n), tunnel.ENDING_HOLD)
 
 
 class SceneTest(unittest.TestCase):

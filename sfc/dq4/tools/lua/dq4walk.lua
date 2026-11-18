@@ -16,6 +16,8 @@
 --             물음에 「아니요」 로 답하지 않는다
 --   settle:N  고르기 창 커서(7E:0AD7)가 N 프레임 같은 값일 때까지 누르지 않고 기다린다(많아야 300 프레임). 창이 뜬 뒤
 --             커서가 몇 프레임 칸을 훑고 첫 칸에 놓이는 창에서, 훑는 값을 보고 cursor 가 끝나지 않게 그 앞에 둔다
+--   gone:S    인물 슬롯 S(10진)가 맵에서 빠질(명령 52 가 X 를 80 으로 둠) 때까지 누르지 않고 기다린다(많아야 6000 프레임).
+--             걸어 나가는 인물이 다 지나가기를 프레임 수 대신 기다릴 때 쓴다
 -- 프레임 수만 정해 누르면, 앞 장·앞 모듈이 메시지를 더해 창이 뜨는 때가 바뀔 때 누른 방향이 물음 창 커서를 옮겼다.
 -- STATE 세이브스테이트에서 시작해 주인공(인물 표 슬롯 0)을 WAYPOINTS 의 셀 좌표로 차례로 걷게 한다.
 -- WAYPOINTS="3,11;3,24;7,24;7,22" 처럼 x,y(맵 셀) 목록. 한 번에 한 축만 움직이므로 꺾이는 곳마다 점을 둔다.
@@ -42,7 +44,7 @@ for tok in string.gmatch(os.getenv("WAYPOINTS") or "", "[^;]+") do
     pts[#pts + 1] = {tonumber(x), tonumber(y)}
   else
     local b, f = tok:match("^(%a+):(%d+)$")
-    if b == "until" or b == "cursor" or b == "ask" or b == "pick" or b == "open" or b == "done" or b == "settle" then
+    if b == "until" or b == "cursor" or b == "ask" or b == "pick" or b == "open" or b == "done" or b == "settle" or b == "gone" then
       pts[#pts + 1] = {kind = b, arg = tonumber(f)}
     else
       pts[#pts + 1] = {b, tonumber(f)}
@@ -125,6 +127,17 @@ emu.addEventCallback(function()
         elseif n % 16 < 8 then
           L.press({a = true})
         end
+      end
+    elseif p.kind == "gone" then
+      local x = emu.read(0x7E3020 + p.arg, m)
+      if press == nil then press = 6000 end
+      press = press - 1
+      if x == 0x80 then
+        log[#log + 1] = string.format("f%05d gone slot %d", n, p.arg)
+        press = nil; wi = wi + 1
+      elseif press <= 0 then
+        log[#log + 1] = string.format("f%05d gone timeout slot %d x=%02X", n, p.arg, x)
+        press = nil; wi = wi + 1
       end
     elseif p.kind == "settle" then
       local c = emu.read(0x7E0AD7, m)
