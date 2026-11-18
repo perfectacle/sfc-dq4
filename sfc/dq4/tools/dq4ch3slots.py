@@ -8,6 +8,7 @@ SLOTS 차례대로 있는 모듈 파일만 들인다. 그래서 여러 사건 PR
 """
 from dataclasses import dataclass
 
+import dq4lowwram as _low
 from dq4ch2slots import Slot as _Slot
 
 
@@ -90,10 +91,8 @@ RAFT_CODE = (0x5DF000, 0x5DF800)
 MONSTERS_CODE = (0x4E8000, 0x4EC000)
 # 엔돌(E) 몫의 낮은 뱅크 BRK 받침(dq4neneshop.BRKS). 원래 롬 빈 자리(dq5build free) 가운데 아무 도구도 쓰지 않던 곳
 LOW_STUBS = (0x29FF80, 0x29FFF0)
-# DQ5 사람 자리 표 넷(7E:1BC5·1BD3·1BE1·1BEF + 0~13). 뱅크 02 의 DQ5 필드 갈래(02:87D2·93AE·8B1A)가 채운다(1장 걷기의
-# 필드·ルーラ 장면에서 02:87E0~87F2 가 씀, dq5wramwatch). 엔돌 검사 전체에서는 전원·리셋 때 WRAM 을 지우는 00:864C 밖에
-# 이 범위에 쓴 원래 DQ5 코드가 없었다
-DQ5_PEOPLE = (0x7E1BC5, 0x7E1BFD)
+# DQ5 사람 자리 표(7E:1BC5~1BFC). 값과 실측 근거는 dq4lowwram.DQ5_USES 가 정본
+DQ5_PEOPLE = tuple(0x7E0000 | a for a in _low.DQ5_USES['people'])
 # 낮은 WRAM 의 3장 몫: 네네 가게 임시 칸(dq4neneshop.TEMP). DQ5_PEOPLE 안이라 루틴 한 번 안에서만 쓰는 값만 둔다
 # (네네 가게 대화 안에서 끝남). 보기 표지·쪽 줄 수처럼 오래 남거나 매 프레임 읽히는 값은 두지 않는다
 NENE_TEMP = (0x7E1BD6, 0x7E1BE0)
