@@ -44,10 +44,23 @@ def reachable_items(dq4, dq5=DQ5_ROM):
     import dq4itemport
     import dq4shopport
     from dq5map import Rom
+    import dq4chestport
     dq4data, prg = dq4growth._fc(dq4)
     known = dq4shopport.dq5_items(Rom(Path(dq5).read_bytes()))
-    out = {known[k] for k in (dq4shopport._fold(name) for _, name, *_ in dq4data.items(prg)) if k in known}
-    return out | set(dq4itemport.BORROWED) | set(dq4itemport.EVENT_ITEMS)
+    names = [dq4shopport._fold(name) for _, name, *_ in dq4data.items(prg)]
+    # 상자 이식은 DQ5 에 없는 FC 물건을 같은 종류의 다른 DQ5 물건으로 바꾼다(dq4chestport.SUBSTITUTE·SPECIAL_ITEMS)
+    names += [dq4shopport._fold(n) for n in (*dq4chestport.SUBSTITUTE.values(), *dq4chestport.SPECIAL_ITEMS.values())]
+    out = {known[k] for k in names if k in known}
+    return out | set(dq4itemport.BORROWED) | set(dq4itemport.EVENT_ITEMS) | set(dq4chestport.EVENT_CHEST_ITEMS.values())
+
+
+# 장비한 물건(E0~E3)과 장비 고르기 목록(DE)은 무기·갑옷·방패·투구만 찍는다
+EQUIP_CODES = (0xDE, 0xE0, 0xE1, 0xE2, 0xE3)
+ITEM_SLOT = 0x23B231               # 물건마다 bit0-2 장비 칸: 0 무기, 1 갑옷, 2 방패, 3 투구, 4 도구(dq5-data-format 「물건 표」)
+
+
+def is_equipment(data, n):
+    return n < 0xD8 and data[lorom(ITEM_SLOT + n)] & 7 < 4
 
 
 def nine_windows():
@@ -126,9 +139,20 @@ NUMBER_FIELDS = {
     0xCB: ('값', 0xFFFF, '가게 값 16비트(FC 물건 값, fc/dq4/docs/dq4-shop-format.md)'),
 }
 # 알려진 걸림 (창, 종류) → 까닭. 고치는 PR 이 그 줄을 지운다. 창·종류 하나씩만 둔다
+# 창 표에 없고 창을 열 때 코드가 바꿔 주는 레코드(dq4windowname.asm). 키는 창 번호와 겹치지 않게 100 부터
+EXTRA = 0x100
+SHOP_SPOT, SHOP_SPOT_END = 0x04FF40, 0x050000          # dq4windowname.SHOP_SPOT: ShopQtyRec·ShopSellRec
+NENE_SPOT, NENE_RECORD, NENE_PAGES = 0x04AE21, 10, 8   # dq4windowname.NENE_SPOT: 쪽 줄 수 1~8 마다 레코드 하나
+NENE_KEYS = EXTRA + 0x10
+
+_SUBSTITUTE = ('C7 はるかぜのフルート: 상자 이식이 あやかしのふえ 를 바꿔 넣는 물건(dq4chestport.SUBSTITUTE)이라 DQ4 에서 손에 들 수 '
+               '있지만 한글 이름이 없어 가나 열 칸 그림뿐(아홉 칸 그림 없음). 1·2·3장 빌드의 DQ4 맵 상자에는 없음. 대체 물건 이름을 '
+               'あやかしのふえ 의 한글로 하는 고침이 지운다')
 ALLOW = {
     (0x3A, '창 밖'): '가게 동료 창을 +1 만 넓혀 한 줄 28칸 > 안쪽 27. #1245(두 칸 넓힘) 또는 한 사람 몫을 13칸으로 줄이는 고침이 지운다',
     (0x3A, '변 어긋남'): '넓힌 3A 의 왼쪽 변이 메시지 창 00(열 2~29)과 1칸 어긋남. 3A 를 원래 x 2·너비 28 로 되돌리는 고침이 지운다',
+    **{(n, kind): _SUBSTITUTE for n, kind in ((0x2E, '제목'), (0x44, '제목'),
+                                              *((NENE_KEYS + k, '창 밖') for k in range(NENE_PAGES)))},
     (0x7D, '제목'): '제목 사람 이름 5칸(자리 1, 너비 6). 롬에 BRK 95 7D 가 없고 LDA #7D 도 창 열기가 아님. 메뉴 표로 여는 길은 미확인',
     (0x73, '창 밖'): 'D9 를 ShopSellPrice 가 가로챔. 창 73 은 대화 07(몬스터 맡기기 06:E95A)·0A(ルイーダ 06:ED01)의 BRK 95 73 으로만 열리고, DQ4 가게 이식(dq4shopport.SERVICE)은 대화 번호 1~6 만 줘 DQ4 에서 열리지 않음',
     **{(n, '가림'): '함께 뜨는 묶음(SHOWN_TOGETHER)이 창 제목으로 고른 추정이고 덮는 것이 앞 창 글자 한 칸. 창 기록 틀로 실측 대기'
@@ -228,26 +252,27 @@ class Widths:
         self._tables[kind] = widest
         return widest
 
-    def nine(self):
+    def nine(self, equip=False):
         """아홉 칸 창(dq4windowname.NINE_WINDOWS)에서 물건 이름이 차지하는 가장 넓은 칸. 열 칸 그림 뒤(1 + 열 × 9)의
         아홉 칸 그림을 쓰고, 그 열 수가 0 이면 열 칸 그대로(dq4windowname.asm WtNineName)."""
-        if 'nine' not in self._tables:
+        key = ('nine', equip)
+        if key not in self._tables:
             widest = 0
             for n in range(0x100):
                 at = u16(self.data, TEXT_BANK << 16 | INDEX + ITEM_KIND * 0x200 + n * 2)
-                if not at:
+                if not at or equip and not is_equipment(self.data, n):
                     continue
                 cols = self.data[lorom(TEXT_BANK << 16 | at)]
                 if cols >= 10:
                     second = self.data[lorom(TEXT_BANK << 16 | at + 1 + cols * 9)]
-                    if not second and n in self.dq5_only() and n not in self.reachable():
+                    if not second and self.excludable(n):
                         # 한글이 없어 가나 그림만 있는 열 칸 이름은 DQ4 명칭표에 없고 DQ4 데이터가 주지 않는 DQ5 전용 물건이다
                         self.wide_items.append(n)
                         continue
                     cols = second or cols
                 widest = max(widest, cols)
-            self._tables['nine'] = widest
-        return self._tables['nine']
+            self._tables[key] = widest
+        return self._tables[key]
 
     def dq5_only(self):
         """DQ4 명칭표(nds/dq4/tables/adopt.tsv, dq4windowtext.adopted)에 일본어 이름이 없는 물건 번호."""
@@ -260,6 +285,10 @@ class Widths:
             self._tables['dq5only'] = {n for n, name in enumerate(names)
                                        if n not in numbered and wt.kana_key(name) not in known}
         return self._tables['dq5only']
+
+    def excludable(self, n):
+        """아홉 칸 창의 너비에서 뺄 수 있는 물건: DQ4 명칭표에 없고(dq5_only) DQ4 데이터가 주지 않는다(reachable)."""
+        return n in self.dq5_only() and n not in self.reachable()
 
     def reachable(self):
         """DQ4 에서 손에 들 수 있는 DQ5 물건 번호(reachable_items). FC 롬이 없으면 빈 집합이라 아무것도 빼지 않는다."""
@@ -284,7 +313,7 @@ class Widths:
             return NAME_CELLS[self.kind] + 8, why
         if isinstance(v, tuple):
             if v[1] == ITEM_KIND and self.kind == 'hack' and window in nine_windows():
-                return self.nine(), why
+                return self.nine(b in EQUIP_CODES), why
             return self.table(v[1], v[2]), why
         return v, why
 
@@ -424,11 +453,6 @@ def bounds(win):
     return win.x, win.y, w, h
 
 
-# 창 표에 없고 창을 열 때 코드가 바꿔 주는 레코드(dq4windowname.asm). 키는 창 번호와 겹치지 않게 100 부터
-EXTRA = 0x100
-SHOP_SPOT, SHOP_SPOT_END = 0x04FF40, 0x050000          # dq4windowname.SHOP_SPOT: ShopQtyRec·ShopSellRec
-NENE_SPOT, NENE_RECORD, NENE_PAGES = 0x04AE21, 10, 8   # dq4windowname.NENE_SPOT: 쪽 줄 수 1~8 마다 레코드 하나
-NENE_KEYS = EXTRA + 0x10
 
 
 def extras(data):
