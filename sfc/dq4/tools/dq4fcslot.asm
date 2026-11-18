@@ -79,6 +79,10 @@ warnpc !stubs_end
 org !hook_at
     JML Entry
 
+; ── 26:8E7C 격투장 시합 고르기의 난수(JSL $00953A)를 FC 18:$ABC3 처럼 ─────────────────────
+org !arena_hook
+    JSL ArenaPick
+
 org !code_at
 Entry:
     CMP.b #!poker
@@ -114,6 +118,39 @@ FcBody:
     LDA !coins+2 : STA.l $7E203E
     JSL $00879C
     PLB : PLP
+    RTL
+
+; FC 18:$ABC3: 시합 번호를 난수로 뽑되 최근 8시합(FC $6E31~$6E38, 맨 앞이 가장 최근)에 있으면 다시 뽑는다. 100번째
+; 뽑기는 기록과 상관없이 받는다. 받은 번호를 기록 맨 앞에 넣고 나머지를 한 칸씩 민다. 기록은 번호 + 1(0 = 빈칸, FC 의 FF)
+; 이라 0 으로 찬 처음 칸이 빈 기록이다. A = 마지막 시합 번호(26:8E7B 의 TXA), 돌려줄 때 A = 고른 번호, DB 는 부른 쪽 그대로
+ArenaPick:
+    PHP
+    SEP #$30
+    PHX : PHY
+    STA.l !arena_recent+9
+    LDY.b #100
+.try
+    PHY
+    LDA.l !arena_recent+9
+    JSL $00953A
+    SEP #$30
+    PLY
+    STA.l !arena_recent+8
+    INC
+    LDX.b #7
+-   CMP.l !arena_recent,X : BEQ .seen
+    DEX : BPL -
+    BRA .take
+.seen
+    DEY : BNE .try
+.take
+    LDX.b #6
+-   LDA.l !arena_recent,X : STA.l !arena_recent+1,X
+    DEX : BPL -
+    LDA.l !arena_recent+8 : INC : STA.l !arena_recent
+    DEC
+    PLY : PLX
+    PLP
     RTL
 
 ; ── 화면 준비(강제 블랭크) ──────────────────────────────────────────────────────

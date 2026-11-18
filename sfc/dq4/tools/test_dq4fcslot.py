@@ -59,5 +59,18 @@ class FcSlotDataTest(unittest.TestCase):
         self.assertEqual(len(slot.palettes(self.prg)[1]), 32 * 5)
 
 
+class ArenaRecentTest(unittest.TestCase):
+    """격투장 최근 8시합 기록(맡긴 동료 칸 42)이 전투 글 그림자(칸 0~33, dq4battlemsg)·네네 가게·변수 칸(43~49)과 겹치지 않고,
+    칸 첫 바이트(DQ5 가 찬 칸 표시로 읽음)를 쓰지 않는다."""
+    def test_slot(self):
+        import dq4ch3slots as slots
+        base, size = 0x7E2332, 26
+        at = slots.ARENA_RECENT
+        self.assertEqual((at - base) % size, 1)
+        self.assertGreaterEqual(at, base + 880)                     # 그림자 110칸 × 8바이트 뒤
+        self.assertLessEqual(at + 10, base + slots.STOCK_SLOTS[0] * size)
+        self.assertEqual(slot.ARENA_ORIG, bytes.fromhex('22 3A 95 00'))
+
+
 if __name__ == '__main__':
     unittest.main()
