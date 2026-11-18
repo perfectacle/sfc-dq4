@@ -169,16 +169,15 @@ def broken_mask(fc_rom=FC_ROM):
     prg = ines.prg(Path(fc_rom).read_bytes())
     d = dq4block.entry(prg, *FC_BROKEN_BRIDGE)
     pal12 = dq4block.palette(prg, 0, field=0)
-    from dq4fcgfx import MESEN_RGB
-    colours = [MESEN_RGB[0x0F]] + [MESEN_RGB[pal12[3 * d["pal"] + j] & 0x3F] for j in range(3)]
+    # NES 색 번호의 아래 니블 1·2 가 파랑(물). 색 0 은 바탕 0F(검정)
+    water = {j + 1 for j in range(3) if pal12[3 * d["pal"] + j] & 0x0F in (1, 2)}
     out = [[False] * 16 for _ in range(16)]
     for q, addr in enumerate(d["addrs"]):
         data = prg[d["bank"] * 0x4000 + (addr & 0x3FFF):][:16]
         for r in range(8):
             for c in range(8):
                 v = (data[r] >> (7 - c) & 1) | (data[r + 8] >> (7 - c) & 1) << 1
-                red, green, blue = colours[v]
-                out[q // 2 * 8 + r][q % 2 * 8 + c] = not (blue > 200 and red < 120)
+                out[q // 2 * 8 + r][q % 2 * 8 + c] = v not in water
     return tuple(tuple(row) for row in out)
 
 
