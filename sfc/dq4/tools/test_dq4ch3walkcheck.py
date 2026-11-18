@@ -21,7 +21,7 @@ import dq4heroblockcheck as hb  # noqa: E402
 import dq4npccheck as npc  # noqa: E402
 
 ROMS = HERE.parents[2] / 'rom'
-TOKEN = re.compile(r'^(\d+,\d+|[a-z]+:\d+)$')
+TOKEN = re.compile(r'^(\d+,\d+|[a-z]+:\d+|stand:[0-9A-F]{2},\d+,\d+)$')
 WARP = r'^[0-9A-F]{2}/[0-9A-F]{2},\d+,\d+$'
 
 

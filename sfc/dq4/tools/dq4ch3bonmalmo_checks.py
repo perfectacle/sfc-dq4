@@ -49,6 +49,11 @@ JAIL_SNEAK_GO = 'stand:0D,%d,%d' % bm.cell(*bm.JAIL_LOOP[0])
 # 줄 08 은 셀 y 17. 왼쪽 위로 온 병사가 오른쪽으로 돌아서며 줄 06~08 을 보기(떠난 지 약 240프레임) 전에 줄 09 로 내려선다
 JAIL_ROW = bm.cell(0, 0x08)[1]
 JAIL_SNEAK_PATH = f'{bm.cell(0x05, 0)[0]},{JAIL_ROW};{bm.SON_SIDE[0]},{JAIL_ROW};{bm.SON_SIDE[0]},{bm.SON_SIDE[1]}'
+# 조작을 막지 않고 걷는 인물(test_dq4heroblock.WALK_EXEMPT)
+WALK_EXEMPT = {
+    bm.SCRIPTS['guard'][2]: '감옥 병사: 조작을 막지 않고 순찰 고리를 한 칸씩 14 로 걷는다. 앞의 주인공은 시야로 먼저 들키고, '
+    '옆·뒤의 주인공에 막히면 엔진이 걸음을 멈추고 jail_step 이 목표 칸이 아닌 것을 보고 걷기를 잇는다(far)',
+}
 SEGMENTS = [
     # 감옥: 창살 너머 아들에게 오른쪽을 보고 말을 걸어 키메라의 날개를 준다. 「아니요」 면 0841 뒤 다시 묻고(두 번),
     # 「예」 면 날개가 빠지고 아들이 사라진다
