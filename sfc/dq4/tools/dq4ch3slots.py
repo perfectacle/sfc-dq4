@@ -54,10 +54,10 @@ SLOTS = {
     'S': Slot('북쪽 동굴과 금고, 여신상 동굴의 배', 'dq4ch3safe', (0x5CE000, 0x5CE800), flags=(0x72, 0x7A),
               scripts=(('10:C8FF', (0, 1, 4, 6, 7, 8, 9)),), lists='ch3_safe_', vars=(14, 25)),
     'B': Slot('본몰 왕자·감옥·여우 마을·다리·개 토마스', 'dq4ch3bonmalmo', (0x5CE800, 0x5CF000), flags=(0x73, 0x74),
-              scripts=(('10:BEE5', (2, *range(4, 10))),), lists='ch3_bonmalmo_'),
+              scripts=(('10:BEE5', (2, *range(4, 10))),), lists='ch3_bonmalmo_', far=(0x4EC800, 0x4ED000)),
     'E': Slot('엔돌: 편지·여신상 동굴·여신상 팔기·가게 사기·납품·용병', 'dq4ch3endor', (0x5CF000, 0x5CFC00),
               flags=(0x75, 0x76), scripts=(('10:8E0D', tuple(range(1, 8))), ('05:A8AE', (0, 1, 2, 3, 4, 6, 7))), lists='ch3_endor_', vars=(10, 14),
-              vars2=(0, 20), far=(0x4EC000, 0x4ED000)),
+              vars2=(0, 20), far=(0x4EC000, 0x4EC800)),
     'T': Slot('굴 공사·개통·장 끝', 'dq4ch3tunnel', (0x5CFC00, 0x5D0000), flags=(0x77,),
               scripts=(('05:996C', (0, 1, 2, 3, 4, 5, 7, 14)),), lists='ch3_tunnel_'),
     'W': Slot('마을 사람 진행별 대사', 'dq4ch3towns', (0x5FF800, 0x600000), flags=(0x79,),
@@ -95,7 +95,8 @@ POKER_CODE = (0x47A000, 0x480000)
 POKER_TILES = (0x548000, 0x54C000)
 # 여신상 동굴의 배(dq4raft, S 가 hooks 로 둠). S 몫 코드 자리가 차서 따로 둔다. 5D:8000~ 은 dq4windowtext 몬스터 자료
 RAFT_CODE = (0x5DF000, 0x5DF800)
-# 뱅크 4E 의 몫: 3장 몬스터·떠돌이 상인(dq4fieldencounter.CH3_CODE_AT 부터, 사건 모듈 밖), 엔돌(E 의 far), 나머지 예비(SPARE).
+# 뱅크 4E 의 몫: 3장 몬스터·떠돌이 상인(dq4fieldencounter.CH3_CODE_AT 부터, 사건 모듈 밖), 엔돌(E 의 far), 감옥 병사(B 의 far),
+# 나머지 예비(SPARE).
 # 4E 처럼 40 이상 뱅크의 코드는 BRK 를 바로 쓰지 못한다: BRK 처리기가 놓인 뱅크를 DB 로 두어 낮은 WRAM 대신 롬을 읽는다
 # (실측: 4E 에서 BRK 95 34 가 04:DADA 에서 끝없이 돎). 낮은 뱅크 받침(LOW_STUBS 같은 BRK … / RTL)으로 부른다
 MONSTERS_CODE = (0x4E8000, 0x4EC000)
