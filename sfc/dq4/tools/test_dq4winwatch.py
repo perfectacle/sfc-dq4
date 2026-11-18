@@ -220,18 +220,22 @@ class FileTest(unittest.TestCase):
     def test_sprite_scene_and_wram_records(self):
         head = b'V' + struct.pack('<H', ww.VERSION)
         spec = b'201D:1,2040:2'
-        data = head + struct.pack('<cH', b'R', len(spec)) + spec
+        ospec = b'3020:2'
+        data = head + struct.pack('<cH', b'R', len(spec)) + spec + struct.pack('<cH', b'Q', len(ospec)) + ospec
         data += record_s(1, 10, [], []) + struct.pack('<cH', b'W', 2) + struct.pack('<HB', 0, 3) + struct.pack('<HB', 2, 0x41)
         data += struct.pack('<cIH', b'O', 11, 1) + struct.pack('<HH', 0, 0x1234)
-        data += struct.pack('<cIHHBBB', b'B', 11, 0x6000, 0x1000, 0, 15, 0)
-        data += struct.pack('<cIBBBB', b'M', 12, 0x37, 0x00, 0, 0)
-        data += struct.pack('<cIHHH', b'J', 42, 0x6000, 0x1000, 1) + struct.pack('<H', 3) + bytes(range(32))
+        data += struct.pack('<cH', b'P', 1) + struct.pack('<HB', 1, 0x77)
+        data += struct.pack('<cIHHBBBBBBB', b'B', 11, 0x6000, 0x1000, 0, 15, 0, 1, 1, 0x17, 0x17)
+        data += struct.pack('<cIBBBBBB', b'M', 12, 0x37, 0x00, 0, 0, 0x50, 2)
+        data += struct.pack('<cIHHH', b'J', 42, 0x6000, 0x1000, 1) + struct.pack('<H', 3) + bytes(range(32)) + bytes(512)
         rec = ww.parse(data)
         self.assertEqual(rec.shots[1].wram, {0x201D: 3, 0x2041: 0x41})
         self.assertEqual(rec.oam[0][0], 11)
         self.assertEqual(rec.oam[0][1][:2], b'\x34\x12')
-        self.assertEqual(rec.obj, [(11, 0x6000, 0x1000, 0, 15, 0)])
-        self.assertEqual(rec.maps, [(12, 0x37, 0x00, 0, 0)])
+        self.assertEqual(rec.oam[0][2], {0x3021: 0x77})
+        self.assertEqual(rec.obj, [(11, 0x6000, 0x1000, 0, 15, 0, 1, 1, 0x17, 0x17)])
+        self.assertEqual(rec.maps, [(12, 0x37, 0x00, 0, 0, 0x50, 2)])
+        self.assertEqual(len(rec.objvram[0][4]), 512)
         self.assertEqual(rec.objvram[0][3][96:128], bytes(range(32)))
         self.assertEqual(ww.Screen(rec.shots[1], None).wram(0x2040, 2), [None, 0x41])
 
@@ -240,7 +244,7 @@ class FileTest(unittest.TestCase):
         rule = types.SimpleNamespace(NAME='스프라이트', MODE='report', ALLOW=(),
                                      check_run=lambda run: [(f, '맵 바뀜') for f, *_ in run.record.maps])
         data = b'V' + struct.pack('<H', ww.VERSION) + struct.pack('<cH', b'R', 0)
-        data += struct.pack('<cIBBBB', b'M', 12, 0x37, 0x00, 0, 0)
+        data += struct.pack('<cIBBBBBB', b'M', 12, 0x37, 0x00, 0, 0, 0x50, 1)
         with tempfile.TemporaryDirectory() as d, mock.patch.object(ww, 'rules', return_value=[rule]):
             (Path(d) / ww.DATA).write_bytes(data)
             self.assertEqual(ww.run_hits(d, fake_rom()), [(12, '스프라이트', '맵 바뀜', 'report')])
@@ -250,8 +254,10 @@ class FileTest(unittest.TestCase):
     def test_wram_ranges_merge(self):
         import types
         rules = [types.SimpleNamespace(WRAM=[(0x2040, 30), (0x201D, 1)]), types.SimpleNamespace(WRAM=[(0x2050, 30)])]
+        rules.append(types.SimpleNamespace(OAM_WRAM=[(0x3020, 64)]))
         with mock.patch.object(ww, 'rules', return_value=rules):
             self.assertEqual(ww.wram_ranges(), [(0x201D, 1), (0x2040, 0x2050 + 30 - 0x2040)])
+            self.assertEqual(ww.wram_env(attr='OAM_WRAM'), '3020:64')
             self.assertEqual(ww.wram_env(), '201D:1,2040:46')
 
     def test_broken_file_is_an_error(self):

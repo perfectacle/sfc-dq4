@@ -14,10 +14,11 @@
 -- x·y·너비·높이 $0A43~$0A46)을 적는다. 창을 닫으면 엔진이 남은 창을 아래부터 다시 그리므로 판정이 그 차례로 겹친 순서를 안다.
 --
 -- 화면이 켜져 있으면(강제 블랭크·밝기 0 이 아님) BG3 과 상관없이 프레임마다 스프라이트·장면 표지도 적는다(판 4):
---   O  OAM 이 바뀐 프레임과 바뀐 낱말
---   B  OBJ 설정(이름 자리·둘째 표 거리·크기 꼴)과 밝기·강제 블랭크가 바뀐 프레임
---   M  맵 번호($BC/$BD)·세계($1949)·전투 여부(NMI 작업 $1944 = 8952)가 바뀐 프레임
---   J  M 뒤 OBJ_SETTLE 프레임에 OBJ VRAM 두 이름 표(16KB)를 32바이트 덩이로 앞서 적은 것과 달라진 덩이만
+--   O  OAM 이 바뀐 프레임과 바뀐 낱말, 이어서 P: 그 프레임의 WINWATCH_OWRAM 조각 가운데 달라진 바이트(인물 표 등)
+--   B  OBJ 설정(이름 자리·둘째 표 거리·크기 꼴), 밝기·강제 블랭크, BG 모드·BG3 우선, 주·부 화면 층이 바뀐 프레임
+--   M  맵 번호($BC/$BD)·세계($1949)·전투 여부(NMI 작업 $1944 = 8952)·시각($075E)·일행 수($1967)가 바뀐 프레임
+--   J  M 뒤 OBJ_SETTLE 프레임과, M 뒤 엔진이 창을 처음 그린 다음 프레임에 OBJ VRAM 두 이름 표(16KB)를 32바이트 덩이로
+--      앞서 적은 것과 달라진 덩이만, 이어서 CGRAM 512바이트 전부
 --   R  파일 첫머리(V 뒤)에 한 번, WRAM 조각 목록 글(WINWATCH_WRAM = "주소:길이,…", 7E 뱅크 16진 주소·10진 길이)
 --   W  S 바로 뒤에, 그 조각을 이은 바이트 가운데 앞서 적은 것과 달라진 것(이은 자리 번호, 값)
 --
@@ -36,8 +37,10 @@ if out then
   local n, last, ids, nid = 0, nil, {}, 0
   local map, art, oam, cg = {}, {}, {}, {}
   local CPU = emu.memType.snesMemory
+  local drew = false
   emu.addMemoryCallback(function()
     if stopped then return end
+    drew = true
     out:write(string.pack("<c1I4BBBBB", "D", n, emu.read(0x7E0A00, CPU), emu.read(0x7E0A43, CPU), emu.read(0x7E0A44, CPU),
                           emu.read(0x7E0A45, CPU), emu.read(0x7E0A46, CPU)))
   end, emu.callbackType.exec, 0x04A56C, 0x04A56C)
@@ -58,28 +61,50 @@ if out then
     for k = 0, tonumber(len) - 1 do wram[#wram + 1] = 0x7E0000 + tonumber(a, 16) + k end
   end
   out:write(string.pack("<c1s2", "R", spec))
-  local ostore, bkey, mkey, jat, jstore = {}, nil, nil, nil, {}
+  local owram, ostorew, ospec = {}, {}, os.getenv("WINWATCH_OWRAM") or ""
+  for a, len in string.gmatch(ospec, "(%x+):(%d+)") do
+    for k = 0, tonumber(len) - 1 do owram[#owram + 1] = 0x7E0000 + tonumber(a, 16) + k end
+  end
+  out:write(string.pack("<c1s2", "Q", ospec))
+  local ostore, bkey, mkey, jat, jstore, jwin = {}, nil, nil, nil, {}, false
   local function scene(s)
     local on = not s["ppu.forcedBlank"] and (s["ppu.screenBrightness"] or 0) > 0
-    local k = string.format("%d/%d/%d/%d/%s", s["ppu.oamBaseAddress"] or 0, s["ppu.oamAddressOffset"] or 0,
-                            s["ppu.oamMode"] or 0, s["ppu.screenBrightness"] or 0, tostring(s["ppu.forcedBlank"]))
+    local b = {s["ppu.oamBaseAddress"] or 0, s["ppu.oamAddressOffset"] or 0, s["ppu.oamMode"] or 0,
+               s["ppu.screenBrightness"] or 0, s["ppu.forcedBlank"] and 1 or 0, s["ppu.bgMode"] or 0,
+               s["ppu.mode1Bg3Priority"] and 1 or 0, s["ppu.mainScreenLayers"] or 0, s["ppu.subScreenLayers"] or 0}
+    local k = table.concat(b, "/")
     if k ~= bkey then
       bkey = k
-      out:write(string.pack("<c1I4I2I2BBB", "B", n, s["ppu.oamBaseAddress"] or 0, s["ppu.oamAddressOffset"] or 0,
-                            s["ppu.oamMode"] or 0, s["ppu.screenBrightness"] or 0, s["ppu.forcedBlank"] and 1 or 0))
+      out:write(string.pack("<c1I4I2I2BBBBBBB", "B", n, table.unpack(b)))
     end
     local m = {emu.read(0x7E00BC, CPU), emu.read(0x7E00BD, CPU), emu.read(0x7E1949, CPU),
-               emu.read16(0x7E1944, CPU) == 0x8952 and 1 or 0}
+               emu.read16(0x7E1944, CPU) == 0x8952 and 1 or 0, emu.read(0x7E075E, CPU), emu.read(0x7E1967, CPU)}
     local mk = table.concat(m, "/")
     if mk ~= mkey then
+      if mkey == nil or mk:match("^[^/]*/[^/]*/[^/]*/[^/]*") ~= mkey:match("^[^/]*/[^/]*/[^/]*/[^/]*") then
+        jat, jwin = n + OBJ_SETTLE, false
+      end
       mkey = mk
-      out:write(string.pack("<c1I4BBBB", "M", n, m[1], m[2], m[3], m[4]))
-      jat = n + OBJ_SETTLE
+      out:write(string.pack("<c1I4BBBBBB", "M", n, table.unpack(m)))
     end
+    if drew and not jwin then
+      jwin = true
+      jat = math.min(jat or (n + 1), n + 1)
+    end
+    drew = false
     if not on then return end
     local t = delta(ostore, OAM, 272)
     if #t > 0 then
       out:write(string.pack("<c1I4I2", "O", n, #t), table.concat(t))
+      local bytes = {}
+      for i, a in ipairs(owram) do
+        local v = emu.read(a, CPU)
+        if ostorew[i] ~= v then
+          ostorew[i] = v
+          bytes[#bytes + 1] = string.pack("<I2B", i - 1, v)
+        end
+      end
+      out:write(string.pack("<c1I2", "P", #bytes), table.concat(bytes))
     end
     if jat and n >= jat then
       jat = nil
@@ -99,7 +124,9 @@ if out then
           end
         end
       end
-      out:write(string.pack("<c1I4I2I2I2", "J", n, base // 2, off // 2, #blocks), table.concat(blocks))
+      local colors = {}
+      for i = 0, 255 do colors[#colors + 1] = string.pack("<I2", emu.read16(2 * i, CGRAM)) end
+      out:write(string.pack("<c1I4I2I2I2", "J", n, base // 2, off // 2, #blocks), table.concat(blocks), table.concat(colors))
     end
   end
   emu.addEventCallback(function()

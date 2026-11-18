@@ -76,7 +76,8 @@ def with_winwatch(script, kwargs, folder):
     없으면 folder)의 winwatch.bin 이라 읽은 바이트 캐시가 장면 출력과 함께 넣고 펼친다."""
     env = dict(kwargs.get('env') or os.environ)
     where = Path(env.get('SHOT_DIR') or folder)
-    env.update(WINWATCH_TARGET=str(script), WINWATCH_OUT=str(where / winwatch.DATA), WINWATCH_WRAM=winwatch.wram_env())
+    env.update(WINWATCH_TARGET=str(script), WINWATCH_OUT=str(where / winwatch.DATA), WINWATCH_WRAM=winwatch.wram_env(),
+               WINWATCH_OWRAM=winwatch.wram_env(attr='OAM_WRAM'))
     return WINWATCH, {**kwargs, 'env': env}, where
 
 

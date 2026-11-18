@@ -69,15 +69,18 @@ class Record:
     shots: dict                 # {모습 번호: Shot}
     events: list                # [(프레임, 모습 번호 또는 -1)]
     draws: list                 # [(프레임, 창 번호, 사각형)] 엔진 창 틀 그리기
-    oam: list                   # [(프레임, OAM 544바이트)] 화면이 켜진 동안 OAM 이 바뀐 프레임
-    obj: list                   # [(프레임, 이름 자리, 둘째 표 거리(낱말), 크기 꼴, 밝기, 강제 블랭크)]
-    maps: list                  # [(프레임, $BC, $BD, $1949, 전투 1/0)]
-    objvram: list               # [(프레임, 이름 자리, 둘째 표 거리, OBJ VRAM 16KB)] 맵이 바뀐 뒤 한 번
+    oam: list                   # [(프레임, OAM 544바이트, {7E 주소: 바이트} OAM_WRAM 조각)] 화면이 켜진 동안 OAM 이 바뀐 프레임
+    obj: list                   # [(프레임, 이름 자리, 둘째 표 거리(낱말), 크기 꼴, 밝기, 강제 블랭크, BG 모드, BG3 우선,
+                                #   주 화면 층, 부 화면 층)]
+    maps: list                  # [(프레임, $BC, $BD, $1949, 전투 1/0, 시각 $075E, 일행 수 $1967)]
+    objvram: list               # [(프레임, 이름 자리, 둘째 표 거리, OBJ VRAM 16KB, CGRAM 512바이트)] 맵이 바뀐 뒤·창을 처음
+                                #   그린 뒤 한 번씩
 
 
-def wram_ranges():
-    """[(7E 뱅크 주소, 길이)] 규칙 파일들이 WRAM 에 선언한 조각(겹치면 합침)."""
-    spans = sorted({(a, n) for m in rules() for a, n in getattr(m, 'WRAM', ())})
+def wram_ranges(attr='WRAM'):
+    """[(7E 뱅크 주소, 길이)] 규칙 파일들이 attr(WRAM: 모습마다, OAM_WRAM: OAM 이 바뀐 프레임마다)에 선언한 조각(겹치면
+    합침)."""
+    spans = sorted({(a, n) for m in rules() for a, n in getattr(m, attr, ())})
     out = []
     for a, n in spans:
         if out and a <= out[-1][0] + out[-1][1]:
@@ -87,9 +90,14 @@ def wram_ranges():
     return out
 
 
-def wram_env(ranges=None):
-    """dq4winwatch.lua 의 WINWATCH_WRAM 값."""
-    return ','.join(f'{a:04X}:{n}' for a, n in (wram_ranges() if ranges is None else ranges))
+def wram_env(ranges=None, attr='WRAM'):
+    """dq4winwatch.lua 의 WINWATCH_WRAM(attr WRAM)·WINWATCH_OWRAM(attr OAM_WRAM) 값."""
+    return ','.join(f'{a:04X}:{n}' for a, n in (wram_ranges(attr) if ranges is None else ranges))
+
+
+def spec_addrs(spec):
+    pairs = [p.split(':') for p in spec.split(',') if p]
+    return [int(a, 16) + k for a, m in pairs for k in range(int(m))]
 
 
 def parse(data, ranges=None):
@@ -104,16 +112,17 @@ def parse(data, ranges=None):
     words, chr_, oam, cgram = [0] * 1024, bytearray(TILES * 16), bytearray(544), bytearray(512)
     live, jv = bytearray(544), bytearray(0x4000)
     addrs = [a + k for a, n in (ranges or ()) for k in range(n)]
-    wram, last = {}, None
+    wram, last, oaddrs, owram = {}, None, [], {}
     while o < len(data):
         kind = data[o:o + 1]
-        if kind == b'R':
+        if kind in (b'R', b'Q'):
             (n,) = struct.unpack_from('<H', data, o + 1)
             spec = data[o + 3:o + 3 + n].decode('ascii')
             o += 3 + n
-            if ranges is None:
-                pairs = [p.split(':') for p in spec.split(',') if p]
-                addrs = [int(a, 16) + k for a, m in pairs for k in range(int(m))]
+            if kind == b'Q':
+                oaddrs = spec_addrs(spec)
+            elif ranges is None:
+                addrs = spec_addrs(spec)
         elif kind == b'S':
             id_, frame, _, _, hs, vs, ncell, ntile, noam, ncg = head.unpack_from(data, o + 1)
             o += 1 + head.size
@@ -156,13 +165,23 @@ def parse(data, ranges=None):
                 i, w = struct.unpack_from('<HH', data, o)
                 live[2 * i:2 * i + 2] = struct.pack('<H', w)
                 o += 4
-            oams.append((frame, bytes(live)))
+            oams.append((frame, bytes(live), dict(owram)))
+        elif kind == b'P':
+            (n,) = struct.unpack_from('<H', data, o + 1)
+            o += 3
+            for _ in range(n):
+                i, v = struct.unpack_from('<HB', data, o)
+                if i < len(oaddrs):
+                    owram[oaddrs[i]] = v
+                o += 3
+            if oams:
+                oams[-1] = oams[-1][:2] + (dict(owram),)
         elif kind == b'B':
-            objs.append(struct.unpack_from('<IHHBBB', data, o + 1))
-            o += 12
+            objs.append(struct.unpack_from('<IHHBBBBBBB', data, o + 1))
+            o += 16
         elif kind == b'M':
-            maps.append(struct.unpack_from('<IBBBB', data, o + 1))
-            o += 9
+            maps.append(struct.unpack_from('<IBBBBBB', data, o + 1))
+            o += 11
         elif kind == b'J':
             frame, base, off, n = struct.unpack_from('<IHHH', data, o + 1)
             o += 11
@@ -170,7 +189,8 @@ def parse(data, ranges=None):
                 (k,) = struct.unpack_from('<H', data, o)
                 jv[k * 32:k * 32 + 32] = data[o + 2:o + 34]
                 o += 34
-            objvram.append((frame, base, off, bytes(jv)))
+            objvram.append((frame, base, off, bytes(jv), data[o:o + 512]))
+            o += 512
         else:
             raise ValueError(f'winwatch 기록이 {o} 에서 깨짐')
         if o > len(data):
