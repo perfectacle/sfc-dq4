@@ -187,6 +187,20 @@ def _in_map(a, label):
         a.label(f'{label}_ok{k}')
 
 
+# 걷는 줄(칸 0 ~ 7E:1967 - 1: 일행·따라 걷는 개)의 안 보이게 비트(7E:3380 bit7, 인물 명령 27)
+WALKERS, SLOT_HIDE = 0x7E1967, 0x7E3380
+
+
+def _followers_shown(a, shown, tag):
+    """걷는 줄 칸 1 부터 끝까지 안 보이게 비트를 끄거나(shown) 켠다. FC 는 배를 탄 동안 따라 걷는 칸을 숨긴다(40/00
+    실측: 탄 뒤 개 칸 $7021 = 81, 배 그림만 보임, 내리면 곧 다시 따라옴). 그대로 두면 일행이 주인공 자취대로 물 칸에 들어가
+    물 뒤에 가려졌다. 8비트 A·X 로 들어온다."""
+    a(0xE2, 0x30, 0xAF, *_al(WALKERS), 0xAA)
+    a.label(f'{tag}_loop')(0xCA).br(0xF0, f'{tag}_end')
+    a(0xBF, *_al(SLOT_HIDE), *((0x29, 0x7F) if shown else (0x09, 0x80)), 0x9F, *_al(SLOT_HIDE)).br(0x80, f'{tag}_loop')
+    a.label(f'{tag}_end')
+
+
 def natives(code, base, tbls):
     """[(이름, 바이트)]·{이름: 주소}. code: Code(at 은 여기서 채움), base: 둘 자리, tbls: tables(prg).
     물 표는 맨 끝에 두어 코드 주소가 표 길이에 매이지 않는다(롬 없이 주소만 쓰는 단위 테스트)."""
@@ -286,8 +300,10 @@ def natives(code, base, tbls):
         a(lda(code.v(RA)), sta(HERO_ATTR))
         code.all_cells(a, False)
         code.raft_cell(a, True, 'rc_l')
+        _followers_shown(a, True, 'fs_l')
         a.brl('c_out')
         a.label('c_water')(0xA5, 0x0C, sta(code.v(RX)), 0xA5, 0x0D, sta(code.v(RY)))
+        _followers_shown(a, False, 'fs_w')
         code.move_raft(a, 'mv3')
         a(0xA5, 0xBD, 0xC9, CROSS['map']).br(BNE, 'c_out2')(0xA5, 0x0C, 0xC9, CROSS['x']).br(BNE, 'c_out2')
         for row in CROSS['rows']:

@@ -19,6 +19,10 @@
   ride0    일행 없음
   ride1    로렌스(따라 걷는 용병 하나)
   ride2    스콧·로렌스(둘)
+  ride_dog   개 토마스(따라 걷는 그림 하나)
+  ride_dog1  로렌스·개
+따라 걷는 칸(걷는 줄 칸 1~)은 탄 동안 안 보이게(7E:3380 bit7) 숨고, 왼쪽 땅으로 돌아와 내리면 다시 보여야 한다(FC 40/00
+실측: 탄 뒤 개 칸 $7021 = 81, 배만 보임).
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4raftcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/raftcheck
 """
@@ -37,6 +41,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
         sys.path.insert(0, str(path))
 
 import dq4battlecheck as bc  # noqa: E402
+import dq4raft  # noqa: E402
 import dq4ch1walkcheck as wc  # noqa: E402
 import dq4ch3endor as endor  # noqa: E402
 import dq4ch3event as ch3  # noqa: E402
@@ -86,8 +91,14 @@ def view(mesence, rom, state, out, name):
     return name, {"ok": (slots, oams) == want, "slots": slots, "oam": oams, "want": want}
 
 
-RIDES = {"ride0": (), "ride1": ("lawrence",), "ride2": ("scott", "lawrence")}
+# (용병들, 개 토마스가 따라옴)
+RIDES = {"ride0": ((), False), "ride1": (("lawrence",), False), "ride2": (("scott", "lawrence"), False),
+         "ride_dog": ((), True), "ride_dog1": (("lawrence",), True)}
 RIDE_WALK = "42,11;44,11;48,11;wait:30"
+# 탄 뒤 물에서 왼쪽 땅으로 돌아가 내린다(배는 마지막 물 칸에 남음)
+LAND_WALK = "44,11;42,11;wait:30"
+# 걷는 줄 칸 1·2 의 안 보이게 비트(dq4raft._followers_shown)
+HIDE_FLAGS = {"HIDE1": (dq4raft.SLOT_HIDE + 1, 0x80), "HIDE2": (dq4raft.SLOT_HIDE + 2, 0x80)}
 
 
 def party_set(data, whos):
@@ -121,19 +132,31 @@ def hero_view(text):
 
 
 def ride(mesence, rom, data, state, out, name):
+    """배를 타고 물로 두 칸 나아가 주인공이 보이는지, 따라 걷는 칸(용병·개)이 숨는지 보고, 땅으로 돌아와 다시 보이는지."""
     dest = out / name
+    whos, dog = RIDES[name]
+    followers = len(whos) + dog
+    dog_set = f"{0x2190 + ch3.DOG[0]:04X}|{ch3.DOG[1]:02X}" if dog else ""
+    flags = {**wc.FLAGS, **HIDE_FLAGS}
     segs = ((f"{name}_warp", "warp", VIEW_TO, {"map": endor.CAVE_ENTRY}),
             (f"{name}_board", "walk", RIDE_WALK, {"map": endor.CAVE_ENTRY, "cell": (48, 11)}))
+    hidden = None
     for seg in segs:
-        extra = ";".join(v for v in (START, party_set(data, RIDES[name])) if v) if seg[1] == "warp" else ""
-        r = wc.segment(mesence, rom, state, dest / seg[0], seg, wc.NO_ENCOUNTERS, extra)
+        extra = ";".join(v for v in (START, dog_set, party_set(data, whos)) if v) if seg[1] == "warp" else ""
+        r = wc.segment(mesence, rom, state, dest / seg[0], seg, wc.NO_ENCOUNTERS, extra, flags=flags)
         if r["status"] != "passed":
             return name, {"ok": False, "error": f"{seg[0]}: {r['problems']}"}
         state = dest / seg[0] / "end.mss"
+        hidden = [f"HIDE{k}" in r.get("flags", ()) for k in range(1, followers + 1)]
     wc.run(mesence, rom, VIEW, dest / "view", {"STATE": str(state), "WAIT": "30"}, 120)
     log = dest / "view" / "view.txt"
     first, front = hero_view(log.read_text(encoding="utf-8")) if log.exists() else (None, None)
-    return name, {"ok": first == 3 and front >= 12, "first": first, "front": front}
+    land = (f"{name}_land", "walk", LAND_WALK, {"map": endor.CAVE_ENTRY, "cell": (42, 11)})
+    r = wc.segment(mesence, rom, state, dest / land[0], land, wc.NO_ENCOUNTERS, "", flags=flags)
+    shown = [f"HIDE{k}" not in r.get("flags", ()) for k in range(1, followers + 1)]
+    ok = first == 3 and front >= 12 and all(hidden) and r["status"] == "passed" and all(shown)
+    return name, {"ok": ok, "first": first, "front": front, "hidden_riding": hidden, "shown_landed": shown,
+                  **({} if r["status"] == "passed" else {"land": r["problems"]})}
 
 
 def fc_cell(cell):
