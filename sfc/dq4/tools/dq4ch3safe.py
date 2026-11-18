@@ -311,11 +311,11 @@ def npc_lists(lists, ctx):
     for side in ('right', 'left'):
         lists[GATES]["entries"] += ch2._invisible(_src(side), t['button'])
     lists[VAULT]["entries"] += ch2._invisible(_src('chest'), t['floor'])
-    # 바위를 부리는 보이지 않는 인물과 바위 넷(FC 처음 자리 2×2 칸, 그림은 DQ5 미는 바위). 낮·밤 한 벌씩
+    # 바위를 부리는 보이지 않는 인물과 바위 넷(FC 처음 자리 2×2 칸, 그림은 NDS 큰 바위의 사분면). 낮·밤 한 벌씩
     import dq4npcport
     x, y = boulder.START
-    rocks = [{"x": 2 * (x + dx), "y": 2 * (y + dy) + 1, "facing": "down", "talk": 0, "gfx": boulder.ROCK_GFX, "layer": 0,
-              "interval": 0} for dy in (0, 1) for dx in (0, 1)]
+    rocks = [{"x": 2 * (x + dx), "y": 2 * (y + dy) + 1, "facing": boulder.ROCK_FACINGS[2 * dy + dx], "talk": 0,
+              "gfx": boulder.ROCK_GFX, "layer": 0, "interval": 0} for dy in (0, 1) for dx in (0, 1)]
     for time in ('day', 'night'):
         lists[ROLL]["entries"] += [e for e in ch2._invisible(_src('boulder'), t['button']) if e["time"] == time]
         lists[ROLL]["entries"] += [{"from": dq4npcport.STAND, "time": time, "fields": dict(r)} for r in rocks]

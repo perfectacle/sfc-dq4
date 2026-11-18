@@ -344,6 +344,18 @@ PEOPLE = (
       for role, pic, sheet, group, anim in EVENT_PEOPLE),
 )
 SHARED_LINES = (0, 1, 2, 3, 4)
+# 사람이 아닌 사건 그림(NDS 3D 모델을 렌더한 그림, 자원 저장소 PROP_SHEETS). PROP_SIZE 정사각으로 줄여 16x16 넷으로
+# 나누고, 한 세트의 네 방향(PROP_QUADRANTS 차례: 왼쪽 위·오른쪽 위·왼쪽 아래·오른쪽 아래)에 싣는다. 사건 모듈은 인물
+# 넷을 방향만 달리 2×2 로 세운다. 색은 따로 줄을 받지 않고 그 그룹 공용 줄 가운데 가장 가까운 줄의 색으로 고른다
+# (줄 색 계산에 넣으면 같은 그룹 사람 색이 흔들린다). 그림 번호는 DQ4 가 쓰지 않는 것이라 세트를 그 자리에서 바꾼다
+PROPS = (
+    # 북쪽 동굴(SFC 3E/07)의 구르는 바위. NDS 사건 모델 oiwa(큰 바위). 동굴 바닥과 같은 갈색 계열이라 윤곽을 둔다.
+    # 줄 3: 거리 합이 가장 작은 줄 2 는 밝은 면과 그늘이 한 주황으로 뭉쳐 공처럼 보이지 않았다(줄마다 넣어 본 결과)
+    Person((0x2A,), 0x3E, 'oiwa', '구르는 바위', anim='prop', spare=0x2A, outline=True, line=3),
+)
+PROP_SHEETS = {'oiwa': Path('nds') / 'dq4' / 'chr' / 'model_anim' / 'oiwa_0_0.webp'}
+PROP_SIZE = 32
+PROP_QUADRANTS = ('down', 'left', 'right', 'up')
 # DQ5 의 6타일 세트 싣기(1F:CFD7 → 1F:D051)는 세트 63·6C(원래 신부 그림 90·91)를 7E:21B3 bit3 이 꺼져 있으면 세트
 # 팔레트 표 값을 버리고 OBJ 팔레트 0 으로 둔다. 이 세트를 빌린 인물은 줄 0 이어야 제 색으로 그려진다
 LINE0_SETS = frozenset({0x63, 0x6C})
@@ -863,6 +875,35 @@ def outline(c):
         px[q] = darkest
 
 
+def prop_frames(prop, assets):
+    """{방향: [16x24 RGBA, 같은 것]}. 렌더의 보이는 상자를 PROP_SIZE 에 맞게 줄여(shrink) 아래 가운데에 두고,
+    사분면을 PROP_QUADRANTS 의 방향마다 프레임 아래 16줄에 둔다(DQ5 미는 바위처럼 발 자리가 칸 바닥)."""
+    im = Image.open(assets / PROP_SHEETS[prop.sheet]).convert('RGBA')
+    im = im.crop(im.getchannel('A').point(lambda a: 255 if a >= 128 else 0).getbbox())
+    s = shrink(im, PROP_SIZE / max(im.size))
+    whole = Image.new('RGBA', (PROP_SIZE, PROP_SIZE))
+    whole.paste(s, ((PROP_SIZE - s.width) // 2, PROP_SIZE - s.height))
+    if prop.outline:
+        outline(whole)                 # 사분면으로 자르기 전에: 자른 뒤면 사분면 경계까지 윤곽이 생긴다
+    out = {}
+    for k, name in enumerate(PROP_QUADRANTS):
+        c = Image.new('RGBA', (16, 24))
+        c.paste(whole.crop((16 * (k % 2), 16 * (k // 2), 16 * (k % 2) + 16, 16 * (k // 2) + 16)), (0, 8))
+        out[name] = [c, c.copy()]
+    return out
+
+
+def prop_line(cells, board, group):
+    """(줄, 줄 색). 그룹의 공용 줄 가운데 그림 색을 가장 가까운 줄 색으로 바꿨을 때 거리 합이 가장 작은 줄."""
+    hist = Counter(p[:3] for pair in cells.values() for c in pair for p in c.get_flattened_data() if p[3])
+
+    def cost(row):
+        colors = [lab(c) for c in row if c is not None]
+        return sum(w * min(math.dist(lab(c), r) for r in colors) for c, w in hist.items())
+    line = min((ln for ln in SHARED_LINES if (group, ln) in board), key=lambda ln: cost(board[(group, ln)]))
+    return line, board[(group, line)]
+
+
 def histogram(cells):
     count = Counter(p[:3] for pair in cells.values() for c in pair for p in c.get_flattened_data() if p[3])
     if INK in count:
@@ -1371,7 +1412,7 @@ def prepare(rom, assets, work, base=None, squeeze=False, pins=None):
     if problems := pin_problems(PEOPLE, pins, hists):
         raise SystemExit('\n'.join(problems))
     placed, board = place(PEOPLE, hists, pinned_where(PEOPLE, used, pins), pins)
-    sets = [target(p, rom)[0] for p in PEOPLE]
+    sets = [target(p, rom)[0] for p in PEOPLE + PROPS]
     if len(set(sets)) != len(sets):
         raise SystemExit(f'두 인물이 같은 세트를 바꿈: {sorted(f"{s:02X}" for s in sets if sets.count(s) > 1)}')
     rows = []
@@ -1389,6 +1430,15 @@ def prepare(rom, assets, work, base=None, squeeze=False, pins=None):
             index_image(cells[p], pal, layout).save(path)
             steps.append(name)
         rows.append((p, s, layout, limit, tiles(path, layout), steps, line, pal))
+    for p in PROPS:
+        cells = prop_frames(p, assets)
+        line, pal = (p.line, board[(p.group, p.line)]) if p.line is not None else prop_line(cells, board, p.group)
+        s, layout, limit = target(p, rom)
+        if layout != 'simple':
+            raise SystemExit(f'{p.role}: 세트 {s:02X} 가 {layout} 배치(사분면은 simple 세트에만 실음)')
+        path = work / f'{s:02X}.png'
+        index_image(cells, pal, layout).save(path)
+        rows.append((p, s, layout, limit, tiles(path, layout), [], line, pal))
     if line0_problems(rows):
         raise SystemExit('\n'.join(line0_problems(rows)))
     return rows, board

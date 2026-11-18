@@ -130,6 +130,19 @@ class NativeTest(unittest.TestCase):
                 self.assertEqual(self.run_ctl((*b.START, 0), cnt, (x, y)) & 3, 2, (cnt, x))
         self.assertEqual(self.run_ctl((*b.START, 0), 0, (x0, y + 1)), 0)
 
+    def test_reset_keeps_rocks_from_turning_when_talked_to(self):
+        # 말을 걸면 바위 인물이 주인공 쪽으로 돌아 사분면이 바뀐다. 맵에 들 때 바위 넷만 돌지 않는 꼴(32A0 bit4-5 = 10)로
+        w = bytearray(0x20000)
+        rocks, other = range(0x0A, 0x0E), 0x0E
+        for s in (*rocks, other):
+            w[b.SLOT_GFX + s], w[b.SLOT_X + s], w[b.SLOT_TURN + s] = b.ROCK_GFX, 6, 0xE1
+        w[b.SLOT_GFX + other] = 0x01
+        c = self.Cpu(self.rom, w)
+        c.pbr = BASE >> 16
+        c.jsl(self.at['reset'], max_steps=20000)
+        self.assertEqual([c.wram[b.SLOT_TURN + s] for s in rocks], [0xD1] * 4)
+        self.assertEqual(c.wram[b.SLOT_TURN + other], 0xE1)
+
     def test_idle_boulder_does_nothing(self):
         self.assertEqual(self.run_step((3, 5, 0x00), [(3, 0x0E)]), (3, 5, 0x00))
         self.assertEqual(self.run_step((3, 0x25, 0x40), [(3, 0x24)]), (3, 0x25, 0x40))
@@ -167,6 +180,30 @@ class NativeTest(unittest.TestCase):
     def test_area_site_holds_the_original_bytes(self):
         data = (HERE.parents[2] / 'rom' / 'dq5.sfc').read_bytes()
         self.assertEqual(data[lorom(b.AREA_SITE):lorom(b.AREA_SITE) + len(b.AREA_ORIG)], b.AREA_ORIG)
+
+
+class PictureTest(unittest.TestCase):
+    def test_rock_is_the_nds_boulder_prop(self):
+        # 바위 그림은 NDS 큰 바위(dq4people.PROPS)의 사분면이다. DQ5 미는 바위(4B) 넷으로 되돌리면 실패
+        import dq4people
+        prop = next(p for p in dq4people.PROPS if p.role == '구르는 바위')
+        self.assertEqual(prop.pictures, (b.ROCK_GFX,))
+        self.assertNotEqual(b.ROCK_GFX, 0x4B)
+        self.assertEqual(dq4people.PROP_SHEETS[prop.sheet].name, 'oiwa_0_0.webp')
+        self.assertEqual(b.ROCK_FACINGS, dq4people.PROP_QUADRANTS)
+
+    def test_safe_rocks_stand_in_quadrant_order(self):
+        import dq4ch3safe as safe
+        lists = {m: {"map": m, "entries": []} for m in (safe.GATES, safe.VAULT, safe.ROLL)}
+
+        class Ctx:
+            talk = {'button': 1, 'floor': 2}
+        safe.npc_lists(lists, Ctx())
+        rocks = [e["fields"] for e in lists[safe.ROLL]["entries"] if e["fields"]["gfx"] == b.ROCK_GFX
+                 and e["time"] == 'day']
+        x, y = b.START
+        self.assertEqual([(r["x"], r["y"], r["facing"]) for r in rocks],
+                         [(2 * (x + k % 2), 2 * (y + k // 2) + 1, f) for k, f in enumerate(b.ROCK_FACINGS)])
 
 
 if __name__ == '__main__':

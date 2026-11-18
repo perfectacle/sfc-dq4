@@ -259,6 +259,12 @@ why = "세트 09 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 
 
 [[original]]
 stage = "people"
+at = "0C:B689~0C:B857"
+data = true
+why = "세트 15(그림 2A)의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 큰 바위 사분면으로 그 자리에서 바꿈(dq4people.PROPS)"
+
+[[original]]
+stage = "people"
 at = "0C:CD6D~0C:D1EB"
 data = true
 why = "세트 20 의 원래 타일 자료 자리(dq5sprite.set_tiles 로 원래 롬에서 잰 끝까지)를 NDS 인물 그림으로 그 자리에서 바꿈(dq4people)"
