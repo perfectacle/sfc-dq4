@@ -5,14 +5,15 @@ Lua(lua/dq4peoplesample.lua)를 얹는다. 표본은 구간 폴더의 lines.bin(
 앞쪽·OBJ VRAM)이다.
 
   색    실내 맵($BE bit7)의 표본마다 공용 줄(dq4people.SHARED_LINES) 가운데 롬이 그 맵에서 덮는 줄의 색이 롬 표
-        (dq5objpalette.run_lines)와 같은지. 다른 표본은 갈래를 붙인다: 모든 색이 표보다 어둡거나 같으면 「어두움」
+        (dq5objpalette.run_lines)와 같은지. 다른 표본은 갈래를 붙인다: 모든 색이 표 색의 회색과 같으면 「회색」
+        (dq4ch3bonmalmo.grey, 촌장 장면의 번쩍임), 모든 색이 표보다 어둡거나 같으면 「어두움」
         (화면을 어둡게 하는 연출), 밝거나 같으면 「밝음」, 그 밖은 「다름」. 맵이 바뀌거나 전투가 끝난 뒤 SETTLE
         프레임 안의 표본은 맵을 싣는 중이라 세지 않는다. 전투(JSL $208001 에 들어가 그 호출이 돌아올
         때까지)의 표본은 전투가 OBJ 팔레트를 제 색으로 덮으므로 빼고, 끝난 뒤의 표본으로 줄이 되돌아왔는지 본다
   OBJ   무거운 표본마다 인물 슬롯을 dq4peoplecheck.judge 로 판정하고, 화면 안 OAM 가운데 공용 줄을 쓰면서 판정한
         슬롯의 타일이 아닌 것을 센다
 
-「다름」 표본이나 인물 밖 OAM 이 있거나 표본이 하나도 없는 구간이 있으면 실패다. 「어두움」·「밝음」 은 구간마다 세어 보고만 한다.
+「다름」 표본이나 인물 밖 OAM 이 있거나 표본이 하나도 없는 구간이 있으면 실패다. 「회색」·「어두움」·「밝음」 은 구간마다 세어 보고만 한다.
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4peopleeventcheck.py --chapter 2 --rom work/ch2/dq4-ch1-full.sfc \\
       --out work/peopleevent2 [--jobs 6] [--only 구간,…] [--json OUT]
@@ -56,7 +57,11 @@ def row(cgram_obj, line):
 
 
 def kind(got, want):
-    """표와 다른 줄의 갈래: '어두움'(모든 채널이 표 이하), '밝음'(모든 채널이 표 이상), '다름'."""
+    """표와 다른 줄의 갈래: '회색'(모든 색이 표 색의 회색과 같음, 여우 마을 촌장 장면의 번쩍임), '어두움'(모든 채널이
+    표 이하), '밝음'(모든 채널이 표 이상), '다름'."""
+    import dq4ch3bonmalmo
+    if got == [dq4ch3bonmalmo.grey(w) for w in want]:
+        return '회색'
     ch = lambda c: (c & 31, c >> 5 & 31, c >> 10 & 31)  # noqa: E731
     pairs = [(g, w) for a, b in zip(got, want) for g, w in zip(ch(a), ch(b))]
     if all(g <= w for g, w in pairs):

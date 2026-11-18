@@ -281,6 +281,12 @@ DARK_FRAMES = 139
 FADE_LEVELS = (13, 11, 9, 7, 5, 3, 1, 0)     # 한 프레임에 두 단계씩: FC 페이드 아웃 9프레임(885~893)
 
 
+def grey(c):
+    """BGR555 색의 번쩍임 회색: g = (R + 2G + B) / 4 를 세 채널에. _grey_flash 의 코드와 같은 셈."""
+    g = ((c & 31) + 2 * (c >> 5 & 31) + (c >> 10 & 31)) >> 2
+    return g | g << 5 | g << 10
+
+
 def _upload():
     return bytes((0xAD, 0x1A, 0x00, 0x09, 0x02, 0x8D, 0x1A, 0x00))      # LDA $1A / ORA #$02 / STA $1A
 
