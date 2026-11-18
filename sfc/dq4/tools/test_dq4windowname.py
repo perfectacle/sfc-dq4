@@ -517,5 +517,20 @@ class CodeRoomTests(unittest.TestCase):
         self.assertIn('assert pc() <= !wn_kana_table', asm)
         self.assertIn('assert pc() <= !wn_code2', (ASM.parent / 'dq4battlemsg.asm').read_text(encoding='utf-8'))
 
+
+class NameSlotTest(unittest.TestCase):
+    """WnSlot: 이름 자리 여덟을 돌려 쓰되, 버퍼에서 아직 제 첫 이름 칸(180 + 자리 × 10)을 가리키는 자리는 건너뛴다.
+    뒤에 어둡게 남은 상태 창 이름 자리를 「누구」 창 이름이 덮어 이름이 바뀌고 위 테두리 합성이 사라졌다."""
+
+    def test_reuse_skips_positions_still_on_screen(self):
+        asm = ASM.read_text(encoding='utf-8')
+        body = asm[asm.index('\nWnSlot:'):]
+        body = body[:body.index('\n.found')]
+        self.assertIn('.pick', body)
+        self.assertIn('ADC #$0180', body)
+        self.assertIn('AND #$03FF', body)
+        self.assertIn('BEQ .pick', body)
+        self.assertIn('LDA #$0008\n    STA.w !wn_r', body)     # 모두 쓰이면 차례대로
+
 if __name__ == '__main__':
     unittest.main()
