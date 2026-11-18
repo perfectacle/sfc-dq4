@@ -150,6 +150,32 @@ def record_e(frame, id_):
     return struct.pack('<cIi', b'E', frame, id_)
 
 
+class EngineWindowsTest(unittest.TestCase):
+    def setUp(self):
+        self.ref = ww.Ref(fake_rom())
+        self.m = [0x2C00] * 1024
+
+    def test_repaint_after_close_rebuilds_the_stack(self):
+        status, command, sub = (19, 16, 27, 28), (4, 2, 12, 13), (6, 1, 16, 10)
+        draws = [(34, 2, status), (37, 1, command), (134, 0x0B, sub), (386, 2, status), (388, 1, command)]
+        self.assertEqual(ww.stacks(draws)[-1][:2], (388, [status, command]))
+        self.assertEqual(ww.stacks(draws)[-1][2][sub], 0x0B)
+        self.assertEqual(ww.stacks(draws)[2][:2], (134, [status, command, sub]))
+
+    def test_engine_order_decides_which_window_is_on_top(self):
+        # 위 창의 테두리가 끊겨 겹친 곳의 테두리 셈으로는 위아래를 못 가르는 꼴도 엔진 그린 차례로 가른다
+        draw(self.m, 17, 2, 27, 29)
+        draw(self.m, 15, 1, 25, 29)
+        self.m[18 * 32 + 29] = 0x2001
+        bad = ww.check(shot(self.m), self.ref, engine=[(17, 2, 27, 29), (15, 1, 25, 29)])
+        self.assertEqual(sorted({(b[0], b[1], b[2]) for b in bad}), [(15, 1, '변 어긋남'), (18, 29, '테두리')])
+
+    def test_closed_engine_window_is_dropped(self):
+        draw(self.m, 4, 4, 8, 12)
+        bad = ww.check(shot(self.m), self.ref, engine=[(4, 4, 8, 12), (10, 10, 20, 20)])
+        self.assertEqual(bad, [])
+
+
 class RuleFilesTest(unittest.TestCase):
     def test_every_rule_file_has_the_contract(self):
         names = [m.NAME for m in ww.rules()]
@@ -175,7 +201,8 @@ class FileTest(unittest.TestCase):
         # 깨진 모습이 한 프레임만(전환 중) 보였다가, 다시 깨진 채 길게 보인다
         data += record_s(2, 20, [(18 * 32 + 29, 0x2001)], []) + record_e(20, 2) + record_e(21, 1) + record_e(40, 2)
         data += record_e(41, 1)
-        shots, events = ww.parse(data)
+        data += struct.pack('<cIBBBBB', b'D', 5, 0x3A, 1, 15, 29, 11)
+        shots, events, draws = ww.parse(data)
         self.assertEqual(shots[2].map[18 * 32 + 29], 0x2001)
         self.assertEqual(shots[2].map[18 * 32 + 30], m[18 * 32 + 30])
         self.assertEqual(shots[2].chr, shots[1].chr)

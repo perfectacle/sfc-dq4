@@ -32,7 +32,9 @@ import sys
 HERE = Path(__file__).resolve().parent
 LOG = 'winwatch.log'
 DATA = 'winwatch.bin'
-VERSION = 2
+VERSION = 3
+# 엔진 창 틀 그리기 기록 뒤 이만큼 프레임 안에 이어진 그리기는 한 번의 다시 그리기(창을 닫은 뒤 남은 창을 아래부터)로 본다
+REPAINT_GAP = 8
 BORDER_ROM = 0x04E978           # 08B~095, 타일마다 평면 0 8바이트 + 평면 1 8바이트
 BORDER_FIRST, BORDER_LAST = 0x8B, 0x95
 KANA_ROM = 0x04E528             # 칸 01 부터 1bpp 8바이트
@@ -61,9 +63,9 @@ class Shot:
 
 
 def parse(data):
-    """({모습 번호: Shot}, [(프레임, 모습 번호 또는 -1 = 화면 꺼짐)]). 모습 기록은 앞 모습과 달라진 낱말·칸 그림·OAM·CGRAM
+    """({모습 번호: Shot}, [(프레임, 모습 번호 또는 -1 = 화면 꺼짐)], [(프레임, 창 번호, 사각형)] 엔진 창 그리기). 모습 기록은 앞 모습과 달라진 낱말·칸 그림·OAM·CGRAM
     낱말만 담아 차례로 덮어 간다. 한 번도 적지 않은 칸 그림은 0 으로 둔다(그 모습의 타일맵이 가리키지 않는 칸)."""
-    shots, events, o = {}, [], 0
+    shots, events, draws, o = {}, [], [], 0
     if data[:1] != b'V' or struct.unpack_from('<H', data, 1)[0] != VERSION:
         raise ValueError(f'winwatch 기록 판이 {VERSION} 이 아님')
     o = 3
@@ -88,6 +90,10 @@ def parse(data):
                     store[2 * i:2 * i + 2] = struct.pack('<H', w)
                     o += 4
             shots[id_] = Shot(id_, frame, tuple(words), bytes(chr_), hs, vs, bytes(oam), bytes(cgram))
+        elif kind == b'D':
+            frame, no, x, y, w, h = struct.unpack_from('<IBBBBB', data, o + 1)
+            draws.append((frame, no, (y, x, y + h - 1, x + w - 1)))
+            o += 10
         elif kind == b'E':
             frame, id_ = struct.unpack_from('<Ii', data, o + 1)
             events.append((frame, id_))
@@ -96,7 +102,25 @@ def parse(data):
             raise ValueError(f'winwatch 기록이 {o} 에서 깨짐')
         if o > len(data):
             raise ValueError('winwatch 기록이 중간에 끊김')
-    return shots, events
+    return shots, events, draws
+
+
+def stacks(draws):
+    """[(프레임, [사각형, …])] 엔진 창 그리기 기록에서 그 프레임 뒤로 떠 있는 창(아래 → 위). 이미 있는 창(맨 위가 아님)을
+    다시 그리면 창을 닫은 뒤의 다시 그리기로 보고, REPAINT_GAP 안에 이어진 그리기로 목록을 새로 짠다."""
+    out, cur, last, burst, numbers = [], [], None, False, {}
+    for frame, no, rect in draws:
+        if burst and last is not None and frame - last > REPAINT_GAP:
+            burst = False
+        if not burst and rect in cur and rect != cur[-1]:
+            cur, burst = [], True
+        if rect in cur:
+            cur.remove(rect)
+        cur.append(rect)
+        numbers[rect] = no
+        last = frame
+        out.append((frame, list(cur), dict(numbers)))
+    return out
 
 
 def planar(p0, p1):
@@ -113,6 +137,24 @@ def flip(px, h, v):
     return tuple(r[::-1] for r in rows) if h else tuple(rows)
 
 
+WINDOW_TABLE = 0x04EB48         # 창 번호 × 2 → 창 레코드(뱅크 04)
+WINDOW_COUNT = 0x94
+SHARED_JP = 0x60B400            # 8000 아래(04:1AC0~)를 가리키는 창 레코드의 롬 사본(dq4menupatch.SHARED_JP)
+DQ5_ROM = HERE.parents[2] / 'rom' / 'dq5.sfc'
+
+
+def window_columns(rom, n):
+    """창 n 레코드의 (x, 너비). 별칭(+0 bit7)은 별칭 자리 x 와 대상 창 너비."""
+    def head(m):
+        a = int.from_bytes(rom[lorom(WINDOW_TABLE + m * 2):lorom(WINDOW_TABLE + m * 2) + 2], 'little')
+        o = lorom(0x040000 | a) if a >= 0x8000 else lorom(SHARED_JP) + a - 0x1AC0
+        return rom[o:o + 3]
+    b = head(n)
+    if b[0] & 0x80:
+        return b[0] & 0x1F, head(b[2])[2] & 0x1F
+    return b[0] & 0x1F, b[2] & 0x1F
+
+
 class Ref:
     """롬에서 읽은 테두리·가나 그림."""
 
@@ -122,6 +164,25 @@ class Ref:
                        for i, t in enumerate(range(BORDER_FIRST, BORDER_LAST + 1))}
         k = lorom(KANA_ROM)
         self.kana = {t: planar(rom[k + (t - 1) * 8:k + t * 8], b'\xff' * 8) for t in KANA}
+        import dq4windowtext
+        # 창 글자를 한글로 옮긴 빌드 단계(메뉴 단계부터)의 롬인가. 그 앞 단계(서곡·타이틀)와 원본 DQ5 는 가나가 맞다
+        t = lorom(dq4windowtext.TEXT_BANK << 16 | dq4windowtext.INDEX)
+        self.korean = any(rom[t:t + 0x2000].strip(b'\xff'))
+        # 원본 DQ5 와 왼쪽 변(x)·오른쪽 변(x + 너비)이 다른 창 번호 {'왼쪽': {…}, '오른쪽': {…}}. 원본 롬이 없으면 None
+        # (모든 창을 바뀐 것으로 봄)
+        self.moved = None
+        if DQ5_ROM.is_file():
+            orig = DQ5_ROM.read_bytes()
+            self.moved = {'왼쪽': set(), '오른쪽': set()}
+            for n in range(WINDOW_COUNT):
+                try:
+                    (x, w), (ox, ow) = window_columns(rom, n), window_columns(orig, n)
+                except IndexError:
+                    x, w, ox, ow = 0, 0, 1, 1
+                if x != ox:
+                    self.moved['왼쪽'].add(n)
+                if x + w != ox + ow:
+                    self.moved['오른쪽'].add(n)
         self._stroke = {}
 
     def stroke(self, tile, h, v):
@@ -150,34 +211,52 @@ def corner_kind(w):
     return {(0, 0): 'TL', (1, 0): 'TR', (0, 1): 'BL', (1, 1): 'BR'}[(bool(w & 0x4000), bool(w & 0x8000))]
 
 
-def windows(shot):
-    """[(위 줄, 왼쪽 열, 아래 줄, 오른쪽 열)] 화면 타일맵에서 찾은 창 사각형(끝 칸 포함)."""
+# 모서리에서 변을 따라 맞은편 모서리를 찾을 때 그 변 칸에 와야 할 테두리 타일(타일, 좌우, 상하): (출발, 찾는 모서리) 마다
+WALKS = {('TL', 'TR'): (EDGE, 0, 0), ('TR', 'TL'): (EDGE, 0, 0), ('BL', 'BR'): (EDGE, 0, 1), ('BR', 'BL'): (EDGE, 0, 1),
+         ('TL', 'BL'): (SIDE, 0, 0), ('BL', 'TL'): (SIDE, 0, 0), ('TR', 'BR'): (SIDE, 1, 0), ('BR', 'TR'): (SIDE, 1, 0)}
+
+
+def windows(shot, stroke_ok=None):
+    """[(위 줄, 왼쪽 열, 아래 줄, 오른쪽 열)] 화면 타일맵에서 찾은 창 사각형(끝 칸 포함). stroke_ok 를 주면 모서리 사이 변
+    칸이 거의 다 테두리 선이어야 맞은편 모서리로 친다(넷에 하나까지 끊김을 봐줌). 겹친 창이 많으면 다른 창의 모서리를
+    잇는 것을 막는다."""
     kinds = {(r, c): k for r in range(32) for c in range(32) if (k := corner_kind(word(shot, r, c)))}
 
     def first(r, c, dr, dc, want):
+        start = kinds[(r, c)]
+        tile = WALKS[(start, want)]
+        r0, c0 = r, c
         r, c = r + 2 * dr, c + 2 * dc
         while 0 <= r < 32 and 0 <= c < 32:
             if kinds.get((r, c)) == want:
+                if stroke_ok is not None:
+                    n = max(abs(r - r0), abs(c - c0)) - 1
+                    broken = sum(not stroke_ok(r0 + dr * i, c0 + dc * i, *tile) for i in range(1, n + 1))
+                    if 4 * broken > n:
+                        return None
                 return r if dr else c
             r, c = r + dr, c + dc
         return None
+
+    def walk(r, c, dr, dc, want):
+        return first(r, c, dr, dc, want) if (r, c) in kinds else None
 
     found = set()
     for (r, c), k in kinds.items():
         if k == 'TL':
             c2, r2 = first(r, c, 0, 1, 'TR'), first(r, c, 1, 0, 'BL')
             if c2 is not None and r2 is None:
-                r2 = first(r, c2, 1, 0, 'BR')
+                r2 = walk(r, c2, 1, 0, 'BR')
             if r2 is not None and c2 is None:
-                c2 = first(r2, c, 0, 1, 'BR')
+                c2 = walk(r2, c, 0, 1, 'BR')
             if c2 is not None and r2 is not None:
                 found.add((r, c, r2, c2))
         elif k == 'BR':
             c1, r1 = first(r, c, 0, -1, 'BL'), first(r, c, -1, 0, 'TR')
             if c1 is not None and r1 is None:
-                r1 = first(r, c1, -1, 0, 'TL')
+                r1 = walk(r, c1, -1, 0, 'TL')
             if r1 is not None and c1 is None:
-                c1 = first(r1, c, 0, -1, 'TL')
+                c1 = walk(r1, c, 0, -1, 'TL')
             if c1 is not None and r1 is not None:
                 found.add((r1, c1, r, c))
     return sorted(found)
@@ -260,8 +339,11 @@ def visible(shot, r):
 class Screen:
     """한 모습의 판정 재료. 규칙끼리 나눠 쓰는 셈(창 찾기·위 창·테두리 선)은 처음 쓸 때 한 번만 한다."""
 
-    def __init__(self, shot, ref, scene=''):
+    def __init__(self, shot, ref, scene='', engine=None, numbers=None):
+        """engine: 엔진 그리기 기록으로 안 그 때의 창 사각형(아래 → 위). None 이면 화면에서만 찾는다. numbers: 사각형 →
+        엔진 창 번호($0A00)."""
         self.shot, self.ref, self.scene = shot, ref, scene
+        self.engine, self.numbers = engine, numbers or {}
         self._stroke = {}
 
     def word(self, r, c):
@@ -297,13 +379,44 @@ class Screen:
         return a is not None and (b is None or a > b)
 
     @functools.cached_property
+    def engine_rects(self):
+        """엔진이 그린 창 가운데 화면에 남은 것(아래 → 위). 테두리 칸이 반 넘게 선이 보이거나 더 위 창에 가려져야 남은
+        것으로 친다(닫힌 뒤 다시 그리지 않고 지운 창은 빠짐)."""
+        if not self.engine or not self.window_screen:
+            return []
+        out = []
+        for i, w in enumerate(self.engine):
+            if not (0 <= w[0] <= w[2] < 32 and 0 <= w[1] <= w[3] < 32) or w[2] - w[0] < 1 or w[3] - w[1] < 1:
+                continue
+            above = self.engine[i + 1:]
+            cells = border_cells(w)
+            seen = sum(self.stroke_ok(*cell) or any(inside(v, cell[0], cell[1]) for v in above) for cell in cells)
+            # 위 창에 다 가려진 창은 화면에 없는 것과 같다. 모서리 하나는 선이 보여야 남은 창이다(다른 창 변과 겹친 변
+            # 칸은 그 창의 선으로도 통과하므로 변으로는 가르지 않음)
+            if 2 * seen > len(cells) and any(self.stroke_ok(*cell) for cell in cells[:4]):
+                out.append(w)
+        return out
+
+    @functools.cached_property
     def rects(self):
-        """[(위 줄, 왼쪽 열, 아래 줄, 오른쪽 열)] 이 모습의 창. 창 화면이 아니면 []."""
+        """[(위 줄, 왼쪽 열, 아래 줄, 오른쪽 열)] 이 모습의 창. 창 화면이 아니면 []. 엔진 그리기 기록이 있으면 그 창을
+        먼저(겹친 차례 그대로) 두고, 화면에서 찾은 창 가운데 엔진 창과 모서리를 함께 쓰지 않는 것을 더한다."""
         if not self.window_screen:
             return []
+        if self.engine:
+            eng = self.engine_rects
+            corners = {p for w in eng for p in ((w[0], w[1]), (w[0], w[3]), (w[2], w[1]), (w[2], w[3]))}
+            extra = [w for w in self.found if not {(w[0], w[1]), (w[0], w[3]), (w[2], w[1]), (w[2], w[3])} & corners
+                     and w not in eng]
+            return eng + extra
+        return self.found
+
+    @functools.cached_property
+    def found(self):
+        """화면 타일맵에서만 찾은 창."""
         # 서로 다른 창의 모서리를 이어 붙인 사각형은 어느 변이 거의 다 끊겨 있다. 네 변 모두 반 넘게 성한(위에 있는 다른
         # 창에 가려진 칸은 성한 것으로 셈) 것만 창으로 본다. 가린 창이 먼저 정해져야 하므로 늘지 않을 때까지 되풀이
-        rects, left = [], windows(self.shot)
+        rects, left = [], windows(self.shot, self.stroke_ok)
         while True:
             more = [w for w in left if all(
                 2 * sum(self.stroke_ok(*cell) or any(inside(v, cell[0], cell[1]) and self.above(v, w) for v in rects)
@@ -316,8 +429,15 @@ class Screen:
 
     @functools.cached_property
     def tops(self):
-        """{창: 그 창 위에 있는 창 목록}"""
-        return {w: [v for v in self.rects if v != w and self.above(v, w)] for w in self.rects}
+        """{창: 그 창 위에 있는 창 목록}. 엔진 창끼리는 그린 차례, 그 밖은 겹친 곳의 테두리로 가른다."""
+        eng = self.engine_rects if self.engine else []
+        out = {}
+        for w in self.rects:
+            if w in eng:
+                out[w] = eng[eng.index(w) + 1:] + [v for v in self.rects if v not in eng and self.above(v, w)]
+            else:
+                out[w] = [v for v in self.rects if v != w and self.above(v, w)]
+        return out
 
     def hidden(self, w, r, c):
         """(r, c) 가 창 w 위의 다른 창에 가려졌는가."""
@@ -357,9 +477,9 @@ def rules():
     return out
 
 
-def check(shot, ref, scene='', only=None):
+def check(shot, ref, scene='', only=None, engine=None, numbers=None):
     """[(줄, 열, 규칙 이름, 설명, 규칙 MODE)] 걸린 칸. 한 칸은 먼저 건 규칙(이름 차례) 하나만 적는다."""
-    screen = Screen(shot, ref, scene)
+    screen = Screen(shot, ref, scene, engine, numbers)
     bad, marked = [], set()
     for rule in rules():
         if only and rule.NAME not in only:
@@ -378,7 +498,8 @@ def analyze(folder, rom, scene=None):
     path = Path(folder) / DATA
     if not path.is_file():
         return None
-    shots, events = parse(path.read_bytes())
+    shots, events, draws = parse(path.read_bytes())
+    timeline = stacks(draws)
     ref = Ref(rom)
     scene = scene or str(folder)
     frames = {}
@@ -393,7 +514,14 @@ def analyze(folder, rom, scene=None):
         first, n = frames.get(i, (shot.frame, 0))
         if n < STEADY:
             continue
-        bad = check(shot, ref, scene)
+        # 그린 프레임의 버퍼는 다음 NMI 에 화면으로 가므로 이 모습이 처음 보인 프레임 앞의 그리기까지 본다
+        engine = None
+        numbers = {}
+        for f, stack, nos in timeline:
+            if f >= first:
+                break
+            engine, numbers = stack, nos
+        bad = check(shot, ref, scene, engine=engine, numbers=numbers)
         if bad:
             out.append((shot, first, n, bad))
     return out

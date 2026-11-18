@@ -8,7 +8,10 @@
 -- 바뀌는 글자 찍기와 200~3FF(필드에서는 BG1·BG2 그림이라 물결마다 바뀜)는 새 모습으로 치지 않는다.
 -- 모습은 앞서 적은 모습과 달라진 타일맵 낱말과, 이 타일맵이 가리키는 칸(과 테두리 칸 08B~095) 가운데 앞서 적은 그림과
 -- 달라진 칸의 그림만 적는다. 같은 때의 OAM(544바이트)·CGRAM(512바이트)도 앞 모습과 달라진 낱말만 적는다(스프라이트·색
--- 규칙용). 파일 첫머리는 판 기록 V(지금 2).
+-- 규칙용). 파일 첫머리는 판 기록 V(지금 3).
+--
+-- 엔진이 창 하나의 틀을 버퍼에 그릴 때(04:A56C, 창 틀 그리기가 $0A46 높이를 읽는 첫 명령)마다 D 기록(프레임, 창 번호 $0A00,
+-- x·y·너비·높이 $0A43~$0A46)을 적는다. 창을 닫으면 엔진이 남은 창을 아래부터 다시 그리므로 판정이 그 차례로 겹친 순서를 안다.
 --
 -- emu.stop 뒤에도 프레임이 몇 개 더 도는데 그 수가 실행마다 달라, 그 뒤로는 적지 않는다(dq4readset.lua 와 같은 까닭).
 local path, target = os.getenv("WINWATCH_OUT"), os.getenv("WINWATCH_TARGET")
@@ -21,9 +24,15 @@ emu.stop = function(...)
   return stopOrig(...)
 end
 if out then
-  out:write(string.pack("<c1I2", "V", 2))
+  out:write(string.pack("<c1I2", "V", 3))
   local n, last, ids, nid = 0, nil, {}, 0
   local map, art, oam, cg = {}, {}, {}, {}
+  local CPU = emu.memType.snesMemory
+  emu.addMemoryCallback(function()
+    if stopped then return end
+    out:write(string.pack("<c1I4BBBBB", "D", n, emu.read(0x7E0A00, CPU), emu.read(0x7E0A43, CPU), emu.read(0x7E0A44, CPU),
+                          emu.read(0x7E0A45, CPU), emu.read(0x7E0A46, CPU)))
+  end, emu.callbackType.exec, 0x04A56C, 0x04A56C)
   local function delta(store, memtype, words)
     local t = {}
     for i = 0, words - 1 do
