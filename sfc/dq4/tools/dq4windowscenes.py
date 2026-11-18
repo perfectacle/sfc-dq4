@@ -123,6 +123,31 @@ def expected(data, scene):
     return out
 
 
+def frames(inputs):
+    """입력 문자열이 끝나는 프레임(누름·기다림 길이의 합)."""
+    return sum(int(tok.split(':')[1]) for tok in inputs.split(',') if ':' in tok)
+
+
+# 전투 장면은 걸을 때마다 조우(dq4windowcheck 의 battle 장면과 같은 ROMPATCH)
+ROMPATCH = {'battle': '8523=FF'}
+
+
+def windowcheck_scenes(data, states):
+    """dq4windowcheck.scenes() 꼴 튜플(이름, 세이브스테이트, POKE, ROMPATCH, PRE, 프레임). states = {'shop': 경로, 'battle': 경로}.
+    일행은 dq4compatcheck.party_pokes 로 둔다. 창 기록 틀은 모든 프레임을 보므로 프레임은 입력이 끝난 뒤 한 프레임."""
+    import dq4compatcheck
+    out = []
+    for s in scenes(data):
+        party = ';'.join(f'{a:06X}={v:02X}' for a, v in dq4compatcheck.party_pokes(s.party, data))
+        if s.people == 1:
+            # 출발 상태는 일행 둘(dq4windowcheck.STATES). party_pokes 는 동료가 없으면 아무것도 쓰지 않아 수를 직접 줄인다
+            party = '7E201D=01;7E201E=01;7E201F=01'
+        poke = ';'.join(x for x in (party, s.sets) if x)
+        end = frames(s.inputs) + 60
+        out.append((f'edge-{s.name}', states[s.state], poke, ROMPATCH.get(s.state, ''), s.inputs, range(end, end + 1)))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--rom', required=True)

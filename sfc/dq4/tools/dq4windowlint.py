@@ -31,7 +31,9 @@ FIRST_ROW = 1
 PARTY_MAX = 4
 TEXT_BANK, INDEX, FIXED_KIND, MONSTER_KIND = 0x58, 0x8000, 7, 4   # dq4windowtext 의 색인
 FIXED_PREFIX, PIECE_PREFIX = 0x9E, 0x9F      # 9E k = 고정 문구 k(dq4windowtext), 9F n k = 메뉴 패치 그림 조각 n 열
-NAME_CELLS = {'base': 4, 'hack': 5}          # 일행 이름: 가나 넉 자 / Galmuri9 한글 넉 자(40점)
+NAME_CELLS = {'base': 4, 'hack': 5}
+# 가게 동료 창 3A 의 상태 칸(CC). 원래 04:B6EA → BC08 아홉 자 고정. 상태 칸을 줄이는 고침은 이 값을 같이 바꾼다
+SHOP_STATE_CELLS = 9          # 일행 이름: 가나 넉 자 / Galmuri9 한글 넉 자(40점)
 
 # 코드 → (원래 칸, 이 해킹의 칸, 근거). 칸은 그 코드가 찍고 나아가는 칸 수. 'name' 은 일행 이름(NAME_CELLS, 나아감은
 # name_step), ('table', 종류, 원래 칸) 은 이름 표 문자열(이 해킹은 색인 그림 열 수의 최대, 한글이 없으면 가나 글자 수).
@@ -43,7 +45,7 @@ CODE_WIDTHS = {
     0xC0: (2, 2, '04:B554 → B68D → B516'), 0xC1: (7, 7, '04:B58E $01~$07'), 0xC2: (3, 3, '04:B594 → B443'),
     0xC3: (3, 3, '04:B5B0 → B443'), 0xC4: (2, 2, '04:B5CC → B513'), 0xC5: (5, 5, '04:B5E8 3 + 7E + $07'),
     0xC6: (2, 2, '04:B621 두 칸(탁점은 위 칸)'), 0xC8: (2, 2, '04:B67B → B516'), 0xC9: (9, 9, '04:B6A0 → BC08 아홉 자'),
-    0xCA: (3, 3, '04:B6A6 → B446'), 0xCB: (5, 5, '04:B6D6 → B4D8'), 0xCC: (9, 9, '04:B6EA → BC08 아홉 자'),
+    0xCA: (3, 3, '04:B6A6 → B446'), 0xCB: (5, 5, '04:B6D6 → B4D8'), 0xCC: (9, SHOP_STATE_CELLS, '04:B6EA → BC08 아홉 자'),
     0xCD: (2, 2, '04:B709 → B516'), 0xCE: (6, 6, '04:B774 $02~$07'), 0xCF: (2, 2, '04:B77A → B516'),
     0xD0: ('name', 'name', '04:B790 → B79B 넉 자, dq4windowname.asm WnList'),
     0xD1: (3, 3, '04:B7D7 석 자, WnText 3열'),
@@ -80,7 +82,7 @@ TITLE_JUMPS = (0x14, 0x25)
 SHOWN_TOGETHER = (
     ('필드 도구', (0x01, 0x0E, 0x0F, 0x10, 0x11), '제목 どうぐ → 물건 목록 → どうする → だれに. 「누구」 창 오른쪽에 도구 목록이 붙음(dq4windowname.NAME_LISTS)'),
     ('필드 주문', (0x01, 0x2C, 0x28, 0x3D), '제목 じゅもん → 주문 목록 → だれを(dq4windowname.NAME_LISTS·SPELL_WINDOW)'),
-    ('가게 사기', (0x33, 0x05, 0x39, 0x3A), '가게 창 → 골드 창 → 사기 목록(오른쪽에 골드 창이 붙음) → 누구에게(dq4-window-text-format 「누가」 창)'),
+    ('가게 사기', (0x33, 0x05, 0x39, 0x00, 0x3A), '가게 창 → 골드 창 → 사기 목록(오른쪽에 골드 창이 붙음) → 메시지 창 00 → 누구에게(dq4-window-text-format 「누가」 창)'),
     ('가게 팔기', (0x33, 0x05, 0x36, 0x37), '가게 창 → 골드 창 → だれが → 팔기 목록(창 37 = 0F 별칭)'),
     ('대열 바꾸기', (0x46, 0x45), 'dq4windowname.FORMATION: 46 은 왼쪽, 45 는 오른쪽으로만 넓혀 둘이 겹치지 않게'),
 )
@@ -99,13 +101,14 @@ NUMBER_FIELDS = {
 # 알려진 걸림 (창, 종류) → 까닭. 고치는 PR 이 그 줄을 지운다. 창·종류 하나씩만 둔다
 _WIDE_ITEM = '10열 물건 이름(외톨이 메탈 갑옷 등)이 창 안쪽 10칸에 앞 칸 하나와 함께 듦. 고칠 방식(창 넓히기·9열 그림) 결정 대기'
 ALLOW = {
-    (0x3A, '넘침'): '가게 동료 창을 +1 만 넓힘. window-guard 의 3A 두 칸 넓히기 PR 이 지운다',
-    **{(n, '넘침'): _WIDE_ITEM for n in (0x08, 0x14, 0x43, 0x3E, 0x3F, 0x40, 0x41)},
+    (0x3A, '창 밖'): '가게 동료 창을 +1 만 넓혀 한 줄 28칸 > 안쪽 27. #1245(두 칸 넓힘) 또는 한 사람 몫을 13칸으로 줄이는 고침이 지운다',
+    (0x3A, '변 어긋남'): '넓힌 3A 의 왼쪽 변이 메시지 창 00(열 2~29)과 1칸 어긋남. 3A 를 원래 x 2·너비 28 로 되돌리는 고침이 지운다',
+    **{(n, '창 밖'): _WIDE_ITEM for n in (0x08, 0x14, 0x43, 0x3E, 0x3F, 0x40, 0x41)},
     **{(n, '제목'): '「어떻게 할까」 제목(고른 물건 이름 10열, 자리 2)이 너비 − 1 을 넘음. ' + _WIDE_ITEM for n in (0x2E, 0x44)},
     (0x7D, '제목'): '제목 사람 이름 5칸(자리 1, 너비 6). 이 창을 여는 장면을 아직 못 찾음',
-    (0x0D, '덮음'): '이름 뒤 01 이 다섯째 칸을 덮음. 이 창은 실측에서 한 번도 열리지 않음(남은 것 「석 자 출력 D1」)',
-    (0x73, '넘침'): 'D9 를 ShopSellPrice 가 가로채 이름 자리에 값을 찍음. DQ5 몬스터 갈래($0F20 = 0A) 창이라 DQ4 에서 열리는지 미확인',
-    **{(n, '겹침'): '함께 뜨는 묶음(SHOWN_TOGETHER)이 창 제목으로 고른 추정이고 덮는 것이 앞 창 글자 한 칸. 창 기록 틀로 실측 대기'
+    (0x0D, '테두리'): '이름 뒤 01 이 다섯째 칸을 덮음. 이 창은 실측에서 한 번도 열리지 않음(남은 것 「석 자 출력 D1」)',
+    (0x73, '창 밖'): 'D9 를 ShopSellPrice 가 가로채 이름 자리에 값을 찍음. DQ5 몬스터 갈래($0F20 = 0A) 창이라 DQ4 에서 열리는지 미확인',
+    **{(n, '가림'): '함께 뜨는 묶음(SHOWN_TOGETHER)이 창 제목으로 고른 추정이고 덮는 것이 앞 창 글자 한 칸. 창 기록 틀로 실측 대기'
        for n in (0x0E, 0x11, 0x2C, 0x37)},
 }
 
@@ -372,19 +375,19 @@ def check(data, base=None):
                 slack = inner_width(b) - bknown            # 원래 줄의 모르는 코드가 쓸 수 있던 칸(보수 상한)
                 end = known + slack
                 if end > inner:
-                    found.append((n, '넘침', f'줄 {r}: 아는 칸 {known} + 원래 남은 칸 {slack} > 안쪽 {inner}(보수 상한)'))
+                    found.append((n, '창 밖', f'줄 {r}: 아는 칸 {known} + 원래 남은 칸 {slack} > 안쪽 {inner}(보수 상한)'))
                 continue
             if end > inner:
-                found.append((n, '넘침', f'줄 {r}: {end}칸 > 안쪽 {inner}칸 ({describe(cells)})'))
+                found.append((n, '창 밖', f'줄 {r}: {end}칸 > 안쪽 {inner}칸 ({describe(cells)})'))
             for a, b in covered(cells):
-                found.append((n, '덮음', f'줄 {r}: 이름({a:02X}) 다섯째 칸을 {b:02X} 가 덮음'))
+                found.append((n, '테두리', f'줄 {r}: 이름({a:02X}) 다섯째 칸을 {b:02X} 가 덮음'))
         x, y, w, h = bounds(win)
         if not (win.per_member and not win.vertical) and x + w > SCREEN_W:
-            found.append((n, '화면', f'x {x} + 너비 {w} > {SCREEN_W}'))
+            found.append((n, '화면 밖', f'x {x} + 너비 {w} > {SCREEN_W}'))
         if win.per_member and not win.vertical and w > SCREEN_W:
-            found.append((n, '화면', f'일행 {PARTY_MAX} 너비 {w} > {SCREEN_W}'))
+            found.append((n, '화면 밖', f'일행 {PARTY_MAX} 너비 {w} > {SCREEN_W}'))
         if y < FIRST_ROW - 1 or y + h > SCREEN_ROWS + FIRST_ROW:
-            found.append((n, '화면', f'y {y} + 높이 {h} > {SCREEN_ROWS + FIRST_ROW}'))
+            found.append((n, '화면 밖', f'y {y} + 높이 {h} > {SCREEN_ROWS + FIRST_ROW}'))
         if win.title is not None:
             cols = title_cols(data, widths, win.title)
             if cols is None:
@@ -392,7 +395,8 @@ def check(data, base=None):
             elif win.title_x + cols > win.w - 1:
                 found.append((n, '제목', f'제목 {win.title:02X}: 자리 {win.title_x} + {cols}열 > {win.w - 1}'))
     if base is not None:
-        found += [(n, '겹침', text) for n, text in overlaps(data, base)]
+        found += [(n, '가림', text) for n, text in overlaps(data, base)]
+        found += [(n, '변 어긋남', text) for n, text in edges(data, base)]
     for code, (what, top, _) in NUMBER_FIELDS.items():
         digits = CODE_WIDTHS[code][1]
         if top is not None and len(str(top)) > digits:
@@ -446,6 +450,33 @@ def overlaps(data, base):
         for (a, b), k in now.items():
             if k > was.get((a, b), 0):
                 found.append((b, f'{scene}: 창 {b:02X} 가 앞 창 {a:02X} 의 글자 {k}칸을 덮음(원래 {was.get((a, b), 0)}칸)'))
+    return found
+
+
+def sides(win):
+    x, y, w, h = win.x, win.y, win.w, win.h
+    return {'왼쪽': x, '오른쪽': x + w - 1, '위': y, '아래': y + h - 1}
+
+
+def misaligned(wins, group):
+    """{(앞, 뒤, 쪽)}: 함께 뜨는 두 창의 같은 쪽 변이 정확히 1칸 차이. 사람마다 되풀이하는 창은 자리를 게임이 셈해 뺀다."""
+    out = set()
+    shown = [n for n in group if n in wins and not wins[n].per_member]
+    for i, a in enumerate(shown):
+        for b in shown[i + 1:]:
+            sa, sb = sides(wins[a]), sides(wins[b])
+            out.update((a, b, k) for k in sa if abs(sa[k] - sb[k]) == 1)
+    return out
+
+
+def edges(data, base):
+    """[(창, 설명)]. 원래 롬에 없던 1칸 변 어긋남(원래부터 있던 쌍은 원본과 같아 뺌)."""
+    _, hack = windows(data, 'hack')
+    _, orig = windows(base, 'base')
+    found = []
+    for scene, group, _ in SHOWN_TOGETHER:
+        for a, b, k in sorted(misaligned(hack, group) - misaligned(orig, group)):
+            found.append((b, f'{scene}: 창 {b:02X} 의 {k} 변이 창 {a:02X} 와 1칸 어긋남'))
     return found
 
 

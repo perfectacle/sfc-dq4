@@ -43,7 +43,7 @@ def kinds(found, n):
 class RowTest(unittest.TestCase):
     def test_two_names_and_states_overflow_a_29_wide_window(self):
         found = wl.check(rom({0x3A: SHOP_MEMBERS}, SHOP_TITLES))
-        self.assertEqual(kinds(found, 0x3A), ['넘침'] * 4)
+        self.assertEqual(kinds(found, 0x3A), ['창 밖'] * 4)
         self.assertIn('28칸 > 안쪽 27칸', found[0][2])
 
     def test_two_names_and_states_fit_a_30_wide_window(self):
@@ -60,11 +60,11 @@ class RowTest(unittest.TestCase):
         rec = bytes.fromhex('020408a50002') + bytes.fromhex('fe9e00ff fe9e01ff') + b'\x80'
         self.assertEqual(wl.check(rom({0x01: rec}, fixed={0: 5, 1: 5})), [])
         found = wl.check(rom({0x01: rec}, fixed={0: 5, 1: 6}))
-        self.assertEqual(kinds(found, 0x01), ['넘침'])
+        self.assertEqual(kinds(found, 0x01), ['창 밖'])
 
     def test_name_stepping_four_under_its_fifth_column_is_covered(self):
         rec = bytes.fromhex('0004 0c a3 00 01') + bytes.fromhex('fed001ff') + b'\x80'
-        self.assertEqual(kinds(wl.check(rom({0x01: rec})), 0x01), ['덮음'])
+        self.assertEqual(kinds(wl.check(rom({0x01: rec})), 0x01), ['테두리'])
 
     def test_name_before_its_state_mark_steps_five(self):
         rec = bytes.fromhex('0004 0c a3 00 01') + bytes.fromhex('fed0ddff') + b'\x80'
@@ -75,10 +75,33 @@ class RowTest(unittest.TestCase):
         self.assertEqual(kinds(wl.check(rom({0x01: rec})), 0x01), ['모름'])
 
 
+class AllowTest(unittest.TestCase):
+    def test_fixed_exception_is_reported_stale(self):
+        from unittest import mock
+        import io
+        import contextlib
+        d = rom({0x3A: SHOP_MEMBERS[:1] + bytes((SHOP_MEMBERS[1], 0x1E)) + SHOP_MEMBERS[3:]}, SHOP_TITLES)
+        out = io.StringIO()
+        with mock.patch.object(wl, 'ALLOW', {(0x3A, '창 밖'): '고칠 때까지'}), \
+                mock.patch('sys.argv', ['x', '--rom', 'r', '--base', 'b']), \
+                mock.patch.object(wl.Path, 'read_bytes', lambda self: d), contextlib.redirect_stdout(out):
+            self.assertEqual(wl.main(), 1)
+        self.assertIn('지난 예외', out.getvalue())
+
+
+class EdgeTest(unittest.TestCase):
+    def test_one_column_apart_sides_are_misaligned(self):
+        a = bytes.fromhex('020408a30001') + bytes.fromhex('fe02ff') + b'\x80'
+        b = bytes.fromhex('030408a30001') + bytes.fromhex('fe02ff') + b'\x80'
+        d = rom({0x01: a, 0x02: b})
+        _, wins = wl.windows(d, 'hack')
+        self.assertEqual(wl.misaligned(wins, (0x01, 0x02)), {(0x01, 0x02, '왼쪽'), (0x01, 0x02, '오른쪽')})
+
+
 class PlaceTest(unittest.TestCase):
     def test_window_past_the_right_edge(self):
         rec = bytes.fromhex('190408a30001') + bytes.fromhex('fe02ff') + b'\x80'
-        self.assertEqual(kinds(wl.check(rom({0x01: rec})), 0x01), ['화면'])
+        self.assertEqual(kinds(wl.check(rom({0x01: rec})), 0x01), ['화면 밖'])
 
     def test_alias_opens_the_target_at_its_own_place(self):
         target = bytes.fromhex('0f030da30001') + bytes.fromhex('fe02ff') + b'\x80'
@@ -106,6 +129,10 @@ class SceneTest(unittest.TestCase):
         sets = dict(kv.split('=') for kv in ws.maxed(2).split(';'))
         self.assertEqual((sets['7E2042'], sets['7E2043']), ('E7', '03'))       # 사람 0 HP 999
         self.assertEqual(sets[f'7E{0x2040 + 42 + 0x12:04X}'], '63')             # 사람 1 레벨 99
+
+    def test_input_length_counts_holds_and_waits(self):
+        import dq4windowscenes as ws
+        self.assertEqual(ws.frames('b:4,wait:40,up:10'), 54)
 
     def test_long_name_fills_eight_name_bytes(self):
         import dq4windowscenes as ws
