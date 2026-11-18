@@ -36,7 +36,7 @@ SPEAKERS = {'TORNEKO': TORNEKO, 'SCOTT': merc.GUEST | merc.SCOTT_KIND, 'LAWRENCE
 DOG_AWAY = (0x13, 0x04)
 # 줄 표의 조건 이름(dq4ch2partytalknds.STORY3·FIXES3) → 사건 모듈의 flag
 CONDITIONS = {
-    'CHAPTER3': ch3.CHAPTER3, 'DOG': ch3.DOG, 'DOG_AWAY': DOG_AWAY, 'SCOTT': ch3.SCOTT, 'LAWRENCE': ch3.LAWRENCE,
+    'CHAPTER3': ch3.CHAPTER3, 'HIRED_NOW': ch3.HIRED_NOW, 'DOG': ch3.DOG, 'DOG_AWAY': DOG_AWAY, 'SCOTT': ch3.SCOTT, 'LAWRENCE': ch3.LAWRENCE,
     'SON_FREED': bonmalmo.SON_FREED, 'FOXED': bonmalmo.FOXED, 'LETTER2': bonmalmo.LETTER2,
     'ALLOWED': endor.ALLOWED, 'SHOP': endor.SHOP, 'ORDER': endor.ORDER, 'DELIVERED': endor.DELIVERED,
     'PAID': tunnel.PAID, 'RESUMED': tunnel.RESUMED, 'OPENED': tunnel.OPENED,

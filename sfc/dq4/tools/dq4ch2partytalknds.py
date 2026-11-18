@@ -463,8 +463,9 @@ FIXES3 = {
     58: {'v0': True, 'on': ('PAID',)}, 59: {'v0': True, 'on': ('PAID',)},             # 노인 「６００００Ｇ 受け取った」
     74: {'v0': True}, 75: {'v0': True}, 76: {'v0': True}, 77: {'v0': True},          # 수집가 「ダメなのか」
     84: {'v0': True, 'on': ('DOG',)}, 88: {'v0': True, 'on': ('DOG',)},               # 스콧 「犬が きらいなのだ」
-    85: {'v0': True, 'talked': ('E.scott',)}, 89: {'v0': True, 'talked': ('E.scott',)},   # 스콧 「やとってくれるか」
-    96: {'v0': True, 'talked': ('E.lawrence',)}, 99: {'v0': True, 'talked': ('E.lawrence',)},
+    # 고용 대사(「やとってくれるか」·「やとってくれますか」)는 「예」 일 때만 뜬다: 방금 그 용병에게 말을 걸어 고용함
+    **{k: {'v0': True, 'talked': (who,), 'on': ('HIRED_NOW',)}
+       for k, who in ((85, 'E.scott'), (89, 'E.scott'), (96, 'E.lawrence'), (99, 'E.lawrence'))},
     108: {'v0': True},                                                                  # 톰 아들 「返したくなったら」
     40: {'flag_c': {60: ('48/04',)}}, 41: {'flag_c': {60: ('48/04',)}},               # 물이 빠짐: 단추 뒤의 맵
 }

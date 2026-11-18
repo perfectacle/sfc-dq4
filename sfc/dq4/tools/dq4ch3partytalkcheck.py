@@ -67,8 +67,13 @@ PEOPLE = [
     ('warrior', '40/0B', (0x0B, 0x03), 'below', '여우', (), True, 'both', 'both', ()),   # 여관 2층 전사(밤)
     ('seller', '40/08', (0x03, 0x03), 'below', '허락', (), False, 'both', 'both', ()),   # 가게를 사기 전 가게 주인
     ('nene_shop', '40/00', (0x06, 0x1C), 'left', '가게', (), False, 'both', 'both', ()),  # 가게를 산 뒤 네네
-    ('scott', '40/00', (0x05, 0x13), 'below', '여우', (), False, 'none', 'scott', ()),   # 고용 대사 뒤
-    ('lawrence', '40/0B', (0x07, 0x08), 'below', '여우', (), False, 'none', 'lawrence', ()),
+    # 용병: 'hire' 는 금화를 쥐여 「예」 로 고용한 직후(일행·flag 는 게임이 만든 그대로) 고용 대사 줄이 나와야 하고,
+    # 'refuse' 는 「방금 고용함」 을 미리 켜 두고 「아니오」 한 뒤 그 용병을 일행에 넣어도 고용 대사 줄이 아니어야 한다
+    # (대화 시작 훅이 그 flag 를 끔)
+    ('scott_hire', '40/00', (0x05, 0x13), 'below', '여우', (), False, 'none', 'scott', ('hire',)),
+    ('scott_refuse', '40/00', (0x05, 0x13), 'below', '여우', (), False, 'none', 'scott', ('refuse',)),
+    ('lawrence_hire', '40/0B', (0x07, 0x08), 'below', '여우', (), False, 'none', 'lawrence', ('hire',)),
+    ('lawrence_refuse', '40/0B', (0x07, 0x08), 'below', '여우', (), False, 'none', 'lawrence', ('refuse',)),
     ('bonmalmo_king', '3F/01', (0x11, 0x07), 'below', '여우', (), False, 'both', 'both', ()),
     # 왕자 방의 유모: 제자리 (06,06). 둘째 유모 (06,07)은 FC 가 싣지 않는 사람이라 목록에 없고(dq4ch3bonmalmo
     # .SECOND_NANNY), 왕자가 처음 말을 마치기(NANNY_GO) 전에는 걷지 않는다
@@ -79,6 +84,9 @@ PEOPLE = [
     ('nene_home', '3E/01', (0x1B, 0x04), 'below', '여우', (), False, 'both', 'both', ()),
     ('old_man', '47/00', (0x12, 0x0A), 'below', '가게', (), False, 'both', 'both', ()),  # 굴 노인: 공사비 내기 전
 ]
+# 고용: 명령 창 → 「はなす」, 묻는 말(두 쪽, dq4mercenary *_offer)의 첫 쪽을 B 로 넘기고 물음에 A 로 「예」, 고용 말은
+# B 로 넘긴다. 고용 뒤 A 를 더 누르면 명령 창 → 「はなす」 로 숨기 전의 용병에게 다시 말을 걸어 「방금 고용함」 이 꺼졌다(실측)
+HIRE_TALK = ','.join(['a:8', 'wait:60', 'a:8', 'wait:200', 'b:8', 'wait:120', 'a:8', 'wait:200'] + ['b:8', 'wait:70'] * 6)
 SIDES = {'below': ((0, 1), 'up', 'down'), 'left': ((-1, 0), 'right', 'left')}
 
 
@@ -111,20 +119,28 @@ def party_writes(data, members):
 class Step:
     """「はなす」 한 번의 상태. names 는 flag 이름(진행 단계 + 동행), party 는 용병 이름들."""
 
-    def __init__(self, name, names, night, party, days=(0, 0), statue=False):
+    def __init__(self, name, names, night, party, days=(0, 0), statue=False, gold=None, game=False, keep=()):
         self.name, self.names, self.night, self.party = name, frozenset(names), night, tuple(party)
-        self.days, self.statue = days, statue
+        self.days, self.statue, self.gold = days, statue, gold
+        # game: 게임이 만든 일행·flag 를 그대로 두고 시각·마지막 줄만 쓴다. keep: 쓰지 않는(게임이 정하는) flag 이름
+        self.game, self.keep = game, frozenset(keep)
 
     def flags(self):
         return self.names | {'SCOTT' if w == 'scott' else 'LAWRENCE' for w in self.party}
 
     def env(self, data, reset_talked=True):
-        writes = [f'{a:04X}={v:02X}/{k:02X}' for a, (v, k) in sorted(flag_bytes(self.flags()).items())]
         t = NIGHT if self.night else DAY
-        writes += [f'075E={t & 0xFF:02X}', f'075F={t >> 8:02X}', f'{0x2190 + pt.LAST[0]:04X}=00']
+        clock = [f'075E={t & 0xFF:02X}', f'075F={t >> 8:02X}', f'{0x2190 + pt.LAST[0]:04X}=00']
+        if self.game:
+            return ','.join(clock)
+        kept = {0x2190 + i: m for n, (i, m) in c3.CONDITIONS.items() if n in self.keep}
+        writes = [f'{a:04X}={v:02X}/{k & ~kept.get(a, 0) & 0xFF:02X}' for a, (v, k) in sorted(flag_bytes(self.flags()).items())]
+        writes += clock
         if reset_talked:
             writes.append(f'{0x2190 + pt.TALKED_TO[0]:04X}=00')
         writes += party_writes(data, self.party)
+        if self.gold is not None:
+            writes += [f'{(ch3.GOLD_AT & 0xFFFF) + k:04X}={self.gold >> 8 * k & 0xFF:02X}' for k in range(3)]
         writes += [f'{ch3.SCOTT_DAYS & 0xFFFF:04X}={self.days[0]:02X}', f'{ch3.LAWRENCE_DAYS & 0xFFFF:04X}={self.days[1]:02X}']
         writes += [f'{ITEM_SLOT:04X}={c3.ITEMS["STATUE"] if self.statue else 0xFF:02X}',
                    f'{(pt.BAG & 0xFFFF) + c3.ITEMS["STATUE"]:04X}=00']
@@ -257,8 +273,12 @@ def run_person(mesence, rom, data, start, out, case, seed):
     """말을 건 뒤 「はなす」 사례 하나. 결과 dict."""
     name, mp, fc, side, stage, more, night, person_party, party, extra = case
     names = dict(c3.STAGES)[stage] | set(more)
-    step = Step('after', names, night, PARTIES[party], statue='statue' in extra)
-    meet = Step('person', names, night, PARTIES[person_party], statue='statue' in extra)
+    hire, refuse = 'hire' in extra, 'refuse' in extra
+    price = merc.PRICES[party] if hire else None
+    step = Step('after', names | ({'HIRED_NOW'} if hire else set()), night, PARTIES[party], statue='statue' in extra,
+                game=hire, keep=('HIRED_NOW',) if refuse else ())
+    meet = Step('person', names | ({'HIRED_NOW'} if refuse else set()), night, PARTIES[person_party],
+                statue='statue' in extra, gold=price)
     t = NIGHT if night else DAY
     clock = f'7E075E={t & 0xFF:02X};7E075F={t >> 8:02X}'
     sets = ';'.join(f'{a:04X}={v:02X}' for a, (v, _k) in sorted(flag_bytes(meet.flags()).items()))
@@ -279,7 +299,7 @@ def run_person(mesence, rom, data, start, out, case, seed):
         return {**results, 'problems': [f"warp: {r.get('problems') or r['status']}"]}
     table = base.table_of(data)
     ids, talk_sets = base.talk_sets(data)
-    plan = [f'person|{meet.env(data)}|{base.PERSON_TALK}', f'turn||{away}:8,wait:40',
+    plan = [f'person|{meet.env(data)}|{HIRE_TALK if hire else base.PERSON_TALK}', f'turn||{away}:8,wait:40',
             f'after|{step.env(data, reset_talked=False)}']
     env = {'STATE': str(out / 'warp' / 'end.mss'), 'PRE': f'{face}:8,wait:30', 'TALK': _talk_input(),
            'ROMPATCH': wc.NO_ENCOUNTERS, 'POKE': HOLD + ';' + clock, 'STEPS': ';'.join(plan)}
@@ -298,7 +318,13 @@ def run_person(mesence, rom, data, start, out, case, seed):
     msg, row = step.expect(table, pt._key(mp), talked, talk_sets)
     if got.get('after') != [f'{msg:03X}']:
         problems.append(f'after: 메시지 {got.get("after")}, 기대 [{msg:03X}]')
-    if row is None or not any(c[0] == pt.TALKED for c in row[4]):
+    hired_now = 0x2190 + ch3.HIRED_NOW[0]
+    if (hire or refuse) and bool(seen.get(f'{hired_now:04X}', 0) & ch3.HIRED_NOW[1]) != hire:
+        problems.append(f"말을 마친 뒤 방금 고용함 flag {'꺼짐' if hire else '켜짐'}")
+    if refuse:
+        if row is not None and any(c[0] == pt.TALKED for c in row[4]):
+            problems.append('「아니오」 뒤에 고용 대사 줄(말 건 뒤 줄)을 고름')
+    elif row is None or not any(c[0] == pt.TALKED for c in row[4]):
         problems.append('모형이 「말 건 뒤」 줄을 고르지 않음(사례가 그 줄을 재지 못함)')
     return {'name': name, 'status': 'failed' if problems else 'passed', 'problems': problems,
             'shown': got.get('after'), 'talk': f'{talk:03X}'}

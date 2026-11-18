@@ -43,6 +43,15 @@ class TableTest(unittest.TestCase):
             if ch3.DOG in ln.on:
                 self.assertIn(c3.DOG_AWAY, ln.off, ln)
 
+    def test_hire_lines_need_the_one_talk_flag(self):
+        # 대화 시작 훅이 끄는 flag 가 「방금 고용함」 이고, 고용 대사 뒤 줄(스콧·로렌스 말 건 뒤)은 그 flag 를 본다
+        self.assertEqual(pt.TALK_ONCE, ch3.HIRED_NOW)
+        hire = [ln for ln in c3.LINES if ln.nds in (85, 89, 96, 99)]
+        self.assertEqual(len(hire), 4)
+        for ln in hire:
+            self.assertIn(ch3.HIRED_NOW, ln.on, ln)
+        self.assertFalse([ln for ln in c3.LINES if ch3.HIRED_NOW in ln.on and ln not in hire])
+
     def test_one_map_free_line_for_the_dog(self):
         anywhere = [ln for ln in c3.LINES if ln.map == pt.ANY]
         self.assertEqual(len(anywhere), 1)

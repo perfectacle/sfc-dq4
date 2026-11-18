@@ -319,6 +319,9 @@ RESULT = (0x6F, 0x01)
 DOG = (0x6F, 0x02)
 SCOTT = (0x6F, 0x04)
 LAWRENCE = (0x6F, 0x08)
+# 방금 끝난 대화에서 용병을 고용함: 고용(dq4mercenary.hire)이 켜고, 동료 대화의 대화 시작 훅(dq4ch2partytalk talked)이
+# 대화를 시작할 때마다 끈다. NDS 고용 직후 동료 대화(최근 이벤트 값 = 고용 대사, 마을 사람과 말하면 지워짐)의 조건
+HIRED_NOW = (0x6F, 0x10)
 # 공용 변수 칸(dq4ch3slots.COMMON_VARS): 용병 날수(FC $628C·$628D), 날이 바뀐 것을 알 시계
 SCOTT_DAYS, LAWRENCE_DAYS, CLOCK = VARS_AT, VARS_AT + 1, VARS_AT + 2
 
