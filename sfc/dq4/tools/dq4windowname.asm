@@ -1510,7 +1510,7 @@ WnUpload:
     BRA ++
 +
     LDA.w !wn_above,X
-    AND #$03FF
+    AND #$C3FF                  ; 타일 번호와 뒤집기(WnBaseRow)
 ++
     STA.w !wn_base
     STZ.w !wn_r
@@ -1617,7 +1617,14 @@ WqStage:
 
 ; !wn_base 타일의 줄 !wn_r 을 A = p0 | p1 << 8 로. 가나 칸 01~8A 는 1bpp(둘째 평면 FF), 테두리 8B~95 는 두 평면.
 WnBaseRow:
+    LDA.w !wn_r
+    BIT.w !wn_base
+    BPL +
+    EOR #$0007                  ; 세로로 뒤집은 타일(창 아래 변 등)은 줄을 거꾸로 읽는다
++
+    PHA                         ; 1,S = 읽을 줄
     LDA.w !wn_base
+    AND #$03FF
     BEQ .blank
     CMP #$008B
     BCS .border
@@ -1626,11 +1633,12 @@ WnBaseRow:
     ASL
     ASL
     CLC
-    ADC.w !wn_r
+    ADC 1,S
     TAX
+    PLA
     LDA.l $04E528,X
     ORA #$FF00
-    RTS
+    BRA .flip
 .border
     CMP #$0096
     BCS .blank
@@ -1641,16 +1649,44 @@ WnBaseRow:
     ASL
     ASL
     CLC
-    ADC.w !wn_r
+    ADC 1,S
     TAX
+    PLA
     SEP #$20
     LDA.l $04E980,X
     XBA
     LDA.l $04E978,X
     REP #$20
+.flip
+    ; 좌우로 뒤집은 타일(창 오른쪽 변·모서리)은 두 평면 바이트의 비트를 거꾸로. 합성한 타일은 뒤집기 없이 쓰므로
+    ; 뒤집기를 버리면 오른쪽 변 「┤」 에 닿은 이름 위 줄이 「├」 로, 아래 변이 위 변 꼴로 그려졌다
+    BIT.w !wn_base
+    BVC +
+    JSR WnMirror
++
     RTS
 .blank
+    PLA
     LDA #$FF00
+    RTS
+
+; A = p0 | p1 << 8 의 바이트마다 비트 차례를 거꾸로(X 는 지킴). !wn_s 를 잠깐 쓴다(이름 그리기·WtAlloc 밖에서만 부름)
+WnMirror:
+    PHX
+    STA.w !wn_s
+    SEP #$20
+    LDX #$0008
+-
+    LSR.w !wn_s
+    ROL
+    XBA
+    LSR.w !wn_s+1
+    ROL
+    XBA
+    DEX
+    BNE -
+    REP #$20
+    PLX
     RTS
 
 ; 타일맵 버퍼: 이름 줄 5칸과 위 줄 5칸. 높은 바이트의 우선·팔레트는 살리고 뒤집기는 지운다.
@@ -3568,7 +3604,7 @@ WtQueue:
     SBC #$0040
     TAX
     LDA.w $0000,X
-    AND #$03FF
+    AND #$C3FF                  ; 타일 번호와 뒤집기(WnBaseRow)
     STA.w !wn_base
     STZ.w !wn_r
 -
