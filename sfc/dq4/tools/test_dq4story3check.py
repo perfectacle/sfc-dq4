@@ -8,7 +8,7 @@ import dq4story3check as check
 TOKEN = re.compile(r'^(\d+,\d+!?|(up|down|left|right|wait):\d+|face:(up|down|left|right)|talk|free|yes\*?|no|await|fight|close|field|'
                    r'cmd:[a-z,]+|rest:[0-9A-F]{4},\d+|push:[0-9A-F]{2},\d+,\d+|meet:[a-z]+,[a-z]+|msg:[0-9A-F]+|win:[0-9A-F/]+|map:[0-9A-F]{2}/[0-9A-F]{2}|near:[0-9A-F]{2}|'
                    r'pick:[0-9A-F]{4}=[0-9A-F]{2}|see:[0-9A-F]{4}=[0-9A-F]{2}|serve:[0-9A-F]{4}>=[0-9A-F]{4}|'
-                   r'pace:[0-9A-F]{4}>=[0-9A-F]{4},[a-z]+,[a-z]+)$')
+                   r'pace:[0-9A-F]{4}>=[0-9A-F]{4},[a-z]+,[a-z]+|stand:[0-9A-F]{2},\d+,\d+)$')
 OPTIONS = {'part', 'map', 'cell', 'field', 'want', 'off', 'items', 'no_items', 'bytes', 'gold_min', 'rng', 'battle', 'fight',
            'maxf', 'tokmax', 'gold', 'give', 'why', 'side', 'rng_fixed', 'encounters', 'level'}
 
@@ -93,6 +93,33 @@ class Judge(unittest.TestCase):
                                    {'cell': (4, 55), 'off': ['SEEN'], 'no_items': [0xBB]}, flags)
         self.assertEqual(len(bad), 4)
         self.assertIn('stuck at 1,1 heading 2,2', bad)
+
+
+class StandToken(unittest.TestCase):
+    """stand:SS,X,Y: 인물 칸이 그 셀에 서서 걷는 중이 아닐 때까지 누르지 않는다(Lua 두 판·호환성 Walker 와 같은 뜻)."""
+
+    def test_runner_waits_for_the_person_to_stand(self):
+        import dq4storytokens
+        mem = {0x7E3020 + 0x0D: 20, 0x7E3080 + 0x0D: 13, 0x7E3280 + 0x0D: 0x80}
+
+        class Walker:
+            def rd(self, a):
+                return mem.get(a, 0)
+
+        gen = dq4storytokens.Runner(Walker())._stand('0D,20,15')
+        self.assertEqual(next(gen), set())
+        mem[0x7E3080 + 0x0D] = 15
+        self.assertEqual(next(gen), set())                       # 셀은 맞지만 걷는 중
+        mem[0x7E3280 + 0x0D] = 0x01
+        with self.assertRaises(StopIteration):
+            next(gen)
+
+    def test_walk_drivers_parse_it(self):
+        import dq4ch1walkcheck as wc
+        import dq4compatcheck
+        self.assertEqual(dq4compatcheck.tokens('10,25;stand:0D,20,15;up:8'), [(10, 25), ('stand', 0x0D, 20, 15), ('up', 8)])
+        self.assertTrue(wc.WINDOW_TOKEN.search('10,25;stand:0D,20,15'))
+        self.assertFalse(wc.WINDOW_TOKEN.search('10,25;up:8'))
 
 
 if __name__ == '__main__':

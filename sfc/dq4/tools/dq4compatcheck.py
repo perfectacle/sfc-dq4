@@ -171,7 +171,13 @@ def tokens(s):
     out = []
     for tok in filter(None, (s or '').split(';')):
         m = re.fullmatch(r'(\d+),(\d+)', tok)
-        out.append((int(m[1]), int(m[2])) if m else (tok.split(':')[0], int(tok.split(':')[1])))
+        st = re.fullmatch(r'stand:([0-9A-Fa-f]+),(\d+),(\d+)', tok)
+        if m:
+            out.append((int(m[1]), int(m[2])))
+        elif st:
+            out.append(('stand', int(st[1], 16), int(st[2]), int(st[3])))
+        else:
+            out.append((tok.split(':')[0], int(tok.split(':')[1])))
     return out
 
 
@@ -336,6 +342,12 @@ class Walker:
                     press = wc.GONE_MAX if press is None else press
                     press -= 1
                     if x == wc.GONE_X or press <= 0:
+                        press, wi = None, wi + 1
+                elif p[0] == 'stand':
+                    at = (self.rd(wc.NPC_X + p[1]), self.rd(wc.NPC_Y + p[1]), self.rd(wc.NPC_WALK + p[1]) & 0x80)
+                    press = wc.STAND_MAX if press is None else press
+                    press -= 1
+                    if at == (p[2], p[3], 0) or press <= 0:
                         press, wi = None, wi + 1
                 elif p[0] == 'settle':
                     c = self.rd(wc.CURSOR)

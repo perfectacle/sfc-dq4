@@ -18,6 +18,7 @@ face:dir · dir:n · wait:n · pace:…). 선택:
 """
 import dq4boulder
 import dq4ch3bonmalmo as bm
+import dq4ch3bonmalmo_checks as bmc
 import dq4ch3event as ch3
 import dq4ch3lakanaba as lakanaba
 import dq4ch3endor as endor
@@ -50,9 +51,6 @@ def writes_set(opt):
 
 
 L_TOWN, L_HOUSE = '3E/00', ch3.HOUSE
-# 감옥 가운데 방 (05,0C)에 들어선 뒤 기다리는 프레임. 시드 0·5·9 에서 420·470 은 들키지 않고 아들에게 날개를 줬고, 360 은
-# 줄 08 에서, 520 부터는 윗줄에서 들켰다. 445 는 들키지 않았는데도 아들 앞의 말이 「誰もいない」(129)로 빗나갔다(원인 미확인)
-JAIL_SNEAK_STORY = 420
 # 걸음 전투를 붙일 때의 몬스터(3장 구역의 버블 슬라임, dq4ch3monstercheck 와 같음)
 BUBBLE = dq4monport.CH3[0x0A][0]
 SEARCH = 'cmd:down,down,down,right'
@@ -150,9 +148,9 @@ SEGMENTS = [
     # 키메라의 날개
     ('bm_inn2', '64,33;56,33;56,49;26,49;26,57;22,57;face:up;talk;yes*', {'map': bm.CASTLE, 'bytes': {'TIME': 0x50}}),
     # 감옥 병사 둘이 돌며 보는 줄(윗줄·열 0A)을 피해: 벽에 둘러싸인 가운데 방에서 기다렸다가 두 병사가 지나간 틈에 문 →
-    # 줄 08 → 열 0B 로 내려가 아들에게 말을 건다(bonmalmo_checks.JAIL_SNEAK_WAIT 와 같은 틈)
-    ('bm_prison', f'32,57;32,35;18,35;18,33;20,33;20,5;50,5;map:{bm.PRISON};10,25;wait:{JAIL_SNEAK_STORY};'
-     f'up:100;right:125;{bm.SON_SIDE[0]},{bm.SON_SIDE[1]};face:right;talk;yes*',
+    # 줄 08 → 열 0B 로 내려가 아들에게 말을 건다(bonmalmo_checks.JAIL_SNEAK_GO 와 같은 틈)
+    ('bm_prison', f'32,57;32,35;18,35;18,33;20,33;20,5;50,5;map:{bm.PRISON};10,25;{bmc.JAIL_SNEAK_GO};'
+     f'{bmc.JAIL_SNEAK_PATH};face:right;talk;yes*',
      {'map': bm.PRISON, 'want': ['BM_SON_FREED'], 'no_items': [bm.WINGS]}),
     # 아들 앞에 서 있으면 다음 병사가 보고 성의 감옥 계단 옆 FC (19,02)로 내보낸다(FC 도 같음). 레이크나바로 돌아가 톰의
     # 아들에게서 개 토마스

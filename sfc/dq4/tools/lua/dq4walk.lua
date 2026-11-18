@@ -18,6 +18,8 @@
 --             커서가 몇 프레임 칸을 훑고 첫 칸에 놓이는 창에서, 훑는 값을 보고 cursor 가 끝나지 않게 그 앞에 둔다
 --   gone:S    인물 슬롯 S(10진)가 맵에서 빠질(명령 52 가 X 를 80 으로 둠) 때까지 누르지 않고 기다린다(많아야 6000 프레임).
 --             걸어 나가는 인물이 다 지나가기를 프레임 수 대신 기다릴 때 쓴다
+--   stand:SS,X,Y  인물 슬롯 SS(16진)가 셀 (X,Y)(10진)에 서서 걷는 중(7E:3280 bit7)이 아닐 때까지 누르지 않고 기다린다(많아야
+--             6000 프레임). 순찰하는 인물이 정한 칸에 설 때를 프레임 수 대신 기다릴 때 쓴다
 -- 프레임 수만 정해 누르면, 앞 장·앞 모듈이 메시지를 더해 창이 뜨는 때가 바뀔 때 누른 방향이 물음 창 커서를 옮겼다.
 -- STATE 세이브스테이트에서 시작해 주인공(인물 표 슬롯 0)을 WAYPOINTS 의 셀 좌표로 차례로 걷게 한다.
 -- WAYPOINTS="3,11;3,24;7,24;7,22" 처럼 x,y(맵 셀) 목록. 한 번에 한 축만 움직이므로 꺾이는 곳마다 점을 둔다.
@@ -40,8 +42,11 @@ end
 local pts = {}
 for tok in string.gmatch(os.getenv("WAYPOINTS") or "", "[^;]+") do
   local x, y = tok:match("^(%d+),(%d+)$")
+  local ss, sx, sy = tok:match("^stand:(%x+),(%d+),(%d+)$")
   if x then
     pts[#pts + 1] = {tonumber(x), tonumber(y)}
+  elseif ss then
+    pts[#pts + 1] = {kind = "stand", arg = tonumber(ss, 16), x = tonumber(sx), y = tonumber(sy)}
   else
     local b, f = tok:match("^(%a+):(%d+)$")
     if b == "until" or b == "cursor" or b == "ask" or b == "pick" or b == "open" or b == "done" or b == "settle" or b == "gone" then
@@ -137,6 +142,17 @@ emu.addEventCallback(function()
         press = nil; wi = wi + 1
       elseif press <= 0 then
         log[#log + 1] = string.format("f%05d gone timeout slot %d x=%02X", n, p.arg, x)
+        press = nil; wi = wi + 1
+      end
+    elseif p.kind == "stand" then
+      local s = p.arg
+      if press == nil then press = 6000 end
+      press = press - 1
+      if emu.read(0x7E3020 + s, m) == p.x and emu.read(0x7E3080 + s, m) == p.y and emu.read(0x7E3280 + s, m) & 0x80 == 0 then
+        log[#log + 1] = string.format("f%05d stand slot %02X", n, s)
+        press = nil; wi = wi + 1
+      elseif press <= 0 then
+        log[#log + 1] = string.format("f%05d stand timeout slot %02X", n, s)
         press = nil; wi = wi + 1
       end
     elseif p.kind == "settle" then

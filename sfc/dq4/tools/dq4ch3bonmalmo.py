@@ -78,13 +78,19 @@ SON_SIDE = cell(0x0B, 0x0C)                                       # 창살 (0C,0
 GUARDS = ((0x0A, 0x0E), (0x02, 0x07))
 JAIL_LOOP = ((0x0A, 0x07), (0x0A, 0x0E), (0x02, 0x0E), (0x02, 0x07))
 JAIL_OUT = ('3F/01', (0x19, 0x02))
-# 맵 안 임시 값(7E:21A2·21A4 는 3F/00 에서 다른 쓰임이 없음): 들킴 bit, 들킨 병사의 인물 칸
+# 맵을 옮기면 지워지는 맵 안 임시 값(dq4ch3slots.MAP_TEMPS). 21A3 은 공용 ANSWERED 가 써서 쓰지 않는다.
+# 21A4: bit6 들킴, bit7 들킨 병사(인물 칸 & 1), bit0-5 병사 1 이 칸을 떠난 때의 프레임 수 $7F. 21A2 bit0-5: 병사 0 의 그것
 SPOTTED = (0x14, 0x40)
-SPOTTER = 0x7E21A2
-# 순찰은 한 칸씩 목표를 두고(jail_step 이 닿을 때마다 다음 칸) 다음 칸을 이 주기(프레임, 2의 거듭제곱)에 한 번만 정해
-# FC 병사의 33프레임/칸에 맞춘다. 속도 01 이면 한 칸을 16프레임에 걸어 주기 안에 닿는다
-PATROL_PERIOD = 32
-PATROL_WINDOW = 4             # 주기의 앞 몇 프레임에 다음 칸을 정하나(순찰 고리는 명령 셋이라 그보다 넓게)
+SPOTTER_BIT = 0x80
+LEAVE_AT = (0x21A2, 0x21A4)
+TICK = 0x7F
+# 순찰: 칸을 떠난 지 TILE_FRAMES 프레임이 지나면 다음 칸으로(걸음 16프레임 + 쉼). FC 칸 (x + y) 홀짝으로 칸마다 32·34 를
+# 번갈아 FC 병사의 평균 33프레임. 쉬는 동안은 명령 05 로 jail_step 에 머물고 속도(3360)를 REST_SPEED 로 두어 2프레임마다
+# 불린다(01 이면 8프레임마다, 실측). 속도가 REST_SPEED 면 닿은 뒤 첫 부름을 마친 것이다. 걷는 동안은 스크립트가 돌지 않고,
+# 닿은 뒤 첫 부름은 속도 01 의 박자를 따라 0~6프레임 늦어(실측) 부른 수 대신 $7F 로 잰다. $7F 는 필드 고리가 돌 때마다
+# 늘어 스크립트 명령이 프레임을 먹으면 멈추지만, 이 고리는 쉬는 동안 05 한 명령에 머물러 멈추지 않는다(실측)
+TILE_FRAMES = (32, 34)
+REST_SPEED = 0x04
 PATROL_SPEED, APPROACH_SPEED = 0x01, 0x02    # 인물 명령 1E. 01 은 16프레임/칸(00 은 서 있음), 02 는 유모처럼 8프레임/칸
 # 시야를 막는 FC 칸(05/00 의 벽·창살). 실측 근거는 dq4-chapter3-format 「본몰 감옥 병사」
 SIGHT_BLOCKS = {0x28, 0x2B}
@@ -303,7 +309,8 @@ CGRAM_NOW, CGRAM_KEEP = 0x7E3914, 0x7E3B14   # 지금 색(NMI 가 $1A bit1 이�
 FLASHES, FLASH_FRAMES = 6, 3                 # FC 084C 뒤 회색 3프레임·원래 색 3프레임을 여섯 번(실측 851~881)
 # 페이드 아웃 뒤 검은 채 기다림. 워프의 맵 불러오기(43프레임쯤)와 합쳐 FC 의 182프레임(실측 894~1075)
 DARK_FRAMES = 139
-FADE_LEVELS = (13, 11, 9, 7, 5, 3, 1, 0)     # 한 프레임에 두 단계씩: FC 페이드 아웃 9프레임(885~893)
+FADE_STEP = 2                 # 15 에서 한 프레임에 두 단계씩: FC 페이드 아웃 9프레임(885~893)
+JAIL_FADE_STEP = 3            # 감옥에서 내보낼 때 다섯 프레임: FC 약 6프레임(034A 가 닫힌 뒤)
 
 
 # 맵 밝히기 루틴(00:CEC3, X 프레임마다 $1D 아래 넷 비트를 0F 까지 1씩, 16번)의 들머리. 워프 뒤 숲을 밝힐 때 여우 장면이면
@@ -405,32 +412,45 @@ def _jail_next():
 
 
 def _jail_step(walls_at):
-    """명령 37(순찰 고리에서 되풀이): 들켰으면 아무것도 안 함. 모퉁이에 닿았으면 다음 모퉁이를 목표로 하고, 명령 14 처럼
-    방향을 정해 걷기를 잇고, 시야를 본다. 시야는 FC 1D:$98BD: 보는 방향의 세 줄(제 줄과 양옆) 한 칸 앞부터 막는 칸까지.
-    보이면 SPOTTED 와 SPOTTER. 명령 05 는 네이티브가 0 이 아닌 값을 주면 걷는 중(3280 bit7)을 지워(01:C98F) 쓰지 않는다."""
+    """명령 05(순찰 고리에서 되풀이). A = 0 이면 스크립트가 다음 명령(들킴 갈래, 걷기 14)으로, 1 이면 다시 부른다.
+    들켰으면 0. 걷다 막혀 목표 칸이 아니면 명령 14 처럼 방향을 정해 걷기를 잇고 0(1 이면 01:C98F 가 걷는 중 3280 bit7 을
+    지움). 목표 칸에 닿은 첫 부름에 속도를 REST_SPEED 로 두고 시야를 본 뒤 1, 쉬는 동안 1, 떠난 지 TILE_FRAMES 가 되면
+    다음 모퉁이 쪽 칸을 목표로 걷기 시작하며 시야를 보고 0. 그래서 시야는 닿을 때와 떠날 때 본다.
+    시야는 FC 1D:$98BD: 보는 방향의 세 줄(제 줄과 양옆) 한 칸 앞부터 막는 칸까지. 보이면 21A4 에 SPOTTED 와 SPOTTER_BIT."""
     w, h, _ = jail_walls()
     row = (w + 7) // 8
     flag = 0x2190 + SPOTTED[0]
-    a = Asm()(0x08, 0xE2, 0x30, 0xA6, 0x90, 0xAD, flag & 0xFF, flag >> 8, 0x29, SPOTTED[1]).br(BEQ, 'calm')(0x28, 0x6B)
+    assert LEAVE_AT[1] == LEAVE_AT[0] + 2
+    lo = (LEAVE_AT[0] & 0xFF, LEAVE_AT[0] >> 8)
+    a = Asm()(0x08, 0xE2, 0x30, 0xA6, 0x90, 0xAD, flag & 0xFF, flag >> 8, 0x29, SPOTTED[1]).br(BEQ, 'calm')(RET0)
     # FC 는 창이 떠 있는 동안 맵이 멈춘다(병사도 멈춤, 실측). 창 번호 7E:0A00 이 FF(없음)·02(필드 상태 창)가 아니면 서 있는다
-    a.label('calm')(0xAD, 0x00, 0x0A, 0xC9, 0xFF).br(BEQ, 'look')(0xC9, 0x02).br(BEQ, 'look')
-    a(0xBD, 0x80, 0x32, 0x29, 0x7F, 0x9D, 0x80, 0x32, 0x28, 0x6B)
+    a.label('calm')(0xAD, 0x00, 0x0A, 0xC9, 0xFF).br(BEQ, 'look')(0xC9, 0x02).br(BEQ, 'look')(RET1)
     a.label('look')(0xBD, 0x60, 0x35, 0xDD, 0x20, 0x30).br(BNE, 'far')(0xBD, 0xA0, 0x35, 0xDD, 0x80, 0x30).br(BEQ, 'here')
     a.label('far').brl('move')
-    # 닿은 칸에서 프레임 수 7E:1ECE 가 PATROL_PERIOD 주기의 앞 8프레임에 들 때만 다음 칸으로: 칸마다 PATROL_PERIOD
     a.label('here')(0xBD, 0x80, 0x32, 0x29, 0x7F, 0x9D, 0x80, 0x32)                  # 명령 14 처럼 닿으면 걷기를 끔
-    a(0xAD, 0xCE, 0x1E, 0x29, PATROL_PERIOD - 1, 0xC9, PATROL_WINDOW).br(BCC, 'turn').brl('look2')
-    a.label('turn')
+    a(0xBD, 0x60, 0x33, 0xC9, REST_SPEED).br(BEQ, 'resting')
+    a(0xA9, REST_SPEED, 0x9D, 0x60, 0x33, 0xA9, 0x01, 0x85, 0x0D).brl('sight')          # 닿은 첫 부름
+    # 쉼: ($7F - 떠난 때) & 3F 가 칸 홀짝에 따라 TILE_FRAMES 의 하나에 이르면 떠난다
+    a.label('resting')(0x8A, 0x29, 0x01, 0x0A, 0xA8, 0xB9, *lo, 0x85, 0x0D)          # Y = (칸 & 1) × 2: 21A2 / 21A4
+    a(0xA5, TICK, 0x38, 0xE5, 0x0D, 0x29, 0x3F, 0x85, 0x0D)
+    # 칸에 선 셀은 (2x, 2y + 1)이라 셀 X·Y 의 bit1 이 칸 x·y 의 bit0
+    a(0xBD, 0x20, 0x30, 0x5D, 0x80, 0x30, 0x29, 0x02).br(BNE, 'long')(0xA9, TILE_FRAMES[0] - 1).br(BRA, 'cmp')
+    a.label('long')(0xA9, TILE_FRAMES[1] - 1)
+    a.label('cmp')(0xC5, 0x0D).br(BCC, 'turn')(RET1)                                   # 지난 프레임 > 칸 프레임 - 1
+    # 떠남: 떠난 때를 적는다. ((t ^ r) & 3F) ^ r 로 bit6-7 은 둔 채
+    a.label('turn')(0xA5, TICK, 0x59, *lo, 0x29, 0x3F, 0x59, *lo, 0x99, *lo)
     _next_corner(a)
     a(0xA6, 0x90)
     # 명령 14: 목표와 견주어 방향·걷는 중
-    a.label('move')(0xBD, 0x60, 0x35, 0xDD, 0x20, 0x30).br(BEQ, 'y')(0xA9, 0x10).br(BCS, 'fx')(0xA9, 0x20)
+    a.label('move')(0xA9, PATROL_SPEED, 0x9D, 0x60, 0x33, 0xBD, 0x60, 0x35, 0xDD, 0x20, 0x30).br(BEQ, 'y')(0xA9, 0x10).br(BCS, 'fx')(0xA9, 0x20)
     a.label('fx')(0x9D, 0xE0, 0x31).br(BRA, 'walk')
-    a.label('y')(0xBD, 0xA0, 0x35, 0xDD, 0x80, 0x30).br(BEQ, 'look2')(0xA9, 0x40).br(BCS, 'fy')(0xA9, 0x80)
+    a.label('y')(0xBD, 0xA0, 0x35, 0xDD, 0x80, 0x30).br(BEQ, 'go')(0xA9, 0x40).br(BCS, 'fy')(0xA9, 0x80)
     a.label('fy')(0x9D, 0xE0, 0x31, 0x9E, 0x40, 0x36)
     a.label('walk')(0xBD, 0x80, 0x32, 0x09, 0x80, 0x9D, 0x80, 0x32)
-    a.label('look2')
-    # 시야: $04·$05 = 방향 dx·dy, $08 = 줄(FF·00·01), $09·$0A = 줄 어긋남, $06·$07 = 보는 칸, $0B = 남은 걸음
+    a.label('go')(0x64, 0x0D)
+    # 시야: $04·$05 = 방향 dx·dy, $08 = 줄(FF·00·01), $09·$0A = 줄 어긋남, $06·$07 = 보는 칸, $0B = 남은 걸음,
+    # $0D = 돌려줄 값
+    a.label('sight')
     a(_guard_tiles(), 0x64, 0x04, 0x64, 0x05, 0xBD, 0xE0, 0x31, 0x0A).br(BCC, 'nu')(0xC6, 0x05)
     a.label('nu')(0x0A).br(BCC, 'nd')(0xE6, 0x05)
     a.label('nd')(0x0A).br(BCC, 'nl')(0xC6, 0x04)
@@ -450,15 +470,20 @@ def _jail_step(walls_at):
     a(0xA5, 0x06, 0xC5, 0x02).br(BNE, 'adv')(0xA5, 0x07, 0xC5, 0x03).br(BEQ, 'seen')
     a.label('adv')(0xA5, 0x06, 0x18, 0x65, 0x04, 0x85, 0x06, 0xA5, 0x07, 0x18, 0x65, 0x05, 0x85, 0x07, 0xC6, 0x0B).br(BNE, 'step')
     a.label('next')(0xA6, 0x90, 0xE6, 0x08, 0xA5, 0x08, 0xC9, 0x02).br(BEQ, 'unseen').brl('lane')
-    a.label('unseen')(0x28, 0x6B)
-    a.label('seen')(0xAD, flag & 0xFF, flag >> 8, 0x09, SPOTTED[1], 0x8D, flag & 0xFF, flag >> 8,
-                    0xA5, 0x90, 0x8D, SPOTTER & 0xFF, SPOTTER >> 8 & 0xFF, 0x28, 0x6B)
+    a.label('unseen').br(BRA, 'out')
+    a.label('seen')(0xA5, 0x90, 0x4A, 0xAD, flag & 0xFF, flag >> 8, 0x09, SPOTTED[1]).br(BCC, 'sk')(0x09, SPOTTER_BIT)
+    a.label('sk')(0x8D, flag & 0xFF, flag >> 8)
+    a.label('out')(0xA5, 0x0D).br(BEQ, 'ret0')(RET1)
+    a.label('ret0')(RET0)
     return a.bytes()
 
 
 def _jail_mine():
     """명령 05: 들킨 병사면 A = 0, 다른 병사는 1(그 자리에서 기다림, FC 는 창이 떠 있는 동안 맵이 멈춤)."""
-    return bytes((0x08, 0xE2, 0x30, 0xA5, 0x90, 0xCD, SPOTTER & 0xFF, SPOTTER >> 8 & 0xFF, 0xF0, len(RET1))) + RET1 + RET0
+    flag = 0x2190 + SPOTTED[0]
+    # LDA 21A4 / ASL / LDA #0 / ROL : A = 들킨 병사의 칸 & 1
+    return bytes((0x08, 0xE2, 0x30, 0xAD, flag & 0xFF, flag >> 8, 0x0A, 0xA9, 0x00, 0x2A, 0x45, 0x90, 0x29, 0x01,
+                  0xF0, len(RET1))) + RET1 + RET0
 
 
 def _jail_near():
@@ -510,11 +535,17 @@ def _grey_flash():
     return grey.bytes()
 
 
+def _fade_down(step):
+    """M8·DB 0: 밝기 $1D 를 15 에서 프레임마다 step 씩 0 까지. 뒤의 워프는 이미 어두운 화면을 다시 밝히지 않는다(실측)."""
+    from dq4chapterbox import wait
+    body = bytes((0x38, 0xE9, step, 0x10, 0x02, 0xA9, 0x00, 0x8D, 0x1D, 0x00, 0x48)) + wait(1) + bytes((0x68,))
+    return bytes((0xA9, 0x0F)) + body + bytes((0xD0, -(len(body) + 2) & 0xFF))     # LDA #15 … BNE 고리
+
+
 def _fox_dark():
     """FC 084C 뒤: 회색 번쩍임 여섯 번, 페이드 아웃, 검은 화면(실측)."""
     from dq4chapterbox import wait
-    fade = b''.join(bytes((0xA9, v, 0x8D, 0x1D, 0x00)) + wait(1) for v in FADE_LEVELS)   # LDA #v / STA $1D
-    return _grey_flash() + fade + wait(DARK_FRAMES)
+    return _grey_flash() + _fade_down(FADE_STEP) + wait(DARK_FRAMES)
 
 
 # A 없이 닫히는 창(FC 실측, 창이 열린 프레임부터): 유모 03B0 223·03B1 204, 여우 마을 개 02F1 195. 명령 30 은 글을 다
@@ -583,7 +614,8 @@ def native(ctx):
     put('fox_event', bytes((0xA0, *_al(at['fox_scene']))) + _warp(FOREST, FOREST_WAKE) + b'\xff')
     put('inn_event', bytes((0xA0, *_al(at['rest']))) + _warp(FOREST, FOREST_WAKE) + b'\xff')
     put('fox_go', dq4prologue._event_start(at['fox_event']))
-    put('jail_event', _warp(JAIL_OUT[0], cell(*JAIL_OUT[1]), facing=3) + b'\xff')
+    put('jail_dark', ENTER + _fade_down(JAIL_FADE_STEP) + LEAVE)
+    put('jail_event', bytes((0xA0, *_al(at['jail_dark']))) + _warp(JAIL_OUT[0], cell(*JAIL_OUT[1]), facing=3) + b'\xff')
     put('jail_go', dq4prologue._event_start(at['jail_event']))
     put('jail_walls', JAIL_WALLS)
     put('jail_next', _jail_next())
@@ -743,9 +775,12 @@ def scripts(ctx):
                    poll(at['dog_trigger']), _cmd('3F'),
                    *timed('woof_run'), _or(DOG_AWAY), call(at['refresh']), _cmd('50', *DOG_FROM), _cmd('53'), _cmd('4F'), _cmd('1C'), *walk(DOG_RUN), _cmd('51'),
                    _cmd('4F'), _cmd('52'), _cmd('50', *DOG_STAND), _cmd('53'), _cmd('4F'), _cmd('40'), _cmd('16', label='stay')]
-    # 감옥 병사: 모퉁이를 하나씩 목표로 걸으며 차례마다 시야를 보다가 들키면 들킨 병사만 다가와 내보낸다
-    guard = [_cmd('1E', PATROL_SPEED), call(at['jail_next']), call(at['jail_step'], label='patrol'),
-             _if_on(SPOTTED, 'seen'), _cmd('03', target='patrol'),
+    # 감옥 병사: 모퉁이를 하나씩 목표로 걸으며 닿을 때·떠날 때 시야를 보다가 들키면 들킨 병사만 다가와 내보낸다.
+    # 쉬는 동안은 jail_step 한 명령에 머문다: 37·06·03 을 차례마다 도는 고리는 필드 고리를 늦춰 주인공 걸음까지 셀마다
+    # 8 → 10프레임이 되었다(실측). 걷기는 차례를 끝내는 14 로: 05 가 0 을 준 뒤 03 으로 바로 돌아오면 같은 프레임에 끝없이
+    # 돌았다(실측)
+    guard = [_cmd('1E', PATROL_SPEED), _cmd('1D', 0x10), call(at['jail_next']), poll(at['jail_step'], label='patrol'),
+             _if_on(SPOTTED, 'seen'), _cmd('14'), _cmd('03', target='patrol'),
              _cmd('15', label='seen'), poll(at['jail_mine']), _cmd('3F'), *timed('jail_who'), call(at['jail_near']),
              _cmd('1E', APPROACH_SPEED), _cmd('1C'), _cmd('14'), *timed('jail_out'), call(at['jail_go']), _cmd('16')]
     bodies = {'guard': guard, 'nanny': nanny, 'village_dog': village_dog, 'village_dog_night': list(village_dog), 'fox': fox, 'gaade': gaade, 'son': son}

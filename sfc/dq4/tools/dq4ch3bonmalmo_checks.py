@@ -42,12 +42,13 @@ BM_WEST = (0x6E * 2, 0x4F * 2)
 BM_EAST = (0x71 * 2, 0x4F * 2)
 # 3F/00 낮 목록에서 감옥 병사 둘이 받는 인물 칸 0C·0D 의 이동 간격(7E:3300 + 칸)을 0 으로: 순찰 스크립트가 멈춘다
 BM_GUARDS_HOLD = '7E330C=00;7E330D=00'
-# 맵을 불러온 뒤 가운데 방 (05,0C)에서 기다렸다가 문 (05,09) → 줄 08 → 열 0B 로 내려간다. 순찰은 두 병사가 반 바퀴씩
-# 떨어져 420프레임마다 같은 모양이고, 맵을 불러온 뒤 361~441 프레임에 나서면 들키지 않았다(461 부터는 윗줄 병사가 줄 08
-# 에서 봄, 입력 프로브 실측). 걷기 검사는 토막 앞에 77프레임을 써서 기다림은 그만큼 뺀다. 아들 앞에 서면 다음 병사가
-# 열 0A 를 내려오며 보므로(FC 도 같음) 닿은 뒤 바로 끝낸다
-JAIL_SNEAK_WAIT = 330
-JAIL_SNEAK_PATH = f'up:100;right:125;{bm.SON_SIDE[0]},{bm.SON_SIDE[1]}'
+# 가운데 방 (05,0C)에서 윗줄 병사(인물 칸 0D, 처음 (02,07))가 오른쪽 위 모퉁이 (0A,07)에 설 때까지 기다렸다가 문 (05,09) →
+# 줄 08 → 열 0B 로 내려간다. 그 병사는 열 0A 를 내려가며 아래만 보고, 다른 병사는 반 바퀴 떨어져 열 02 를 올라간다.
+# 아들 앞에 서면 다음 병사가 열 0A 를 내려오며 보므로(FC 도 같음) 닿은 뒤 바로 끝낸다
+JAIL_SNEAK_GO = 'stand:0D,%d,%d' % bm.cell(*bm.JAIL_LOOP[0])
+# 줄 08 은 셀 y 17. 왼쪽 위로 온 병사가 오른쪽으로 돌아서며 줄 06~08 을 보기(떠난 지 약 240프레임) 전에 줄 09 로 내려선다
+JAIL_ROW = bm.cell(0, 0x08)[1]
+JAIL_SNEAK_PATH = f'{bm.cell(0x05, 0)[0]},{JAIL_ROW};{bm.SON_SIDE[0]},{JAIL_ROW};{bm.SON_SIDE[0]},{bm.SON_SIDE[1]}'
 SEGMENTS = [
     # 감옥: 창살 너머 아들에게 오른쪽을 보고 말을 걸어 키메라의 날개를 준다. 「아니요」 면 0841 뒤 다시 묻고(두 번),
     # 「예」 면 날개가 빠지고 아들이 사라진다
@@ -67,7 +68,7 @@ SEGMENTS = [
      # 앞 구간이 켠 아들을 풀어 줌을 끈다(켜져 있으면 아들이 숨음)
      {'map': bm.PRISON, 'set': f'{BM_SLOT2}={bm.WINGS:02X};{0x2190 + bm.SON_FREED[0]:04X}&{~bm.SON_FREED[1] & 0xFF:02X}',
       'poke': wc.DAY}),
-    ('bm_jail_sneak', 'walk', f'wait:{JAIL_SNEAK_WAIT};{JAIL_SNEAK_PATH};right:8;wait:30;{BM_YES};{taps(8)};wait:60',
+    ('bm_jail_sneak', 'walk', f'{JAIL_SNEAK_GO};{JAIL_SNEAK_PATH};right:8;wait:30;{BM_YES};{taps(8)};wait:60',
      {'want': ['BM_SON_FREED'], 'bytes': {'BM_SLOT2': 0xFF}, 'poke': wc.DAY}),
     # 여우 마을 촌장: 개가 없으면 「예」·「예」 로 묵고 숲에서 아침에 깬다
     ('bm_inn_town', 'warp', f'{bm.FOX_TOWN},{bm.CHIEF[0] - 2},{bm.CHIEF[1] - 1}', {'map': bm.FOX_TOWN, 'poke': wc.NIGHT}),

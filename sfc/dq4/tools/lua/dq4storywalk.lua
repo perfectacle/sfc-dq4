@@ -28,6 +28,8 @@
 --   serve:AAAA>=VVVV  누르지 않고 서서 다가오는 사람의 말을 넘기고 묻는 창마다 「예」, WRAM 7E:AAAA(16비트)가 VVVV 이상이고
 --             조작이 풀리면 끝(무기점 손님을 가게를 닫을 때까지 받기)
 --   field     필드(7E:00BE bit7 꺼짐)에 서고 조작이 풀릴 때까지 기다린다
+--   stand:SS,X,Y  누르지 않고 인물 칸 SS(16진)가 셀 (X,Y)(10진)에 서서 걷는 중(7E:3280 bit7)이 아닐 때까지 기다린다
+--             (순찰하는 감옥 병사가 정한 모퉁이에 설 때)
 --   pace:AAAA>=VVVV,dir1,dir2  WRAM 7E:AAAA(16비트)가 VVVV 이상이 될 때까지 dir1·dir2 를 32프레임씩 번갈아 누른다
 --             (필드를 걸어 밤 7E:075E ≥ 00F0 을 기다릴 때)
 -- 토막마다 TOKMAX 프레임(기본 6000)을 넘기면 fail. fail 이면 그 줄을 남기고 곧 끝낸다. 다 하면 AFTER 프레임 뒤 끝.
@@ -46,6 +48,9 @@ local function heroAt()
 end
 local WINDOW, CURSOR, TICK = 0x7E0A00, 0x7E0AD7, 0x7E007F
 local W_COMMAND, W_MESSAGE, W_YESNO, W_STATUS, W_NONE = 0x01, 0x00, 0x32, 0x02, 0xFF
+-- face 토막: 주인공 셀이 이만큼 그대로이면 누름. 방향은 7E:31E0 위 니블
+local FACE_STILL = 4
+local FACING = {up = 0x80, down = 0x40, left = 0x20, right = 0x10}
 local STABLE = tonumber(os.getenv("STABLE") or "8")
 local FREE = tonumber(os.getenv("FREE") or "40")
 local STUCK = tonumber(os.getenv("STUCK") or "900")
@@ -184,8 +189,23 @@ local function step(tok)
   local kind, arg = tok:match("^([%a*]+):?(.*)$")
   if kind == "wait" then return st.t >= tonumber(arg) end
   if kind == "face" then
-    if st.t <= 8 then hold(arg) end
-    return st.t >= 24
+    -- 걸음이 끝나는 프레임에 누르면 걸음이 비틀려 한 셀 옆에 다른 쪽을 보고 섰다(감옥 아들 앞, 실측). 주인공 셀이 FACE_STILL
+    -- 프레임 그대로일 때 누르고, 다 누른 뒤 방향(7E:31E0 위 니블)이 맞지 않으면 세 번까지 다시 한다
+    local here = rd(0x7E3020) * 256 + rd(0x7E3080)
+    if st.at ~= here then st.at, st.still = here, 0 else st.still = (st.still or 0) + 1 end
+    if not st.p0 then
+      if st.still >= FACE_STILL then st.p0 = st.t end
+      return false
+    end
+    local dt = st.t - st.p0
+    if dt < 8 then hold(arg) end
+    if dt < 24 then return false end
+    local want = FACING[arg]
+    if want == nil or rd(0x7E31E0) & 0xF0 == want then return true end
+    st.tries = (st.tries or 0) + 1
+    if st.tries >= 3 then fail("face %s: facing %02X", arg, rd(0x7E31E0)); return true end
+    st.p0 = nil
+    return false
   end
   if kind == "talk" or kind == "cmd" then
     if not st.open then
@@ -381,6 +401,11 @@ local function step(tok)
   if kind == "field" then
     advance()
     return rd(0x7E00BE) & 0x80 == 0 and isFree()
+  end
+  if kind == "stand" then
+    local ss, sx, sy = arg:match("^(%x+),(%d+),(%d+)$")
+    local slot = tonumber(ss, 16)
+    return rd(0x7E3020 + slot) == tonumber(sx) and rd(0x7E3080 + slot) == tonumber(sy) and rd(0x7E3280 + slot) & 0x80 == 0
   end
   if kind == "pace" then
     local a, v, d1, d2 = parsePace(arg)
