@@ -1380,6 +1380,12 @@ WnSlot:
     INX
     CPX #$0010
     BCC -
+    ; 돌려 쓸 자리는 아직 화면 버퍼에서 제 이름 칸을 가리키는 자리를 건너뛴다. 「누구」 창의 이름이 뒤에 어둡게
+    ; 남은 상태 창 이름의 자리를 덮어, 상태 창 위 테두리 합성 칸이 「누구」 창 위 줄(빈칸·가로선)로 바뀌었다.
+    ; 여덟 자리가 모두 쓰이면 원래처럼 차례대로 내준다
+    LDA #$0008
+    STA.w !wn_r
+.pick
     LDA.w !wn_next
     AND #$0007
     ASL
@@ -1388,6 +1394,29 @@ WnSlot:
     INC
     AND #$0007
     STA.w !wn_next
+    LDA.w !wn_keys,X
+    BEQ .take
+    DEC.w !wn_r
+    BEQ .take
+    PHX
+    TAY
+    TXA
+    LSR
+    STA.w !wn_c
+    ASL
+    ASL
+    CLC
+    ADC.w !wn_c
+    ASL
+    CLC
+    ADC #$0180
+    STA.w !wn_c             ; 그 자리의 첫 이름 칸
+    LDA.w $0000,Y
+    AND #$03FF
+    PLX
+    CMP.w !wn_c
+    BEQ .pick
+.take
     LDA.w !wn_key
     STA.w !wn_keys,X
 .found
