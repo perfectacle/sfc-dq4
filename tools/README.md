@@ -10,6 +10,7 @@
 
 ```sh
 export LIBDIR=$(uv run krpatch sfc lua)   # 툴킷 Lua 폴더
+# FC 프로브는 $(uv run krpatch fc lua). fc/dq4/tools/dq4warp.sh·dq4state.sh 는 FC 폴더가 아니면 스스로 바꿈
 export MESENCE=/path/to/MesenCE       # macOS: .../MesenCE.app/Contents/MacOS/Mesen
 
 mkdir -p work/wprof

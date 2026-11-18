@@ -49,7 +49,8 @@ end
 -- 테스트러너의 작업 폴더는 셸의 현재 폴더가 아니라서 상대 경로는 열리지 않는다. PWD 를 앞에 붙인다.
 local state = os.getenv("STATE") or "work/state/dq4-ch1-throne.mss"
 if state:sub(1, 1) ~= "/" then state = os.getenv("PWD") .. "/" .. state end
-L.loadState(state)
+local stateFile = io.open(state, "rb")
+if stateFile then stateFile:close(); L.loadState(state) end
 
 -- 필드 쪽 갈고리. armed 동안만 값을 바꾼다.
 local armed, savedW, entered = false, nil, nil
@@ -96,6 +97,13 @@ emu.addEventCallback(function()
   L.release()
   if phase == "start" then
     log[#log + 1] = report(string.format("f%d 출발", n))
+    -- SFC lib 를 쓰거나 STATE 가 실리지 않으면 장소 바이트가 모두 0 이다. 걷기를 기다리지 않고 바로 알린다
+    if not stateFile or L.mem ~= emu.memType.nesMemory
+        or (rd(0x63) | rd(0x64) | rd(0x42) | rd(0x43) | rd(0x44) | rd(0x45) | rd(0x28)) == 0 then
+      log[#log + 1] = string.format("f%d 실패: 상태가 실리지 않음(LIBDIR 이 FC Lua 폴더인지, STATE %s 가 있는지 확인)", n, state)
+      L.write("warp.txt", table.concat(log, "\n") .. "\n"); phase = "failed"; emu.stop(1)
+      return
+    end
     pokes(os.getenv("SET"))
     if mapG then injectExits() end
     armed = true; phase = "walk"; mark = n
