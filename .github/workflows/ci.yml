@@ -149,6 +149,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The PR head, not the default refs/pull/N/merge: the guard names are handed to guard-shards.yml, which
+          # checks out this same commit. A merge checkout lists guards main gained after the branch was cut, and
+          # the shards then stop on "--only: unknown guard".
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
 
@@ -230,6 +234,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The PR head, not the default refs/pull/N/merge: the guard names are handed to guard-shards.yml, which
+          # checks out this same commit. A merge checkout lists guards main gained after the branch was cut, and
+          # the shards then stop on "--only: unknown guard".
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
 

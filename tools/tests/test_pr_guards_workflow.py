@@ -92,6 +92,18 @@ class PrGuardsWorkflowTest(unittest.TestCase):
             self.assertIn(f'{s}: ${{{{ secrets.{s} }}}}', job)
         self.assertEqual(len(re.findall(r'secrets\.', job)), len(SECRETS))
 
+    def test_plan_reads_the_guard_table_of_the_commit_the_shards_check_out(self):
+        """guard-plan 이 뽑은 검사 이름은 guard-shards 가 `ref` 로 받는 PR 머리 커밋의 표에서 읽혀야 한다. 기본 체크아웃
+        (refs/pull/N/merge)은 가지를 딴 뒤 main 에 새로 생긴 가드까지 이름으로 뽑아, 그 가드가 없는 머리 커밋을 받은
+        조각이 「--only: 모르는 검사」 로 멈춘다. required-checks 도 같은 표로 본문 결과 줄을 요구한다."""
+        head = 'ref: ${{ github.event.pull_request.head.sha || github.sha }}'
+        passed = re.search(r'\n      ref: (.+)\n', self.jobs['pr-guards'])[1].strip()
+        self.assertEqual(f'ref: {passed}', head)
+        for name in ('guard-plan', 'required-checks'):
+            checkouts = [s for s in self.steps[name] if 'actions/checkout@' in s]
+            self.assertEqual(len(checkouts), 1, name)
+            self.assertIn(head, checkouts[0], f'{name} 가 PR 머리 커밋을 받지 않음')
+
     def test_plan_runs_protection_tests_first(self):
         steps = self.steps['guard-plan']
         tests = [i for i, s in enumerate(steps) if 'test_release_gate_workflow.py' in run_texts(s)
