@@ -173,6 +173,58 @@ class RecordTests(unittest.TestCase):
             if m not in dq4monport.field_numbers().values():
                 self.assertFalse({dq4monport.SUMMON_SAME, dq4monport.SUMMON_FIXED} & set(acts), hex(m))
 
+    def test_tsuukon_damage_is_fc(self):
+        # 20:B587 훅을 65816 해석기로: 행동 74 면 회심 피해가 FC 11:$9906 식 공격력 × (64 + r) / 64(r = rand(11)),
+        # 같은 루틴의 みなごろし 8A 는 원래 명령(LDA $46 / STA $71). rand 는 00:953A 를 값으로 바꿔 끼움
+        import w65816
+        from dq5map import lorom
+
+        class Done(Exception):
+            pass
+        rom = bytearray(self.dq5) + bytes(max(0, 0x400000 - len(self.dq5)))
+        for w in dq4monport.crit_writes(self.dq5):
+            at = int(w['at'][:2], 16) << 16 | int(w['at'][3:], 16)
+            data = bytes.fromhex(w['hex'])
+            rom[lorom(at):lorom(at) + len(data)] = data
+        rom = bytes(rom)
+        entry = dq4monport.crit_code()[1]['crit']
+
+        def run(attack, action, r):
+            c = w65816.Cpu(rom, bytearray(0x20000))
+            c.p, c.dbr = 0x30, 0x7E
+            c.wram[0x46], c.wram[0x47], c.wram[0x10F7] = attack & 0xFF, attack >> 8, action
+
+            def rand(cpu):
+                self.assertEqual(cpu.a & 0xFF, dq4monport.CRIT_SPREAD)
+                cpu.a = cpu.a & 0xFF00 | r
+                cpu.rtl()
+                return True
+
+            def done(cpu):
+                raise Done(cpu.wram[0x10EC] | cpu.wram[0x10ED] << 8)
+            c.hooks[dq4monport.RAND] = rand
+            c.hooks[dq4monport.CRIT_STORE] = done
+            try:
+                c.jsl(entry)
+            except Done as d:
+                return d.args[0]
+            return ('original', c.wram[0x71])
+        for attack in (1, 40, 63, 64, 255, 256, 999):
+            for r in range(dq4monport.CRIT_SPREAD):
+                self.assertEqual(run(attack, dq4monport.CRIT_ACTION, r), attack * (64 + r) // 64, (attack, r))
+        self.assertEqual(run(40, 0x8A, 0), ('original', 40))
+
+    def test_tsuukon_slot_is_only_fc(self):
+        # 74 를 원래 레코드로 쓰는 DQ5 대역이 이 해킹에 없어야 74 를 FC 식으로 바꿀 수 있다
+        import dq5monlimits
+        from dq5map import Rom
+        rom = Rom(self.dq5)
+        ported = set(dq4monport.field_numbers().values())
+        for m in dq4monport.used_numbers() - ported:
+            acts = [rom.u8(dq5monlimits.MONSTER_RECORDS + m * dq5monlimits.MONSTER_SIZE + 0x11 + i) for i in range(6)]
+            self.assertNotIn(dq4monport.CRIT_ACTION, acts, hex(m))
+        self.assertEqual({k for k, v in dq4monport.fc_actions().items() if v == f'{dq4monport.CRIT_ACTION:02X}'}, {0x33})
+
     def test_summon_writes_patch_the_handlers(self):
         import dq4fieldencounter
         writes = dq4monport.summon_writes(self.dq5)

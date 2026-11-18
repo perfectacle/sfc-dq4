@@ -407,12 +407,55 @@ def summon_writes(original):
             put(same_at, same, same_orig, '부르기 B5 는 같은 몬스터(FC 48)')]
 
 
+# つうこん(FC 33, 행동 ID 44, 11:$98D2): rand(4) = 0 이면 공격력 × (64 + rand(11)) / 64(11:$9906, 수비 무시)와
+# 「つうこんの いちげき」, 아니면 보통 공격. DQ5 かいしん１ 74 의 피해 루틴 20:B579(표 20:B7F9[74])도 rand(4) = 0 이면 수비 무시
+# 회심이지만 폭이 공격력 + rand(공격력 × 5 / 100 + 1) 이다. 같은 루틴을 쓰는 みなごろし 8A(20:B62B)는 그대로 두고 행동이 74 일
+# 때만 회심 값을 FC 식(공격력 + ⌊공격력 × r / 64⌋, r = rand(11))으로 바꾼다. 74 는 FC 33 만 쓴다(이 해킹의 DQ5 대역은 쓰지 않음)
+CRIT_SITE, CRIT_ORIG = 0x20B587, bytes((0xA5, 0x46, 0x85, 0x71))     # 회심 갈래: LDA $46(공격력) / STA $71
+CRIT_STORE = 0x20B5B1           # JSR $AF85 / CLC / RTS: $10EC·$10ED 의 피해를 쓰는 곳
+CRIT_ACTION, CRIT_SPREAD = 0x74, 11
+ACTION = 0x7E10F7
+RAND = 0x00953A                 # A = n → 0~n-1(M·X 8비트)
+DAMAGE = 0x7E10EC
+CRIT_CODE_AT = 0x16FF30
+
+
+def crit_code(at=CRIT_CODE_AT):
+    """(바이트, 라벨): 20:B587 에서 JSL. M·X 8비트. 74 가 아니면 원래 두 명령."""
+    from dq4environmentrom import _Asm
+    a = _Asm(at)
+    a.label('crit').b(0xAF, *ACTION.to_bytes(3, 'little'), 0xC9, CRIT_ACTION).rel(0xF0, 'fc')
+    a.b(0xA5, 0x46, 0x85, 0x71, 0x6B)                                        # 원래 명령 / RTL
+    a.label('fc').b(0xA9, CRIT_SPREAD, 0x22, *RAND.to_bytes(3, 'little'), 0x48)  # r = rand(11) / PHA
+    a.b(0xA5, 0x46, 0x8F, 0x02, 0x42, 0x00, 0xA3, 0x01, 0x8F, 0x03, 0x42, 0x00)   # 공격력 아래 바이트 × r(4202·4203)
+    a.b(0xEA, 0xEA, 0xEA, 0xEA, 0xC2, 0x20, 0xAF, 0x16, 0x42, 0x00, 0x85, 0x71, 0xE2, 0x20)  # $71·$72 = 곱
+    a.b(0xA5, 0x47, 0x8F, 0x02, 0x42, 0x00, 0xA3, 0x01, 0x8F, 0x03, 0x42, 0x00)   # 위 바이트 × r(999 × 10 이라 8비트)
+    a.b(0xEA, 0xEA, 0xEA, 0xEA, 0xAF, 0x16, 0x42, 0x00, 0x18, 0x65, 0x72, 0x85, 0x72, 0x68)  # $72 += 곱 / PLA
+    a.b(0xC2, 0x20, 0xA5, 0x71, *([0x4A] * 6))                               # 공격력 × r >> 6
+    a.b(0x18, 0x65, 0x46, 0x8F, *DAMAGE.to_bytes(3, 'little'), 0xE2, 0x20)   # + 공격력 → 피해
+    a.b(0x68, 0x68, 0x68, 0x5C, *CRIT_STORE.to_bytes(3, 'little'))           # 돌아갈 곳 버림 / JML 20:B5B1
+    return a.assemble()
+
+
+def crit_writes(original):
+    from dq5map import lorom
+    data, labels = crit_code()
+    orig = original[lorom(CRIT_SITE):lorom(CRIT_SITE) + len(CRIT_ORIG)]
+    if orig != CRIT_ORIG:
+        raise ValueError(f'20:B587 이 {orig.hex()}')
+    return [{'at': f'{CRIT_CODE_AT >> 16:02X}:{CRIT_CODE_AT & 0xFFFF:04X}', 'hex': data.hex(' '),
+             'note': 'つうこん(74)의 회심 피해를 FC 식으로'},
+            {'at': '20:B587', 'hex': bytes((0x22, *labels['crit'].to_bytes(3, 'little'))).hex(' '),
+             'orig': orig.hex(' '), 'note': '회심 갈래를 FC つうこん 식 훅으로'}]
+
+
 def records_patch(original, prg, path):
-    """record_writes·picture_writes·summon_writes 를 dq5patch/1 파일로. prg 는 FC 롬 PRG."""
+    """record_writes·picture_writes·summon_writes·crit_writes 를 dq5patch/1 파일로. prg 는 FC 롬 PRG."""
     import dq4fieldencounter
     writes = record_writes(original, dq4fieldencounter.PLACEHOLDERS, prg)
     writes += picture_writes(original, dq4fieldencounter.PLACEHOLDERS)
     writes += summon_writes(original)
+    writes += crit_writes(original)
     path.write_text(json.dumps({'format': 'dq5patch/1', 'name': 'dq4-monster-records', 'writes': writes},
                                ensure_ascii=False))
     return path
