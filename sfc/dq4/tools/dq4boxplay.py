@@ -13,24 +13,39 @@ import dq4boxjudge as bj
 
 # 게임 장면: 장 첫머리 상자는 그 맵(dq4chapterbox Scene.where)에 그 깃발이 꺼진 채(since 는 켠 채) 들어가면 뜬다.
 # 끝 상자(Scene.where 없음)는 장 끝 사건이 부르므로 이 길로는 띄우지 못한다(미리보기 판정과 장 끝 사건 검사가 지난다)
-PLAY_FRAMES = 600              # 들어간 뒤 찍는 프레임(상자 밝히기·버티기·지우기가 이 안)
+PLAY_FRAMES = 600              # 들어간 뒤 기다리는 프레임(상자 밝히기·버티기·지우기가 이 안)
+MAX_FRAMES = PLAY_FRAMES + 1200  # 워프(배에서 사다리까지 걷기)를 더한 끝
+SHOT_LUA = Path(__file__).resolve().parent / 'lua' / 'dq4shotwarp.lua'
 SHOT_EVERY = 6
 
 
+def starts():
+    """{장면 이름: (맵, X, Y)}: 그 장이 시작하는 칸(장 모듈의 시작 칸)."""
+    import dq4ch2event
+    import dq4ch3event
+    import dq4chapter1
+    import dq4prologue
+    return {'box0': dq4prologue.START, 'box': dq4chapter1.START,
+            'box2': (dq4ch2event.THRONE, *dq4ch2event.START_CELL), 'box3': (dq4ch3event.HOUSE, *dq4ch3event.START_CELL)}
+
+
 def play_cases():
-    """[(이름, 'GG/MM,X,Y', SET)]: 맵이 있는 상자 장면. 도착 칸은 맵 들어가는 곳(dq4chapterbox 가 고른 맵의 0,0 은 쓰지 않고
-    dq5warp.lua 가 정한 도착 칸)."""
+    """[(이름, 'GG/MM,X,Y', SET)]: 맵이 있는 상자 장면. 시작 칸이 그 장면의 맵이 아니면 멈춘다."""
     import dq4chapterbox as cb
+    cells = starts()
     out = []
     for s in cb.GAME_SCENES:
         if s.where is None:
             continue
+        where, x, y = cells[s.name]
+        if where != f'{s.where[0]:02X}/{s.where[1]:02X}':
+            raise SystemExit(f'{s.name}: 시작 칸 {where} 이 상자 맵과 다름')
         sets = []
         if s.flag:
             sets.append(f'{s.flag[0] & 0xFFFF:04X}&{0xFF ^ s.flag[1]:02X}')
         if s.since:
             sets.append(f'{s.since[0] & 0xFFFF:04X}|{s.since[1]:02X}')
-        out.append((s.name, f'{s.where[0]:02X}/{s.where[1]:02X}', ';'.join(sets)))
+        out.append((s.name, f'{where},{x},{y}', ';'.join(sets)))
     return out
 
 
@@ -47,11 +62,12 @@ def play(mesence, rom, out):
         dest = out / name
         env = dq4groupcheck.environment(os.environ['LIBDIR'], states['shop'], dest)
         dest.mkdir(parents=True)
-        frames = range(SHOT_EVERY, PLAY_FRAMES, SHOT_EVERY)
-        env.update(TO=where, SET=sets, ANYWHERE='1', SETTLE=str(PLAY_FRAMES), MAXF=str(PLAY_FRAMES + 1200),
+        frames = range(SHOT_EVERY, MAX_FRAMES, SHOT_EVERY)
+        env.update(TO=where, SET=sets, ANYWHERE='1', SETTLE=str(PLAY_FRAMES), MAXF=str(MAX_FRAMES),
+                   WARPLUA=str(dq4groupcheck.WARP),
                    SHOTS=','.join(map(str, frames)), WARPEXIT=f'{dq4groupcheck.warp_exit(Path(rom)):X}',
                    DP86OK=dq4groupcheck.dp86_allowed(Path(rom)))
-        dq4readset.run(mesence, Path(rom), dq4groupcheck.WARP, dest, env, timeout=300)
+        dq4readset.run(mesence, Path(rom), SHOT_LUA, dest, env, timeout=300)
         shots = sorted(dest.glob('*.png'))
         seen, found = 0, []
         for shot in shots:
