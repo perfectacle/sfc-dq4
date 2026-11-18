@@ -506,6 +506,30 @@ def watch_flags(flags=None):
             f';ITEMS0={ITEMS:X}:6;ITEMS1={ITEMS + 6:X}:6;BE=7E00BE:1')
 
 
+# 「반드시 쓰러진다」 전멸 장면의 주인공: HP 1, みのまもり 0, 장비 없음. 수비력 0 이면 DQ5 피해 h = 공격력/2 라 공격력 4 이상인
+# 적의 보통 공격은 맞을 때마다 1 이상이다(20:B030: h < 8 이면 h - 1 + 0~2). FC 몬스터는 공격하는 것 모두 공격력 6 이상이다
+BARE_HERO = '2042=01;2043=00;2048=00;2054=00;2055=00'
+
+
+def record_set(record, at=0x7E2040):
+    """일행 기록(42바이트)을 그 자리에 쓰는 SET."""
+    return ';'.join(f'{(at + k) & 0xFFFF:04X}={b:02X}' for k, b in enumerate(record))
+
+
+def chapter_hero(data, chapter):
+    """그 장의 시작 주인공 기록(42바이트): 2장 아리나(dq4ch2event.alena_record), 3장 톨네코(FC 시작 소지품·장비).
+    새 게임 출발 상태에 장 flag 만 켠 장면이 1장 라이안 기록으로 돌지 않게 한다."""
+    import dq4ch2event as ch2
+    import dq4ch3event as ch3
+    import dq4growth
+    template = ch2.person_record(data, 0)
+    if chapter == 2:
+        return ch2.alena_record(template)
+    if chapter == 3:
+        return ch3.torneko_record(template, ch3.start(data, dq4growth.DQ4))
+    raise ValueError(chapter)
+
+
 def start_want(who, chapter):
     """FC 장 시작 표대로의 START_BYTES 값: 인물 who(dq4growth 의 FC 인물 번호)의 소지품·장비(12:$9192)와 chapter 장(1~)의
     시작 금화(12:$91D9). 물건은 dq4ch3event.start 처럼 이름으로 DQ5 물건에 잇는다."""

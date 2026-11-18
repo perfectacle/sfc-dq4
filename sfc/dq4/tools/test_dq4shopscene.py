@@ -288,3 +288,13 @@ class ShopPlaceTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class StartItemsTest(unittest.TestCase):
+    @unittest.skipUnless((Path(__file__).resolve().parents[3] / 'rom' / 'dq5.sfc').exists(), 'rom 없음')
+    def test_start_items_are_the_fc_chapter1_start(self):
+        """가방을 쓰지 않는 장면이 물려받는 물건은 FC 1장 시작 표(새 게임 틀, dq4growth)와 같다."""
+        import dq4ch1walkcheck as wc
+        want = wc.start_want(6, 1)
+        self.assertEqual(ss.START_ITEMS, (want['START_ITEM0'], want['START_ITEM1']))
+        self.assertEqual((want['START_EQUIP0'], want['START_EQUIP1']), (0x03, 0x00))
