@@ -61,6 +61,9 @@ CODE_WIDTHS = {
     0xDB: (('table', 1, 10), ('table', 1, 10), '04:B983 → B7FA → B808 표 1·4'),
     0xDC: (20, 'dc', '04:B9A7 이름 넉 자 + 01 01 87 + 두 자리 + 01 01 + B808 표 0B 아홉 자'),
     0xDD: (1, 1, '04:BA14 상태 표시 한 칸'),
+    0xC7: ('dc+2', 'dc+2', '04:B65C 번호 + 85, 뒤는 DC 와 같은 04:B9B3'),
+    0xDF: ('name+8', 'name+8', '04:BA76 → BE1A: 번호 + 커서 칸 + 이름 + 상태 표시 + 01 87 85 + 두 자리'),
+    0xF1: ('name+8', 'name+8', '04:BE00 → BE1A'),
     0xDE: (('table', 5, 8), ('table', 5, 10), '04:BA4B → B84C → B808 표 5'),
     0xE0: (('table', 5, 8), ('table', 5, 10), '04:BAC4 → B808 표 5(장비)'),
     0xE1: (('table', 5, 8), ('table', 5, 10), '04:BAE7 → BACF'), 0xE2: (('table', 5, 8), ('table', 5, 10), '04:BAF5'),
@@ -105,9 +108,11 @@ ALLOW = {
     (0x3A, '변 어긋남'): '넓힌 3A 의 왼쪽 변이 메시지 창 00(열 2~29)과 1칸 어긋남. 3A 를 원래 x 2·너비 28 로 되돌리는 고침이 지운다',
     **{(n, '창 밖'): _WIDE_ITEM for n in (0x08, 0x14, 0x43, 0x3E, 0x3F, 0x40, 0x41)},
     **{(n, '제목'): '「어떻게 할까」 제목(고른 물건 이름 10열, 자리 2)이 너비 − 1 을 넘음. ' + _WIDE_ITEM for n in (0x2E, 0x44)},
-    (0x7D, '제목'): '제목 사람 이름 5칸(자리 1, 너비 6). 이 창을 여는 장면을 아직 못 찾음',
-    (0x0D, '테두리'): '이름 뒤 01 이 다섯째 칸을 덮음. 이 창은 실측에서 한 번도 열리지 않음(남은 것 「석 자 출력 D1」)',
-    (0x73, '창 밖'): 'D9 를 ShopSellPrice 가 가로채 이름 자리에 값을 찍음. DQ5 몬스터 갈래($0F20 = 0A) 창이라 DQ4 에서 열리는지 미확인',
+    (0x7D, '제목'): '제목 사람 이름 5칸(자리 1, 너비 6). 롬에 BRK 95 7D 가 없고 LDA #7D 도 창 열기가 아님. 메뉴 표로 여는 길은 미확인',
+    (0x0D, '테두리'): '이름 뒤 01 이 다섯째 칸을 덮음. 상태 → 공격력(05:D617 BRK 95 0D)으로 열림. WnList 가 0D 에서도 5칸 나아가고 이름 뒤 01 하나를 빼는 고침이 지운다',
+    (0x5D, '테두리'): '모험의 서 기록 목록 DC 가 이름 뒤 01 01 87 을 4칸 뒤에 찍어 다섯째 칸을 덮음(정적 셈). 화면 실측 뒤 고친다',
+    (0x61, '테두리'): 'C7 이 DC 와 같은 길(04:B9B3)로 이름을 찍어 다섯째 칸을 덮음(정적 셈). 화면 실측 뒤 고친다',
+    (0x73, '창 밖'): 'D9 를 ShopSellPrice 가 가로챔. 창 73 은 대화 07(몬스터 맡기기 06:E95A)·0A(ルイーダ 06:ED01)의 BRK 95 73 으로만 열리고, DQ4 가게 이식(dq4shopport.SERVICE)은 대화 번호 1~6 만 줘 DQ4 에서 열리지 않음',
     **{(n, '가림'): '함께 뜨는 묶음(SHOWN_TOGETHER)이 창 제목으로 고른 추정이고 덮는 것이 앞 창 글자 한 칸. 창 기록 틀로 실측 대기'
        for n in (0x0E, 0x11, 0x2C, 0x37)},
 }
@@ -119,6 +124,7 @@ class Cell:
     start: int
     step: int
     width: int | None          # 찍는 칸(그림이 덮는 칸). None = 모름
+    inner_cover: bool = False  # 코드 안에서 이름(5칸 그림)을 찍고 4칸만 나아가 뒤 글자가 다섯째 칸을 덮음
 
 
 @dataclass
@@ -211,8 +217,12 @@ class Widths:
         v = base if self.kind == 'base' else hack
         if v == 'name':
             return NAME_CELLS[self.kind], why
-        if v == 'dc':
-            return 4 + 3 + 2 + 2 + self.table(0x0B, 9) + 1, why
+        if v in ('dc', 'dc+2'):
+            name = NAME_CELLS[self.kind]
+            dc = 20 if self.kind == 'base' else name + 3 + 2 + 2 + self.table(0x0B, 9)
+            return dc + (2 if v == 'dc+2' else 0), why
+        if v == 'name+8':
+            return NAME_CELLS[self.kind] + 8, why
         if isinstance(v, tuple):
             return self.table(v[1], v[2]), why
         return v, why
@@ -261,6 +271,11 @@ def parse(data, n, widths):
                 nxt = rec[i + 1] if i + 1 < len(rec) else 0xFF
                 step = name_step(widths, n, nxt) if CODE_WIDTHS.get(b, (None, None))[widths.kind == 'hack'] == 'name' else w
                 cells.append(Cell(b, x, step if step is not None else 0, w))
+                # 이름을 안에 찍는 묶음 코드(DC·C7·DF·F1)는 이름 뒤 바이트가 자기 레코드의 다음 바이트가 아니라
+                # 04:B79B 를 부를 때 X 가 가리키는 그 다음 바이트라, WnList 는 창 번호(45·46)로만 5칸을 고른다
+                kind = CODE_WIDTHS.get(b, (None, None))[widths.kind == 'hack']
+                if widths.kind == 'hack' and kind in ('dc', 'dc+2', 'name+8') and name_step(widths, n, nxt) < NAME_CELLS['hack']:
+                    cells[-1].inner_cover = True
                 i += 1
             x += cells[-1].step
         win.rows.append(cells)
@@ -323,7 +338,7 @@ def row_end(cells):
 
 def covered(cells):
     """이름 그림의 다섯째 칸을 뒤 내용이 덮는 자리 [(이름 코드, 덮은 코드)]."""
-    out = []
+    out = [(c.code, 0x01) for c in cells if c.inner_cover]
     for k, c in enumerate(cells):
         if c.width is not None and c.step < c.width:
             for d in cells[k + 1:]:
