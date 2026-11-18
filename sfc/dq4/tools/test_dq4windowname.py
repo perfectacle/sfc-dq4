@@ -112,25 +112,31 @@ class HoldAreaTest(unittest.TestCase):
             self.assertIn(define(name), range(define('wh_magic') + 2, define('wt_stc')))
 
     def test_send_tables_stay_after_the_buffer_in_the_free_area(self):
-        # WhReq 가 짜는 DMA 표·가림 표·임시 칸은 묶음 버퍼 뒤, 실측으로 비어 있던 7F:A33F 안. 표는 가장 많이 찼을 때
-        # (DMA !wh_ndma 칸 × 8바이트, 가림 !wh_nmask 칸 × 4바이트, 끝 표시 2바이트)도 다음 자리를 덮지 않아야 한다
+        # WhReq 가 짜는 DMA 표·임시 칸은 묶음 버퍼 뒤, 실측으로 비어 있던 7F:A33F 안. 표는 가장 많이 찼을 때
+        # (DMA !wh_ndma 칸 × 8바이트, 끝 표시 2바이트)도 다음 자리를 덮지 않아야 한다
         text = ASM.read_text()
 
         def count(name):
             return int(re.search(rf'^!{name} *= *(\d+)', text, re.M).group(1))
         end = define('wh_buf') + define('wh_size')
-        parts = sorted([(define('wh_dma'), count('wh_ndma') * 8 + 2), (define('wh_mask'), count('wh_nmask') * 4 + 2),
-                        (define('wh_skip'), 8 * 2)]
-                       + [(define(n), 2) for n in ('wh_snap', 'wh_snapn', 'wh_tmpn', 'wh_tmpl', 'wh_tmpb', 'wh_tmpv',
-                                                   'wh_tmpm', 'wh_tmpx', 'wh_tmpk', 'wh_tmpc', 'wh_tmpd', 'wh_tmpt',
-                                                   'wh_tmpi', 'wh_tmpe', 'wh_tmpr', 'wh_tmpq', 'wh_tmps')])
+        parts = sorted([(define('wh_dma'), count('wh_ndma') * 8 + 2)]
+                       + [(define(n), 2) for n in ('wh_snap', 'wh_snapn', 'wh_tmpn', 'wh_tmpl', 'wh_tmpb', 'wh_tmpr',
+                                                   'wh_tmps')])
         self.assertGreaterEqual(parts[0][0], end)
         for (a, n), (b, _) in zip(parts, parts[1:]):
             self.assertLessEqual(a + n, b, hex(a))
         self.assertLessEqual(parts[-1][0] + parts[-1][1], 0x7FA340)
 
+    def test_with_sends_no_tilemap_cells_of_its_own(self):
+        # 메시지 창 칸을 001 로 가리던 장치는 지웠다: 메시지가 새로 그리는 칸까지 가렸고, 푸는 $0BEC 재요청은 WhWith 가 NMI
+        # 작업을 8CEF 로 둔 뒤라 소비되지 않아 글이 빠진 채 남았다. 다시 넣으려면 푸는 쪽(버퍼 값 되쓰기)부터 만든다
+        text = ASM.read_text()
+        body = re.search(r'^WhWith:\n(.*?)^[A-Za-z]\w*:', text, re.M | re.S).group(1)
+        self.assertNotIn('$002118', body)
+        self.assertNotIn('WhCellOf', text)
+
     def test_head_flags_sit_before_the_stale_table(self):
-        for name in ('wh_msgwin', 'wh_pend', 'wh_maskthis'):
+        for name in ('wh_msgwin', 'wh_pend'):
             self.assertIn(define(name), range(define('wh_go') + 2, define('wt_stc')))
 
     def test_stale_slot_numbers_leave_bit7_free(self):
