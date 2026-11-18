@@ -148,6 +148,24 @@ with open(os.environ['FAKE_LOG'], 'a') as log:
 '''
 
 
+class WinwatchTests(unittest.TestCase):
+    """모든 실행 앞에 창 모습 기록 Lua 를 붙이고, 기록은 장면 출력 폴더(SHOT_DIR, 없으면 folder)에 둔다."""
+
+    def test_wraps_the_script_and_writes_into_the_scene_folder(self):
+        script, kwargs, where = mesen.with_winwatch('/a/probe.lua', {'env': {'SHOT_DIR': '/s/scene'}}, '/f')
+        self.assertEqual(script, mesen.WINWATCH)
+        self.assertEqual(kwargs['env']['WINWATCH_TARGET'], '/a/probe.lua')
+        self.assertEqual(Path(kwargs['env']['WINWATCH_OUT']), Path('/s/scene') / mesen.winwatch.DATA)
+        self.assertEqual(where, Path('/s/scene'))
+        _, kwargs, where = mesen.with_winwatch('/a/probe.lua', {'env': {}}, '/f')
+        self.assertEqual(where, Path('/f'))
+
+    def test_watch_lua_runs_the_target(self):
+        text = mesen.WINWATCH.read_text(encoding='utf-8')
+        self.assertIn('dofile(target)', text)
+        self.assertIn('os.getenv("WINWATCH_TARGET")', text)
+
+
 @unittest.skipIf(sys.platform == 'win32', 'shebang 가짜 실행 파일')
 class BigEnvTests(unittest.TestCase):
     """리눅스 MAX_ARG_STRLEN(128KiB)을 넘는 환경 변수(dq4windowcheck --every 의 DUMP)는 파일로 넘어가 dq4bigenv.lua 가
@@ -182,7 +200,8 @@ class BigEnvTests(unittest.TestCase):
         for line, outer in zip(self.log.read_text().splitlines(), ('dq4beat-', 'dq4bigenv.lua')):
             script, inline, names, size, target = line.split()
             self.assertTrue(script.startswith(outer), script)
-            self.assertEqual((inline, names, int(size), target), ('False', 'DUMP', len(big), 'probe.lua'))
+            # bigenv 안쪽은 창 모습 기록 Lua 이고, 그것이 원래 스크립트를 이어 돈다(WinwatchTests)
+            self.assertEqual((inline, names, int(size), Path(target).name), ('False', 'DUMP', len(big), 'dq4winwatch.lua'))
         self.assertEqual(len(self.log.read_text().splitlines()), 2)
         self.assertEqual(list(tmp.iterdir()), [])
 

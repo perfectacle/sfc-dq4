@@ -40,6 +40,8 @@ import uuid
 
 sys.path.append(str(Path(__file__).resolve().parents[3] / 'tools'))
 import headless_slots  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import dq4winwatch as winwatch  # noqa: E402
 
 ARGS = ('--Snes.DisableFrameSkipping=true',)
 # Runner 의 기본 시간 상한(초). timeout 없이 부른 run·testrunner 에서는 MesenCE 의 --timeout 이 된다
@@ -50,6 +52,8 @@ TIMEOUT_MARGIN = 60
 # (dq4compatcheck.py scenes). 범위는 DQ4_OPENBUS_RANGES(dq4openbus.lua 의 OPENBUS_RANGES)
 OPENBUS = Path(__file__).resolve().parent / 'lua' / 'dq4openbus.lua'
 BIGENV = Path(__file__).resolve().parent / 'lua' / 'dq4bigenv.lua'
+# 모든 실행 앞에 붙여 BG3 창 모습을 적는다(dq4winwatch.py 가 판정)
+WINWATCH = Path(__file__).resolve().parent / 'lua' / 'dq4winwatch.lua'
 # 심장 박동 사이 프레임 수(60fps 로 10초)
 HEARTBEAT_FRAMES = 600
 # 리눅스 MAX_ARG_STRLEN(131072, 「이름=값」 과 끝 NUL 포함)보다 넉넉히 아래
@@ -65,6 +69,15 @@ def with_openbus(script, kwargs):
     env.update(PROBE_TARGET=str(script), OPENBUS_LOG=log,
                OPENBUS_RANGES=os.environ.get('DQ4_OPENBUS_RANGES', env.get('OPENBUS_RANGES', '')))
     return OPENBUS, {**kwargs, 'env': env}
+
+
+def with_winwatch(script, kwargs, folder):
+    """(dq4winwatch.lua, 그 스크립트를 WINWATCH_TARGET 으로 둔 kwargs, 기록이 쌓일 폴더). 기록은 장면 출력 폴더(SHOT_DIR,
+    없으면 folder)의 winwatch.bin 이라 읽은 바이트 캐시가 장면 출력과 함께 넣고 펼친다."""
+    env = dict(kwargs.get('env') or os.environ)
+    where = Path(env.get('SHOT_DIR') or folder)
+    env.update(WINWATCH_TARGET=str(script), WINWATCH_OUT=str(where / winwatch.DATA))
+    return WINWATCH, {**kwargs, 'env': env}, where
 
 
 def with_bigenv(script, kwargs):
@@ -207,6 +220,8 @@ class Runner:
         self.rom = unique_copy(rom, folder, tag)
         clear_saves(self.rom, mesence)
         self.slot = headless_slots.acquire(f'MesenCE {tag}')
+        self.source = rom
+        script, kwargs, self.watch = with_winwatch(script, kwargs, folder)
         script, kwargs = with_openbus(script, kwargs)
         script, kwargs, self.bigenv = with_bigenv(script, kwargs)
         try:
@@ -235,9 +250,11 @@ class Runner:
 
     def wait(self):
         try:
-            return self.proc.wait()
+            rc = self.proc.wait()
         finally:
             self.close()
+        winwatch.verdict(self.watch, self.source)
+        return rc
 
     def close(self):
         # KeyboardInterrupt 등으로 MesenCE 가 살아 있을 때 불려도, 끄기 전에는 자리와 롬 복사본을 놓지 않는다
@@ -251,6 +268,7 @@ class Runner:
 def run(mesence, rom, script, folder=None, tag='probe', extra=ARGS, **kwargs):
     """subprocess.run 과 같이 띄운다. TimeoutExpired 는 그대로 올린다."""
     folder = Path(folder or kwargs.get('cwd') or Path(rom).parent)
+    script, kwargs, watch = with_winwatch(script, kwargs, folder)
     script, kwargs = with_openbus(script, kwargs)
     script, kwargs, bigenv = with_bigenv(script, kwargs)
     script, temps, beat = with_heartbeat(script)
@@ -258,8 +276,10 @@ def run(mesence, rom, script, folder=None, tag='probe', extra=ARGS, **kwargs):
     clear_saves(copy, mesence)
     try:
         with headless_slots.slot(f'MesenCE {tag}'):
-            return subprocess.run([str(mesence), '--testrunner', str(copy), str(script), *extra,
+            done = subprocess.run([str(mesence), '--testrunner', str(copy), str(script), *extra,
                                    *timeout_args(extra, kwargs.get('timeout'))], **kwargs)
+        winwatch.verdict(watch, copy)
+        return done
     except subprocess.TimeoutExpired as e:
         e.heartbeat = last_beat(beat)
         raise
