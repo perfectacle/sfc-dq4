@@ -12,7 +12,12 @@ root=$(pwd)
 out=$1
 case $out in /*) ;; *) out=$root/$out ;; esac
 mkdir -p "$out"
-LIBDIR=${LIBDIR:-$(uv run --locked krpatch fc lua)}
+# 셸에 SFC Lua 폴더(tools/README 의 기본값)가 남아 있으면 FC 상태가 실리지 않고 RAM 0 으로 「진입 루틴이 돌지 않음」 만
+# 남는다. FC 툴킷 lib(nesMemory)가 아니면 FC 폴더로 바꾼다
+if [ -z "${LIBDIR:-}" ] || ! grep -q nesMemory "$LIBDIR/lib.lua" 2>/dev/null; then
+  [ -n "${LIBDIR:-}" ] && echo "LIBDIR=$LIBDIR 은 FC Lua 폴더가 아니라 FC 툴킷 폴더로 바꿉니다" >&2
+  LIBDIR=$(uv run --locked krpatch fc lua)
+fi
 export LIBDIR
 STATE=${STATE:-$root/work/state/dq4-ch1-throne.mss}
 export STATE
