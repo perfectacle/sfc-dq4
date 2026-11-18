@@ -80,6 +80,16 @@ FLAGS.update({f'ARENA_RECENT{k}': (dq4ch3slots.ARENA_RECENT + k, 0xFF) for k in 
 ARENA_TALK = f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:60;{";".join(["b:8;wait:90"] * 4)}'
 # 시합 동안 셋째 몬스터(몬스터 칸 2, 7E:07C0 + 칸 × 16 의 +2 HP)를 999 로 묶어 난수와 상관없이 셋째가 이기게 한다
 ARENA_STRONG = '7E07E2=E7;7E07E3=03'
+# 무리 칸마다 OBJ 팔레트 줄(7E:0CD7 + 칸, 22:A0BE). 보통 전투는 무리 차례 = 줄인데 격투장 대화(26:8ECF)로 연 전투도
+# 같은지 본다(몬스터 색 검사 dq4monartcheck 는 격투장 시합을 보통 조우로 붙여 보므로 대화 길은 여기서만 지난다)
+ARENA_LINES = 0x7E0CD7
+ARENA_LINE_WAIT = 600          # 시합을 연 A 뒤 몬스터 셋이 모두 놓인 때(실측)
+FLAGS.update({f'ARENA_LINE{k}': (ARENA_LINES + k, 0xFF) for k in range(4)})
+# 고른 시합(26:8ED9): 무리 칸 몬스터 7E:1001 + 칸, 倍率 정수 7E:115A + 칸·소수 7E:115E + 칸. 상금은 06:F31C 가 건 코인 ×
+# (정수 × 10 + 소수) ÷ 10 을 반올림(나머지 5 이상이면 올림, dq5-data-format 「격투장」)
+FLAGS.update({f'ARENA_MON{k}': (0x7E1001 + k, 0xFF) for k in range(4)})
+FLAGS.update({f'ARENA_INT{k}': (0x7E115A + k, 0xFF) for k in range(4)})
+FLAGS.update({f'ARENA_DEC{k}': (0x7E115E + k, 0xFF) for k in range(4)})
 MAGIC_WATER = 0xA9              # DQ5 まほうのせいすい(FC 경품 첫 줄 5A)
 METAL_SHIELD = 0x84             # はぐれメタルのたて(DQ5 メタルキングのたて 자리를 빌림)
 
@@ -106,34 +116,65 @@ PRINCE_RIGHT = W.cell(0x02, 0x0B)
 # 쫓겨난 방문의 유모는 FC (04,09)까지 걸어와 선다(본몰 모듈)
 NANNY_BELOW = W.cell(0x04, 0x0A)
 PRINCE_HOLD = '7E3308=00'
+# 묶은 난수에서 고른 시합(헤드리스 실측, 최근 기록 06): FC 5번 いたずらもぐら·おおみみず·みみとびねずみ, 倍率 5.3·11.3·1.1
+ARENA_PICKED = (0x02, 0x07, 0x08)
+ARENA_ODDS = ((5, 3), (11, 3), (1, 1))
+ARENA_BET = 9
+
+
+def arena_payout(bet, odds):
+    """06:F31C: 건 코인 × (정수 × 10 + 소수) ÷ 10, 나머지 5 이상이면 올림(dq5-data-format 「격투장」)."""
+    q, r = divmod(bet * (odds[0] * 10 + odds[1]), 10)
+    return q + (r >= 5)
+
+
+def _arena_match_bytes():
+    import dq4monport
+    numbers = dq4monport.field_numbers()
+    out = {f'ARENA_MON{k}': numbers[fc] for k, fc in enumerate(ARENA_PICKED)}
+    out.update({f'ARENA_INT{k}': i for k, (i, _) in enumerate(ARENA_ODDS)})
+    out.update({f'ARENA_DEC{k}': d for k, (_, d) in enumerate(ARENA_ODDS)})
+    return out
 
 SEGMENTS = [
     # 격투장(DQ5 대화 0E, 시합은 FC 3장 표). 게임 난수(7E:075B~075D)는 매 프레임 굴러(가만히 서 있어도 30프레임에
     # 4A, 31프레임에 4B) 코어마다 늦는 프레임 수가 달라 시합 고르기·승패가 갈린다. 말 거는 동안은 난수를 묶어 시합을
-    # FC 4번(셋째 가위 사슴 벌레, 이 난수에서 배율 4.0)으로 정하고, 시합 동안은 난수를 풀고
+    # FC 5번(いたずらもぐら·おおみみず·みみとびねずみ, 시합 19개에서 다섯째)으로 정하고, 시합 동안은 난수를 풀고
     # (내내 묶으면 전투가 같은 고리에서 멈춤) 셋째 HP 를 묶어(ARENA_STRONG) 셋째가 이기게 한다. 수 창에서 위 한 번에
-    # 2장씩 늘어 위 넷이면 9장: 셋째에 걸면 이겨 91 + 9 × 4.0 = 127, 첫째에 걸면 져 91. 시합 수가 바뀌면 같은 난수가
-    # 다른 시합을 고르니 다시 잰다. 시합을 여는 A 는
+    # 2장씩 늘어 위 넷이면 9장(ARENA_BET): 셋째(1.1)에 걸면 이겨 91 + arena_payout(9, 1.1) = 91 + 10 = 101, 첫째에 걸면
+    # 져 91. 말 거는 구간 끝에 고른 시합의 무리 몬스터·倍率(ARENA_PICKED·ARENA_ODDS)을 보고, 코인은 그 倍率로 셈한다.
+    # 시합 수가 바뀌면 같은 난수가 다른 시합을 고르니 다시 잰다. 시합을 여는 A 는
     # 시합 구간에 둔다(앞 구간에서 전투에 들면 dq4peoplesample 이 시합을 전투로 세지 못함)
-    *(seg for k, (pick, coins) in enumerate(((2, 127), (0, 91)))
+    *(seg for k, (pick, coins) in enumerate(((2, 91 + arena_payout(ARENA_BET, ARENA_ODDS[2])), (0, 91)))
       for seg in ((f'towns_arena_{("win", "lose")[k]}_side', 'warp', f'{W.CASINO},{ARENA[0]},{ARENA[1] + 1}',
                    {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
                   (f'towns_arena_{("win", "lose")[k]}', 'walk',
                    f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:60;{"down:8;wait:30;" * pick}'
                    f'wait:{38 * (3 - pick) + 1};a:8;wait:90;{"up:2;wait:14;" * 4}a:8;wait:100',
                    {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{ARENA_RNG}',
-                    'bytes': {'TOWNS_COIN0': 91, 'TOWNS_COIN1': 0}}),
+                    'bytes': {'TOWNS_COIN0': 100 - ARENA_BET, 'TOWNS_COIN1': 0, 'ARENA_RECENT0': 6,
+                              **_arena_match_bytes()}}),
                   (f'towns_arena_{("win", "lose")[k]}_fight', 'walk', f'a:8;wait:3000;{";".join(["b:8;wait:150"] * 6)}',
                    {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{ARENA_STRONG}',
                     'bytes': {'TOWNS_COIN0': coins, 'TOWNS_COIN1': 0}}))),
+    # 격투장 대화로 연 시합의 무리 칸 줄(ARENA_LINES): 위 시합(무리 셋)을 열고 ARENA_LINE_WAIT 프레임 뒤 칸 0~2 가 줄 0~2.
+    # 시합 도중에 구간을 끊으면 뒤 구간의 승패가 달라져(실측) 이긴 판·진 판과 따로 둔다
+    ('towns_arena_lines_side', 'warp', f'{W.CASINO},{ARENA[0]},{ARENA[1] + 1}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
+    ('towns_arena_lines', 'walk',
+     f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:60;wait:115;a:8;wait:90;{"up:2;wait:14;" * 4}a:8;wait:100',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{ARENA_RNG}', 'bytes': {'TOWNS_COIN0': 91, 'TOWNS_COIN1': 0}}),
+    ('towns_arena_lines_open', 'walk', f'a:8;wait:{ARENA_LINE_WAIT}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{ARENA_STRONG}',
+      'bytes': {f'ARENA_LINE{g}': g for g in range(3)}}),
     # 격투장 최근 8시합 막기(FC 18:$ABC3, 헤드리스 실측: FC 에서 열두 번 말을 걸어 고른 시합이 앞 여덟에 없음). 난수를
     # 매 프레임 묶어 두 번 말을 걸면(시합 목록에서 B 로 나옴) 첫 뽑기는 둘 다 같은 시합 4 지만, 둘째는 그 번호가 기록에
-    # 있어 다시 뽑아 7 이 된다. 기록은 번호 + 1 이라 08·05·00
+    # 있어 다시 뽑는다. 시합 19개에서 첫 뽑기 5, 둘째 8, 기록은 번호 + 1 이라 09·06·00(18개일 때는 4·7 → 08·05·00)
     ('towns_arena_recent_side', 'warp', f'{W.CASINO},{ARENA[0]},{ARENA[1] + 1}',
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
     ('towns_arena_recent', 'walk', f'{ARENA_TALK};{ARENA_TALK}',
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{ARENA_RNG}',
-      'bytes': {'ARENA_RECENT0': 0x08, 'ARENA_RECENT1': 0x05, 'ARENA_RECENT2': 0x00}}),
+      'bytes': {'ARENA_RECENT0': 0x09, 'ARENA_RECENT1': 0x06, 'ARENA_RECENT2': 0x00}}),
     # 슬롯(FC 기계 칸 가운데, 아래에서 위를 보고 말 걸기 → DQ5 1코인 기계): 583·584 에 「예」, 위로 한 장 넣으면 슬롯 안
     # 코인이 99. 돌린 뒤 배당은 코어 난수에 따라 달라 코인은 넣은 뒤에만 본다
     ('towns_slot_side', 'warp', f'{W.CASINO},{SLOT[0]},{SLOT[1] + 1}',

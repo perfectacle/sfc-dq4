@@ -33,6 +33,30 @@ def _msgs(body, acc):
     return acc
 
 
+class ArenaTest(unittest.TestCase):
+    def test_payout_is_dq5_rounding(self):
+        # 06:F31C: 1 장 × 1.9 = 1.9 → 2(dq5-data-format 실측 99 → 101), 9 장 × 1.1 = 9.9 → 10, 9 장 × 1.4 = 12.6 → 13
+        import dq4ch3towns_checks as c
+        self.assertEqual(c.arena_payout(1, (1, 9)), 2)
+        self.assertEqual(c.arena_payout(9, (1, 1)), 10)
+        self.assertEqual(c.arena_payout(9, (1, 4)), 13)
+        self.assertEqual(c.arena_payout(10, (2, 5)), 25)
+
+    def test_picked_match_is_an_fc_chapter3_row(self):
+        # 묶은 난수에서 고른 시합(ARENA_PICKED)은 FC 3장 표의 한 줄이고, 그 번호가 최근 기록(번호 + 1)과 맞는다
+        import dq4ch3towns_checks as c
+        import dq4shopport
+        from kr_patch.fc import ines
+        dq4 = Path(__file__).resolve().parents[3] / 'rom' / 'dq4.nes'
+        if not dq4.is_file():
+            self.skipTest('FC 롬이 필요')
+        prg = ines.prg(dq4.read_bytes())
+        row = [prg[dq4shopport.FC_ARENA_BANK * 0x4000 + dq4shopport.FC_ARENA_TABLE + 8 * 5 + i - 0x8000] for i in range(4)]
+        self.assertEqual(tuple(m for m in row if m != 0xFF), c.ARENA_PICKED)
+        self.assertEqual([prg[dq4shopport.FC_ARENA_BANK * 0x4000 + dq4shopport.FC_ARENA_TABLE + 8 * 5 + 4 + i - 0x8000]
+                          for i in range(3)], [i + (d > 3) for i, d in c.ARENA_ODDS])
+
+
 class RegisterTest(unittest.TestCase):
     def test_registered_last_with_no_flags_of_its_own(self):
         self.assertIn('dq4ch3towns', ev.EVENTS)
