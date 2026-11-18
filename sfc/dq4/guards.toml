@@ -2255,7 +2255,7 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-ch1-save"
-why = "1장 출하 롬(dq4-ch1-full)에서 교회 저장 → 리셋 → 이어 하기, 우물 아래 전멸 → 교회 귀환이 끝까지 가야 한다(서장 끝·이무르 밤·호이민·보스·보고 다섯 자리). 교회 순간이동은 「arrived map」 이 36/00 이고 MAXF 에 닿지 않아야(timeout phase 없음) 도착으로 본다. 출발 상태는 같은 명령 안의 1장 걷기(--units, 전 구간)로 만든다. 그 걷기는 구간마다(순간이동은 도착 뒤) 뜬 메시지 번호의 처음 나온 차례가 기준 sfc/dq4/ch1-walk-messages.toml 과 같아야 하고(기준이 없거나 손으로 고쳐 check 표지가 맞지 않거나 기록이 400개를 넘어 잘려도 실패)(대사가 빠지거나 바뀌거나 늘면 실패, 기준은 --write-messages 「까닭」 으로만 고침), 이무르 감옥(37/00 → 37/02)과 이무르(37/01 → 37/00)는 순간이동 대신 실제 계단으로 걸어 들어가 끝 맵이 맞아야 한다"
+why = "1장 출하 롬(dq4-ch1-full)에서 교회 저장 → 리셋 → 이어 하기, 우물 아래 전멸 → 교회 귀환이 끝까지 가야 한다(서장 끝·이무르 밤·호이민·보스·보고 다섯 자리). 교회 순간이동은 「arrived map」 이 36/00 이고 MAXF 에 닿지 않아야(timeout phase 없음) 도착으로 본다. 출발 상태는 같은 명령 안의 1장 걷기(--units, 전 구간)로 만든다. 그 걷기는 구간마다(순간이동은 도착 뒤) 뜬 메시지 번호의 처음 나온 차례가 기준 sfc/dq4/ch1-walk-messages.toml 과 같아야 하고(기준이 없거나 손으로 고쳐 check 표지가 맞지 않거나 기록이 400개를 넘어 잘려도 실패)(대사가 빠지거나 바뀌거나 늘면 실패, 기준은 --write-messages 「까닭」 으로만 고침), 이무르 감옥(37/00 → 37/02)과 이무르(37/01 → 37/00)는 순간이동 대신 실제 계단으로 걸어 들어가 끝 맵이 맞아야 한다. 독늪에서 쓰러짐(swamp-*, dq4swampdeath): 라이안 혼자·둘 다는 586 → 금화 반 → 전멸 처리 한 번 → 교회, 호이민만은 586·관·금화 그대로"
 paths = [
   "@ch2-modules",
   "@ch3-modules",
@@ -3272,6 +3272,7 @@ ch1-build = [
   "sfc/dq4/tools/dq4soundsfx.py",
   "sfc/dq4/tools/dq4sparfx.py",
   "sfc/dq4/tools/dq4sprites.py",
+  "sfc/dq4/tools/dq4swampdeath.py",
   "sfc/dq4/tools/dq4sysmsg.py",
   "sfc/dq4/tools/dq4terrain.py",
   "sfc/dq4/tools/dq4title.py",
@@ -3356,6 +3357,7 @@ ch1-build = [
   "tools/headless_slots.py",
 ]
 ch1-walk = [
+  "sfc/dq4/tools/dq4swampdeath.py",
   "sfc/dq4/tools/dq4environmentnight.py",
   "fc/dq4/tools/dq4bank.py",
   "fc/dq4/tools/dq4block.py",

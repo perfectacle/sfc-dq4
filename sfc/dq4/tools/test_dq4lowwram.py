@@ -53,6 +53,8 @@ class ModuleTest(unittest.TestCase):
         import dq4neneshop
         import dq4prologue
         import dq4soundpatch
+        import dq4swampdeath
+        self.inside(dq4swampdeath.WHO & 0xFFFF, self.cell('dq4swampdeath', 'WHO'))
         self.inside(dq4soundpatch.KEEP_BUSY, self.cell('dq4soundpatch', 'KEEP_BUSY·KEEP_SONG'), 2)
         self.inside(dq4soundpatch.KEEP_SONG, self.cell('dq4soundpatch', 'KEEP_BUSY·KEEP_SONG'))
         self.inside(dq4bg3slot.SHOWN, self.cell('dq4bg3slot', 'SHOWN'))

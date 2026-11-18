@@ -1,7 +1,7 @@
 """DQ5 필드 시스템 메시지(조사·상자·문·주문·도구)와 가게·여관·교회 대사를 한글로. dq4chapter1.messages 가 1장
 메시지에 더한다.
 
-문장 안의 자리 표시: {L} 일행 첫째(1011), {P} 인물(1008), {I} 물건(100A, 9칸. 롬의 가나 이름·한글 이름 모두 가장 긴 것이 9글자), {S} 주문(100B, 8칸), {N} 숫자(1004).
+문장 안의 자리 표시: {L} 일행 첫째(1011), {H} 주인공(1012), {P} 인물(1008), {I} 물건(100A, 9칸. 롬의 가나 이름·한글 이름 모두 가장 긴 것이 9글자), {S} 주문(100B, 8칸), {N} 숫자(1004).
 조사 {은}·{이}·{을}·{로}·{과}·{아}·{이여} 는 바로 앞 글자의 받침으로 고르는 코드(dq4josa.py)가 된다. 줄은 dq4wrap 이
 낱말 단위로 나누고, | 는 쪽을 넘긴다(1002, 한 쪽 4줄).
 서술(SOURCE)은 {1006} 으로 시작하고 해라체로 쓴다. 대사(SPEECH)는 원문처럼 {1006} 없이 써서 엔진이 ＊「 를 붙인다.
@@ -29,7 +29,7 @@ PAGE = 0x1002
 PAGE_LINES = 4
 LINE_COLS = 14
 NARR_COLS = 15      # 서술({1006})은 ＊「 가 없어 한 칸 넓다(dq4chapter1.NARR_COLS)
-SLOTS = {'L': (0x1011, 4), 'P': (0x1008, 4), 'I': (0x100A, 9), 'S': (0x100B, 8), 'N': (0x1004, 5),
+SLOTS = {'L': (0x1011, 4), 'H': (0x1012, 4), 'P': (0x1008, 4), 'I': (0x100A, 9), 'S': (0x100B, 8), 'N': (0x1004, 5),
          'M': (0x100F, 8)}     # M: 격투장에서 건 몬스터(창 이름, dq4monport.korean_names(window=True) 가장 긴 것)
 JOSA = {has: code for code, (has, _, _) in dq4josa.JOSA.items()}
 JOSA['로'] = next(code for code, (_, none, _) in dq4josa.JOSA.items() if none == '로')
@@ -160,6 +160,9 @@ SOURCE = {
     0x1C9: '{P}의 최대 MP가 {N} 올랐다!',
     0x1CA: '{P}{은} 전투의 북을 울렸다!',
     0x1CB: '횃불은 이미 쓰고 있다.',
+    # 필드에서 HP 가 0 이 됨(독늪, dq4swampdeath). 전투 글과 같은 말
+    0x586: '{P}{은} 죽고 말았다!',
+    0x585: '{H} 일행은 전멸했다!',
 }
 
 # 가게·여관·교회 대사. 가게 문구는 넷씩 한 벌로, 원문처럼 도구점(친절한 존댓말)·방어구점(정중한 존댓말)·
@@ -465,8 +468,12 @@ def message(text, end=END, narrate=True):
     return out + [end]
 
 
+# 원문 끝 코드가 1018 인 메시지(필드 쓰러짐·전멸, 06:80B6 이 띄움)는 그대로 둔다
+KEEP_END = {0x585: 0x1018, 0x586: 0x1018}
+
+
 def _end(m):
-    return END_WAIT if m in WAIT else END
+    return KEEP_END.get(m, END_WAIT if m in WAIT else END)
 
 
 TEXTS = {**{m: message(t, _end(m)) for m, t in SOURCE.items()},
