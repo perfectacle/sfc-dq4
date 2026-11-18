@@ -622,6 +622,48 @@ DROP_SITE, DROP_ORIG = 0x258966, bytes((0xAD, 0x16, 0x11, 0xC9, 0xFF, 0xD0, 0x03
 DROP_ITEM = 0x2589AA        # LDA $46 / CMP #$FF: 떨어뜨릴 물건
 RANDOM = 0x00953E           # A(16비트) = n → 0~n-1
 CANDIDATE, KILLS = 0x7E1116, 0x7E111A
+# 떨어뜨림 후보: DQ5 는 처음 쓰러뜨린 종류($1116, 20:A346)이고 다른 종류를 쓰러뜨리면 FF(20:A363, 섞인 무리는 떨어뜨림
+# 없음), 물건·확률·이름은 마지막으로 빠진 몬스터 종류($1113, 20:A170, 도망 포함)의 칸에서 읽는다(25:8970). FC 는 마지막으로
+# 쓰러뜨린 몬스터 칸($7200, 11:$91F1)의 물건이고 도망은 이를 바꾸지 않는다(실측). 20:A363 을 「쓰러뜨릴 때마다 $1116 = 그
+# 종류」로, 25:8977·8984 가 $1113 대신 쓰러뜨릴 때마다 쓰는 마지막 종류 $111C(20:A33E)를 읽게 한다
+LAST_KILL_SITE = 0x20A363
+LAST_KILL_ORIG = bytes.fromhex('ad 16 11 c9 ff f0 09 c5 46 f0 05 a9 ff 8d 16 11')
+LAST_KILL = bytes.fromhex('a5 46 8d 16 11') + bytes((0xEA,) * 11)
+DROP_SPECIES = ((0x258977, bytes.fromhex('cd 13 11'), bytes.fromhex('cd 1c 11')),
+                (0x258984, bytes.fromhex('ad 13 11'), bytes.fromhex('ad 1c 11')))
+# 떨어뜨림 메시지(25:89BF BRK 9E B1 / 다음 BRK 9E 00 의 첫 바이트): FC 12:$9246 는 무리가 모두 한 종류면 01C7「…は
+# たからばこを もっていた！」, 아니면 01C8「まもののむれは たからばこを もっていた！」. 0B1 의 한글을 FC 뜻으로 두고, 섞인
+# 무리면 1A8. BRK 가 부른 뱅크를 DB 로 쓰므로 WRAM 거울이 있는 뱅크 0B(dq4monspecial 코드 뒤)에 둔다
+DROP_MSG_SITE, DROP_MSG_ORIG = 0x2589BF, bytes.fromhex('00 9e b1 00')
+# 덮은 넷째 바이트는 다음 BRK 9E 00 의 첫 바이트라 그 BRK 를 이 코드가 하고 25:89C5(BRK 16 35 00, 상자 여는 소리)로
+# 돌아간다. 그 BRK 16 은 사운드 패치가 효과음 번호를 바꾸는 자리(dq4sound-game.args 2589C5=35:3F)라 옮기지 않는다.
+# BRK 를 가리키는 JML 은 롬 장부 검사(dq4romledgercheck inv_hooks)가 빈 자리로 뛴 훅과 가르지 못해 RTL 로 돌아간다
+DROP_MSG_TAIL, DROP_MSG_NEXT = bytes.fromhex('00 9e 00'), 0x2589C5
+DROP_MSG_AT = 0x0BFFA0
+# 전투가 끝날 때 무리(7E:1001~)는 비어 있고 그림 종류(7E:117C~)는 도망친 종류가 빠진다. 무리 몬스터 사본 7E:1156~1159
+# (전투 시작 26:82B4, 부르기 20:DAC2 가 씀)은 남아 있어 FC 의 $6E45~ 처럼 도망친 무리도 센다
+BATTLE_SPECIES = 0x7E1156
+MSG_DROP, MSG_DROP_GROUP = 0x0B1, 0x1A8
+
+
+def drop_msg_code(at=DROP_MSG_AT):
+    """(바이트, 라벨): 전투의 무리 몬스터 7E:1156~1159 의 FF 아닌 것이 모두 같으면 BRK 9E B1, 아니면 BRK 9F A8, 그 뒤 원래의
+    BRK 9E 00 과 25:89C5(RTL 로). M·X 8비트."""
+    from dq4environmentrom import _Asm
+    a = _Asm(at)
+    a.label('drop_msg').b(0xA0, 0xFF, 0xA2, 0x00)
+    a.label('dm_loop').b(0xBF, *_long(BATTLE_SPECIES), 0xC9, 0xFF).rel(0xF0, 'dm_next')
+    a.b(0xC0, 0xFF).rel(0xD0, 'dm_cmp').b(0xA8).rel(0x80, 'dm_next')
+    a.label('dm_cmp').b(0x48, 0x98, 0xC3, 0x01).rel(0xF0, 'dm_same').b(0x68).rel(0x80, 'dm_group')
+    a.label('dm_same').b(0x68)
+    a.label('dm_next').b(0xE8, 0xE0, 0x04).rel(0x90, 'dm_loop')
+    a.b(0x00, 0x9E, MSG_DROP).rel(0x80, 'dm_tail')
+    a.label('dm_group').b(0x00, 0x9F, MSG_DROP_GROUP & 0xFF)
+    a.label('dm_tail').b(*DROP_MSG_TAIL, 0xA9, DROP_MSG_NEXT >> 16, 0x48, 0xF4, *((DROP_MSG_NEXT - 1) & 0xFFFF).to_bytes(2, 'little'), 0x6B)
+    data, labels = a.assemble()
+    if at + len(data) > 0x0C0000:
+        raise ValueError('떨어뜨림 메시지 코드가 뱅크 0B 끝을 넘음')
+    return data, labels
 TORNEKO_LEVEL = 0x7E2052    # 일행 기록 0(7E:2040) + 12. 3장 일행 기록 0 은 톨네코
 
 # 떠돌이 상인(FC 18:$9D12): 3장 필드 조우의 1/10 은 싸우지 않고 여관(rand(256) < 16)이나 도구점
@@ -1115,6 +1157,17 @@ def ch3_writes(prg, dq5, report, at=CH3_CODE_AT):
     out.append(put(SURPRISE_SITE, bytes((0x5C, *_long(labels['surprise_hook']), 0xEA)), SURPRISE_ORIG,
                    '걸음 전투의 기습·선제를 FC 문턱으로'))
     out.append(put(WAKE_SITE, jsl('wake'), WAKE_ORIG, '필드 여관(떠돌이 상인)에서 깨면 그룹 01 갈래로 가지 않음'))
+    out.append(put(LAST_KILL_SITE, LAST_KILL, LAST_KILL_ORIG, '떨어뜨림 후보는 마지막으로 쓰러뜨린 종류(FC)'))
+    for site, orig, new in DROP_SPECIES:
+        out.append(put(site, new, orig, '떨어뜨림 종류는 마지막으로 쓰러뜨린 종류 $111C(FC, 도망은 바꾸지 않음)'))
+    msg, msg_labels = drop_msg_code()
+    tail = dq5[_lorom(DROP_MSG_SITE + 3):_lorom(DROP_MSG_NEXT)]
+    if tail != DROP_MSG_TAIL or dq5[_lorom(DROP_MSG_NEXT):_lorom(DROP_MSG_NEXT) + 2] != bytes((0x00, 0x16)):
+        raise ValueError(f'25:89C2~89CB 가 {tail.hex()}')
+    out.append({'at': f'{DROP_MSG_AT >> 16:02X}:{DROP_MSG_AT & 0xFFFF:04X}', 'hex': msg.hex(' ').upper(),
+                'note': '떨어뜨림 메시지: 섞인 무리면 마물 무리(FC 01C8)'})
+    out.append(put(DROP_MSG_SITE, bytes((0x5C, *_long(msg_labels['drop_msg']))), DROP_MSG_ORIG,
+                   '떨어뜨림 메시지를 FC 처럼 무리 종류로'))
     return out
 
 

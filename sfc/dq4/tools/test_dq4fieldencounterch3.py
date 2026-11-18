@@ -69,6 +69,47 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(blob[labels['found'] - m.CH3_CODE_AT:][:3], bytes((0xA9, m.MERCHANT_RATE, 0x00)))
         self.assertEqual((m.TALK_SHOP, m.TALK_INN), (0x02, 0x06))
 
+    def test_drop_message_by_battle_species(self):
+        # 전투 무리 몬스터 사본(7E:1156~1159)의 FF 아닌 것이 모두 같으면 0B1(BRK 9E B1), 아니면 1A8(BRK 9F A8), 그 뒤 원래의
+        # BRK 9E 00 과 25:89C5(RTL). BRK 는 자리에서 가로채 적는다
+        import w65816
+        import dq4monspecial
+        data, labels = m.drop_msg_code()
+        import dq4monport
+        far = dq4monspecial.far_code(dq4monport.summon_code()[1]['same'])[0]
+        self.assertLessEqual(dq4monspecial.CODE_AT + len(far), m.DROP_MSG_AT)   # 앞의 몬스터 행동 코드와 겹치지 않음
+        rom = bytearray(0x400000)
+        o = (m.DROP_MSG_AT >> 16) * 0x8000 + (m.DROP_MSG_AT & 0x7FFF)
+        rom[o:o + len(data)] = data
+
+        class Done(Exception):
+            pass
+        for species, want in (([0x50, 0xFF, 0xFF, 0xFF], 0x9EB1), ([0x50, 0x50, 0xFF, 0xFF], 0x9EB1),
+                              ([0x50, 0x07, 0xFF, 0xFF], 0x9FA8), ([0xFF, 0x07, 0x50, 0xFF], 0x9FA8),
+                              ([0xFF, 0xFF, 0x07, 0x07], 0x9EB1)):
+            cpu = w65816.Cpu(bytes(rom), bytearray(0x20000))
+            cpu.p, cpu.dbr = 0x30, 0x25
+            cpu.wram[0x1156:0x115A] = bytes(species)
+            shown = []
+            for i in range(len(data) - 2):
+                if data[i] == 0x00 and data[i + 1] in (0x9E, 0x9F, 0x16):
+                    def brk(c, v=data[i + 1] << 8 | data[i + 2], n=4 if data[i + 1] == 0x16 else 3):
+                        shown.append(v)
+                        c.pc += n
+                        return True
+                    cpu.hooks[m.DROP_MSG_AT + i] = brk
+            cpu.hooks[m.DROP_MSG_NEXT] = lambda c: (_ for _ in ()).throw(Done())   # RTL 로 25:89C5
+            with self.assertRaises(Done):
+                cpu.jsl(labels['drop_msg'])
+            self.assertEqual(shown, [want, 0x9E00], species)
+
+    def test_last_kill_patch(self):
+        # 20:A363 의 16바이트(다른 종류를 쓰러뜨리면 후보 FF)를 LDA $46 / STA $1116 과 NOP 로, 떨어뜨림 종류 읽기 둘을 $111C 로
+        self.assertEqual(len(m.LAST_KILL), len(m.LAST_KILL_ORIG))
+        self.assertEqual(m.LAST_KILL[:5], bytes((0xA5, 0x46, 0x8D, 0x16, 0x11)))
+        for _, orig, new in m.DROP_SPECIES:
+            self.assertEqual((orig[0], orig[1:], new[0], new[1:]), (new[0], b'\x13\x11', orig[0], b'\x1c\x11'))
+
     def test_code_has_no_brk_and_stays_in_its_share(self):
         # BRK 처리기는 BRK 가 놓인 뱅크를 DB 로 둔다: 4E 코드에서 부르면 WRAM 대신 롬을 읽는다
         blob, labels = m.ch3_code([32, 33, 78, 35], PICKS, ITEMS, TABLES)

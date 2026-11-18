@@ -11,6 +11,10 @@
   open-01  マホステ 없이(ようすをみる) 같은 メラ 는 1A7 없이 피해 메시지가 나와야 한다
   full-*   부를 자리가 없으면 부르기를 고르지 않아야 한다(FC 10:$BC2D·$BC6B): 작은 몬스터 8마리(살아 있는 몬스터 8),
            큰 몬스터 8마리 무리(화면에 다섯만 서 그림 자리 없음)
+  drop-*   전투 뒤 떨어뜨림(dq4fieldencounter 의 LAST_KILL·drop_msg_code): 몬스터를 HP 1·수비 0·드롭률 1/1·종마다 다른
+           물건으로 덮고 이겨, 섞인 무리(スライム + エアラット)는 마지막으로 쓰러뜨린 エアラット 의 물건(25:89B3 의 A)과
+           1A8「마물 무리는…」, 같은 종 두 무리는 그 물건과 0B1, エアラット 가 도망치면 쓰러뜨린 スライム 의 물건과 1A8.
+           고치기 전 롬은 섞인 무리에서 떨어뜨리지 않았다(DQ5 20:A363)
   herb-*   필드 68 을 FC AI 종류로: サイモン(FC AI 1)은 HP 가 차 있으면 やくそう 를 고르지 않고, きりかぶおばけ(FC AI 0)는
            HP 와 관계없이 고른다
 
@@ -49,6 +53,14 @@ KING = 0x6B
 # 자리 없는 부르기: (이름, 몬스터, 마릿수, 부르기)
 FULL = (('full-b5-small', 0x50, 8, dq4monport.SUMMON_SAME), ('full-b5-wide', 0x77, 8, dq4monport.SUMMON_SAME),
         ('full-b4-small', 0x50, 8, dq4monport.SUMMON_FIXED), ('full-c8-wide', 0x77, 8, S.GUARD))
+# 떨어뜨림: (이름, 무리, 떨어뜨릴 물건, 메시지). 종마다 물건(DROP_ITEMS), 둘째 무리를 나중에 쓰러뜨림(주인공이 앞에서부터)
+DROP_ITEMS = {0x50: 0x01, 0x07: 0x02}
+DROPS = (('drop-mixed', [(0x50, 1), (0x07, 1)], 0x02, 0x1A8), ('drop-same', [(0x50, 1), (0x50, 1)], 0x01, 0x0B1),
+         ('drop-flee', [(0x50, 1), (0x07, 1)], 0x01, 0x1A8))
+# drop-flee: エアラット 는 도망(98)만 하고 쓰러지지 않는다(HP FF·필드 68 = 0). 쓰러뜨린 スライム 의 물건이고, 도망친 무리도
+# 세어 마물 무리(FC: 도망은 $7200 을 바꾸지 않고 $6E45 무리는 남음, 실측)
+FLEE_ACTION = '98'
+DROP_ITEM_SITE = 0x2589B3       # STA $10F7: 떨어뜨릴 물건
 # やくそう: (이름, 몬스터, 골라야 하는지)
 HERBS = (('herb-ai1', 0x68, False), ('herb-ai0', 0x35, True))
 # 적에게 거는 일행 주문을 실행 루틴(26:8865)마다 하나. メガンテ(15)는 외운 주인공이 쓰러지고, ミナデイン(12)은 혼자인
@@ -134,12 +146,12 @@ def main(argv=None):
     def acts(m, act):
         return f'{wc.MONSTERS + m * 25 + 17:X}={act * 6}'
 
-    def scene(name, groups, actions, poke='', presses=24, maxf=4200):
+    def scene(name, groups, actions, poke='', presses=24, maxf=4200, extra=(), trace=()):
         patch = [dq4fieldport.warp_patch(data, *field), fec.RATES, dq4battlecheck.force_patch(groups)]
-        patch += [acts(m, act) for m, act in actions]
+        patch += [acts(m, act) for m, act in actions] + list(extra)
         got = dq4groupcheck.scene(mesence, rom, state, out, name, FIELD='{},{}'.format(*field), ROMPATCH=';'.join(patch),
                                   TEST='idle:16,right:40,left:40,' + ','.join(['wait:60,a:2'] * presses), MAXF=str(maxf),
-                                  TRACE=f'{MESSAGE:06X}', LOG=LOG,
+                                  TRACE=','.join([f'{MESSAGE:06X}', *(f'{t:06X}' for t in trace)]), LOG=LOG,
                                   POKE=f"{wc.HERO_HP} {C.CLOCK['day']} {poke}".strip())
         trace = out / name / 'trace.txt'
         return got, messages(trace) if trace.exists() else []
@@ -172,10 +184,33 @@ def main(argv=None):
             problems.append('HP 가 찬 채 やくそう 를 ' + ('고르지 않음' if expect else '고름'))
         return name, {'ok': not problems, 'problems': problems, 'messages': [f'{m:03X}' for _, m, *_ in log][:40]}
 
-    jobs = [(full, *f) for f in FULL] + [(herb, *h) for h in HERBS]
+    def drop(name, groups, item, msg):
+        extra = []
+        flee = name == 'drop-flee'
+        for m, it in DROP_ITEMS.items():
+            b = wc.MONSTERS + m * 25
+            # HP 1(+3·+10 bit0-2), 수비 0(+2·+8 bit6), 드롭률 0 = 1/1(+9 bit3-5), 물건(+23)(dq5tables.MONSTER_FIELDS).
+            # 도망치는 쪽은 HP FF, 필드 68(+8 bit0-1) = 0
+            runs = flee and m == 0x07
+            extra += [f'{b + 3:X}={"FF" if runs else "01"}', f'{b + 10:X}={data[b + 10] & 0xF8:02X}', f'{b + 2:X}=00',
+                      f'{b + 8:X}={data[b + 8] & (0xBC if runs else 0xBF):02X}', f'{b + 9:X}={data[b + 9] & 0xC7:02X}',
+                      f'{b + 23:X}={it:02X}']
+        acts_ = [(m, FLEE_ACTION if flee and m == 0x07 else WAIT_ACTION) for m in DROP_ITEMS]
+        got, log = scene(name, groups, acts_, extra=extra, maxf=4000, presses=30, trace=(DROP_ITEM_SITE,))
+        trace = out / name / 'trace.txt'
+        items = [int(kv['A'], 16) & 0xFF for _, at, kv in fec.lines(trace) if at == f'{DROP_ITEM_SITE:06X}'] \
+            if trace.exists() else []
+        problems = [got['error']] if 'error' in got else []
+        if items != [item]:
+            problems.append(f'떨어뜨린 물건 {items}, 기대 [{item:02X}]')
+        if msg not in [m for _, m, *_ in log]:
+            problems.append(f'메시지 {msg:03X} 없음')
+        return name, {'ok': not problems, 'problems': problems, 'messages': [f'{m:03X}' for _, m, *_ in log][:40]}
+
+    jobs = [(full, *f) for f in FULL] + [(herb, *h) for h in HERBS] + [(drop, *d) for d in DROPS]
     jobs += [(mixed, *m) for m in MIXED] + [(block, s) for s in BLOCK_SPELLS] + [(block, 0x01, False)]
     if a.only:
-        names = lambda j: j[1] if j[0] in (mixed, full, herb) else f'{"block" if len(j) == 2 else "open"}-{j[1]:02X}'  # noqa: E731
+        names = lambda j: j[1] if j[0] in (mixed, full, herb, drop) else f'{"block" if len(j) == 2 else "open"}-{j[1]:02X}'  # noqa: E731
         jobs = [j for j in jobs if any(names(j).startswith(p) for p in a.only.split(','))]
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as pool:
         results = dict(f.result() for f in [pool.submit(fn, *args) for fn, *args in jobs])
