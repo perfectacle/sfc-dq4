@@ -451,17 +451,47 @@ class RecordErrorTests(unittest.TestCase):
             mp.put(data, 0x040000, b'x', b'y')
 
     def test_grown_record_missing_from_the_window_table_is_an_error(self):
-        # 표 첫 칸이 표 바로 뒤를 가리키면 칸 수가 10 으로 읽혀, 5E 를 가리키는 칸을 찾지 못한다
+        # 창 표 칸 수가 5E 앞에서 끊기면 옮긴 레코드를 가리키는 칸을 찾지 못한다
         rom, _, _ = menu_rom()
-        mp.put(rom, TABLE, (0xEB48 + 20).to_bytes(2, 'little'))
-        with self.assertRaisesRegex(ValueError, '창 5E: 창 표에서 레코드를 찾지 못함'):
-            build_menu(rom)
+        with mock.patch.object(mp, 'window_count', return_value=10):
+            with self.assertRaisesRegex(ValueError, '창 5E: 창 표에서 레코드를 찾지 못함'):
+                build_menu(rom)
 
     def test_shared_windows_must_fit_before_the_menu_flag(self):
         rom, _, _ = menu_rom()
         with mock.patch.object(mp, 'MENU_FLAG', mp.SHARED_WRAM + 4):
             with self.assertRaisesRegex(ValueError, '공용 창'):
                 build_menu(rom)
+
+
+class WindowCountTests(unittest.TestCase):
+    """창 표는 0x94 칸이고, 그 뒤 창마다 1바이트 표(04:EC70)는 포인터가 아니다."""
+
+    def fake(self):
+        rom = bytearray(0x40000)
+        for n in range(0x94):
+            at = mp.lorom(0x04EB48 + n * 2)
+            rom[at:at + 2] = (0xED04 + n * 0x10).to_bytes(2, 'little')
+        rom[mp.lorom(mp.WINDOW_BYTES):mp.lorom(mp.WINDOW_BYTES) + 4] = bytes((0xFF, 0x00, 0x00, 0xFF))
+        return rom
+
+    def test_count_stops_before_the_per_window_byte_table(self):
+        self.assertEqual(mp.window_count(self.fake()), 0x94)
+        self.assertEqual(0x04EB48 + 2 * mp.window_count(self.fake()), mp.WINDOW_BYTES)
+
+    def test_last_record_span_ignores_the_byte_table(self):
+        # 표 바이트 FF 00 → 「주소 00FF」 가 아니라, 마지막 레코드는 다음 레코드가 없다
+        rom = self.fake()
+        starts = {mp.window_addr(rom, n) & 0xFFFF for n in range(mp.window_count(rom))}
+        self.assertNotIn(0x00FF, starts)
+        self.assertEqual(len(mp.window_span(rom, 0x92)), 0x10)
+
+    @unittest.skipUnless((ROOT / 'rom' / 'dq5.sfc').exists(), '원본 롬 없음')
+    def test_rom_table_layout(self):
+        rom = (ROOT / 'rom' / 'dq5.sfc').read_bytes()
+        addrs = [mp.window_addr(rom, n) & 0xFFFF for n in range(mp.window_count(rom))]
+        self.assertEqual(min(addrs), (mp.WINDOW_BYTES & 0xFFFF) + mp.window_count(rom))
+        self.assertTrue(all(a >= 0xED04 for a in addrs))
 
 
 class SheetTests(unittest.TestCase):

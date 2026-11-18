@@ -197,10 +197,15 @@ def window_record(data, addr):
     return bytes(data[o:end + 1])
 
 
+# 창 표(04:EB48, 창마다 2바이트) 바로 뒤 04:EC70~ED03 은 창마다 1바이트인 다른 표다(04:A47C LDA $EC70,X·04:A7E7 LDY $EC70,X 가
+# 창 번호로 읽음). 첫 레코드(04:ED04)까지로 세면 그 표를 포인터로 읽어 0xDE 가 되고, 0x94 이상의 「창」 은 0000·00FF·FF00 같은
+# 값이라 레코드 끝 셈(window_span)에 엉뚱한 주소가 섞인다
+WINDOW_BYTES = 0x04EC70
+
+
 def window_count(data):
-    """창 표 칸 수. 표 바로 뒤에 첫 레코드가 오므로 가장 낮은 레코드 주소까지(dq5text.window 와 같은 셈)."""
-    first = int.from_bytes(data[lorom(0x04EB48):lorom(0x04EB48) + 2], 'little')
-    return (first - 0xEB48) // 2
+    """창 표 칸 수(0x94). 창마다 1바이트 표 WINDOW_BYTES 앞까지."""
+    return (WINDOW_BYTES - 0x04EB48) // 2
 
 
 def window_span(data, n):
