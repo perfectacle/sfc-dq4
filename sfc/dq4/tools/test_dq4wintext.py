@@ -14,6 +14,7 @@ import dq4winrule_josa as josa  # noqa: E402
 import dq4winrule_party as party  # noqa: E402
 import dq4winrule_raw as raw  # noqa: E402
 import dq4winrule_textlines as textlines  # noqa: E402
+import dq4winrule_unknownink as unknownink  # noqa: E402
 
 W = (2, 2, 12, 20)
 
@@ -124,6 +125,28 @@ class RuleTests(unittest.TestCase):
             got = party.check(screen_with([line('호이민 크리프트')], wram))
             self.assertEqual(len(got), 1)
             self.assertEqual(len(party.check(screen_with([line('호이민 호이민')], wram))), 1)
+
+
+class ShapeTests(unittest.TestCase):
+    def test_components_and_shape(self):
+        comps = wt.components({(0, 0), (1, 1), (5, 5)})
+        self.assertEqual(sorted(len(c) for c in comps), [1, 2])
+        self.assertEqual(wt.shape([(0, 0), (1, 1)]), '#./.#')
+
+    def test_line_symbols(self):
+        self.assertEqual(wt.line_symbol('#####'), '─')
+        self.assertEqual(wt.line_symbol('#/#/#'), '│')
+        self.assertIsNone(wt.line_symbol('##/##'))
+
+    def test_known_symbols_file_parses(self):
+        k = wt.known()
+        self.assertIn('「', k.values())
+        self.assertIn('＊', k.values())
+
+    def test_unknown_ink_rule(self):
+        ln = wt.Line(8, [(8, '가', 10, 'galmuri9', 6), (20, wt.UNREAD, 3, None, 6)])
+        self.assertEqual(len(unknownink.check(screen_with([ln]))), 1)
+        self.assertEqual(unknownink.check(screen_with([line('가나')])), [])
 
 
 @unittest.skipUnless(os.environ.get('DQ4_GALMURI'), 'DQ4_GALMURI 가 없음')

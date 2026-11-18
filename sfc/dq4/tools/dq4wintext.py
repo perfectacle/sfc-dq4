@@ -34,6 +34,7 @@ UNREAD = '⍰'
 UNREAD_COST = 8              # 못 읽은 잉크 열 하나를 덮은 점 몇 개로 칠지(읽기 고르기)
 LINE_GAP = 6                 # 같은 줄로 묶는 글자 y 차
 SPACE_GAP = 3                # 이만큼 비면 띄움
+EDGE = 4                     # 테두리 칸까지 이만큼 점 안에 닿은 못 읽음 묶음은 가려지거나 넘친 글자로 본다
 
 
 def lorom(addr):
@@ -56,6 +57,7 @@ def use_rom(rom):
     glyph_table.cache_clear()
     widths.cache_clear()
     band_height.cache_clear()
+    glyph_shapes.cache_clear()
 
 
 @functools.lru_cache(maxsize=None)
@@ -157,9 +159,11 @@ def interior(screen, w):
     rows, cols = r2 - r1 + 1, c2 - c1 + 1
     grid = [[None] * (cols * 8) for _ in range(rows * 8)]
     words = {}
+    covered = set()
     for r in range(r1, r2 + 1):
         for c in range(c1, c2 + 1):
             if screen.hidden(w, r, c):
+                covered.add((r - r1, c - c1))
                 continue
             wd = screen.word(r, c)
             px = screen.shown(r, c)
@@ -169,6 +173,8 @@ def interior(screen, w):
             t = wd & 0x3FF
             # 테두리 칸(08B~095)은 글자가 아니다: 창 제목·9점 글자의 윗부분은 테두리 줄에 놓인 다른 칸에 그린다
             border = t in screen.ref.border
+            if border and r1 < r < r2 and c1 < c < c2:
+                covered.add((r - r1, c - c1))      # 창 안에 놓인 다른 창의 테두리 칸: 그 너머 글자는 가려졌다
             # 테두리 줄·열에 놓인 다른 칸(창 제목·걸친 글자)도 그 자리 테두리 선 점은 선이다
             line = set()
             if r in (r1, r2):
@@ -178,6 +184,8 @@ def interior(screen, w):
             for y in range(8):
                 grid[(r - r1) * 8 + y][(c - c1) * 8:(c - c1 + 1) * 8] = (
                     [None] * 8 if border else [None if (y, x) in line else v for x, v in enumerate(px[y])])
+    screen._covered = getattr(screen, '_covered', {})
+    screen._covered[w] = covered
     return grid, words
 
 
@@ -270,27 +278,47 @@ def read_window(screen, w, rom_table):
                 results.append((score - UNREAD_COST * unread, y0, name, real))
     results.sort(key=lambda v: (-v[0], v[1], FONTS.index(v[2])))
     claimed = set()
+    # 점수 높은 읽기부터, 글자마다 아직 아무 글자도 덮지 않은 점만 쓰는 것을 받는다(한 띠에 두 글꼴이 섞인 메시지 줄:
+    # 한글은 빌드 글리프, ＊「·숫자는 원본 DQ5 글자)
     for _, y0, name, real in results:
-        pix = set().union(*(p for _, _, p in real))
-        if pix & claimed:
-            continue
-        for x, ch, _ in real:
+        for x, ch, pix in real:
+            if pix & claimed:
+                continue
             chars.append((y0 + 2, x, ch, width(name, ch), name, y0))
-        claimed |= pix
-    # 어느 글자로도 읽지 못한 잉크: 이어진 열 묶음마다 못 읽음 하나(그 묶음 잉크의 윗줄 자리)
-    left = [(y, x) for y in range(H) for x in range(len(ink[0])) if ink[y][x] and (y, x) not in claimed]
-    by_col = {}
-    for y, x in left:
-        by_col.setdefault(x, []).append(y)
-    run = None
-    for x in sorted(by_col) + [None]:
-        if run and (x is None or x != run[1] + 1):
-            chars.append((run[2] - 1, run[0], UNREAD, run[1] - run[0] + 1, None, run[2]))
-            run = None
-        if x is None:
-            break
-        top = min(by_col[x])
-        run = (x, x, top) if run is None else (run[0], x, min(run[2], top))
+            claimed |= pix
+    # 어느 글자로도 읽지 못한 잉크: 이어진 점 묶음(8방향)마다, 아는 기호(KNOWN)면 그 이름, 아니면 못 읽음 하나
+    left = {(y, x) for y in range(H) for x in range(len(ink[0])) if ink[y][x] and (y, x) not in claimed}
+    covered = getattr(screen, '_covered', {}).get(w, set())
+    partial = w not in (getattr(screen, 'engine_rects', None) or [])
+    for comp in clusters(components(left)):
+        ys, xs = [y for y, _ in comp], [x for _, x in comp]
+        # 위 창에 가려진 칸에 닿은 묶음은 가려져 잘린 글자다: 못 읽음으로 치지 않는다
+        # (9점 글자는 칸 두 줄에 걸쳐, 윗부분이 가려지면 아래 조각만 남는다: 묶음 위·아래 한 칸 줄까지 본다)
+        top, bottom = min(ys) // 8, max(ys) // 8
+        cols = {x // 8 for x in xs} | {(min(xs) - EDGE) // 8, (max(xs) + EDGE) // 8}
+        if covered and any((r, c) in covered for r in range(top - 1, bottom + 2) for c in cols):
+            continue
+        # 테두리 칸 줄·열(창 사각형의 바깥 한 칸)에 걸친 묶음: 옆 창에 가려 좁게 찾은 창이거나 창 밖으로 넘친 글자라
+        # 이 창의 글자로 보지 않는다(테두리 규칙·창 밖 규칙의 몫)
+        nr, nc = len(grid) // 8, len(grid[0]) // 8
+        if min(ys) < 8 or max(ys) >= (nr - 1) * 8 or min(xs) < 8 or max(xs) >= (nc - 1) * 8:
+            continue
+        # 엔진 창이 아닌, 화면에서만 찾은 창은 옆 창에 가려 좁게 찾은 것일 수 있다: 테두리 가까이(EDGE 점) 잘린 조각도 뺀다
+        # 옆 테두리 칸이 이 창의 옆 변(왼쪽 08E, 오른쪽 08E 좌우 뒤집기)이 아니면 다른 창이 그 자리를 덮었다
+        rows_ = range(min(ys) // 8, max(ys) // 8 + 1)
+        def foreign(c, flip):
+            return any(words.get((r, c), 0) & 0x43FF != (0x08E | flip) for r in rows_)
+        if ((max(xs) + EDGE) // 8 >= nc - 1 and foreign(nc - 1, 0x4000)) or \
+                ((min(xs) - EDGE) // 8 <= 0 and foreign(0, 0)):
+            continue
+        if partial and ((min(ys) - EDGE) // 8 <= 0 or (max(ys) + EDGE) // 8 >= nr - 1
+                        or (min(xs) - EDGE) // 8 <= 0 or (max(xs) + EDGE) // 8 >= nc - 1):
+            continue
+        mask = shape(comp)
+        name = known().get(mask) or glyph_shapes().get(mask) or line_symbol(mask)
+        if HARVEST is not None:
+            HARVEST.append((mask, name, screen.scene, getattr(screen.shot, 'id', None), w, min(ys), min(xs)))
+        chars.append((min(ys) - 1, min(xs), name or UNREAD, max(xs) - min(xs) + 1, 'known' if name else None, min(ys)))
     return lines_of(chars)
 
 
@@ -314,6 +342,96 @@ class Line:
 
     def __iter__(self):
         return iter((self.y, self.x, self.text))
+
+
+HARVEST = None                 # 목록을 두면 못 읽은·아는 기호 묶음을 모은다(아는 기호를 정할 때)
+KNOWN_FILE = HERE.parents[1] / 'dq4' / 'wintext-symbols.txt'
+
+
+def clusters(comps):
+    """가로로 겹치는 묶음끼리 합친다(한 글자가 점이 이어지지 않은 두 묶음일 때, 「２」 의 윗부분처럼)."""
+    out = []
+    for comp in sorted(comps, key=lambda c: min(x for _, x in c)):
+        lo, hi = min(x for _, x in comp), max(x for _, x in comp)
+        ylo, yhi = min(y for y, _ in comp), max(y for y, _ in comp)
+        for g in out:
+            if lo <= g[2] and g[1] <= hi and ylo <= g[4] + 2 and g[3] <= yhi + 2:
+                g[0] += comp
+                g[1], g[2], g[3], g[4] = min(g[1], lo), max(g[2], hi), min(g[3], ylo), max(g[4], yhi)
+                break
+        else:
+            out.append([list(comp), lo, hi, ylo, yhi])
+    return [g[0] for g in out]
+
+
+@functools.lru_cache(maxsize=None)
+def glyph_shapes():
+    """{점 상자 무늬: 글자} — 모든 글꼴 글리프의 잉크 상자 무늬. 진행 폭보다 좁게 붙어 찍혀(메시지 숫자·부호) 열 무늬로
+    맞지 않은 글자를, 남은 잉크 묶음의 상자 무늬로 다시 맞춘다. 무늬가 같은 글자가 둘 이상이면 넣지 않는다."""
+    seen, out = {}, {}
+    for name in FONTS:
+        for adv, keys in glyph_table(name).items():
+            for cols, ch in keys.items():
+                pts = [(k, x) for x, bits in enumerate(cols) for k in range(BAND) if bits >> k & 1]
+                m = shape(pts)
+                seen.setdefault(m, set()).add(ch)
+    for m, chs in seen.items():
+        if len(chs) == 1 and len(m) > 3:
+            out[m] = next(iter(chs))
+    return out
+
+
+def line_symbol(mask):
+    """한 줄 굵기의 곧은 선(가로 3점 이상 ─, 세로 3점 이상 │): 창 제목 밑줄·구분선·목록 칸막이."""
+    rows = mask.split('/')
+    if len(rows) == 1 and len(rows[0]) >= 3 and set(rows[0]) == {'#'}:
+        return '─'
+    if len(rows) >= 3 and all(r == '#' for r in rows):
+        return '│'
+    return None
+
+
+def components(points):
+    """점 모음 → 8방향으로 이어진 묶음들(차례: 왼쪽 위부터)."""
+    points, out = set(points), []
+    for start in sorted(points):
+        if start not in points:
+            continue
+        stack, comp = [start], []
+        points.discard(start)
+        while stack:
+            y, x = stack.pop()
+            comp.append((y, x))
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    q = (y + dy, x + dx)
+                    if q in points:
+                        points.discard(q)
+                        stack.append(q)
+        out.append(comp)
+    return out
+
+
+def shape(comp):
+    """점 묶음의 상자 안 무늬 '#.'(줄은 '/' 로 이음)."""
+    y0, x0 = min(y for y, _ in comp), min(x for _, x in comp)
+    h, w = max(y for y, _ in comp) - y0 + 1, max(x for _, x in comp) - x0 + 1
+    rows = [['.'] * w for _ in range(h)]
+    for y, x in comp:
+        rows[y - y0][x - x0] = '#'
+    return '/'.join(''.join(r) for r in rows)
+
+
+@functools.lru_cache(maxsize=None)
+def known():
+    """{무늬: 기호 이름} — wintext-symbols.txt(줄마다 「이름<TAB>무늬<TAB>까닭」)."""
+    out = {}
+    if KNOWN_FILE.is_file():
+        for row in KNOWN_FILE.read_text(encoding='utf-8').splitlines():
+            if row and not row.startswith('#'):
+                name, mask = row.split('\t')[:2]
+                out[mask] = name
+    return out
 
 
 def lines_of(chars):
