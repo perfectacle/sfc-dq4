@@ -29,7 +29,13 @@ SCREEN_W, SCREEN_ROWS = 32, 28
 # 타일맵 버퍼 줄 y 는 화면에서 한 줄 위(y − 1)에 보인다(BG3 세로 스크롤, dq4windowname.NENE_VIEW_XY). 보이는 버퍼 줄은 1~28
 FIRST_ROW = 1
 PARTY_MAX = 4
-TEXT_BANK, INDEX, FIXED_KIND, MONSTER_KIND = 0x58, 0x8000, 7, 4   # dq4windowtext 의 색인
+TEXT_BANK, INDEX, FIXED_KIND, MONSTER_KIND, ITEM_KIND = 0x58, 0x8000, 7, 4, 5   # dq4windowtext 의 색인
+
+
+def nine_windows():
+    """물건 이름을 아홉 칸 그림으로 그리는 창. 3장 네네 보기 창(extras)도 같은 갈래를 탄다(dq4windowname.asm WnText)."""
+    import dq4windowname
+    return dq4windowname.NINE_WINDOWS + tuple(range(NENE_KEYS, NENE_KEYS + NENE_PAGES))
 FIXED_PREFIX, PIECE_PREFIX = 0x9E, 0x9F      # 9E k = 고정 문구 k(dq4windowtext), 9F n k = 메뉴 패치 그림 조각 n 열
 NAME_CELLS = {'base': 4, 'hack': 5}
 # 가게 동료 창 3A 의 상태 칸(CC). 원래 04:B6EA → BC08 아홉 자 고정. 상태 칸을 줄이는 고침은 이 값을 같이 바꾼다
@@ -102,16 +108,10 @@ NUMBER_FIELDS = {
     0xCB: ('값', 0xFFFF, '가게 값 16비트(FC 물건 값, fc/dq4/docs/dq4-shop-format.md)'),
 }
 # 알려진 걸림 (창, 종류) → 까닭. 고치는 PR 이 그 줄을 지운다. 창·종류 하나씩만 둔다
-_WIDE_ITEM = '10열 물건 이름(외톨이 메탈 갑옷 등)이 창 안쪽 10칸에 앞 칸 하나와 함께 듦. 고칠 방식(창 넓히기·9열 그림) 결정 대기'
 ALLOW = {
     (0x3A, '창 밖'): '가게 동료 창을 +1 만 넓혀 한 줄 28칸 > 안쪽 27. #1245(두 칸 넓힘) 또는 한 사람 몫을 13칸으로 줄이는 고침이 지운다',
     (0x3A, '변 어긋남'): '넓힌 3A 의 왼쪽 변이 메시지 창 00(열 2~29)과 1칸 어긋남. 3A 를 원래 x 2·너비 28 로 되돌리는 고침이 지운다',
-    **{(n, '창 밖'): _WIDE_ITEM for n in (0x08, 0x14, 0x43, 0x3E, 0x3F, 0x40, 0x41)},
-    **{(n, '제목'): '「어떻게 할까」 제목(고른 물건 이름 10열, 자리 2)이 너비 − 1 을 넘음. ' + _WIDE_ITEM for n in (0x2E, 0x44)},
     (0x7D, '제목'): '제목 사람 이름 5칸(자리 1, 너비 6). 롬에 BRK 95 7D 가 없고 LDA #7D 도 창 열기가 아님. 메뉴 표로 여는 길은 미확인',
-    (0x0D, '테두리'): '이름 뒤 01 이 다섯째 칸을 덮음. 상태 → 공격력(05:D617 BRK 95 0D)으로 열림. WnList 가 0D 에서도 5칸 나아가고 이름 뒤 01 하나를 빼는 고침이 지운다',
-    (0x5D, '테두리'): '모험의 서 기록 목록 DC 가 이름 뒤 01 01 87 을 4칸 뒤에 찍어 다섯째 칸을 덮음(정적 셈). 화면 실측 뒤 고친다',
-    (0x61, '테두리'): 'C7 이 DC 와 같은 길(04:B9B3)로 이름을 찍어 다섯째 칸을 덮음(정적 셈). 화면 실측 뒤 고친다',
     (0x73, '창 밖'): 'D9 를 ShopSellPrice 가 가로챔. 창 73 은 대화 07(몬스터 맡기기 06:E95A)·0A(ルイーダ 06:ED01)의 BRK 95 73 으로만 열리고, DQ4 가게 이식(dq4shopport.SERVICE)은 대화 번호 1~6 만 줘 DQ4 에서 열리지 않음',
     **{(n, '가림'): '함께 뜨는 묶음(SHOWN_TOGETHER)이 창 제목으로 고른 추정이고 덮는 것이 앞 창 글자 한 칸. 창 기록 틀로 실측 대기'
        for n in (0x0E, 0x11, 0x2C, 0x37)},
@@ -124,7 +124,7 @@ class Cell:
     start: int
     step: int
     width: int | None          # 찍는 칸(그림이 덮는 칸). None = 모름
-    inner_cover: bool = False  # 코드 안에서 이름(5칸 그림)을 찍고 4칸만 나아가 뒤 글자가 다섯째 칸을 덮음
+    inner_cover: bool = False  # 코드 안에서 이름(5칸 그림)을 찍고 4칸만 나아가 바로 뒤 상태 표시가 다섯째 칸을 덮음
 
 
 @dataclass
@@ -180,6 +180,7 @@ class Widths:
         self.data, self.kind = data, kind
         self._tables = {}
         self._fixed = {}
+        self.wide_items = []        # 아홉 칸 창에서 뺀 열 칸 물건(DQ5 전용, 가나 그림만)
         from dq5map import Rom
         self.rom = Rom(bytes(data))
 
@@ -209,7 +210,40 @@ class Widths:
         self._tables[kind] = widest
         return widest
 
-    def code(self, b):
+    def nine(self):
+        """아홉 칸 창(dq4windowname.NINE_WINDOWS)에서 물건 이름이 차지하는 가장 넓은 칸. 열 칸 그림 뒤(1 + 열 × 9)의
+        아홉 칸 그림을 쓰고, 그 열 수가 0 이면 열 칸 그대로(dq4windowname.asm WtNineName)."""
+        if 'nine' not in self._tables:
+            widest = 0
+            for n in range(0x100):
+                at = u16(self.data, TEXT_BANK << 16 | INDEX + ITEM_KIND * 0x200 + n * 2)
+                if not at:
+                    continue
+                cols = self.data[lorom(TEXT_BANK << 16 | at)]
+                if cols >= 10:
+                    second = self.data[lorom(TEXT_BANK << 16 | at + 1 + cols * 9)]
+                    if not second and n in self.dq5_only():
+                        # 한글이 없어 가나 그림만 있는 열 칸 이름은 DQ4 명칭표에 없는 DQ5 전용 물건이라 DQ4 에서 손에 들지 않는다
+                        self.wide_items.append(n)
+                        continue
+                    cols = second or cols
+                widest = max(widest, cols)
+            self._tables['nine'] = widest
+        return self._tables['nine']
+
+    def dq5_only(self):
+        """DQ4 명칭표(nds/dq4/tables/adopt.tsv, dq4windowtext.adopted)에 일본어 이름이 없는 물건 번호."""
+        if 'dq5only' not in self._tables:
+            import dq4windowtext as wt
+            known = wt.adopted(wt.KINDS[ITEM_KIND][0])
+            known.update({wt.kana_key(jp): ko for jp, ko in wt.EXTRA_NAMES.get(ITEM_KIND, {}).items()})
+            numbered = wt.numbered_names().get(ITEM_KIND, {})
+            names = wt.rom_names(self.data, ITEM_KIND)
+            self._tables['dq5only'] = {n for n, name in enumerate(names)
+                                       if n not in numbered and wt.kana_key(name) not in known}
+        return self._tables['dq5only']
+
+    def code(self, b, window=None):
         """코드 b 의 칸 수와 근거. 모르면 (None, None)."""
         if b not in CODE_WIDTHS:
             return None, None
@@ -224,15 +258,18 @@ class Widths:
         if v == 'name+8':
             return NAME_CELLS[self.kind] + 8, why
         if isinstance(v, tuple):
+            if v[1] == ITEM_KIND and self.kind == 'hack' and window in nine_windows():
+                return self.nine(), why
             return self.table(v[1], v[2]), why
         return v, why
 
 
 def name_step(widths, window, nxt):
     """이름을 찍은 뒤 나아가는 칸(dq4windowname.asm WnList). 원래는 넉 칸."""
+    import dq4windowname
     if widths.kind == 'base':
         return NAME_CELLS['base']
-    return 5 if nxt in (0xDD, 0xCC) or window in (0x45, 0x46) else 4
+    return 5 if nxt in (0xDD, 0xCC) or window in dq4windowname.NAME_STEP5_WINDOWS else 4
 
 
 def parse(data, n, widths, rec=None, addr=None):
@@ -268,14 +305,15 @@ def parse(data, n, widths, rec=None, addr=None):
                 cells.append(Cell(b, x, 1, 1))
                 i += 1
             else:
-                w, _ = widths.code(b)
+                w, _ = widths.code(b, n)
                 nxt = rec[i + 1] if i + 1 < len(rec) else 0xFF
                 step = name_step(widths, n, nxt) if CODE_WIDTHS.get(b, (None, None))[widths.kind == 'hack'] == 'name' else w
                 cells.append(Cell(b, x, step if step is not None else 0, w))
                 # 이름을 안에 찍는 묶음 코드(DC·C7·DF·F1)는 이름 뒤 바이트가 자기 레코드의 다음 바이트가 아니라
                 # 04:B79B 를 부를 때 X 가 가리키는 그 다음 바이트라, WnList 는 창 번호(45·46)로만 5칸을 고른다
                 kind = CODE_WIDTHS.get(b, (None, None))[widths.kind == 'hack']
-                if widths.kind == 'hack' and kind in ('dc', 'dc+2', 'name+8') and name_step(widths, n, nxt) < NAME_CELLS['hack']:
+                # DC·C7 은 이름 뒤가 빈칸 01 둘이라 덮지 않는다. DF·F1 은 상태 표시(04:BA18)가 바로 붙는다
+                if widths.kind == 'hack' and kind == 'name+8' and name_step(widths, n, nxt) < NAME_CELLS['hack']:
                     cells[-1].inner_cover = True
                 i += 1
             x += cells[-1].step
@@ -284,7 +322,7 @@ def parse(data, n, widths, rec=None, addr=None):
     return win
 
 
-def title_cols(data, widths, t):
+def title_cols(data, widths, t, window=None):
     """제목 t 의 열 수. 모르는 코드가 있으면 None."""
     a, cols = lorom(dq5text.WINDOW_TITLES), 0
     for _ in range(t):
@@ -307,12 +345,13 @@ def title_cols(data, widths, t):
                 return None
             v = TITLE_CODES[b][0]
             if v == 'titles':
-                jumps = [title_cols(data, widths, j) for j in TITLE_JUMPS]
+                jumps = [title_cols(data, widths, j, window) for j in TITLE_JUMPS]
                 return None if None in jumps else cols + max(jumps)
             if v == 'name':
                 cols += NAME_CELLS[widths.kind]
             elif isinstance(v, tuple):
-                cols += widths.table(v[1], v[2])
+                cols += widths.nine() if v[1] == ITEM_KIND and widths.kind == 'hack' and window in nine_windows() \
+                    else widths.table(v[1], v[2])
             else:
                 cols += v
         else:
@@ -339,11 +378,12 @@ def row_end(cells):
 
 def covered(cells):
     """이름 그림의 다섯째 칸을 뒤 내용이 덮는 자리 [(이름 코드, 덮은 코드)]."""
-    out = [(c.code, 0x01) for c in cells if c.inner_cover]
+    out = [(c.code, 0x7E) for c in cells if c.inner_cover]
     for k, c in enumerate(cells):
         if c.width is not None and c.step < c.width:
             for d in cells[k + 1:]:
-                if d.start < c.start + c.width:
+                # 빈칸 01 은 이름 그림을 지우지 않는다(창 0D 의 「D0 01 01」, 고치기 전후 화면이 같았음)
+                if d.start < c.start + c.width and d.code != 0x01:
                     out.append((c.code, d.code))
     return out
 
@@ -362,6 +402,7 @@ def bounds(win):
 EXTRA = 0x100
 SHOP_SPOT, SHOP_SPOT_END = 0x04FF40, 0x050000          # dq4windowname.SHOP_SPOT: ShopQtyRec·ShopSellRec
 NENE_SPOT, NENE_RECORD, NENE_PAGES = 0x04AE21, 10, 8   # dq4windowname.NENE_SPOT: 쪽 줄 수 1~8 마다 레코드 하나
+NENE_KEYS = EXTRA + 0x10
 
 
 def extras(data):
@@ -384,7 +425,10 @@ def extras(data):
         rec = bytes(data[lorom(a):lorom(a) + NENE_RECORD])
         if rec[0] != 0xFF:
             out.append((f'네네 보기 창 {k + 1}줄', a, rec))
-    return [(EXTRA + i, name, a, rec) for i, (name, a, rec) in enumerate(out)]
+    keys = {}
+    for i, (name, a, rec) in enumerate(out):
+        keys[name] = NENE_KEYS + int(name.split()[-1][:-1]) - 1 if name.startswith('네네') else EXTRA + i
+    return [(keys[name], name, a, rec) for name, a, rec in out]
 
 
 def label(data, n):
@@ -445,7 +489,7 @@ def check(data, base=None):
         if y < FIRST_ROW - 1 or y + h > SCREEN_ROWS + FIRST_ROW:
             found.append((n, '화면 밖', f'y {y} + 높이 {h} > {SCREEN_ROWS + FIRST_ROW}'))
         if win.title is not None:
-            cols = title_cols(data, widths, win.title)
+            cols = title_cols(data, widths, win.title, n)
             if cols is None:
                 found.append((n, '모름', f'제목 {win.title:02X} 너비 모름'))
             elif win.title_x + cols > win.w - 1:
@@ -566,6 +610,10 @@ def main():
     for n, kind in stale:
         print(f'{label(data, n)} {kind} 지난 예외: 더 걸리지 않으니 ALLOW 에서 지울 것')
     fail += len(stale)
+    widths = Widths(data, 'hack')
+    widths.nine()
+    if widths.wide_items:
+        print('-- 남은 것 아홉 칸 창에서 뺀 DQ5 전용 열 칸 물건: ' + ' '.join(f'{n:02X}' for n in widths.wide_items))
     for code, what, why in unknown_numbers():
         print(f'-- 남은 것 {code:02X} {what}: {why}')
     print(f'걸림 {fail}건, 예외 {len(found) - fail + len(stale)}건')

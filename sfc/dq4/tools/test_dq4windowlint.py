@@ -63,8 +63,12 @@ class RowTest(unittest.TestCase):
         self.assertEqual(kinds(found, 0x01), ['창 밖'])
 
     def test_name_stepping_four_under_its_fifth_column_is_covered(self):
-        rec = bytes.fromhex('0004 0c a3 00 01') + bytes.fromhex('fed001ff') + b'\x80'
+        rec = bytes.fromhex('0004 0c a3 00 01') + bytes.fromhex('fed002ff') + b'\x80'
         self.assertEqual(kinds(wl.check(rom({0x01: rec})), 0x01), ['테두리'])
+
+    def test_blank_after_a_name_keeps_its_fifth_column(self):
+        rec = bytes.fromhex('0004 0c a3 00 01') + bytes.fromhex('fed00101ff') + b'\x80'
+        self.assertEqual(wl.check(rom({0x01: rec})), [])
 
     def test_name_before_its_state_mark_steps_five(self):
         rec = bytes.fromhex('0004 0c a3 00 01') + bytes.fromhex('fed0ddff') + b'\x80'
