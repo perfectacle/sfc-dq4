@@ -33,6 +33,10 @@ SHIP_SLOTS = 13          # 1E:E4B2 CPX #$0D
 # first FC group of its DQ5 group: the landing takes the DQ5 group's first entrance row. テンペ (0E) and フレノール
 # (0F) share DQ5 group 3D with サントハイム, so they have no slot of their own.
 FC_GROUPS = (0x00, 0x01, 0x02, 0x04, 0x05, 0x06, 0x11, 0x12, 0x14, 0x15, 0x16, 0x17)
+# FC_GROUPS 의 FC 기록 이름(dq4field.places 그대로, destinations 가 롬과 견줌). 창 글자(dq4windowtext)는 이름 표 0B 를
+# 쓰기 전 롬으로 빌드하므로 칸 번호로 한글 이름을 찾는다(slot_names)
+FC_NAMES = ('キングレオ', 'サントハイム', 'バトランド', 'エンドール', 'ボンモール', 'ブランカ', 'ハバりア', 'イムル',
+            'たびだちのむら', 'モンバーバラ', 'レイクナバ', 'コーミズ')
 # Slots after FC_GROUPS for FC groups that share their DQ5 group with another (テンペ·フレノール in 3D, the bazaar and
 # サラン in 45): (FC group, name, listed). The engine ties a slot to its group alone, so the hook (hook_writes) ties
 # these slots to their maps. サラン is no FC ルーラ destination but has an FC church to come back to, and DQ5 keeps the
@@ -69,11 +73,11 @@ FC_LIST_ORDER = (0x02, 0x12, 0x01, 0x0E, 0x0F, 0x0C, 0x16, 0x05, 0x04, 0x15, 0x1
 ORDER_SITE, ORDER_ORIG, ORDER_DONE, ORDER_SLOTS = 0x219E2C, "AF 01 80 01", 0x219E4C, 0x18
 # 장 시작 때 FC 는 다녀온 비트를 12:$9179[5 × 장] 으로 덮는다. 2장은 サントハイム 하나(04 = 비트 2 = 그룹 01)
 CHAPTER2_VISITED_FC = (0x01,)
-# キメラのつばさ(11:8CA3 BRK 95 00 / BRK 98 AE 「ほうりなげた」 → 88E5 물건 줄이기 → 8CB2 날기). 2장이면 그 앞에서 ルーラ
+# キメラのつばさ(11:8CA3 BRK 95 00 / BRK 98 AE 「ほうりなげた」 → 88E5 물건 줄이기 → 8CB2 날기). 다녀온 칸이 있으면 그 앞에서 ルーラ
 # 목록 창(BRK 95 4D)을 띄워 고른 칸을 7E:2193 = 80 | 칸 으로 두고, 그만두면 물건을 줄이지 않고 처리기 끝(11:8A36)으로.
 # 창 BRK(95)는 뱅크 11 밖에서 부르면 창이 뜨지 않고 멈추었으므로(5B 에서 BRK 95 00 만 부른 롬, 98 은 됨), 창을 여는
 # 토막은 뱅크 11 의 やみのランプ 처리기 자리(11:8C18~8C50, 이 롬에 나오지 않는 DQ5 물건)에 둔다. 그 물건은 「아무 일도
-# 없음」 처리기(11:8BBD)로 돌린다. 2장인지는 뱅크 밖 kimera 가 C 로 돌려준다
+# 없음」 처리기(11:8BBD)로 돌린다. 목록을 띄울지는 뱅크 밖 kimera 가 C 로 돌려준다
 KIMERA_SITE, KIMERA_ORIG, KIMERA_CANCEL = 0x118CA3, "00 95 00", 0x118A36
 KIMERA_STUB, KIMERA_STUB_END = 0x118C18, 0x118C51
 LAMP_HANDLER, LAMP_ORIG, NOTHING_HANDLER = 0x118F81, "18 8C", 0x8BBD
@@ -135,6 +139,8 @@ def destinations(prg, links, doors):
         if fc not in first:
             raise ValueError(f"FC group {fc:02X} is not the first part of a LINKS group")
         e = records[fc]
+        if e["name"] != FC_NAMES[slot]:
+            raise ValueError(f"FC group {fc:02X}: record name {e['name']} is not FC_NAMES[{slot}] {FC_NAMES[slot]}")
         land = (2 * e["x"], 2 * e["y"])
         row = (land[0], land[1] - 1)
         if row not in doors[fc][0]:
@@ -170,6 +176,11 @@ def landing_rows(rows, dests):
     """Aux entrance rows ({group, x, y}) with each destination's row first among its group's rows."""
     want = {(d["group"], *d["row"]) for d in dests}
     return sorted(rows, key=lambda r: (r["group"], r["x"], r["y"]) not in want)
+
+
+def slot_names():
+    """{ルーラ slot: FC kana name}: FC_GROUPS by FC_NAMES, then EXTRA."""
+    return {**dict(enumerate(FC_NAMES)), **{len(FC_GROUPS) + k: name for k, (_, name, _) in enumerate(EXTRA)}}
 
 
 def slot_of_fc(fc):
@@ -379,11 +390,8 @@ def hook_code(at, extra, maps):
     asm.label("o_hit").long(0xBF, "order_tab").b(0xAA, *jml(ORDER_DONE))
     asm.label("o_none").b(0xA2, 0xFF, *jml(ORDER_DONE))
 
-    # kimera (M8, KIMERA_STUB 의 JSL): 2장이고 다녀온 칸이 있으면 C = 1
-    import dq4growth
-    flag, bit = dq4growth.CHAPTER2
-    asm.label("kimera").b(0xAF, *flag.to_bytes(3, "little"), 0x29, bit).rel(0xF0, "k_no")
-    asm.b(0xAF, *VISITED.to_bytes(3, "little"), 0x0F, *(VISITED + 1).to_bytes(3, "little"),
+    # kimera (M8, KIMERA_STUB 의 JSL): 다녀온 칸이 있으면 C = 1(FC 는 장과 상관없이 「どこへ」 목록)
+    asm.label("kimera").b(0xAF, *VISITED.to_bytes(3, "little"), 0x0F, *(VISITED + 1).to_bytes(3, "little"),
           0x0F, *(VISITED + 2).to_bytes(3, "little")).rel(0xF0, "k_no").b(0x38, 0x6B)
     asm.label("k_no").b(0x18, 0x6B)
 

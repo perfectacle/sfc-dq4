@@ -28,7 +28,22 @@ DATA = 0x9200
 # 이름 표 번호 → (adopt.tsv 의 표, 창 이름 칸의 최대 열 수, 넘으면 멈출지). 주문 창(28)은 두 칸 넓혀 일곱 칸이고,
 # 그보다 긴 이름(몬스터 특기 「얼어붙은 눈보라」)은 가나로 둔다. 전투 몬스터 목록(창 1B)은 이름 아홉 칸이라 넘는 이름은 가나.
 KINDS = {5: ('아이템', 10, True), 3: ('주문·특기', 7, False), 4: ('몬스터', 9, False), 6: ('작전', 10, True),
-         2: ('성별', 3, True), 1: ('직함', 10, False)}
+         2: ('성별', 3, True), 1: ('직함', 10, False), 0x0B: ('지명·장 제목', 9, True)}
+# 표 0B 는 ルーラ·キメラのつばさ 목록 창(4D, 코드 D5 → 04:B808)의 곳 이름이다(창 안쪽 10열에 커서 한 열, place_names). 색인에는 종류 0~7
+# 자리만 있어, 표 0(인물 이름 8개, 창 글자가 쓰지 않음)의 빈 번호 PLACE_BASE~ 에 둔다. dq4windowname.asm WnText 가
+# $43 = 0B 를 그 자리로 돌린다
+PLACE_KIND, PLACE_SLOT, PLACE_BASE = 0x0B, 0, 0x80
+
+
+def index_at(kind, n):
+    """색인(INDEX~) 안에서 이름 표 kind 의 n 번 그림 주소를 두는 자리."""
+    if kind == PLACE_KIND:
+        if n >= 0x100 - PLACE_BASE:
+            raise ValueError(f'표 {kind:02X} 의 {n} 번은 색인 자리 밖')
+        return PLACE_SLOT * 0x200 + (PLACE_BASE + n) * 2
+    return kind * 0x200 + n * 2
+
+
 # adopt.tsv 에 없는 DQ5 고유 이름(빌드가 키를 kana_key 꼴로 바꿈). 작전은 고정 문구 FIXED 와 같은 한글
 # 표 2 는 성별 둘(adopt.tsv 능력치·직업 4·5) 뒤에 몬스터 종족이 이어짐. DQ4 동료는 사람뿐이라 성별만 한글로
 # 표 1 은 강함 보기의 직함(D2, 사람이면 $43 = 1). DQ5 주인공 직함은 adopt.tsv 에 없어 새로 옮김
@@ -56,7 +71,19 @@ def numbered_names(window=True):
     monsters = {n: ko for n, (_, ko) in dq4ch1event.BOSS_MONSTERS.items()}
     monsters.update(dq4monport.korean_names(window))
     monsters.update({n: ko for _, mod in dq4ch2event.modules() for n, ko in getattr(mod, 'MONSTER_NAMES', {}).items()})
-    return {3: dq4party.korean_names(), 4: monsters, 5: dq4itemport.korean_names()}
+    return {3: dq4party.korean_names(), 4: monsters, 5: dq4itemport.korean_names(), PLACE_KIND: place_names()}
+
+
+def place_names():
+    """ルーラ 칸 → 한글 곳 이름. 이름 표 0B 는 dq4chapter1(곳 이름 쓰기)이 창 글자 단계 뒤에 쓰므로 칸 번호로 덮는다."""
+    import dq4fieldtravel
+    korean = adopted(KINDS[PLACE_KIND][0])
+    out = {}
+    for slot, name in dq4fieldtravel.slot_names().items():
+        if kana_key(name) not in korean:
+            raise ValueError(f'ルーラ 칸 {slot} {name}: adopt.tsv 「{KINDS[PLACE_KIND][0]}」 에 없음')
+        out[slot] = korean[kana_key(name)]
+    return out
 
 
 # 전투 작전 창(16)은 작전 이름을 넉 자씩 두 줄로 찍는다(04:BB61). 한글은 띄어쓰기 자리에서 나눠 줄마다 고정 문구 하나
@@ -582,8 +609,9 @@ def build(data, font, banks=None):
     for kind, (table, limit, strict) in KINDS.items():
         korean = adopted(table)
         korean.update({kana_key(jp): ko for jp, ko in EXTRA_NAMES.get(kind, {}).items()})
-        names = rom_names(data, kind)
         by_number = numbered_names().get(kind, {})
+        # 곳 이름은 칸 번호로만(place_names). 이 단계 롬의 표 0B 는 아직 DQ5 이름이고 이름 자리의 마지막 표다
+        names = [''] * (max(by_number, default=-1) + 1) if kind == PLACE_KIND else rom_names(data, kind)
         done = 0
         for n, name in enumerate(names):
             ko = by_number.get(n) or korean.get(kana_key(name))
@@ -610,7 +638,8 @@ def build(data, font, banks=None):
                     raise ValueError(f'{ko!r}: 띄어쓰기를 빼도 {len(nine)}열, 아홉 글자 고정 창에 들어가지 않음')
                 blob += bytes((len(nine),)) + b''.join(nine)
             at = mplace(blob) if banks is not None and kind == MONSTER_KIND else place(blob)
-            index[kind * 0x200 + n * 2:kind * 0x200 + n * 2 + 2] = at.to_bytes(2, 'little')
+            i = index_at(kind, n)
+            index[i:i + 2] = at.to_bytes(2, 'little')
             done += 1
         report[kind] = (len(names), done)
     if banks is not None:

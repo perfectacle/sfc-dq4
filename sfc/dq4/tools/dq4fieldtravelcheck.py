@@ -10,7 +10,8 @@ dq5warp.lua FIELD).
            extra slot (dq4fieldtravel.EXTRA) sets its own bit and 7E:2193 = 80 | slot; サラン and the other parts
            of its DQ5 group (the tower, the cave) set nothing
   list     the ルーラ window with the four flags set; its screen is <out>/list/end.png
-  kimera2  chapter 2 (dq4growth.CHAPTER2 set) with the chapter-2 places visited (CH2_SLOTS): キメラのつばさ opens
+  kimeraN  chapter N (1, 2 with dq4growth.CHAPTER2, 3 with CHAPTER3) with its places visited (CH1_SLOTS, CH2_SLOTS,
+           CH3_SLOTS): キメラのつばさ opens
            the ルーラ list window in FC list order (dq4fieldtravel.order_slots) and row k lands on that place;
            B in the window keeps the item and the party where it stood. ruler2-k takes row k of ルーラ's list
   ship     ルーラ as above while the party owns the ship (7E:21A5 bit1): the ship moves to the destination's ship
@@ -51,6 +52,8 @@ CHIMERA = "a:8,wait:60,right:8,wait:40,down:8,wait:40,a:8,wait:80,a:8,wait:80,a:
 CHIMERA_ITEM = 0xA4
 # 2장에 다녀올 수 있는 곳: サントハイム(칸 1)·エンドール(3)·テンペ(12)·フレノール(13)·사막의 바자(14)
 CH2_SLOTS = (1, 3, 12, 13, 14)
+# 1장: バトランド(2)·イムル(7). 3장: エンドール(3)·ボンモール(4)·レイクナバ(10)
+CH1_SLOTS, CH3_SLOTS = (2, 7), (3, 4, 10)
 ROW = "down:6,wait:12,"
 VISITED, LAST_TOWN = 0x2030, 0x2193
 # 7E:21A5 bit1: the party owns the ship (00:D315), so ルーラ moves it (00:D2EB). 7E:21B5 bit7: the ship stands on the
@@ -121,8 +124,9 @@ def main():
     def run_chimera(d):
         start = leave(next(e for e in dests if e is not d))
         town = d["group"] if d["slot"] < len(FC_GROUPS) else dq4fieldtravel.SLOT_MARK | d["slot"]
+        # 다녀온 칸이 없으면 목록 없이 7E:2193 의 마을로 바로 난다
         got = field_scene(mesence, rom, state, out, f"chimera-{d['slot']}", *start, CHIMERA,
-                          SET=f"2056={CHIMERA_ITEM:02X};{LAST_TOWN:04X}={town:02X}", MAXF="3000")
+                          SET=f"{flags([])};2056={CHIMERA_ITEM:02X};{LAST_TOWN:04X}={town:02X}", MAXF="3000")
         return f"chimera-{d['slot']}", {"from": list(start), "got": got, "want": {"field": list(d["land"])},
                                         "ok": got == {"field": list(d["land"])}}
 
@@ -191,14 +195,20 @@ def main():
     by_slot = {d["slot"]: d for d in listed}
     rows = [s for s in dq4fieldtravel.order_slots() if s in CH2_SLOTS]
     away = leave(dests[0])
+    # 장마다 (2장·3장 flag 를 켜는 SET, 다녀온 칸): FC 는 장과 상관없이 「どこへ」 목록을 띄운다
+    flag3, bit3 = dq4growth.CHAPTER3
+    kimera_chapters = {1: ("", CH1_SLOTS), 2: (f"{flag & 0xFFFF:04X}|{bit:02X}", CH2_SLOTS),
+                       3: (f"{flag3 & 0xFFFF:04X}|{bit3:02X}", CH3_SLOTS)}
 
-    def run_kimera2(k):
-        name = f"kimera2-{k}"
+    def run_kimera(chapter, k):
+        name = f"kimera{chapter}-{k}"
+        chapter_set, slots = kimera_chapters[chapter]
+        picks = [s for s in dq4fieldtravel.order_slots() if s in slots]
         moves = CHIMERA.rsplit(",wait:600", 1)[0] + ",wait:80," + ROW * k + "a:8,wait:600"
-        got = field_scene(mesence, rom, state, out, name, *away, moves,
-                          SET=f"{chapter2};2056={CHIMERA_ITEM:02X};{LAST_TOWN:04X}=00", MAXF="3000")
-        want = {"field": list(by_slot[rows[k]]["land"])}
-        return name, {"row": k, "slot": rows[k], "got": got, "want": want, "ok": got == want}
+        sets = ";".join(s for s in (chapter_set, flags(slots), f"2056={CHIMERA_ITEM:02X}", f"{LAST_TOWN:04X}=00") if s)
+        got = field_scene(mesence, rom, state, out, name, *away, moves, SET=sets, MAXF="3000")
+        want = {"field": list(by_slot[picks[k]]["land"])}
+        return name, {"row": k, "slot": picks[k], "got": got, "want": want, "ok": got == want}
 
     def run_kimera2_cancel():
         moves = CHIMERA.rsplit(",wait:600", 1)[0] + ",wait:80,b:8,wait:200"
@@ -217,7 +227,8 @@ def main():
         return name, {"row": k, "slot": rows[k], "got": got, "want": want, "ok": got == want}
 
     jobs = [(f, (d,)) for d in listed for f in (run_ruler, run_chimera, run_visit)] + [(run_list, ())]
-    jobs += [(run_kimera2, (k,)) for k in range(len(rows))] + [(run_kimera2_cancel, ()), (run_ruler2, (len(rows) - 1,))]
+    jobs += [(run_kimera, (c, k)) for c, (_, slots) in kimera_chapters.items() for k in range(len(slots))]
+    jobs += [(run_kimera2_cancel, ()), (run_ruler2, (len(rows) - 1,))]
     jobs += [(run_visit, (d,)) for d in extra if not d["listed"]] + [(run_blocked, (fc,)) for fc in blocked]
     jobs += [(f, (d,)) for d in listed if d["ship"] for f in (run_ship, run_sail)]
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:

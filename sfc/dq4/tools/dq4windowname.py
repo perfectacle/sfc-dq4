@@ -343,6 +343,8 @@ def apply(data, font=None, asar=None):
             f'!wn_glyph_bank = ${ne.GLYPH_BANK:02X}\n!wn_list_prev = ${int.from_bytes(d[o + 1:o + 4], "little"):06X}\n'
             f'!wn_menu_flag = ${flag}\n!wt_bank = ${dq4windowtext.TEXT_BANK:02X}\n!wt_mbank = ${dq4windowtext.MONSTER_BANK:02X}\n'
             f'!wt_mkind = {dq4windowtext.MONSTER_KIND}\n'
+            f'!wt_place = ${dq4windowtext.PLACE_KIND:02X}\n!wt_place_slot = {dq4windowtext.PLACE_SLOT}\n'
+            f'!wt_place_base = ${dq4windowtext.PLACE_BASE:02X}\n'
             f'!wt_prefix_prev = ${int.from_bytes(d[po + 1:po + 4], "little"):06X}\n'
             f'!wt_fixed = ${dq4windowtext.FIXED_PREFIX:02X}\n!wt_fixed_kind = {dq4windowtext.FIXED_KIND}\n!wt_safe = ${dq4windowtext.SAFE:04X}\n'
             f'!wt_tactic = {dq4windowtext.tactic_first()}\n!wt_tactic_count = {len(dq4windowtext.TACTIC_LINES)}\n'

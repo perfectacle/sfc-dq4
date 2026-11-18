@@ -242,17 +242,18 @@ class HookTest(unittest.TestCase):
             cpu.step()
         return cpu.pbr << 16 | cpu.pc, cpu, sp
 
-    def test_kimera_lists_in_chapter2_only(self):
+    def test_kimera_lists_when_a_place_is_visited(self):
+        # FC 는 장과 상관없이 「どこへ」 목록(1장 필드에서도 실측, fc/dq4/docs/dq4-debug.md). 다녀온 칸이 없으면 목록 없이
+        # 원래 BRK 95 00(7E:2193 의 마을로 바로)
         import dq4growth
-        flag, bit = dq4growth.CHAPTER2
         _, stub = travel.kimera_stub(self.labels["kimera"])
         stops = {stub["plain"], stub["list"]}
-        # 1장(flag 꺼짐)과, 2장이어도 다녀온 칸이 없으면 목록 없이 원래 BRK 95 00
-        for wram in ({"_2030": 2}, {f"_{flag & 0xFFFF:04X}": bit}):
-            at, cpu, sp = self.run_stub(travel.KIMERA_STUB, stops, **wram)
-            self.assertEqual((at, cpu.s), (stub["plain"], sp))
-        at, _, _ = self.run_stub(travel.KIMERA_STUB, stops, **{f"_{flag & 0xFFFF:04X}": bit, "_2032": 0x40})
-        self.assertEqual(at, stub["list"])
+        at, cpu, sp = self.run_stub(travel.KIMERA_STUB, stops)
+        self.assertEqual((at, cpu.s), (stub["plain"], sp))
+        for chapter in ({}, *({f"_{f & 0xFFFF:04X}": b} for f, b in (dq4growth.CHAPTER2, dq4growth.CHAPTER3))):
+            for visited in ({"_2030": 4}, {"_2031": 0x80}, {"_2032": 0x40}):
+                at, _, _ = self.run_stub(travel.KIMERA_STUB, stops, **chapter, **visited)
+                self.assertEqual(at, stub["list"], (chapter, visited))
 
     def test_kimera_pick_and_cancel(self):
         _, stub = travel.kimera_stub(self.labels["kimera"])
