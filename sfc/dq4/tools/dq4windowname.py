@@ -44,11 +44,13 @@ SPELL_BODY = bytes((0x00, 0x81, 0xFE, 0xD6, 0xFF))
 # 전투 작전 창(머리 17 82 06 05). 두 줄 한글(줄마다 다섯 칸까지)이 들어가게 한 칸 왼쪽으로 옮겨 넓힌다
 TACTIC_WINDOW = 0x16
 TACTIC_HEAD = bytes((0x17, 0x82, 0x06, 0x05))
-# 가게 동료 창(머리 02 0F 1C, 줄마다 「이름 EF + 상태 CC」 둘). 이름 다섯째 칸 뒤로 상태를 사람마다 한 칸 밀어 한 줄이
-# 두 칸 길어지므로, 한 칸 왼쪽으로 옮겨 두 칸 넓힌다(한 칸만 넓히면 둘째 사람 칸 끝 빈칸이 오른쪽 테두리 열을 덮음)
+# 가게 동료 창(머리 02 0F 1C, 줄마다 이름 EF + 상태 CC 를 두 사람). 원래 한 사람 몫은 이름 4칸 + 상태 9칸(CC 가 04:BC08 로
+# 아홉 글자)이다. 창은 아래 메시지 창과 좌우 변이 맞는 원래 자리·너비 그대로 두고, 이름 5칸 + 상태 8칸으로 나눈다
+# (WnMonster 가 이 창이면 여덟 글자). 상태 문구는 다음 사람 이름과 한 칸 띄우게 SHOP_STATE_COLS 열 안이어야 한다
 SHOP_MEMBERS = 0x3A
 SHOP_MEMBERS_HEAD, SHOP_MEMBERS_ROW = bytes((0x02, 0x0F, 0x1C)), bytes((0xEF, 0xCC))
-SHOP_MEMBERS_WIDEN = 2
+SHOP_NAME_CELLS, SHOP_STATE_CELLS, SHOP_STATE_COLS = 5, 8, 7
+SHOP_STATE_KEYS = ('　そうびしている', '　　もっている', '　そうびできない', '　もっていない')
 # 대열 바꾸기 창(46 왼쪽 DF 줄, 45 오른쪽 F1 줄). 줄마다 「번호 이름 Lv:」 라 이름 다섯째 칸 뒤로 미는 만큼 한 칸씩 넓힌다.
 # 46 은 왼쪽으로 옮기고 45 는 오른쪽으로만 넓혀 둘이 겹치지 않게 한다
 FORMATION = ((0x46, bytes((0x42, 0x04, 0x0E)), True), (0x45, bytes((0x10, 0x84, 0x0E)), False))
@@ -185,6 +187,12 @@ def kana_glyphs(d, font, render):
     return numbers
 
 
+def shop_states():
+    """가게 동료 창(3A)의 상태 문구 키(dq4windowtext.FIXED): 04:C511 표의 넷과 「 N개 소지」."""
+    import dq4windowtext
+    return list(SHOP_STATE_KEYS) + list(dq4windowtext.HELD_COUNT)
+
+
 def room(out):
     """구역마다 마지막으로 쓴 바이트 뒤 남은 바이트 수. 코드 끝이 0 바이트로 끝나면 그만큼 많게 센다(어림).
     전투 메시지 코드(dq4battlemsg.CODE_AT~둘째 구역 앞)도 같은 뱅크를 나눠 쓰므로 함께 센다."""
@@ -235,10 +243,6 @@ def apply(data, font=None, asar=None):
     o = lorom(dq4menupatch.window_addr(d, SHOP_MEMBERS))
     if d[o:o + 3] != SHOP_MEMBERS_HEAD or SHOP_MEMBERS_ROW not in d[o:o + 12]:
         raise ValueError(f'창 {SHOP_MEMBERS:02X} 머리 {d[o:o + 12].hex()}: 가게 동료 창 모양이 아님')
-    d[o] -= 1
-    d[o + 2] += SHOP_MEMBERS_WIDEN
-    # 제목 가로 자리(+4 아래 4비트)는 창 왼쪽에서 세므로 한 칸 늘려 제목을 원래 화면 자리에 둔다
-    d[o + 4] += 1
     for w, head, left in FORMATION:
         o = lorom(dq4menupatch.window_addr(d, w))
         if d[o:o + 3] != head:
@@ -306,6 +310,9 @@ def apply(data, font=None, asar=None):
     cannot = dq4windowtext.FIXED[dq4windowtext.CANNOT_SELL]
     if len(dq4windowtext.columns(font, cannot)) > SHOP_PRICE_COLS:
         raise ValueError(f'「{cannot}」 이 값 칸 {SHOP_PRICE_COLS}열을 넘음')
+    for key in shop_states():
+        if len(dq4windowtext.columns(font, dq4windowtext.FIXED[key])) > SHOP_STATE_COLS:
+            raise ValueError(f'가게 동료 창 상태 「{dq4windowtext.FIXED[key]}」 이 {SHOP_STATE_COLS}열을 넘음')
     banks = {}
     text, _ = dq4windowtext.build(d, font, banks)
     for bank, blob in banks.items():
@@ -356,6 +363,7 @@ def apply(data, font=None, asar=None):
             f'!wt_cannot_sell = {numbers[dq4windowtext.CANNOT_SELL]}\n!shop_sell_alias = ${sell & 0xFFFF:04X}\n'
             f'!shop_sell_code = ${SHOP_SELL_CODE:02X}\n!shop_sell_slot = ${CODE_TABLE + (SHOP_SELL_CODE - 0xB0) * 2:06X}\n'
             f'!shop_spot = ${SHOP_SPOT:06X}\n!shop_sell_w = {shop_w}\n!wt_held_first = {held[0]}\n'
+            f'!shop_members = ${SHOP_MEMBERS:02X}\n!shop_state_cells = {SHOP_STATE_CELLS}\n'
             f'!shop_buy_ask = ${BUY_ASK:02X}\n!shop_buy_spot = ${BUY_SPOT:06X}\n'
             f'!qp_line = $7E{qp_cell(QP_LINE_X, QP_NUM_Y - 1):04X}\n!qp_up = $7E{qp_cell(QP_NUM_X, QP_NUM_Y - 1):04X}\n!qp_num = $7E{qp_cell(QP_NUM_X, QP_NUM_Y):04X}\n!qp_down = $7E{qp_cell(QP_NUM_X, QP_NUM_Y + 1):04X}\n'
             f'!qp_num_xy = ${QP_NUM_Y << 8 | QP_NUM_X:04X}\n!qp_off_xy = ${QP_OFF_Y << 8:04X}\n'

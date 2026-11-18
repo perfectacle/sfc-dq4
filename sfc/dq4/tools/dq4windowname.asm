@@ -1690,10 +1690,17 @@ WnSpell:
 WnArena:
     LDA #$0A
     BRA +
-; 04:BC08(E6 전투 몬스터 이름, 04:B6A0 의 C9 도 BRL 로 옴). 원래는 REP #$10 / LDX #0 / LDA #9 / STA $00 / BRL $B7A3,
+; 04:BC08(E6 전투 몬스터 이름, 04:B6A0 의 C9·CC 도 BRL 로 옴). 원래는 REP #$10 / LDX #0 / LDA #9 / STA $00 / BRL $B7A3,
 ; 부른 쪽이 이미 PHX 를 했다.
 WnMonster:
     REP #$10
+    ; 가게 동료 창(CC 상태)은 이름이 다섯째 칸까지 오므로 상태를 여덟 칸으로 줄여 창 너비를 원래대로 둔다
+    LDA.l $7E0A00
+    CMP #!shop_members
+    BNE ++
+    LDA #!shop_state_cells
+    BRA +
+++
     LDA #$09
     BRA +
 WnText:
@@ -1915,6 +1922,13 @@ WnText:
     LDX #$0000
     LDA.l $7E0000|!wt_mode
     STA.b $00
+    ; 가게 동료 창의 가나 글자(장비 비교 「  13▶ 24 」, 빈 사람의 빈칸)는 앞 빈칸 하나를 빼고 여덟 칸. 이름 다섯째 칸이
+    ; 그 앞 빈칸 자리이고, 뒤 빈칸은 다음 사람 이름과 띄우는 칸이다
+    LDA.l $7E0A00
+    CMP #!shop_members
+    BNE +
+    INX
++
     JML $04B7A3
 
 ; 칸 슬롯: 큰 20칸(10열 × 글자 줄·위 줄), 중간 14칸, 작은 8칸(WtSlot). 캔버스 096~17F 안의 슬롯은 메시지 창이 뜨면
