@@ -128,6 +128,19 @@ class FlagTest(unittest.TestCase):
             for p in people:
                 self.assertIn(group, pins[p.role].groups, p.role)
 
+    def test_customer_walks_and_waits_like_fc(self):
+        # FC 손님(16/00 슬롯 11, 헤드리스 실측): FC 칸당 16프레임(속도 01 = SFC 칸 8프레임), 나타난 뒤·돌아간 뒤 약 14·16
+        # 프레임 서 있음(명령 둘), 숨어 있는 동안 26 + 16k(k = rand & 7 + 2) 프레임(쉼 차례 2 × rand(8) + 6)
+        self.assertEqual((L.CUSTOMER_SPEED, L.DOOR_TURNS), (0x01, 2))
+        self.assertEqual((L.PACE_BASE, L.PACE_SPREAD), (6, 8))
+        body = next(s for s in L.scripts(ctx()) if s['address'] == L.SCRIPTS['customer'][2])['commands']
+        ops = [c['op'] for c in body]
+        self.assertEqual(body[0], {'op': '1E', 'args': [L.CUSTOMER_SPEED]})
+        enter = ops.index('13')
+        self.assertEqual(ops[enter - L.DOOR_TURNS:enter], ['2F'] * L.DOOR_TURNS)
+        leave = len(ops) - 1 - ops[::-1].index('13')
+        self.assertEqual(ops[leave + 2:leave + 2 + L.DOOR_TURNS], ['2F'] * L.DOOR_TURNS)
+
     def test_vars_stay_in_the_l_var_slot(self):
         lo, hi = ev.SLOTS['L'].vars
         for a in (L.STOCK_AT, L.STOCK_AT + 2, L.WAGE_AT, L.WAGE_AT + 1, L.ITEM_AT):
