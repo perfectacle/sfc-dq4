@@ -6,6 +6,7 @@
 -- 손님은 맵 구석에서 문 칸(ROW 줄)으로 순간이동해 들어온다. 그 줄에 처음 든 때부터 카운터 앞에 설 때까지 3프레임마다
 -- walk-<차례>-<nn>.png(열여섯 장까지), 선 첫 프레임 arrive-<차례>-<그림>.png. 나가는 걸음은 찍지 않는다.
 -- looks.txt 에 「차례 프레임 그림」 줄을 쓴다. 상태를 불러온 뒤 맵 위에 이미 서 있던 손님은 세지 않는다.
+-- events.txt 에 칸이 바뀐 프레임마다 「프레임 X Y」 를 쓴다(나타남·걷기·돌아감·사라짐의 프레임 판정에 씀).
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
 local L = require("lib")
 L.loadState(os.getenv("STATE"))
@@ -14,12 +15,18 @@ local slot = tonumber(os.getenv("SLOT"), 16)
 local counterX, row = tonumber(os.getenv("COUNTER_X")), tonumber(os.getenv("ROW"))
 local maxf = tonumber(os.getenv("MAXF") or "30000")
 local log = assert(io.open(os.getenv("SHOT_DIR") .. "/looks.txt", "w"))
+local events = assert(io.open(os.getenv("SHOT_DIR") .. "/events.txt", "w"))
+local lastCell
 local n, visit, walking, walkShots, lastA, prevY, present, stood = 0, 0, false, 0, -100, nil, false, nil
 local SETTLE = 24
 local function rd(a) return emu.read(a, m) end
 emu.addEventCallback(function()
   n = n + 1
   local x, y, pic = rd(0x7E3020 + slot), rd(0x7E3080 + slot), rd(0x7E3220 + slot)
+  if n > 10 and lastCell ~= x * 256 + y then
+    events:write(string.format("%d %d %d\n", n, x, y))
+    lastCell = x * 256 + y
+  end
   if n == 10 then prevY = y end
   if prevY ~= nil and n > 10 then
     if y == row and prevY ~= row then
@@ -45,6 +52,7 @@ emu.addEventCallback(function()
   if n - lastA < 6 then L.press({a = true}) end
   if n >= maxf then
     log:close()
+    events:close()
     emu.stop(0)
   end
 end, emu.eventType.endFrame)
