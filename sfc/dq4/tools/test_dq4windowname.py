@@ -360,6 +360,10 @@ class ApplyTests(unittest.TestCase):
         import dq4menupatch
         font = dq4menupatch.Font('galmuri9')
         cols = {dq4windowtext.FIXED[k]: len(dq4windowtext.columns(font, dq4windowtext.FIXED[k])) for k in wn.shop_states()}
+        # Galmuri9 v2.40.4 실측. 문구나 글꼴이 바뀌면 이 표를 다시 재고, 일곱 열(SHOP_STATE_COLS)을 넘지 않는지 본다
+        want = {' 장비 중': 5, ' 소지 중': 5, ' 장비 불가': 7, ' 없음': 4,
+                **{f' {n}개 소지': 6 for n in range(1, 10)}, ' 10개 소지': 7, ' 11개 소지': 6, ' 12개 소지': 7}
+        self.assertEqual(cols, want)
         self.assertLessEqual(max(cols.values()), wn.SHOP_STATE_COLS, cols)
 
     def test_shop_buy_row_gets_gold_mark(self):
