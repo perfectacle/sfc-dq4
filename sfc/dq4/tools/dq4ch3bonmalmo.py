@@ -324,7 +324,7 @@ JAIL_FADE_HOLD = 3
 # 3F/01 에 도착해 밝힐 때: FC 는 창이 사라진 78프레임 뒤부터 3프레임마다 1044·1047·1050·1053 이고 밝기 0.1·0.2·6.6(43%)·
 # 15.4. 밝히기 루틴이 불린 뒤 JAIL_LIGHT_WAIT 프레임 쉬고 JAIL_LIGHT 를 JAIL_FADE_HOLD 프레임씩
 JAIL_LIGHT = (0, 0, 6, 15)
-JAIL_LIGHT_WAIT = 2
+JAIL_LIGHT_WAIT = 5
 FADE_IN_RTS = 0x00CEF9         # 밝히기 루틴 끝의 RTS
 
 
