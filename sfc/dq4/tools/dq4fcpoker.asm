@@ -192,11 +192,13 @@ PutLabel:                           ; X = 맵 자리, Y = Labels 안 자리
     DEC !pk_n : BRA -
 +   RTS
 
-; 배당 표: 왼쪽(패 0·1·2·6·7·8)은 행 1~6, 오른쪽(3·4·5)은 행 4~6
+; 배당 표(FC 포커 화면 네임테이블과 같은 자리): 왼쪽(패 0·1·2·6·7·8)은 행 3~8 열 2, 오른쪽(3·4·5)은 행 6~8 열 12.
+; 숫자는 열 21 에서 끝나게 오른쪽 맞춤(패 6·7·8 의 한 자리만 열 10)
 PayRows: db 0, 1, 2, 6, 7, 8, 3, 4, 5
 PayRow:  db 3, 4, 5, 6, 7, 8, 6, 7, 8
-PayCol:  db 1, 1, 1, 1, 1, 1, 18, 18, 18
-PayNum:  db 14, 14, 14, 14, 14, 14, 26, 26, 26
+PayCol:  db 2, 2, 2, 2, 2, 2, 12, 12, 12
+PayNum:  db 19, 19, 19, 10, 10, 10, 19, 19, 19
+PayLen:  db 3, 3, 3, 1, 1, 1, 3, 3, 3
 DrawPay:
     STZ !pk_round                   ; 줄 i
 .each
@@ -224,8 +226,9 @@ DrawPay:
     REP #$20 : LDA.l Payout,X : STA !pk_num : SEP #$20 : STZ !pk_num+2
     LDA !pk_round : %ix()
     LDA.l PayRow,X : REP #$20 : AND.w #$00FF : ASL : ASL : ASL : ASL : ASL : STA !pk_pos : SEP #$20
+    LDA.l PayLen,X : PHA
     LDA.l PayNum,X : REP #$20 : AND.w #$00FF : CLC : ADC !pk_pos : ASL : TAX : SEP #$20
-    LDA.b #3 : JSR NumberRight
+    PLA : JSR NumberRight
     INC !pk_round : LDA !pk_round : CMP.b #9 : BCS + : JMP .each
 +   RTS
 
@@ -270,27 +273,12 @@ Digits:
 
 Pow: dl 100000, 10000, 1000, 100, 10, 1
 
-DrawCoins:                          ; 상자(행 2~5 열 22~30) 안 행 3 코인, 행 4 건 수
+DrawCoins:                          ; 상자(행 4~8 열 23~30) 안 행 5 코인, 행 7 건 수(FC 와 같은 자리)
     LDA !coins : STA !pk_num : LDA !coins+1 : STA !pk_num+1 : LDA !coins+2 : STA !pk_num+2
-    %at(3, 24) : LDA.b #6 : JSR NumberRightW
+    %at(5, 24) : LDA.b #6 : JSR NumberRight
     LDA !pk_bet : STA !pk_num : STZ !pk_num+1 : STZ !pk_num+2
-    %at(4, 27) : LDA.b #3 : JSR NumberRightW
+    %at(7, 27) : LDA.b #3 : JSR NumberRight
     RTS
-
-; 창 글 숫자 꼴로 오른쪽 맞춤(빈칸은 창 바탕 01). A = 칸 수, X = 맵 자리
-NumberRightW:
-    STA !pk_n
-    JSR Digits
-    LDA !pk_n : SEC : SBC !pk_lead : BEQ ++ : BCC ++
-    STA !pk_tmp
--   REP #$20 : LDA.w #$0001 : STA.l !map,X : SEP #$20
-    INX : INX
-    DEC !pk_tmp : BNE -
-++  LDY.w #$0000
--   TYA : CMP !pk_lead : BCS +
-    LDA !pk_dig,Y : ASL : PHX : %ix() : REP #$20 : LDA.l WDigitTiles,X : PLX : STA.l !map,X : SEP #$20
-    INX : INX : INY : BRA -
-+   RTS
 
 ; 카드 i(0~4) 칸에 카드 c(0~53, 35 = 뒷면)
 DrawCard:                           ; A = 카드, Y = 칸
@@ -350,20 +338,20 @@ ClearLabels:
     SEP #$20
     RTS
 
-; 글 창: 행 !window_row~+4, 열 4~27(11:BA8B 와 같은 꼴)
+; 글 창: 행 !window_row~+5, 열 3~28(FC 포커 화면과 같은 자리·크기)
 DrawWindow:
     REP #$20
-    LDA.w #22 : STA !pk_bw : LDA.w #3 : STA !pk_bh
-    %at(!window_row, 4)
+    LDA.w #24 : STA !pk_bw : LDA.w #4 : STA !pk_bh
+    %at(!window_row, 3)
     BRA Box
 
 DrawCoinBox:
     REP #$20
-    LDA.w #7 : STA !pk_bw : LDA.w #2 : STA !pk_bh
-    %at(2, 22)
+    LDA.w #6 : STA !pk_bw : LDA.w #3 : STA !pk_bh
+    %at(4, 23)
     ; 떨어짐
 
-; DQ5 창 테두리 상자. 16비트 A 로 들어옴. X = 왼쪽 위 맵 자리, 안 너비 !pk_bw·높이 !pk_bh
+; FC 상자(테두리 FC 18:$BC60 타일, 안은 바닥색 빈칸). 16비트 A 로 들어옴. X = 왼쪽 위 맵 자리, 안 너비 !pk_bw·높이 !pk_bh
 Box:
     STX !pk_pos
     LDA.w #$008C : STA.l !map,X : INX : INX
@@ -374,7 +362,7 @@ Box:
     LDA !pk_pos : CLC : ADC.w #64 : STA !pk_pos : TAX
     LDA.w #$008E : STA.l !map,X : INX : INX
     LDY !pk_bw
--   LDA.w #$0001 : STA.l !map,X : INX : INX : DEY : BNE -
+-   LDA.w #$0000 : STA.l !map,X : INX : INX : DEY : BNE -
     LDA.w #$408E : STA.l !map,X
     DEC !pk_bh : BNE .mid
     LDA !pk_pos : CLC : ADC.w #64 : TAX
@@ -385,7 +373,7 @@ Box:
     SEP #$20
     RTS
 
-; 글: Y = Texts 안 자리, !pk_num = 수 자리(#)에 찍을 값. 줄 l 은 창 행 1 + 2l(아래 줄 둘), 열 6
+; 글: Y = Texts 안 자리, !pk_num = 수 자리(#)에 찍을 값. 줄 l 은 창 행 2 + 2l, 열 5(FC 와 같음)
 Message:                            ; Y = Texts 안 자리
     STY !pk_ptr
     JSR DrawWindow
@@ -394,8 +382,8 @@ Message:                            ; Y = Texts 안 자리
     INX
     STZ !pk_n+1                     ; 줄 번호
 .line
-    LDA !pk_n+1 : ASL : CLC : ADC.b #!window_row+1
-    REP #$20 : AND.w #$00FF : ASL : ASL : ASL : ASL : ASL : CLC : ADC.w #6 : ASL : STA !pk_pos : SEP #$20
+    LDA !pk_n+1 : ASL : CLC : ADC.b #!window_row+2
+    REP #$20 : AND.w #$00FF : ASL : ASL : ASL : ASL : ASL : CLC : ADC.w #5 : ASL : STA !pk_pos : SEP #$20
     LDA.l Texts,X : STA !pk_wait    ; 칸 수
     INX
 .cell
@@ -422,14 +410,14 @@ WindowNumber:                       ; !pk_num 을 X 자리부터(창 글 숫자 
 
 ; 「예·아니요」(창 넷째 줄) 고르기. 예면 C 켬
 YesNo:
-    %at(!window_row+3, 8) : LDY.w #!label_yes : JSR PutLabel
-    %at(!window_row+3, 16) : LDY.w #!label_no : JSR PutLabel
+    %at(!window_row+4, 8) : LDY.w #!label_yes : JSR PutLabel
+    %at(!window_row+4, 16) : LDY.w #!label_no : JSR PutLabel
     STZ !pk_cur
 .loop
     LDA !pk_cur : BNE +
     LDX.w #8 : BRA ++
 +   LDX.w #16
-++  LDY.w #!window_row+3 : JSR HandAt
+++  LDY.w #!window_row+4 : JSR HandAt
     JSR Frame
     %btn(!BTN_LEFT|!BTN_RIGHT) : BEQ +
     LDA !pk_cur : EOR.b #1 : STA !pk_cur

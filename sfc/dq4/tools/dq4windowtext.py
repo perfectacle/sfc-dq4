@@ -104,6 +104,8 @@ SQUEEZE_KINDS = (4,)
 # 뒤에 띄어쓰기를 뺀 아홉 열 그림을 붙여 두고, dq4windowname.asm WnText 가 그 창에서는 둘째 그림을 쓴다. 한글이 없어 가나로
 # 그린 이름은 열 수 0 한 바이트를 붙여 그 창에서 원래 가나로 둔다
 NINE_KIND, NINE_COLS = 5, 10
+# 아홉 글자 고정 창에 뜨는 이름 표(물건·몬스터). 이 표의 한글 이름이 열 수를 넘어 가나로 떨어지면 그 창에 가나가 찍힌다
+NINE_WINDOW_KINDS = (4, 5)
 KANA_LIMIT = KANA_LIMITS[5]
 NARROW_FONT = 'galmuri7'
 SHIFT = 6                       # render 의 띠(한글 윗줄 = 1줄)를 위 줄 7줄로 내림
@@ -606,6 +608,7 @@ def build(data, font, banks=None):
         raise ValueError(f'고정 문구 {len(phrases())}개: 번호 k 가 한 바이트(FE 미만)를 넘음')
     report[FIXED_KIND] = (len(phrases()), len(phrases()))
     narrow = None
+    report['kana'] = []             # 열 수를 넘어 가나로 남은 한글 이름 (종류, 번호, 일본어, 한글, 열 수)
     for kind, (table, limit, strict) in KINDS.items():
         korean = adopted(table)
         korean.update({kana_key(jp): ko for jp, ko in EXTRA_NAMES.get(kind, {}).items()})
@@ -630,6 +633,8 @@ def build(data, font, banks=None):
             if len(cols) > limit:
                 if strict and ko != name:
                     raise ValueError(f'{ko!r}: {len(cols)}열, 창은 {limit}열')
+                if ko != name:
+                    report['kana'].append((kind, n, name, ko, len(cols)))
                 continue
             blob = bytes((len(cols),)) + b''.join(cols)
             if kind == NINE_KIND and len(cols) == NINE_COLS:
@@ -637,6 +642,8 @@ def build(data, font, banks=None):
                 if len(nine) >= NINE_COLS:
                     raise ValueError(f'{ko!r}: 띄어쓰기를 빼도 {len(nine)}열, 아홉 글자 고정 창에 들어가지 않음')
                 blob += bytes((len(nine),)) + b''.join(nine)
+            elif kind in NINE_WINDOW_KINDS and len(cols) >= NINE_COLS and ko != name:
+                report['kana'].append((kind, n, name, ko, len(cols)))
             at = mplace(blob) if banks is not None and kind == MONSTER_KIND else place(blob)
             i = index_at(kind, n)
             index[i:i + 2] = at.to_bytes(2, 'little')

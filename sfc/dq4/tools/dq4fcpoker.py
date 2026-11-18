@@ -4,7 +4,8 @@ FC 포커(뱅크 17, fc/dq4/docs/dq4-chapter3-format.md 「포커」)의 규칙�
 - 카드: NDS data/MINIGAME/POKER(에셋 저장소 nds/dq4/minigame/poker, 42×64) 를 줄이지 않고 6×8 타일 칸에 두고 무늬마다
   15색(dq4monart.palette). 슬라임·검·방패·왕관 = FC 무늬 0~3, 조커·뒷면은 joker_omote.
 - 화면은 BG1 한 장: DQ5 슬롯 NMI(00:FEDD)가 7E:6000 을 매 프레임 VRAM 1400 으로 보내므로 BG1 맵을 1400 에 두고 카드·글
-  창·배당 표를 7E:6000 에 쓴다. 글 창 테두리는 DQ5 글자(04:E528, 11:BFCC 와 같은 꼴)를 4bpp 로, 한글은 Galmuri7.
+  창·배당 표를 7E:6000 에 쓴다. 상자(글 창·코인 상자) 테두리와 배당 표·코인 숫자는 FC 포커 화면의 타일(FC_BOX·FC_DIGITS,
+  1bpp)이고 상자 안은 FC 처럼 바닥색이다. 한글은 Galmuri7. 배당 표·상자 자리는 FC 화면 네임테이블과 같다.
 - 들어가는 길은 슬롯과 같다: 02:A8BC → 11:BF71(dq4fcslot 의 입구가 기계 번호 POKER 면 여기로).
 """
 from pathlib import Path
@@ -29,12 +30,15 @@ HAND_PAL = 4                       # FC 스프라이트 팔레트 0(= 전체 팔
 FELT = 0x0A                        # FC 바닥색
 FC_PALETTE = 0xA975                # 슬롯과 같은 표의 앞은 BG; 포커 손가락 색은 FC 실측 팔레트(0A 30 37 17)
 HAND_COLORS = (0x30, 0x37, 0x17)
-FONT_AT = 0x04E528                 # DQ5 BG3 글자(11:BFCC 가 읽는 곳)
-FONT_TILES = {0x01: None, 0x8C: None, 0x8D: None, 0x8E: None}
+# FC 포커 화면의 BG 타일(1bpp 8바이트씩, 화면 CHR 덤프와 바이트가 같음): 상자 84(왼쪽)·85(위)·86(왼쪽 위), 숫자 01~0A(0~9)
+FC_BOX, FC_DIGITS = (0x18, 0xBC60), (0x17, 0x954E)
+# 상자 타일 번호(dq4fcpoker.asm Box: 8C 모서리·8D 위·8E 왼쪽을 뒤집어 씀)와 그 FC 타일, 01 은 상자 안 빈칸
+BOX_TILES = {0x8C: 0x86, 0x8D: 0x85, 0x8E: 0x84}
+FONT_TILES = {0x01: None, **dict.fromkeys(BOX_TILES)}
 # 포커 화면 자리(BG1 맵 행·열). 필드에서 넘어온 겹침 주사(239줄, $2133)를 그대로 두므로 맵 0행과 29행은 TV 에서 가려진다
 CARD_ROW, CARD_COL0 = 11, 1
 LABEL_ROW, DEAL_ROW, DEAL_COL = 19, 21, 13
-WINDOW_ROW = 23
+WINDOW_ROW = 22
 from dq4ch3slots import POKER_CODE, POKER_TILES  # noqa: E402
 CODE_AT, CODE_END = POKER_CODE
 TILES_AT, TILES_END = POKER_TILES                 # 타일 앞 512칸(16KB)
@@ -52,8 +56,7 @@ TEXTS = {
     'again': ('한 번 더 포커에 도전하시겠습니까?',),
     'nocoin': ('코인이 없으니 코인을 사신 뒤', '다시 와 주세요!'),
 }
-LABELS = (('keep', '남김', False), ('swap', '바꿈', False), ('deal', '나눠 줌', False), ('yes', '예', True),
-          ('no', '아니요', True))
+LABELS = (('keep', '남김'), ('swap', '바꿈'), ('deal', '나눠 줌'), ('yes', '예'), ('no', '아니요'))
 PAY_NAMES = ('로열 스트레이트 플러시', '파이브 카드', '스트레이트 플러시', '포 카드', '풀 하우스', '플러시',
              '스트레이트', '스리 카드', '투 페어')
 DIGITS = '0123456789'
@@ -130,39 +133,38 @@ class Tiles:
         return bytes(out)
 
 
-def font_tiles(dq5):
-    """창 테두리·빈칸(DQ5 BG3 글자 01·8C~8E)을 4bpp(색 0~3)로. 01 은 1bpp(평면 1 = FF), 8B~ 는 2bpp."""
-    out = {}
-    for t in FONT_TILES:
-        if t < 0x8B:
-            rows = dq5[lorom(FONT_AT) + (t - 1) * 8:][:8]
-            px = [((r >> (7 - x)) & 1) | 2 for r in rows for x in range(8)]
-        else:
-            base = lorom(FONT_AT) + 0x8A * 8 + (t - 0x8B) * 16
-            p0, p1 = dq5[base:base + 8], dq5[base + 8:base + 16]
-            px = [((p0[y] >> (7 - x)) & 1) | (((p1[y] >> (7 - x)) & 1) << 1) for y in range(8) for x in range(8)]
-        out[t] = tile4(px)
-    return out
+def fc_1bpp(prg, where, t):
+    """FC 1bpp 타일(뱅크, 주소) 의 t 번째 → 4bpp(점 3, 바탕 0)."""
+    bank, a = where
+    o = bank * 0x4000 + a - 0x8000 + 8 * t
+    return tile4([3 if prg[o + y] >> (7 - x) & 1 else 0 for y in range(8) for x in range(8)])
 
 
-def text_tiles(font, text, window):
-    """글 → 타일 칸들(색: 점 3, 창 글은 바탕 2·배당 표 글은 바탕 0)."""
+def font_tiles(prg):
+    """상자 테두리(FC 84~86)와 상자 안 빈칸(01, 바닥색)."""
+    return {0x01: bytes(32), **{t: fc_1bpp(prg, FC_BOX, fc - 0x84) for t, fc in BOX_TILES.items()}}
+
+
+def text_tiles(font, text):
+    """글 → 타일 칸들(색: 점 3, 바탕 0 = 바닥색. FC 포커는 창 안도 바닥색)."""
     import dq4menupatch
     cols = dq4menupatch.render(font, text)
     tiles = []
     for col in cols:
         if any(any(r) for r in col[8:]):
             raise ValueError(f'{text!r}: 한 줄(8점) 밖의 점')
-        tiles.append(tile4([3 if v else (2 if window else 0) for r in col[:8] for v in r]))
+        tiles.append(tile4([3 if v else 0 for r in col[:8] for v in r]))
     return tiles
 
 
 def build(dq5, dq4, font):
     """(타일 바이트, 표 바이트들 dict, 팔레트 바이트)."""
+    from kr_patch.fc import ines
+    prg = ines.prg(Path(dq4).read_bytes())
     tiles = Tiles()
-    for t, raw in font_tiles(dq5).items():
+    for t, raw in font_tiles(prg).items():
         tiles.put(raw, at=t)
-    blank_window = font_tiles(dq5)[0x01]
+    blank_window = font_tiles(prg)[0x01]
     # 글: 줄마다 [타일 번호…], 수 자리(#)는 FF
     texts = bytearray()
     text_at = {}
@@ -176,23 +178,23 @@ def build(dq5, dq4, font):
                 if piece == '#':
                     row.append(0xFFFF)
                 else:
-                    row += [tiles.put(t) for t in text_tiles(font, piece, True)]
+                    row += [tiles.put(t) for t in text_tiles(font, piece)]
             texts.append(len(row))
             for n in row:
                 texts += n.to_bytes(2, 'little')
     labels = bytearray()
     label_at = {}
-    for key, name, window in LABELS:
+    for key, name in LABELS:
         label_at[key] = len(labels)
-        row = [tiles.put(t) for t in text_tiles(font, name, window)]
+        row = [tiles.put(t) for t in text_tiles(font, name)]
         labels.append(len(row))
         for n in row:
             labels += n.to_bytes(2, 'little')
-    digits = [tiles.put(text_tiles(font, d, False)[0]) for d in DIGITS]
-    wdigits = [tiles.put(text_tiles(font, d, True)[0]) for d in DIGITS]
+    digits = [tiles.put(fc_1bpp(prg, FC_DIGITS, k)) for k in range(10)]           # 배당 표·코인 상자(FC)
+    wdigits = [tiles.put(text_tiles(font, d)[0]) for d in DIGITS]                 # 글 안의 수(Galmuri7)
     pay = bytearray()
     for name in PAY_NAMES:
-        row = [tiles.put(t) for t in text_tiles(font, name, False)]
+        row = [tiles.put(t) for t in text_tiles(font, name)]
         pay.append(len(row))
         for n in row:
             pay += n.to_bytes(2, 'little')
@@ -230,9 +232,6 @@ def build(dq5, dq4, font):
             cg[o + 2 + 2 * k:o + 4 + 2 * k] = color(rgb)
     obj = bytearray(32)
     obj[2:8] = b''.join(color(dq4block.nes_rgb(c)) for c in HAND_COLORS)
-    from kr_patch.fc import ines
-    prg = ines.prg(Path(dq4).read_bytes())
-
     def fc(a, n):
         o = FC_BANK * 0x4000 + a - 0x8000
         return prg[o:o + n]

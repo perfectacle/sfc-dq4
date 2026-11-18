@@ -118,7 +118,7 @@ def palettes(prg):
     """(BG CGRAM 자리와 바이트, OBJ CGRAM 자리와 바이트). 팔레트마다 16색, 색 0 은 투명이라 검정."""
     def pal(k):
         return bytes(2) + b''.join(nes_color(c) for c in rd(prg, PALETTES + 3 * k, 3)) + bytes(24)
-    return (b''.join(pal(k) for k in range(4)), b''.join(pal(4 + k) for k in range(4)))
+    return (b''.join(pal(k) for k in range(4)), b''.join(pal(4 + k) for k in range(4)) + pal(pay_palette(prg)))
 
 
 def bg(prg):
@@ -153,12 +153,42 @@ def obj(prg):
         base = SYMBOL_TILES + (k - 1) * 0x40
         for j, (dx, dy) in enumerate(((0, 0), (1, 0), (0, 1), (1, 1))):
             place((k - 1) * 2 + dx + dy * 16, rd(prg, base + j * 16, 16))
-    for t in range(1, 0x0D):
+    for t in range(1, 0x0E):
         place(SMALL_NAME + t, rd(prg, SMALL_TILES + t * 16, 16))
+    place(COVER_NAME, FILLS[PAY_BLANK])
     return bytes(sheet)
 
 
-SMALL_NAME = 0x20                  # 작은 타일 t 의 OBJ 이름 = 20 + t(둘째 줄 첫 칸부터)
+SMALL_NAME = 0x20                  # 작은 타일 t 의 OBJ 이름 = 20 + t(둘째 줄 첫 칸부터). 0C 램프, 0D 흰 램프
+# 배당을 세는 동안 FC 17:$9E80 이 배당 표의 그 무늬 줄 6칸을 바탕 칸 8F 로 바꾼다. SFC 는 그 칸을 OBJ 로 덮는다
+PAY_ROWS, PAY_BLANK, PAY_CELLS = 0xA883, 0x8F, 6
+COVER_NAME = SMALL_NAME + 0x0F
+COVER_PAL = 4                      # OBJ 팔레트 OBJ_PAL + 4 = 배당 표 칸의 BG 팔레트
+
+
+def pay_rows(prg):
+    """배당 색인 0~7 마다 FC 배당 표 줄의 (행, 첫 열)(17:$A883 + 9 × 색인 의 PPU 주소)."""
+    out = []
+    for s in range(8):
+        a = rd(prg, PAY_ROWS + 9 * s) | rd(prg, PAY_ROWS + 9 * s + 1) << 8
+        out.append(divmod(a - 0x2000, 32))
+    return out
+
+
+def pay_palette(prg):
+    """배당 표 줄 칸들의 FC BG 팔레트 번호(모두 같아야 OBJ 팔레트 하나로 덮는다)."""
+    _, attrs = nametable(prg)
+    pals = {attrs[(r // 4) * 8 + c // 4] >> (((r // 2) % 2) * 4 + ((c // 2) % 2) * 2) & 3
+            for r, c0 in pay_rows(prg) for c in range(c0, c0 + PAY_CELLS)}
+    if len(pals) != 1:
+        raise ValueError(f'FC 배당 표 줄의 BG 팔레트가 여럿: {sorted(pals)}')
+    return pals.pop()
+
+
+def pay_cells(prg):
+    """색인마다 덮는 OBJ 첫 칸 (x, y). SNES BG1 행 = FC 행 − 1 이고, OBJ 는 y + 1 줄째부터 그려지므로 그 행 위 끝 − 1
+    (헤드리스 화면에서 8F 덮개가 배당 표 줄의 여덟 줄과 겹치는 자리)."""
+    return b''.join(bytes((c * 8, (r - 1) * 8 - 1)) for r, c in pay_rows(prg))
 
 
 def machine_data(prg):
@@ -202,11 +232,12 @@ def apply(data, dq4, font, asar=None):
     lay = dq4slottext.Layout(font)
     files = {'bgtiles.bin': bg_tiles, 'bgmap.bin': bg_map, 'objtiles.bin': obj_tiles, 'bgpal.bin': bgpal,
              'objpal.bin': objpal, 'machines.bin': machine_data(prg), 'lines.bin': lines, 'pay.bin': pay,
-             'sympal.bin': sympal, 'reelx.bin': xs}
+             'sympal.bin': sympal, 'reelx.bin': xs, 'paycell.bin': pay_cells(prg)}
     defs = ''.join(f'!{k} = ${v:X}\n' for k, v in {
         'code_at': CODE_AT, 'code_end': CODE_END, 'stubs_at': STUBS_AT, 'stubs_end': STUBS_END, 'hook_at': HOOK_AT,
         'hook_back': HOOK_BACK, 'first_machine': FIRST_MACHINE, 'bg1_map': BG1_MAP, 'bg1_chr': BG1_CHR,
         'obj_chr': OBJ_CHR, 'bg_pal_cg': BG_PAL * 16, 'obj_pal_cg': 0x80 + OBJ_PAL * 16, 'small_name': SMALL_NAME,
+        'cover_name': COVER_NAME, 'cover_pal': OBJ_PAL + COVER_PAL,
         'poker': dq4fcpoker.POKER, 'poker_body': dq4fcpoker.CODE_AT,
         'slottext_code': dq4slottext.CODE_AT, 'cursor_tile': lay.cursor & 0xFF,
         **{f'str_{name}': at for name, at in lay.addrs().items()},
