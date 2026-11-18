@@ -327,14 +327,50 @@ class ApplyTests(unittest.TestCase):
         for w in wn.NAME_LISTS + (wn.TACTIC_WINDOW,):
             b, a = self.head(w, before), self.head(w, after)
             self.assertEqual((a[0], a[2]), (b[0] - 1, b[2] + 1), f'{w:02X}')
-        # 가게 동료 창은 한 줄에 이름이 둘이라 두 칸
-        b, a = self.head(wn.SHOP_MEMBERS, before), self.head(wn.SHOP_MEMBERS, after)
-        self.assertEqual((a[0], a[2]), (b[0] - 1, b[2] + 2))
+        # 가게 동료 창은 아래 메시지 창과 좌우 변이 맞는 원래 자리·너비 그대로(한 사람 몫을 이름 5 + 상태 8 로 나눔)
         o, p = window(before, wn.SHOP_MEMBERS), window(after, wn.SHOP_MEMBERS)
-        self.assertEqual(after[p + 4], before[o + 4] + 1)
+        self.assertEqual(after[p:p + 5], before[o:o + 5])     # 제목 가로 자리(+4)도 그대로
         self.assertEqual(self.head(wn.SPELL_WINDOW)[2], 8 + 2)
         for w, h, left in wn.FORMATION:
             self.assertEqual(self.head(w)[:3], bytes((h[0] - left, h[1], h[2] + 1)))
+
+    def test_shop_members_cells_fill_the_window(self):
+        inner = (wn.SHOP_MEMBERS_HEAD[2] & 0x1F) - 2
+        self.assertEqual(2 * (wn.SHOP_NAME_CELLS + wn.SHOP_STATE_CELLS), inner)
+        self.assertLess(wn.SHOP_STATE_COLS, wn.SHOP_STATE_CELLS)
+        self.assertEqual(self.defs['!shop_members'], f'${wn.SHOP_MEMBERS:02X}')
+        self.assertEqual(int(self.defs['!shop_state_cells']), wn.SHOP_STATE_CELLS)
+        # 이름 다섯 칸(Y 10)은 WnList, 상태 여덟 칸은 WnMonster 가 이 창일 때 고른다
+        asm = ASM.read_text(encoding='utf-8')
+        monster = asm[asm.index('\nWnMonster:'):asm.index('\nWnText:')]
+        self.assertIn('CMP #!shop_members', monster)
+        self.assertIn('LDA #!shop_state_cells', monster)
+        # 가나 글자(장비 비교 값)는 앞 빈칸을 건너 $02 부터 여덟 칸: 뒤 빈칸이 다음 사람 이름과 띄우는 칸으로 남는다
+        text = asm[asm.index('\nWnText:'):asm.index('\nWtAlloc:')]
+        self.assertIn('CMP #!shop_members\n    BNE +\n    INX\n+\n    JML $04B7A3', text)
+        self.assertEqual(len(wn.shop_states()), 4 + 12)
+        for key in wn.shop_states():
+            self.assertIn(key, dq4windowtext.FIXED)
+
+    def test_shop_state_must_fit_its_cells(self):
+        def wide(font, text):
+            return [b''] * (wn.SHOP_STATE_COLS + 1 if text == dq4windowtext.FIXED['　そうびできない'] else 2)
+        with mock.patch.object(dq4windowtext, 'columns', side_effect=wide), \
+                self.assertRaisesRegex(ValueError, '가게 동료 창 상태'):
+            with mock.patch.object(dq4windowtext, 'build', return_value=(TEXT, {})), \
+                    mock.patch.object(wn.subprocess, 'run', FakeAsar()):
+                wn.apply(bytes(base_rom()), object(), 'asar')
+
+    @unittest.skipUnless(os.environ.get('DQ4_GALMURI'), 'DQ4_GALMURI 가 필요')
+    def test_shop_states_fit_in_galmuri9(self):
+        import dq4menupatch
+        font = dq4menupatch.Font('galmuri9')
+        cols = {dq4windowtext.FIXED[k]: len(dq4windowtext.columns(font, dq4windowtext.FIXED[k])) for k in wn.shop_states()}
+        # Galmuri9 v2.40.4 실측. 문구나 글꼴이 바뀌면 이 표를 다시 재고, 일곱 열(SHOP_STATE_COLS)을 넘지 않는지 본다
+        want = {' 장비 중': 5, ' 소지 중': 5, ' 장비 불가': 7, ' 없음': 4,
+                **{f' {n}개 소지': 6 for n in range(1, 10)}, ' 10개 소지': 7, ' 11개 소지': 6, ' 12개 소지': 7}
+        self.assertEqual(cols, want)
+        self.assertLessEqual(max(cols.values()), wn.SHOP_STATE_COLS, cols)
 
     def test_shop_buy_row_gets_gold_mark(self):
         o = window(self.asar.rom, wn.SHOP_BUY)
