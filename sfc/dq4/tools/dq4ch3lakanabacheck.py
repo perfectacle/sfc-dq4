@@ -198,6 +198,17 @@ CASES = {
                     'msgs': ['late', 'how', *INTRO, 'buy', 'bought', 'closing'],
                     'check': lambda s: ([] if s.get('TIME0') == L.NIGHT_TIME else [f"시각 {s.get('TIME0')}"]) +
                                        ([] if s.get('L0', 0) & L.DONE[1] else ['오늘 일 마침 꺼짐'])},
+    # FC 손님처럼 주인공이 카운터 안에 없어도 들어와 카운터 앞 (8,53)에서 기다리고, 주인공이 카운터 안 (4,53)에 서면 말을
+    # 건다. 주인공은 카운터 안 방 위쪽에서 기다렸다가 손님이 선 뒤 내려온다
+    'customer_waits': {'variant': buyer('sold'),
+                       'steps': [('room', 'warp', f'{L.TOWN},4,48', {'set': _set(L0=SEEN_SHIFT)}),
+                                 ('wait', 'walk', 'wait:1200', {'maxf': 1300}),
+                                 ('counter', 'walk', f'4,53;{taps(14)};{CLOSE}', {'maxf': 2400})],
+                       'msgs': [*INTRO, 'buy', 'bought'], 'check': wage_is(0)},
+    # 밤의 아래층 주인은 FC 처럼 (08,06)에 누워 자고, 아래 칸에서 위로 말을 걸면 05C9(옮긴 메시지 CC9)
+    'cellar_night': {'steps': [('cellar', 'warp', f'{L.CELLAR},16,14', {'set': f'{_a(ch2.TIME_AT):04X}={L.NIGHT_TIME:02X}'}),
+                               ('talk', 'walk', f'{wc.talk("up", 3)};{CLOSE}', {'maxf': 900})],
+                     'msgs': [], 'raw_msgs': ['CC9'], 'check': lambda s: []},
     # 아래층 주인에게 그만두기: 일삯을 금화로, 오늘 일 마침
     'quit': {'steps': [('cellar', 'warp', f'{L.CELLAR},14,10', {'set': _set(L0=SEEN_SHIFT, WAGE0=50)}),
                        ('ask', 'walk', f'{wc.talk("up", 6)}', {'maxf': 1400})],
@@ -360,6 +371,8 @@ def run_case(mesence, data, base, ctx, ids, name, dest, seed):
         except ValueError:
             problems.append(f'메시지 {w}({[n for n in case["msgs"] if f"{ids[n]:X}" == w][0]}) 가 차례대로 뜨지 않음: {got}')
             break
+    # 모듈 밖 메시지(옮긴 FC 대사)는 번호로 본다
+    problems += [f'메시지 {w} 가 뜨지 않음: {got}' for w in case.get('raw_msgs', ()) if w not in got]
     problems += case['check'](seen)
     if case.get('dog_gone'):
         wram = dest / case['steps'][-1][0] / 'final.wram'
