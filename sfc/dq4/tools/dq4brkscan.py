@@ -98,7 +98,8 @@ def blobs():
         if hasattr(ctx.module, 'far_native'):
             blob, at = ctx.module.far_native(ctx)
             name = f'ch3.{ctx.key}.far'
-            entries, problems = entries_of(name, ctx.far_at, blob, at)
+            entries, problems = entries_of(name, ctx.far_at, blob, at, getattr(ctx.module, 'DATA_ENTRIES', ()),
+                                           getattr(ctx.module, 'CODE_ENTRIES', ()))
             if problems:
                 raise ValueError('; '.join(problems))
             out.append((name, ctx.far_at, blob, entries))

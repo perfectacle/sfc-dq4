@@ -288,8 +288,8 @@ CALLS = {'give_prince_letter': ('give', PRINCE_LETTER), 'take_prince_letter': ('
 ITEM_SONG = 0x2F               # 물건을 받는 징글(dq4ch2frenol.ITEM_SONG, 끝을 기다리는 곡)
 # 네이티브 가운데 코드가 아닌 이벤트 스크립트(dq4brkscan)
 DATA_ENTRIES = ('fox_event', 'inn_event', 'jail_event', 'jail_walls')
-# PHP 없이 JSL 로 시작하는 훅(원래 대상을 먼저 부름)
-CODE_ENTRIES = ('bridge_hook',)
+# PHP 없이 시작하는 코드: 다리 훅(JSL 로 원래 대상을 먼저 부름), 시야(jail_watch 가 JSR 로 부름)
+CODE_ENTRIES = ('bridge_hook', 'jail_sight')
 
 
 # ---- 네이티브 ----
