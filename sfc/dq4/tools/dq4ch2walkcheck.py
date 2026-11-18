@@ -120,7 +120,7 @@ COMMON_SEGMENTS = [
     # 왕의 방 벽 앞에서 오른쪽을 보면 묻고, 예 → 걷어차 필드 산트하임 나오는 칸 (78,149)로. 필드 네 걸음째에 두
     # 사람이 합류한다. 필드에서도 7E:00BC·00BD 는 떠난 맵 번호 그대로라 끝 맵 대신 필드인지를 본다
     ('wall_side', 'warp', f'{ch2.BEDROOM},22,9', {'map': ch2.BEDROOM}),
-    ('wall', 'walk', f'{ch2.WALL_STAND[0]},{ch2.WALL_STAND[1]};right:8;wait:60;' + taps(5, 60) + ';wait:400',
+    ('wall', 'walk', f'{ch2.WALL_STAND[0]},{ch2.WALL_STAND[1]};right:8;ask:600;cursor:0;' + taps(3, 60) + ';wait:400',
      {'want': ['KICKED'], 'field': True, 'cell': (78, 149)}),
     ('join', 'walk', 'down:120;wait:200;' + taps(8) + ';' + CLOSE, {'want': ['JOINED'], 'field': True}),
 ]

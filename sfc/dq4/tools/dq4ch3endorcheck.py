@@ -28,7 +28,7 @@ import dq4chapterwalk as cwk  # noqa: E402
 
 CLOSE = wc.pc.CLOSE
 _set, _items, _below, _gold = parts.set_flag, parts.items, endor_checks.below, parts.gold
-talk = wc.talk
+talk, talk_yes = wc.talk, wc.talk_yes
 # 3장 출발 상태의 엔돌 flag 를 모두 끄고 갈래의 flag 만 켠다
 CLEAR = f'{0x2190 + endor.IDX:04X}=00;{0x2190 + endor.IDX2:04X}=00'
 
@@ -137,13 +137,13 @@ SEGMENTS = [
     ('nene_day_side', 'warp', f'{endor.TOWN},{endor.NENE_SIDE[1][0]},{endor.NENE_SIDE[1][1] - 1}',
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(STOCK_SET, sales_set(0))),
       'poke': RNG_PIN}),
-    ('nene_day', 'walk', talk('right', 8),
+    ('nene_day', 'walk', talk_yes('right', 8),
      {'map': endor.TOWN, 'poke': RNG_PIN, 'changes': 1, 'after': 600,
       'bytes': {'NENE_SALES0': 0x6B, 'NENE_SALES1': 0x1F, 'NENE_SALES2': 0, 'NENE_STOCK0': 0}}),
     # 안 팔린 날: 강철 검 하나를 두고 난수를 C0 으로 고정하면 굴림이 3/4 밖이라 칸에 남고 매상은 0(00·40·80·FF 는 팔림)
     ('nene_unsold_side', 'warp', f'{endor.TOWN},{endor.NENE_SIDE[1][0]},{endor.NENE_SIDE[1][1] - 1}',
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(STOCK_SET.split(';')[0], sales_set(0))), 'poke': UNSOLD_PIN}),
-    ('nene_unsold', 'walk', talk('right', 8),
+    ('nene_unsold', 'walk', talk_yes('right', 8),
      {'map': endor.TOWN, 'poke': UNSOLD_PIN, 'changes': 1, 'after': 600,
       'bytes': {'NENE_SALES0': 0, 'NENE_SALES1': 0, 'NENE_SALES2': 0, 'NENE_STOCK0': endor.STEEL_SWORD + 1}}),
     # 납품: 주문 전·「아니요」·다 채운 뒤. 안내하는 옆 사람도 셋
@@ -158,23 +158,23 @@ SEGMENTS = [
     # 갑옷은 다 찼고 칼 하나(남은 갑옷 줄이 빠짐)
     ('deliver_empty_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
      {'map': endor.CASTLE_HALL, 'set': sets(endor.ORDER)}),
-    ('deliver_empty', 'walk', talk('up', 7), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0}}),
+    ('deliver_empty', 'walk', talk_yes('up', 7), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0}}),
     ('deliver_one_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
      {'map': endor.CASTLE_HALL, 'set': sets(endor.ORDER, more=(_items(endor.STEEL_SWORD),))}),
-    ('deliver_one', 'walk', talk('up', 8), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0x01},
+    ('deliver_one', 'walk', talk_yes('up', 8), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0x01},
                                             'items': [0x42, parts.BENTO]}),
     ('deliver_over_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
      {'map': endor.CASTLE_HALL,
       'set': sets(endor.ORDER, more=(_items(*[endor.STEEL_SWORD] * 4, endor.IRON_ARMOR), _gold(0), COUNT_SET(0x64)))}),
-    ('deliver_over', 'walk', talk('up', 8), {'map': endor.CASTLE_HALL, 'want': ['ENDOR_DELIVERED'],
+    ('deliver_over', 'walk', talk_yes('up', 8), {'map': endor.CASTLE_HALL, 'want': ['ENDOR_DELIVERED'],
                                              'bytes': {'ENDOR_COUNT': 0x77, 'GOLD0': 0x60, 'GOLD1': 0xEA},
                                              'items': [0x42, parts.BENTO, endor.STEEL_SWORD]}),
     ('deliver_bag_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
      {'map': endor.CASTLE_HALL, 'set': sets(endor.ORDER, more=(BAG_SET,))}),
-    ('deliver_bag', 'walk', talk('up', 7), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0}}),
+    ('deliver_bag', 'walk', talk_yes('up', 7), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0}}),
     ('deliver_armors_full_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
      {'map': endor.CASTLE_HALL, 'set': sets(endor.ORDER, more=(_items(endor.STEEL_SWORD), COUNT_SET(0x70)))}),
-    ('deliver_armors_full', 'walk', talk('up', 7), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0x71}}),
+    ('deliver_armors_full', 'walk', talk_yes('up', 7), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0x71}}),
     ('deliver_done_side', 'warp', _below(endor.CASTLE_HALL, endor.DELIVER[2]),
      {'map': endor.CASTLE_HALL, 'set': sets(endor.ORDER, endor.DELIVERED)}),
     ('deliver_done', 'walk', talk('up', 1), {'map': endor.CASTLE_HALL}),
@@ -207,12 +207,12 @@ SEGMENTS = [
     ('lawrence_no', 'walk', talk_no('up', 1, 1), {'map': endor.BARD_HALL, 'off': ['LAWRENCE']}),
     ('lawrence_poor_side', 'warp', _below(endor.BARD_HALL, endor.LAWRENCE[0][2]),
      {'map': endor.BARD_HALL, 'set': sets(more=(_gold(599),))}),
-    ('lawrence_poor', 'walk', talk('up', 4), {'map': endor.BARD_HALL, 'off': ['LAWRENCE'], 'bytes': {'PARTY_N': 1}}),
+    ('lawrence_poor', 'walk', talk_yes('up', 4), {'map': endor.BARD_HALL, 'off': ['LAWRENCE'], 'bytes': {'PARTY_N': 1}}),
     ('scott_dog_side', 'warp', _below(endor.TOWN, endor.SCOTT[2]),
      {'map': endor.TOWN, 'set': sets(more=(_gold(400), f'{0x2190 + ch3.DOG[0]:04X}|{ch3.DOG[1]:02X}'))}),
-    ('scott_dog', 'walk', talk('up', 4), {'map': endor.TOWN, 'off': ['SCOTT'], 'bytes': {'GOLD0': 0x90, 'GOLD1': 0x01}}),
+    ('scott_dog', 'walk', talk_yes('up', 4), {'map': endor.TOWN, 'off': ['SCOTT'], 'bytes': {'GOLD0': 0x90, 'GOLD1': 0x01}}),
     ('scott_side', 'warp', _below(endor.TOWN, endor.SCOTT[2]), {'map': endor.TOWN, 'set': sets(more=(_gold(400),))}),
-    ('scott_hire', 'walk', talk('up', 6), {'map': endor.TOWN, 'want': ['SCOTT'],
+    ('scott_hire', 'walk', talk_yes('up', 6), {'map': endor.TOWN, 'want': ['SCOTT'],
                                            'bytes': {'PARTY_N': 2, 'PARTY1': 0xE8, 'GOLD0': 0, 'GOLD1': 0,
                                                      'FOLLOWER1': ch3.SCOTT_PICTURE}}),
     # 단추에 「아니요」: 그대로 48/03, 칸을 떠났다가 다시 서야 또 묻는다

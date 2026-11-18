@@ -3,7 +3,7 @@ import dq4ch1walkcheck as wc
 import dq4ch3event as ch3
 import dq4ch3endor as endor
 import dq4neneshop as shop
-from dq4ch3walkparts import BENTO, CLOSE, FACE_UP, FIELD_OUT, SEARCH, TOWN, TOWN_WEST, gold, items, set_flag, talk, taps
+from dq4ch3walkparts import BENTO, CLOSE, FACE_UP, FIELD_OUT, SEARCH, TOWN, TOWN_WEST, gold, items, set_flag, talk, talk_yes, taps
 
 FLAGS = {
     **{f'ENDOR_{k}': wc.flag(getattr(endor, k)) for k in ('ALLOWED', 'SHOP', 'ORDER', 'DELIVERED', 'SOLD', 'SON_CHEER',
@@ -44,38 +44,38 @@ def effects(data):
 # 35001 골드로 가게를 삼(아침, 네네 옆으로) → 왕의 주문
 SEGMENTS = [
     ('endor_king', 'warp', below(endor.THRONE, endor.KING[2]), {'map': endor.THRONE}),
-    ('endor_king_first', 'walk', talk('up', 6), {'map': endor.THRONE, 'off': ENDOR_OFF}),
+    ('endor_king_first', 'walk', talk_yes('up', 6), {'map': endor.THRONE, 'off': ENDOR_OFF}),
     ('endor_seller', 'warp', below(endor.SHOP_UP, endor.SELLER[0][2]), {'map': endor.SHOP_UP}),
     ('endor_seller_wish', 'walk', talk('up', 4), {'map': endor.SHOP_UP, 'off': ENDOR_OFF}),
     ('endor_king_letter', 'warp', below(endor.THRONE, endor.KING[2]), {'map': endor.THRONE, 'set': LETTER2_SET}),
     ('endor_king_allow', 'walk', talk('up', 6), {'map': endor.THRONE, 'want': ['ENDOR_ALLOWED']}),
     ('endor_seller_allowed', 'warp', below(endor.SHOP_UP, endor.SELLER[0][2]), {'map': endor.SHOP_UP}),
-    ('endor_seller_poor', 'walk', talk('up', 6), {'map': endor.SHOP_UP, 'off': ['ENDOR_SHOP']}),
-    ('endor_seller_buy', 'walk', talk('up', 14),
+    ('endor_seller_poor', 'walk', talk_yes('up', 6), {'map': endor.SHOP_UP, 'off': ['ENDOR_SHOP']}),
+    ('endor_seller_buy', 'walk', talk_yes('up', 14),
      {'set': gold(endor.SHOP_PRICE + 1), 'map': endor.TOWN, 'cell': endor.NENE_SIDE[1], 'want': ['ENDOR_SHOP'],
       'bytes': {'GOLD0': 1, 'GOLD1': 0, 'GOLD2': 0}, 'changes': 1, 'after': 900}),
     ('endor_king_shop', 'warp', below(endor.THRONE, endor.KING[2]), {'map': endor.THRONE}),
     ('endor_king_order', 'walk', talk('up', 6), {'map': endor.THRONE, 'want': ['ENDOR_ORDER']}),
     # 네네: 가게를 산 뒤 낮에는 「쉴래요?」 → 「예」 면 잠, 개통 소식이 왔으면 08A0 → 개통
     ('endor_nene', 'warp', f'{endor.TOWN},{endor.NENE_SIDE[1][0]},{endor.NENE_SIDE[1][1] - 1}', {'map': endor.TOWN}),
-    ('endor_nene_sleep', 'walk', talk('right', 8), {'map': endor.TOWN, 'cell': endor.NENE_SIDE[1], 'changes': 1,
+    ('endor_nene_sleep', 'walk', talk_yes('right', 8), {'map': endor.TOWN, 'cell': endor.NENE_SIDE[1], 'changes': 1,
                                                      'after': 600, 'items': [BENTO]}),
-    ('endor_nene_notice', 'walk', talk('right', 12), {'map': endor.TOWN, 'set': set_flag(endor.NOTICE),
+    ('endor_nene_notice', 'walk', talk_yes('right', 12), {'map': endor.TOWN, 'set': set_flag(endor.NOTICE),
                                                        'want': ['TUNNEL_OPENED']}),
     # 납품: 주문 전에는 안내만, 주문 뒤 없으면 그대로, 칼 둘·갑옷 하나를 받고, 다 차면 60000 골드
     ('endor_deliver', 'warp', below(endor.CASTLE_HALL, endor.DELIVER[2]), {'map': endor.CASTLE_HALL}),
-    ('endor_deliver_none', 'walk', talk('up', 8), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0}}),
-    ('endor_deliver_some', 'walk', talk('up', 10),
+    ('endor_deliver_none', 'walk', talk_yes('up', 8), {'map': endor.CASTLE_HALL, 'bytes': {'ENDOR_COUNT': 0}}),
+    ('endor_deliver_some', 'walk', talk_yes('up', 10),
      {'map': endor.CASTLE_HALL, 'set': items(endor.STEEL_SWORD, endor.STEEL_SWORD, endor.IRON_ARMOR),
       'bytes': {'ENDOR_COUNT': 0x12}, 'items': [0x42, BENTO]}),
-    ('endor_deliver_full', 'walk', talk('up', 10),
+    ('endor_deliver_full', 'walk', talk_yes('up', 10),
      {'map': endor.CASTLE_HALL,
       'set': ';'.join((items(endor.STEEL_SWORD, endor.IRON_ARMOR), gold(0), f'{FLAGS["ENDOR_COUNT"][0] & 0xFFFF:04X}=66')),
       'want': ['ENDOR_DELIVERED'], 'bytes': {'ENDOR_COUNT': 0x77, 'GOLD0': 0x60, 'GOLD1': 0xEA, 'GOLD2': 0}}),
     # 수집가: 여신상을 25000 골드에. 낮의 수집가는 걸어 다녀 밤에 서 있는 자리로 본다
     ('endor_collector', 'warp', below(endor.COLLECTOR, endor.COLLECTORS[1][2]), {'map': endor.COLLECTOR,
                                                                                    'poke': wc.NIGHT}),
-    ('endor_collector_sell', 'walk', talk('up', 4),
+    ('endor_collector_sell', 'walk', talk_yes('up', 4),
      {'map': endor.COLLECTOR, 'poke': wc.NIGHT, 'set': ';'.join((items(endor.STATUE), gold(0))), 'want': ['ENDOR_SOLD'],
       'bytes': {'GOLD0': 0xA8, 'GOLD1': 0x61, 'GOLD2': 0}, 'items': [0x42, BENTO]}),
     # 단추를 누른 뒤 입구 층의 계단은 48/03 대신 물이 빠진 48/04 로(누르기 전은 48/03)
@@ -85,7 +85,7 @@ SEGMENTS = [
     ('endor_cave_dry', 'walk', 'up:40;wait:300', {'map': endor.CAVE_DRY, 'changes': 1, 'after': 60}),
     # 용병 로렌스(dq4mercenary): 600 골드로 고용하면 일행 기록 1 이 손님 로렌스(+0 = C0 | 29)
     ('endor_lawrence', 'warp', below(endor.BARD_HALL, endor.LAWRENCE[0][2]), {'map': endor.BARD_HALL}),
-    ('endor_lawrence_hire', 'walk', talk('up', 8),
+    ('endor_lawrence_hire', 'walk', talk_yes('up', 8),
      {'map': endor.BARD_HALL, 'set': ';'.join((gold(600), f'{ch3.LAWRENCE_DAYS & 0xFFFF:04X}=03')), 'want': ['LAWRENCE'],
       'bytes': {'PARTY_N': 2, 'PARTY1': 0xE9, 'LAWRENCE_DAYS': 0, 'GOLD0': 0, 'GOLD1': 0,
                 'FOLLOWER1': ch3.LAWRENCE_PICTURE}}),
@@ -103,7 +103,7 @@ SEGMENTS = [
     ('endor_statue_open', 'walk', SEARCH, {'poke': FACE_UP, 'items': [endor.STATUE]}),
     # 여신상 동굴 단추: 「예」 면 물이 빠진 48/04 의 같은 칸으로
     ('endor_button_side', 'warp', f'{endor.CAVE_WET},{BUTTON_CELL[0]},{BUTTON_CELL[1] + 1}', {'map': endor.CAVE_WET}),
-    ('endor_button', 'walk', 'up:40;wait:200;a:8;wait:60;a:8;wait:600',
+    ('endor_button', 'walk', f'up:40;ask:400;cursor:0;a:8;wait:60;a:8;wait:600',
      {'map': endor.CAVE_DRY, 'cell': endor.BUTTON_LAND[1], 'want': ['ENDOR_BUTTON'], 'changes': 1, 'after': 60}),
 ]
 

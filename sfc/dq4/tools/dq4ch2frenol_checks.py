@@ -24,6 +24,9 @@ def effects(data):
 CHEST_SEARCH = ('a:8;wait:60;down:6;wait:25;down:6;wait:25;down:6;wait:25;right:6;wait:25;a:8;wait:200;'
                 'a:4;wait:150;a:4;wait:150;b:4;wait:220')
 
+# 묘지 장면(망토 요구 → 메이 → 도적의 열쇠 → 아침)을 물음마다 「예」 로 말이 끝날 때까지 넘긴다(dq4walk.lua done)
+GRAVE_DONE = f'done:{30 * 58 + 400}'
+
 SEGMENTS = [
     # 프레놀 가짜 공주(dq4ch2frenol): 여관 2층 방 아래 (1E,08)에서 위로 올라가면 비명 → 「멈춰라!」 → 셋이 계단으로
     ('inn_side', 'warp', f'{frenol.INN},60,17', {'map': frenol.INN}),
@@ -41,7 +44,7 @@ SEGMENTS = [
      {'want': ['BRACELET_CHEST'], 'items': [frenol.BRACELET], 'map': frenol.CAVE}),
     # 밤의 묘지: 서쪽 어귀에서 내려와 (03,0B)에 서면 망토가 요구 → 예 → 메이 → 도적의 열쇠 → 아침의 같은 칸
     ('grave_side', 'warp', f'{frenol.TOWN},6,19', {'map': frenol.TOWN, 'poke': wc.NIGHT}),
-    ('grave', 'walk', '6,23;wait:120;' + taps(30, 50) + ';wait:300;' + CLOSE,
+    ('grave', 'walk', '6,23;wait:120;' + GRAVE_DONE + ';wait:300;' + CLOSE,
      {'want': ['FRENOL_RESCUED'], 'off': ['FRENOL_SCENE'], 'items': [frenol.THIEF_KEY], 'map': frenol.TOWN}),
 ]
 
@@ -58,7 +61,7 @@ def hero_cases():
     night = f'{wc.NIGHT_SET};{(wc.ITEMS & 0xFFFF) + 1:04X}={frenol.BRACELET:02X}'
     for name, at, first in FRENOL_GRAVE:
         out[name] = {'warp': f'{frenol.TOWN},4,19', 'set': ';'.join((set_flags(frenol.KIDNAPPED, frenol.LEFT), night)),
-                     'late': wc.NIGHT_SET, 'walk': f'{at};wait:120;{first}{taps(30, 50)};wait:300;{CLOSE}',
+                     'late': wc.NIGHT_SET, 'walk': f'{at};wait:120;{first}{GRAVE_DONE};wait:300;{CLOSE}',
                      'want': [('FRENOL_RESCUED', frenol.RESCUED)], 'hero_at': frenol.MORNING_CELL, 'maxf': 6000,
                      'distinct': 8 if first else 7}
     return out

@@ -200,13 +200,13 @@ CASES = {
                                        ([] if s.get('L0', 0) & L.DONE[1] else ['오늘 일 마침 꺼짐'])},
     # 아래층 주인에게 그만두기: 일삯을 금화로, 오늘 일 마침
     'quit': {'steps': [('cellar', 'warp', f'{L.CELLAR},14,10', {'set': _set(L0=SEEN_SHIFT, WAGE0=50)}),
-                       ('ask', 'walk', f'{wc.talk("up", 6)}', {'maxf': 1400})],
+                       ('ask', 'walk', f'{wc.talk_yes("up", 6)}', {'maxf': 1400})],
              'msgs': ['quit_ask', 'quit_pay', 'tomorrow'], 'check': same(GOLD0=50, WAGE0=0, L0=SEEN_SHIFT | L.DONE[1])},
     # 톰 노인: 「예」 뒤 밀리는 인물이 되어 아래로 밀면 따라 움직인다(TOMY). 교회까지 미는 긴 길은 돌아다니는 마을 사람에
     # 따라 막혀 갈래가 생기므로, 마을을 다시 불러와 톰을 교회 문 안 (28,17) 에 옮겨 두고 위로 밀어 교회 안에 닿게 한다.
     # 교회에 닿으면 03AE, 2~12 골드(난수), 밀기 끝
     'tom': {'steps': [('tom', 'warp', f'{L.TOWN},48,24', {}),
-                      ('ask', 'walk', f'{wc.talk("up", 5)}', {'maxf': 1200}),
+                      ('ask', 'walk', f'{wc.talk_yes("up", 5)}', {'maxf': 1200}),
                       ('push', 'walk', '50,25;50,21;48,21;48,25', {'maxf': 1200, 'tom_y': 0x1B}),
                       ('house', 'warp', f'{L.HOUSE},60,16', {}), ('church', 'warp', f'{L.TOWN},28,18', {}),
                       ('push_in', 'walk', f'28,13;wait:60;{taps(3)};{CLOSE}', {'maxf': 1500, 'tom_at': (28, 17)})],
@@ -217,7 +217,7 @@ CASES = {
     # 아들이 돌아온 뒤(SON_FREED) 톰의 첫마디는 0844(FC 15:$860D)
     'tom_back': {'steps': [('tom', 'warp', f'{L.TOWN},48,24',
                             {'set': f'{0x2190 + L.SON_FREED[0]:04X}={L.SON_FREED[1]:02X}'}),
-                           ('ask', 'walk', f'{wc.talk("up", 5)}', {'maxf': 1200})],
+                           ('ask', 'walk', f'{wc.talk_yes("up", 5)}', {'maxf': 1200})],
                  'msgs': ['tom_glad', 'tom_ask', 'tom_go'], 'check': lambda s: []},
     # 톰 아들(본몰 감옥에서 풀려난 뒤에만 섬): 개를 빌려줌(DOG). 마을을 다시 불러오면 우리의 개가 없다(아래 dog_gone)
     'son': {'steps': [('son', 'warp', f'{L.TOWN},46,8', {'set': f'{0x2190 + L.SON_FREED[0]:04X}={L.SON_FREED[1]:02X}'}),
@@ -233,7 +233,7 @@ CASES = {
     'son_return': {'steps': [('son', 'warp', f'{L.TOWN},46,8',
                               {'set': f'{0x2190 + L.FOXED[0]:04X}={L.FOXED[1] | L.SON_FREED[1]:02X};'
                                       f'{_a(FLAGS["COMMON"][0]):04X}={ch3.DOG[1]:02X}'}),
-                             ('ask', 'walk', f'{wc.talk("up", 6)};{CLOSE}', {'maxf': 1400}),
+                             ('ask', 'walk', f'{wc.talk_yes("up", 6)};{CLOSE}', {'maxf': 1400}),
                              # 돌려준 개가 줄 끝 자리에서 우리로 걸어가 닿아야 조작이 풀린다
                              ('leave', 'walk', '44,9;44,13', {'maxf': 900, 'cell': (44, 13)})],
                    'msgs': ['son_return', 'son_thanks', 'son_luck'],
