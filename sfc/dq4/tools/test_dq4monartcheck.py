@@ -111,6 +111,20 @@ class GroupTests(unittest.TestCase):
         _, problems = mc.judge_group(oam, vram, cgram, (0x30, 0x30), {0x30: (PICTURE, self.COLORS)})
         self.assertIn('30 그림의 OBJ 팔레트 [0, 0], 무리 줄 [0, 1]', problems)
 
+    def test_overlapping_species_are_judged_by_their_own_lines(self):
+        # 띄운 몬스터가 땅 몬스터 위에 겹쳐도(낮은 OAM 칸이 위) 종마다 제 줄 OBJ 만으로 찾아 둘 다 맞는다
+        oam, vram, cgram = two_screen((1, 0), [self.COLORS, self.COLORS])
+        oam = bytearray(oam)
+        oam[4:8] = bytes((42, 59, 0, 0 << 1))           # 줄 0 몬스터를 줄 1 몬스터 2픽셀 옆에 겹치게
+        pictures = {0x30: (PICTURE, self.COLORS), 0x31: (PICTURE, self.COLORS)}
+        out, problems = mc.judge_group(bytes(oam), vram, cgram, (0x30, 0x31), pictures, floating={0x31})
+        self.assertEqual(problems, [])
+        self.assertEqual(out['30'][0]['palettes'], [0])
+        self.assertEqual(out['31'][0]['palettes'], [1])
+        # 둘 다 땅 몬스터면 겹침은 실패
+        _, problems = mc.judge_group(bytes(oam), vram, cgram, (0x30, 0x31), pictures)
+        self.assertTrue(any('땅 몬스터끼리' in p for p in problems), problems)
+
     def test_unplaced_group_is_not_judged(self):
         # 화면 폭에 들지 않는 무리(놓인 수 0)는 그림도 줄 색도 없다
         oam, vram = screen(40, 60, PICTURE, 0)

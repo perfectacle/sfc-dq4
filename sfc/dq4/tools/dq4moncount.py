@@ -72,11 +72,12 @@ CHAPTER_ZONES = {
 KNOWN = {
     (2, 0x08, 'night'): 1,
     (2, 0x09, 'day'): 4, (2, 0x09, 'night'): 2,
-    (2, 0x0B, 'day'): 7, (2, 0x0B, 'night'): 5,
-    (2, 0x0C, 'day'): 14, (2, 0x0C, 'night'): 15,
-    (2, 0x4C, 'dungeon'): 1, (2, 0x4D, 'dungeon'): 7, (2, 0x4E, 'dungeon'): 9, (2, 0x4F, 'dungeon'): 15,
+    (2, 0x0B, 'day'): 2, (2, 0x0B, 'night'): 3,
+    (2, 0x0C, 'day'): 2, (2, 0x0C, 'night'): 2,
+    (2, 0x4D, 'dungeon'): 2, (2, 0x4E, 'dungeon'): 6, (2, 0x4F, 'dungeon'): 5,
 }
 
+VERIFY_PER_PLACE = 3        # --verify some: 곳마다 덜 놓이지 않는 조합에서 붙여 볼 수
 FC_BANK = 0x14
 WIDTH_LIMIT = 0x20          # 14:$9C5E CMP #$20: 마리마다 폭 + 1 을 더한 합이 이 값 이상이면 그 마리부터 놓지 않음
 BOSS_PICTURE, BOSS_WIDTH_AT = 0xAE, 0x932B   # 14:$9326 CMP #$AE / LDA #$0E: デスピサロ 폭은 고정값
@@ -340,8 +341,12 @@ def _commit(slots, pals, bg, place_color):
 
 
 def sfc_placed(pictures, groups):
-    """빌드 롬이 놓는 수: dq5monlimits.Pictures.place 에 [(DQ5 몬스터, 마릿수, 무리 값 0)]."""
-    kept = pictures.place([(m, n, 0) for m, n in groups])[0]
+    """빌드 롬이 놓는 수: dq5monlimits.Pictures.place 에 [(DQ5 몬스터, 마릿수, 무리 값 0)]. 빌드 롬은 커진 그림을 48:8000 으로
+    옮기고 24비트 머리 표로 찾으므로(dq5monwrite), 머리 찾기를 head_of 로 돌린다. 원래 머리 표로 읽으면 옮긴 그림이 원래 DQ5
+    그림의 크기·띄움으로 세어진다"""
+    import dq5monwrite
+    with dq5monwrite.following_table():
+        kept = pictures.place([(m, n, 0) for m, n in groups])[0]
     return [j for _, j, *_ in kept]
 
 
@@ -470,7 +475,7 @@ def count(build, prg, dq5):
     same = {i: i for i in range(256)}
     battle = FcBattle(prg)
     widths = {}
-    places, short = {}, []
+    places, short, every = {}, [], []
     for ch, zones in CHAPTER_ZONES.items():
         for z in zones:
             row = rows[z]
@@ -487,6 +492,8 @@ def count(build, prg, dq5):
                     want, why = battle.place(groups)
                     dq5g = [(FE.MONSTERS[m], n) for m, n in groups]
                     got = sfc_placed(pictures, dq5g)
+                    every.append({'chapter': ch, 'fc_zone': z, 'mode': mode, 'dq5': dq5g, 'placed': got,
+                                  'short': any(g < w for g, w in zip(got, want))})
                     if any(g < w for g, w in zip(got, want)):
                         bad += 1
                         short.append({'chapter': ch, 'fc_zone': z, 'area': row[0], 'mode': mode,
@@ -495,7 +502,45 @@ def count(build, prg, dq5):
                                       'placed': got, 'p': p, 'fc_widths': [widths[m] for m, _ in groups]})
                 places[ch, z, mode] = {'area': row[0], 'combos': len(combos), 'short': bad,
                                        'p_short': sum(s['p'] for s in short[len(short) - bad:])}
-    return {'places': places, 'short': short}
+    return {'places': places, 'short': short, 'every': every}
+
+
+def pick_checks(every, per_place):
+    """실제 롬으로 붙여 볼 조합: 덜 놓이는 조합 모두와, 곳(장·구역·때)마다 덜 놓이지 않는 조합에서 per_place 개(놓인 수가
+    줄어든 것부터 — 배치 한도에 가까운 것). per_place 가 None 이면 모든 조합. 같은 DQ5 무리는 한 번만."""
+    seen, out, by_place = set(), [], {}
+    for e in every:
+        if per_place is None or e['short']:
+            out.append(e)
+        else:
+            by_place.setdefault((e['chapter'], e['fc_zone'], e['mode']), []).append(e)
+    for es in by_place.values():
+        out += sorted(es, key=lambda e: (-sum(n for _, n in e['dq5']), [m for m, _ in e['dq5']]))[:per_place]
+    unique = []
+    for e in out:
+        key = tuple(map(tuple, e['dq5']))
+        if key not in seen:
+            seen.add(key)
+            unique.append(e)
+    return unique
+
+
+def verify(rom_path, checks, work):
+    """checks 의 조합마다 빌드 롬을 헤드리스(snes9x, dq4monartcheck.Battles)로 붙여 엔진이 놓은 마릿수(차례 창 뒤
+    7E:0C60·0CD7 몬스터 칸, dq4monartcheck.placed_counts)를 읽고 모형(sfc_placed)과 견준다. [(조합, 모형, 실제)] 다른 것."""
+    import dq4monartcheck as mc
+    numbers = sorted({m for e in checks for m, _ in e['dq5']})
+    run = mc.Battles(rom_path, numbers, work)
+    bad = []
+    try:
+        for e in checks:
+            ms, ns = [m for m, _ in e['dq5']], [n for _, n in e['dq5']]
+            info = run.battle(ms, counts=ns)[3]
+            if info['placed'] != list(e['placed']):
+                bad.append((e, list(e['placed']), info['placed']))
+    finally:
+        run.close()
+    return bad
 
 
 def judge(places, known=None):
@@ -522,9 +567,20 @@ def main():
     ap.add_argument('--dq4', type=Path, default=ROOT / 'rom' / 'dq4.nes')
     ap.add_argument('--dq5', type=Path, default=ROOT / 'rom' / 'dq5.sfc')
     ap.add_argument('--out', type=Path, required=True)
+    ap.add_argument('--verify', choices=('some', 'all'),
+                    help='모형이 낸 SFC 마릿수를 빌드 롬 헤드리스 전투로 견줌: some = 덜 놓이는 조합 모두와 곳마다 '
+                         f'{VERIFY_PER_PLACE}개, all = 모든 조합')
     args = ap.parse_args()
     from kr_patch.fc import ines
     res = count(args.rom.read_bytes(), ines.prg(args.dq4.read_bytes()), args.dq5.read_bytes())
+    if args.verify:
+        checks = pick_checks(res['every'], VERIFY_PER_PLACE if args.verify == 'some' else None)
+        bad = verify(args.rom, checks, args.out / 'core')
+        print(f'실제 롬 견줌: 조합 {len(checks)}개, 모형과 다른 것 {len(bad)}개')
+        for e, model, real in bad:
+            print(f'  {label((e["chapter"], e["fc_zone"], e["mode"]))} {e["dq5"]}: 모형 {model}, 실제 {real}')
+        if bad:
+            sys.exit(1)
     places = res['places']
     up, down = judge(places)
     args.out.mkdir(parents=True, exist_ok=True)

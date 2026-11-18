@@ -264,15 +264,18 @@ def arena_problems(rom_path, texts):
     if not matches:
         out.append('격투장 시합이 없음')
     found = {g: k for k, g in enumerate(matches)}
-    reserve = pictures.reserve(found)
-    for k, groups in enumerate(matches):
-        placed = [x[1] for x in pictures.place(groups)[0]]
-        if placed != [1] * len(groups):
-            out.append(f'시합 {k} {[f"{m:02X}" for m, _, _ in groups]}: 놓인 수 {placed}')
-        elif pictures.listed(groups) > limits.PIECE_LIST_LIMIT or \
-                pictures.reach_slots(groups) + reserve > limits.SLOT_LIMIT or \
-                pictures.band_rows(groups) > limits.ROW_LIMIT:
-            out.append(f'시합 {k}: 그림 한도를 넘음')
+    import dq5monwrite
+    # 빌드 롬은 커진 그림을 옮겨 24비트 머리 표로 찾는다. 원래 머리 표로 읽으면 옮긴 그림의 크기·띄움을 원래 것으로 센다
+    with dq5monwrite.following_table():
+        reserve = pictures.reserve(found)
+        for k, groups in enumerate(matches):
+            placed = [x[1] for x in pictures.place(groups)[0]]
+            if placed != [1] * len(groups):
+                out.append(f'시합 {k} {[f"{m:02X}" for m, _, _ in groups]}: 놓인 수 {placed}')
+            elif pictures.listed(groups) > limits.PIECE_LIST_LIMIT or \
+                    pictures.reach_slots(groups) + reserve > limits.SLOT_LIMIT or \
+                    pictures.band_rows(groups) > limits.ROW_LIMIT:
+                out.append(f'시합 {k}: 그림 한도를 넘음')
     picks = arena_picks(rom_path.read_bytes(), len(matches))
     if matches and picks != set(range(len(matches))):
         out.append(f'격투장 시합 고르기가 {len(matches)}개 가운데 {sorted(picks)} 만 뽑음')

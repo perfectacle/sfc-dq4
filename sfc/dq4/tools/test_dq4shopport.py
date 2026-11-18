@@ -313,10 +313,10 @@ class ArenaTest(unittest.TestCase):
         prg = ines.prg(DQ4.read_bytes())
         numbers = dq4monport.field_numbers()
         picked, skipped = shopport.arena(shopport.dq5item.Rom(DQ5.read_bytes()), prg)
-        # FC 3장 20시합 = 옮긴 것 19 + 폭으로 뺀 6번. 17번(ピクシー 넷)은 NDS 픽시 그림이면 넷 다 놓인다.
+        # FC 3장 20시합을 모두 옮긴다. 17번(ピクシー 넷)은 NDS 픽시 그림, 6번은 はえおとこ 띄움으로 넷 다 놓인다.
         # おおめだま(FC 29)는 dq4monport.ARENA 번호
         self.assertEqual(len(picked) + len(skipped), 20)
-        self.assertEqual(skipped, [(6, [])])
+        self.assertEqual(skipped, [])
         self.assertTrue(any(len(match) == 4 and {m for m, _ in match} == {numbers[0x22]} for match in picked))
         self.assertIn([(numbers[0x40], 10), (dq4monport.ARENA[0x29][0], 1), (numbers[0x40], 10)], picked)
         for match in picked:
