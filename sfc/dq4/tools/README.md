@@ -7,6 +7,8 @@
 | 스크립트 | 하는 일 |
 | --- | --- |
 | `dq4graphics.py [--check] [--output 폴더]` | 롬 없이 스프라이트·블록·샘플 맵·타이틀을 PNG·SFC 4bpp·팔레트로 출력. `--check` 는 파일을 쓰지 않고 반복 생성·왕복 검사 |
+| `dq4itemreach.py --rom 장롬 --chapter N` | 장 빌드 롬이 실제로 주는 물건(가게·코인 경품·상자·조사·몬스터·시작 소지품·사건 지급). `given_items`·`given_union`. [물건 출처와 FC 대조](../docs/dq4-item-match-format.md) |
+| `dq4itemmatch.py --rom 장롬` | 빌드 롬의 가게 목록·값·상자·タンス·つぼ·발밑·몬스터 떨어뜨림을 FC 원작 표의 같은 자리와 견줌. 알려진 줄 밖이 있으면 1. [물건 출처와 FC 대조](../docs/dq4-item-match-format.md) |
 | `dq4romassets.py rom --out 폴더` | 라이안 정면의 DQ5 엔진 데이터·별도 롬·IPS와 역변환 검증 보고서 생성. 기존 공용 팔레트를 유지하는 색 변경 시안. [롬 삽입](../docs/dq4-rom-assets-format.md) |
 | `dq4romgallery.py --input 폴더 --out 폴더` | ROM 변환 결과와 인물 시안의 비교 갤러리 생성. 시각 확인과 기술 검증 상태를 구분 |
 | `dq4titlelayers.py --out 폴더` | 고정 전경·하늘·앞 구름·용의 128위상(12자세)과 차이 전송 데이터를 생성. [애니메이션 규격](../docs/dq4-title-animation.md) |

@@ -3683,3 +3683,20 @@ paths = [
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/guard-night-rom --chapter2 && rm -rf work/guard-night && uv run --locked python sfc/dq4/tools/dq4environmentnightcheck.py --rom work/guard-night-rom/dq4-ch1-full.sfc --out work/guard-night"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
+name = "dq4-item-match"
+why = "빌드 롬의 가게 목록(차례)·값·상자 칸·タンス·つぼ·발밑 숨은 물건·몬스터가 떨어뜨리는 물건이 FC 원작 표의 같은 가게·칸·종과 같아야 한다(이식 길의 이름 바꿈·대체를 거쳐). 집합만 보면 같은 물건이 다른 가게·칸으로 간 것을 못 봐서 따로 잰다. 발밑 숨은 물건 둘·여우 마을 장소별 값은 알려진 줄"
+paths = [
+  "sfc/dq4/tools/dq4itemmatch.py",
+  "sfc/dq4/tools/dq4itemreach.py",
+  "sfc/dq4/tools/dq4chestport.py",
+  "sfc/dq4/tools/dq4shopport.py",
+  "sfc/dq4/tools/dq4shopkey.py",
+  "sfc/dq4/tools/dq4monport.py",
+  "sfc/dq4/tools/dq4itemport.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4itemmatch.py --rom work/ch1/dq4-ch1.sfc && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4itemmatch.py --rom work/ch2/dq4-ch1.sfc && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4itemmatch.py --rom work/ch3/dq4-ch1.sfc"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
+groups = ["ch1-build"]
