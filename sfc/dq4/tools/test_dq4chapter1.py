@@ -494,6 +494,7 @@ class BuildFlowTests(unittest.TestCase):
         import dq4menupatch
         import dq4party
         import dq4msgnames
+        import dq4slottext
         import dq4prologue
         import dq4monport
         import dq4signs
@@ -558,6 +559,7 @@ class BuildFlowTests(unittest.TestCase):
                                         writes=lambda dq5, dq4: [], apply_recruits=step('party')), \
                     mock.patch.object(dq4josa, 'apply', step('josa')), \
                     mock.patch.object(dq4msgnames, 'apply', step('msgnames')), \
+                    mock.patch.object(dq4slottext, 'apply', step('slottext')), \
                     mock.patch.object(dq4signs, 'apply', step('signs')), \
                     mock.patch.object(dq4prologue, 'apply', step('prologue')), \
                     mock.patch.multiple(dq4monport, build=monport_build, records_patch=monport_records,
@@ -645,8 +647,8 @@ class BuildFlowTests(unittest.TestCase):
         checksum = int.from_bytes(out[0x7FDE:0x7FE0], 'little')
         self.assertEqual(checksum ^ int.from_bytes(out[0x7FDC:0x7FDE], 'little'), 0xFFFF)
         self.assertEqual(checksum, sum(out) & 0xFFFF)
-        self.assertEqual(order[:8], ['chapterbox', 'ch1event', 'ch2event', 'ch3event', 'party', 'josa', 'msgnames',
-                                     'signs'])
+        self.assertEqual(order[:9], ['chapterbox', 'ch1event', 'ch2event', 'ch3event', 'party', 'josa', 'msgnames',
+                                     'slottext', 'signs'])
         # 그룹 빌드 롬과 견주는 것은 체크섬까지 끝낸 롬이다
         self.assertEqual(self.verify.call_args.args[:2], (bytes(out), b'groups'))
 

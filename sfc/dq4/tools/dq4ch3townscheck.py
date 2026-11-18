@@ -222,7 +222,7 @@ ARENA_MESSAGES = range(0x112, 0x11F)
 
 def arena_problems(rom_path, texts):
     """빌드 롬의 격투장(dq4shopport.arena_writes): 고를 수 있는 시합(문턱 0)마다 몬스터가 모두 전투 화면에 놓이고
-    (dq5monlimits.Pictures.place, 한도도), 격투장 메시지가 한글로 덮였는지."""
+    (dq5monlimits.Pictures.place, 한도도), 격투장 메시지가 한글로 덮였는지. 슬롯 화면 안 글에 가나가 남지 않았는지."""
     import dq4shopport
     import dq5monlimits as limits
     from dq5map import Rom
@@ -247,6 +247,11 @@ def arena_problems(rom_path, texts):
             out.append(f'시합 {k}: 그림 한도를 넘음')
     messages = json.loads(texts.read_text())['messages']
     out += [f'격투장 메시지 {m:03X} 가 한글이 아님' for m in ARENA_MESSAGES if f'{m:03X}' not in messages]
+    # 슬롯 화면 안 글(메시지 표 밖, dq4slottext): bit8 을 끈 채 찍히는 가나 타일이 없어야 한다
+    import dq4slottext
+    data = rom_path.read_bytes()
+    out += [f'슬롯 글 {name}: {at >> 16:02X}:{at & 0xFFFF:04X} 가나 {b:02X}'
+            for name, _, ldy, _ in dq4slottext.TEXTS for at, b in dq4slottext.kana_in(data, ldy)]
     return out, len(matches)
 
 
