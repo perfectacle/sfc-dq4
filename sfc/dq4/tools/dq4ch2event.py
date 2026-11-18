@@ -198,7 +198,7 @@ def _transfer(record_at, name_at, event_at):
     # FC 처럼 장 끝 서술 뒤 「제1장 … / 완」 상자(dq4chapterbox.DONE1)를 먼저 띄운다. 상자 주소는 빌드와 상관없다
     import dq4chapterbox
     done = dq4chapterbox.entry_points(dq4chapterbox.GAME_SCENES)['done1']
-    return bytes((0x22,)) + _al(done) + ENTER + bytes(body) + start + LEAVE
+    return ENTER + bytes((0x22,)) + _al(done) + bytes(body) + start + LEAVE
 
 
 def _skip_song():

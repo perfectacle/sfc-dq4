@@ -80,10 +80,11 @@ class TransferTest(unittest.TestCase):
     def test_transfer_writes_torneko_flags_and_moves_to_the_house(self):
         code, at = ev.native()
         t = code[at['transfer'] - ev.CODE_AT:at['pad'] - ev.CODE_AT]
-        # 먼저 「제2장 … / 완」 상자(JSL), 그 뒤 넘김
-        self.assertEqual(t[:4], bytes((0x22, *box.entry_points(box.GAME_SCENES)['done2'].to_bytes(3, 'little'))))
-        t = t[4:]
         self.assertEqual(t[:len(box.ENTER)], box.ENTER)
+        # 먼저 「제2장 … / 완」 상자(JSL), 그 뒤 넘김
+        n = len(box.ENTER)
+        self.assertEqual(t[n:n + 4], bytes((0x22, *box.entry_points(box.GAME_SCENES)['done2'].to_bytes(3, 'little'))))
+        t = t[:n] + t[n + 4:]
         self.assertEqual(t[-len(box.LEAVE):], box.LEAVE)
         self.assertIn(ch2._mvn(at['record'], ev.PARTY_AT, 42), t)
         self.assertIn(ch2._mvn(at['name'], ev.NAME_AT, 8), t)

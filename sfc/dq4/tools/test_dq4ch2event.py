@@ -116,7 +116,9 @@ class TransferTest(unittest.TestCase):
     def test_first_shows_the_chapter1_done_box(self):
         """FC 처럼 장 끝 서술 뒤 「제1장 … / 완」 상자(dq4chapterbox.DONE1)를 먼저 부른다."""
         import dq4chapterbox as box
-        self.assertEqual(self.body()[:4], bytes((0x22, *box.entry_points(box.GAME_SCENES)['done1'].to_bytes(3, 'little'))))
+        n = len(box.ENTER)
+        self.assertEqual(self.body()[:n], box.ENTER)
+        self.assertEqual(self.body()[n:n + 4], bytes((0x22, *box.entry_points(box.GAME_SCENES)['done1'].to_bytes(3, 'little'))))
 
     def test_clear_runs_with_16_bit_a(self):
         code = self.body()
