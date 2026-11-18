@@ -9,6 +9,13 @@
 --             팔기 목록 55 = 37 등)이 뜰 때까지 넘길 때 쓴다
 --   pick:K    DQ5 가게 사기 목록에서 고른 물건 번호(7E:0F22, 10진 K)가 K 가 될 때까지 아래를 cursor 처럼 누른다. 목록 커서는
 --             0AD7 이 아니고, 목록이 열려야 움직이므로 열림을 함께 기다린다
+--   done:N    말이 끝나 조작이 돌아올 때까지 A 로 글을 넘긴다(많아야 N 프레임). 창이 닫히고(창 번호 FF, 가만히 서면 뜨는
+--             상태 창 02 도 닫힌 것으로 봄) 조작이 풀리고(7E:19AE bit0 = 0) 필드 루프가 도는(7E:007F 가 4 프레임 안에 바뀜)
+--             채 30 프레임이면 끝. 장면 사이 잠깐 조작이 풀리는 틈에 끝나지 않게 필드 루프까지 본다. 물음 창(32)은 커서를
+--             「예」(0)에 두고 A, 남은 A 가 연 명령 창(01)은 B 로 닫는다. 쪽 수로 A 를 세지 않으므로 글이 길어져도 남은 B 가
+--             물음에 「아니요」 로 답하지 않는다
+--   settle:N  고르기 창 커서(7E:0AD7)가 N 프레임 같은 값일 때까지 누르지 않고 기다린다(많아야 300 프레임). 창이 뜬 뒤
+--             커서가 몇 프레임 칸을 훑고 첫 칸에 놓이는 창에서, 훑는 값을 보고 cursor 가 끝나지 않게 그 앞에 둔다
 -- 프레임 수만 정해 누르면, 앞 장·앞 모듈이 메시지를 더해 창이 뜨는 때가 바뀔 때 누른 방향이 물음 창 커서를 옮겼다.
 -- STATE 세이브스테이트에서 시작해 주인공(인물 표 슬롯 0)을 WAYPOINTS 의 셀 좌표로 차례로 걷게 한다.
 -- WAYPOINTS="3,11;3,24;7,24;7,22" 처럼 x,y(맵 셀) 목록. 한 번에 한 축만 움직이므로 꺾이는 곳마다 점을 둔다.
@@ -35,7 +42,7 @@ for tok in string.gmatch(os.getenv("WAYPOINTS") or "", "[^;]+") do
     pts[#pts + 1] = {tonumber(x), tonumber(y)}
   else
     local b, f = tok:match("^(%a+):(%d+)$")
-    if b == "until" or b == "cursor" or b == "ask" or b == "pick" or b == "open" then
+    if b == "until" or b == "cursor" or b == "ask" or b == "pick" or b == "open" or b == "done" or b == "settle" then
       pts[#pts + 1] = {kind = b, arg = tonumber(f)}
     else
       pts[#pts + 1] = {b, tonumber(f)}
@@ -53,6 +60,7 @@ local after = tonumber(os.getenv("AFTER") or "120")
 local changesWanted = tonumber(os.getenv("CHANGES") or "1")
 local hold = tonumber(os.getenv("HOLD") or "90")
 local n, pi, left, wi, stuck, last, press, since = 0, 1, nil, 1, 0, nil, nil, nil
+local tick, tickAge, held = nil, 0, nil
 local log, curMap, changes, lastChange = {}, nil, 0, nil
 emu.addEventCallback(function()
   n = n + 1
@@ -94,6 +102,41 @@ emu.addEventCallback(function()
       elseif press <= 0 then
         log[#log + 1] = string.format("f%05d until timeout window %02X", n, w)
         press = nil; wi = wi + 1
+      end
+    elseif p.kind == "done" then
+      local w, c = emu.read(0x7E0A00, m), emu.read(0x7E0AD7, m)
+      local t = emu.read(0x7E007F, m)
+      if t ~= tick then tick = t; tickAge = 0 else tickAge = tickAge + 1 end
+      local calm = (w == 0xFF or w == 0x02) and (emu.read(0x7E19AE, m) & 1) == 0 and tickAge < 4
+      if press == nil then press = p.arg; since = 0 end
+      press = press - 1
+      if calm then since = since + 1 else since = 0 end
+      if since >= 30 then
+        log[#log + 1] = string.format("f%05d done", n)
+        press = nil; since = nil; wi = wi + 1
+      elseif press <= 0 then
+        log[#log + 1] = string.format("f%05d done timeout window %02X", n, w)
+        press = nil; since = nil; wi = wi + 1
+      elseif not calm and not ((w == 0xFF or w == 0x02) and (emu.read(0x7E19AE, m) & 1) == 0) then
+        if w == 0x32 and c ~= 0 then
+          if n % 12 < 6 then L.press({up = true}) end
+        elseif w == 0x01 then
+          if n % 16 < 8 then L.press({b = true}) end
+        elseif n % 16 < 8 then
+          L.press({a = true})
+        end
+      end
+    elseif p.kind == "settle" then
+      local c = emu.read(0x7E0AD7, m)
+      if press == nil then press = 300; since = 0; held = c end
+      press = press - 1
+      if c == held then since = since + 1 else since = 0; held = c end
+      if since >= p.arg then
+        log[#log + 1] = string.format("f%05d settle cursor %d", n, c)
+        press = nil; since = nil; wi = wi + 1
+      elseif press <= 0 then
+        log[#log + 1] = string.format("f%05d settle timeout cursor %d", n, c)
+        press = nil; since = nil; wi = wi + 1
       end
     elseif p.kind == "ask" or p.kind == "open" then
       local w = emu.read(0x7E0A00, m)
