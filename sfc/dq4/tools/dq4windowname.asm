@@ -790,6 +790,7 @@ org $24A5E9
 !wt_hash  = $1D0C           ; WtAlloc 안에서만: 그린 문구 표식. 이름 그리기(WnKorean)의 !wn_s 와 자리를 함께 씀(겹쳐 돌지 않음)
 !wt_slot2 = $A972           ; 이번에 쓴 슬롯 × 2, FFFF = 명령 창 전용 칸
 !wt_fixkeys = $3EA0         ; 8 워드: 전용 칸에 그린 명령 창·가게 창 문구의 버퍼 자리, 0 = 빈 칸. WtVis 가 안 보이는 것을 지움
+!wt_fix_scan = 6           ; WtVis: 전용 칸 문구 자리에서 1D0~ 을 찾는 칸 수(문구 첫 칸이 덮여도 뒤 칸이 보이면 보임)
 !wt_k     = $A974           ; 그리는 고정 문구 번호
 !wt_dirty = $A9F0           ; 2 워드: 슬롯마다 1비트, 메시지 캔버스 안에 그림을 올린 슬롯
 !wt_age   = $A96C           ; 쓸 때마다 하나씩
@@ -2090,6 +2091,39 @@ WtBaseOf:
     RTS
 +
     LDA.l WtSlot,X
+    RTS
+
+; 슬롯 X 가 그릴 수 있는 열 수(A). 가나 항목은 칸 수(열 수 × 2)의 반, 캔버스 슬롯은 크기 묶음(작은 4·중간 7·큰 10)
+WtColsOf:
+    CPX.w #!wt_nkana*2
+    BCS +
+    PHX
+    TXA
+    LSR
+    TAX
+    LDA.w !wt_klen,X
+    PLX
+    AND #$00FF
+    LSR
+    RTS
++
+    JSR WtClassOf
+    AND #$000F
+    BNE +
+    LDA #$0004
+    RTS
++
+    CMP #$0001
+    BNE +
+    LDA #$0007
+    RTS
++
+    CMP #$0002
+    BNE +
+    LDA #$000A
+    RTS
++
+    LDA #$0000
     RTS
 
 ; 슬롯 X 의 등급(A). 필드면 WtClassF, 전투면 WtClass
@@ -3790,12 +3824,34 @@ WtVis:
     CMP #$001E
     BCS .next
 .check
+    ; 키 자리(첫 칸)만 보면, 앞 창이 이름 앞부분만 덮은 뒤 창(장비 칸 43 이 덮은 「누구」 미리보기 14 등)의 남은
+    ; 칸이 보이는데도 슬롯을 내줘 다른 이름 조각이 보였다. 그 줄의 열 칸 가운데 하나라도 슬롯 그림이면 보임
+    JSR WtBaseOf
+    STA.w !wq_left
+    JSR WtColsOf
+    PHA
     LDY.w !wq_len
+-
+    LDA 1,S
+    BEQ .unseen
+    DEC
+    STA 1,S
     LDA.w $5000,Y
     AND #$03FF
-    STA.w !wq_left
-    JSR WtBaseOf
     CMP.w !wq_left
+    BEQ .seen
+    INC.w !wq_left
+    INY
+    INY
+    BRA -
+.unseen
+    PLA
+    LDA #$0001
+    BRA .mark
+.seen
+    PLA
+    LDA #$0000
+.mark
     PHP
     TXA
     LSR
@@ -3816,7 +3872,9 @@ WtVis:
     INX
     INX
     CPX.w #!wt_nslot*2
-    BCC .slot
+    BCS +
+    JMP .slot
++
     ; 전용 칸 문구 자리도 같은 줄 거르기로 재, 그 자리가 더는 1D0~1FF 를 가리키지 않으면 지운다
     LDX #$000E
 .fix
@@ -3844,10 +3902,18 @@ WtVis:
     CMP #$001E
     BCS .fixnext
 .fixcheck
+    ; 문구 첫 칸이 다른 창에 덮여도 뒤 칸이 보이면 그 창은 보인다(명령 창 왼쪽 줄이 「누구」 창에 반쯤 덮일 때)
+    LDA.w #!wt_fix_scan
+    STA.w !wq_left
+-
     LDA.w $5000,Y
     AND #$03FF
     CMP #$01D0
     BCS .fixnext
+    INY
+    INY
+    DEC.w !wq_left
+    BNE -
 .fixgone
     STZ.w !wt_fixkeys,X
 .fixnext

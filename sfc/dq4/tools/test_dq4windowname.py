@@ -531,6 +531,27 @@ class NameSlotTest(unittest.TestCase):
         self.assertIn('AND #$03FF', body)
         self.assertIn('BEQ .pick', body)
         self.assertIn('LDA #$0008\n    STA.w !wn_r', body)     # 모두 쓰이면 차례대로
+class VisibleTest(unittest.TestCase):
+    """WtVis: 슬롯은 키 줄의 열 칸 가운데 하나라도 그 슬롯 그림이면 보인다(앞 창이 이름 앞부분만 덮은 뒤 창)."""
+
+    def body(self, name):
+        asm = ASM.read_text(encoding='utf-8')
+        start = asm.index(f'\n{name}:')
+        return asm[start:asm.index('\n; ', start + 1)]
+
+    def test_any_cell_of_the_key_row_counts(self):
+        vis = self.body('WtVis')
+        self.assertIn('JSR WtColsOf', vis)
+        self.assertIn('INC.w !wq_left\n    INY\n    INY\n    BRA -', vis)
+        # 전용 칸 문구도 첫 칸만이 아니라 !wt_fix_scan 칸을 본다(16비트 즉값이어야 함)
+        self.assertIn('LDA.w #!wt_fix_scan', vis)
+
+    def test_cols_of_a_slot(self):
+        """가나 항목은 칸 수의 반, 캔버스 슬롯은 크기 묶음 4·7·10(dq4windowcheck.slot_table 과 같음)."""
+        cols = self.body('WtColsOf')
+        self.assertIn('LDA.w !wt_klen,X', cols)
+        found = [int(v, 16) for v in re.findall(r'LDA #\$([0-9A-F]{4})\n    RTS', cols)]
+        self.assertEqual(found, [4, 7, 10, 0])
 
 if __name__ == '__main__':
     unittest.main()
