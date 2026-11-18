@@ -10,7 +10,7 @@ FLAGS = {
                                                           'NOTICE', 'BUTTON', 'ASKED', 'PRESSED')},
     'ENDOR_COUNT': (ch3.VARS_AT + ch3.SLOTS['E'].vars[0] + endor.VARS, 0xFF),
     **{f'NENE_SALES{k}': (ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + shop.SALES + k, 0xFF) for k in range(3)},
-    'NENE_STOCK0': (ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + shop.STOCK, 0xFF),
+    'NENE_STOCK0': (shop.stock_addr(0), 0xFF),
     # 따라 걷는 첫 칸의 그림 번호(인물 표 7E:3220 + 슬롯 1). 용병은 dq4people 이 NDS 병사·시인을 싣는 그림
     'FOLLOWER1': (0x7E3221, 0xFF),
 }

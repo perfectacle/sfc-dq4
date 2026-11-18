@@ -51,7 +51,7 @@ class DayTest(unittest.TestCase):
             rom[lorom(shop.PRICE_SCALE + item)] = k
         w = bytearray(0x20000)
         for i, item in enumerate(stock):
-            w[(VARS2 & 0xFFFF) + shop.STOCK + i] = 0 if item is None else item + 1
+            w[shop.stock_addr(i) & 0xFFFF] = 0 if item is None else item + 1
         for k in range(3):
             w[(VARS2 & 0xFFFF) + shop.SALES + k] = sales >> 8 * k & 0xFF
         c = Cpu(bytes(rom), w)
@@ -65,7 +65,8 @@ class DayTest(unittest.TestCase):
         c.jsl(FAR, max_steps=200000)
         got = c.wram
         base = (VARS2 & 0xFFFF)
-        left = [None if got[base + shop.STOCK + i] == 0 else got[base + shop.STOCK + i] - 1 for i in range(len(stock))]
+        cells = [got[shop.stock_addr(i) & 0xFFFF] for i in range(len(stock))]
+        left = [None if v == 0 else v - 1 for v in cells]
         return int.from_bytes(got[base + shop.SALES:base + shop.SALES + 3], 'little'), left
 
     def test_day_matches_the_fc_formula(self):
@@ -73,6 +74,8 @@ class DayTest(unittest.TestCase):
             ([0x0C, 0x0C, 0x01], [0, 0, 0, 0xFF, 0x10, 0x80]),
             ([0x0C, None, 0x20, 0x01], [0xBF, 0x40, 0xC0, 0x00, 0x22]),
             ([0x20] * 3, [0xFF, 0xFF, 0x00, 0xFF]),
+            # 덩어리 경계(칸 23·24)와 마지막 칸 119
+            ([None] * 23 + [0x0C, 0x01] + [None] * 94 + [0x20], [0x00, 0x00, 0x00, 0x80, 0x00, 0x40]),
         ]
         for stock, rolls in cases:
             want = fc_day(stock + [None] * (shop.STOCK_SLOTS - len(stock)), rolls)
@@ -87,21 +90,23 @@ class DayTest(unittest.TestCase):
 
 
 class ViewTest(unittest.TestCase):
-    """nene_view: 창(BRK 95 0F)이 열린 동안 톨네코 물건 칸 = 가게 물건, 장비 비트 0. 닫은 뒤 둘 다 그대로."""
+    """nene_view: 창(BRK 95 0F)이 열릴 때마다 톨네코 물건 칸 = 비지 않은 가게 물건 12개씩(빈 칸은 FF), 장비 비트 0.
+    끝나면 톨네코 칸·장비가 그대로이고 가게 칸은 바뀌지 않는다."""
 
-    def run_view(self, stock, items, equip):
+    def run_view(self, stock, items, equip, answers=()):
         rom = bytearray(0x280000)
         stubs, where = shop.low_stubs(slots.LOW_STUBS[0])
         code = shop._view(VARS2, where)
         rom[lorom(FAR):lorom(FAR) + len(code)] = code
         w = bytearray(0x20000)
-        base, it = VARS2 & 0xFFFF, ch3.PARTY_ITEMS & 0xFFFF
+        it = ch3.PARTY_ITEMS & 0xFFFF
         for i, item in enumerate(stock):
-            w[base + shop.STOCK + i] = 0 if item is None else item + 1
+            w[shop.stock_addr(i) & 0xFFFF] = 0 if item is None else item + 1
         w[it:it + 12] = bytes(items)
         w[it - 2], w[it - 1] = equip & 0xFF, equip >> 8
+        before = [w[shop.stock_addr(i) & 0xFFFF] for i in range(shop.STOCK_SLOTS)]
         c = Cpu(bytes(rom), w)
-        seen = []
+        seen, answers = [], iter(answers)
 
         def rtl(cpu):
             cpu.rtl()
@@ -109,34 +114,52 @@ class ViewTest(unittest.TestCase):
 
         def window(cpu):
             seen.append((bytes(cpu.wram[it:it + 12]), cpu.wram[it - 2] | cpu.wram[it - 1] << 8))
+            cpu.wram[0xE8] = next(answers, 0)            # 0 = A(다음 쪽), 80 = B(그만둠)
             return rtl(cpu)
         for a in (shop.SHOP_ENTER, shop.PICKER_RESET, *where.values()):
             c.hooks[a] = rtl
         c.hooks[where['items']] = window
-        c.jsl(FAR, max_steps=200000)
+        c.jsl(FAR, max_steps=500000)
         result = bool(c.wram[(0x2190 + ch3.RESULT[0])] & ch3.RESULT[1])
-        after = (bytes(c.wram[it:it + 12]), c.wram[it - 2] | c.wram[it - 1] << 8,
-                 bytes(c.wram[base + shop.STOCK:base + shop.STOCK + shop.STOCK_SLOTS]))
+        after = (bytes(c.wram[it:it + 12]), c.wram[it - 2] | c.wram[it - 1] << 8)
+        self.assertEqual([c.wram[shop.stock_addr(i) & 0xFFFF] for i in range(shop.STOCK_SLOTS)], before, '가게 칸')
         return result, seen, after
 
-    def test_window_shows_the_stock_and_restores(self):
-        stock = [0x0C, None, 0x01] + [None] * (shop.STOCK_SLOTS - 3)
+    def test_pages_of_twelve_skip_holes(self):
+        # 15개(사이에 빈 칸, 덩어리 경계 23·24 를 넘음) → 12 + 3
+        stock = [None] * shop.STOCK_SLOTS
+        filled = [0, 2, 5, 9, 11, 20, 22, 23, 24, 25, 40, 60, 80, 100, 119]
+        for n, k in enumerate(filled):
+            stock[k] = n + 1
         items = [0x42, 0xBB, 0x0C] + [0xFF] * 9
         result, seen, after = self.run_view(stock, items, 0x0001)
         self.assertTrue(result)
-        self.assertEqual(seen, [(bytes([0x0C, 0xFF, 0x01] + [0xFF] * 9), 0)])
-        self.assertEqual(after, (bytes(items), 0x0001, bytes([0x0D, 0, 0x02] + [0] * (shop.STOCK_SLOTS - 3))))
+        self.assertEqual(seen, [(bytes(range(1, 13)), 0), (bytes([13, 14, 15] + [0xFF] * 9), 0)])
+        self.assertEqual(after, (bytes(items), 0x0001))
+
+    def test_b_stops_after_the_first_page(self):
+        stock = [7] * 30 + [None] * (shop.STOCK_SLOTS - 30)
+        result, seen, after = self.run_view(stock, [0x42] + [0xFF] * 11, 0x0001, answers=(0x80,))
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(after, (bytes([0x42] + [0xFF] * 11), 0x0001))
+
+    def test_full_stock_is_ten_pages(self):
+        stock = [k % 0xD0 for k in range(shop.STOCK_SLOTS)]
+        _, seen, _ = self.run_view(stock, [0xFF] * 12, 0)
+        self.assertEqual(len(seen), shop.STOCK_SLOTS // 12)
+        self.assertEqual(b''.join(p for p, _ in seen), bytes(stock))
 
     def test_empty_stock_opens_nothing(self):
         result, seen, after = self.run_view([None] * shop.STOCK_SLOTS, [0x42] + [0xFF] * 11, 0x0001)
         self.assertFalse(result)
         self.assertEqual(seen, [])
-        self.assertEqual(after[:2], (bytes([0x42] + [0xFF] * 11), 0x0001))
+        self.assertEqual(after, (bytes([0x42] + [0xFF] * 11), 0x0001))
 
 
 class ShapeTest(unittest.TestCase):
-    def test_stock_fits_the_second_vars(self):
-        self.assertLessEqual(shop.STOCK + shop.STOCK_SLOTS, slots.SLOTS['E'].vars2[1] - slots.SLOTS['E'].vars2[0])
+    def test_save_area_fits_the_second_vars(self):
+        self.assertLessEqual(shop.SAVE + shop.ITEM_SLOTS + 2, slots.SLOTS['E'].vars2[1] - slots.SLOTS['E'].vars2[0])
+        self.assertGreaterEqual(shop.SAVE, shop.SALES + 3)
 
     def test_low_stubs(self):
         # 뱅크 4E 의 코드는 BRK 를 받침으로만 부른다(BRK 는 놓인 뱅크를 DB 로 둠)
@@ -164,9 +187,10 @@ class ShapeTest(unittest.TestCase):
         self.assertIn(0x1004, shop.MESSAGES['nene_offer'])
         self.assertNotIn(0x100A, shop.MESSAGES['nene_precious'])
 
-    def test_stock_slots_match_the_item_slots(self):
-        # 「보기」 는 가게 칸과 톨네코 물건 12칸을 한 번에 맞바꾼다
-        self.assertEqual(shop.STOCK_SLOTS, 12)
+    def test_stock_is_the_fc_size(self):
+        # FC $61DB 의 칸 수(119개면 036E, 120개면 0377)
+        self.assertEqual(shop.STOCK_SLOTS, 120)
+        self.assertEqual(len({shop.stock_addr(k) for k in range(shop.STOCK_SLOTS)}), 120)
 
     def test_counter_talk_falls_back(self):
         ctx = next(c for c in ch3.contexts(0x1000) if c.key == 'E')

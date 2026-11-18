@@ -100,6 +100,22 @@ class SlotTest(unittest.TestCase):
             self.assertFalse([q for q in prefixes if q != p and q.startswith(p)], p)
             self.assertFalse('ch3_opening'.startswith(p), p)
 
+    def test_nene_stock_slots_stay_clear_of_the_other_users(self):
+        slots_used = set(slots.STOCK_SLOTS)
+        # 변수 칸 48·49, 3장 넘김이 아리나 일행을 맡기는 칸(STASH_FIRST~), 전투 글 그림자(dq4battlemsg, 7E:2332 + 880)와 겹치지 않음
+        self.assertFalse(slots_used & {slots.VARS_SLOT, slots.VARS2_SLOT})
+        self.assertLess(max(slots_used), ev.STASH_FIRST)
+        self.assertGreaterEqual(ev.MONSTER_SLOTS + min(slots_used) * ev.MONSTER_SLOT, 0x7E2332 + 880)
+        self.assertEqual(sorted(slots_used), list(range(min(slots_used), max(slots_used) + 1)))
+        self.assertEqual(len(slots_used) * slots.STOCK_PER_SLOT, 120)
+        self.assertLess(slots.STOCK_PER_SLOT, ev.MONSTER_SLOT - 1)
+        self.assertEqual(slots.STOCK_AT, ev.MONSTER_SLOTS + min(slots_used) * ev.MONSTER_SLOT + 1)
+        # 4장 넘김이 지울 자리가 가게 물건과 변수 칸 둘을 모두 덮는다
+        lo, hi = slots.CHAPTER_END_CLEAR
+        self.assertEqual(lo, ev.MONSTER_SLOTS + min(slots_used) * ev.MONSTER_SLOT)
+        self.assertGreaterEqual(hi, slots.VARS_AT + slots.VARS_SIZE)
+        self.assertLessEqual(hi, ev.MONSTER_SLOTS + ev.STASH_FIRST * ev.MONSTER_SLOT)
+
     def test_second_vars_and_far_code_are_owned_once(self):
         spans = [('spare', slots.SPARE['vars2'])] + [(k, s.vars2) for k, s in SLOTS.items() if s.vars2]
         used = set()
@@ -136,7 +152,8 @@ class SlotTest(unittest.TestCase):
         mine = {f + 0x2190 for f in slots.COMMON_FLAGS} | {f + 0x2190 for s in SLOTS.values() for f in s.flags} | \
             {f + 0x2190 for f in slots.SPARE['flags']} | set(range(slots.VARS_AT & 0xFFFF,
                                                                     (slots.VARS_AT & 0xFFFF) + slots.VARS_SIZE)) | \
-            set(range(slots.VARS2_AT & 0xFFFF, (slots.VARS2_AT & 0xFFFF) + slots.VARS2_SIZE))
+            set(range(slots.VARS2_AT & 0xFFFF, (slots.VARS2_AT & 0xFFFF) + slots.VARS2_SIZE)) | \
+            {(0x2332 + 26 * s + 1 + k) for s in slots.STOCK_SLOTS for k in range(slots.STOCK_PER_SLOT)}
         owners = {s.module for s in SLOTS.values()} | {'dq4ch3slots', 'dq4ch3event', 'dq4neneshop'}
         for path in HERE.glob('*.py'):
             if path.stem.startswith('test_') or path.stem in owners:
