@@ -80,8 +80,9 @@ ITEM_LIST = 0x0F
 COUNTER_WALK = f'{TALK_DOWN};{YES};open:{ITEM_LIST};settle:8;cursor:2;a:8;{YES};{NO};{NO};{wc.taps(1, 90)};{CLOSE}'
 # 036B 「예」(매상 없음), 물건 창을 B 로 그만두고 0374 「예」 → 가게 물건 창(BRK 95 0F)을 B 로 닫고 0375
 VIEW_WALK = f'{TALK_DOWN};{YES};wait:150;b:8;{YES};wait:150;b:8;wait:60;{wc.taps(1, 90)};{CLOSE}'
-# 가게 물건 11개 → 보기 창(창 37, 네네 꼴 8줄) 두 쪽을 A 로 넘겨 끝까지 본 뒤 0375
-PAGE_STOCK = ';'.join(f'{shop.stock_addr(k) & 0xFFFF:04X}={(k % 0x30) + 2:02X}' for k in range(11))
+# 가게 물건 11개 → 보기 창(창 37, 네네 꼴 8줄) 두 쪽을 A 로 넘겨 끝까지 본 뒤 0375. 물건은 3장 엔돌·본몰 가게가 파는 것(DQ5 번호)
+PAGE_ITEMS = (0x0C, 0x1E, 0x01, 0x07, 0x21, 0x0B, 0x50, 0x4F, 0x78, 0x76, 0x4D)
+PAGE_STOCK = ';'.join(f'{shop.stock_addr(k) & 0xFFFF:04X}={item + 1:02X}' for k, item in enumerate(PAGE_ITEMS))
 VIEW_PAGE = 0x37
 PAGES_WALK = (f'{TALK_DOWN};{YES};wait:150;b:8;{YES};open:{VIEW_PAGE};wait:60;a:8;wait:150;open:{VIEW_PAGE};wait:60;a:8;wait:60;'
               f'{wc.taps(1, 90)};{CLOSE}')
@@ -90,6 +91,9 @@ PAGES_WALK = (f'{TALK_DOWN};{YES};wait:150;b:8;{YES};open:{VIEW_PAGE};wait:60;a:
 WIDE_ITEMS = (0x0B, 0x29, 0x2A, 0x61, 0x84, 0xCD)
 WIDE_STOCK = ';'.join(f'{shop.stock_addr(k) & 0xFFFF:04X}={item + 1:02X}' for k, item in enumerate(WIDE_ITEMS))
 PAGE_OPEN_WALK = f'{TALK_DOWN};{YES};wait:150;b:8;{YES};open:{VIEW_PAGE};wait:60'
+# 0374(사들이기 끝)·0377(가게가 가득 참) 뒤 보기 창이 열린 채 멈춘다. 그 메시지 글자가 창 밑에 없어야 한다
+MSG_CLEAR = {k: 0 for k in endor_checks.FLAGS if k.startswith('NENE_MSG_')}
+FULL_VIEW_WALK = f'{TALK_DOWN};{YES};{YES};open:{VIEW_PAGE};wait:60'
 PAGE_TWO_WALK = f'{PAGE_OPEN_WALK};a:8;wait:150;open:{VIEW_PAGE};wait:60'
 # 톨네코 소지품이 없으면 0334 → 0374 「예」 → 가게가 비었으면 0376 만
 EMPTY_WALK = f'{TALK_DOWN};{YES};{YES};{wc.taps(1, 90)};{CLOSE}'
@@ -147,14 +151,24 @@ SEGMENTS = [
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(_items(endor.STEEL_SWORD), PAGE_STOCK, sales_set(0)))}),
     ('nene_pages', 'walk', PAGES_WALK,
      {'map': endor.TOWN, 'items': [0x42, parts.BENTO, endor.STEEL_SWORD],
-      'bytes': {'NENE_STOCK0': 0x02, 'EQUIP0': 0x01, 'NENE_MARK': 0}}),
+      'bytes': {'NENE_STOCK0': PAGE_ITEMS[0] + 1, 'EQUIP0': 0x01, 'NENE_MARK': 0}}),
     # 첫 쪽(8줄, 다음 쪽 있음)이 열린 채 멈춰 표지·쪽 줄 수를 본다. 받침 뒤 절대 주소로 쓰던 때는 둘 다 0 이라 창 37 이
     # FC 꼴 대신 DQ5 팔기 목록 꼴(x 9, 커서)로 떴다
     ('nene_page_open_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(_items(endor.STEEL_SWORD), PAGE_STOCK, sales_set(0)))}),
     ('nene_page_open', 'walk', PAGE_OPEN_WALK,
      {'map': endor.TOWN, 'bytes': {'NENE_MARK': shop.VIEW_MORE, 'NENE_LINES': shop.VIEW_LINES, 'NENE_SPLIT': 0,
-                                   'NENE_CELL_18_3': 0x8C, 'NENE_CELL_19_4': 0x01, 'NENE_CELL_18_20': 0x8B}}),
+                                   'NENE_CELL_18_3': 0x8C, 'NENE_CELL_19_4': 0x01, 'NENE_CELL_18_20': 0x8B, **MSG_CLEAR}}),
+    # 물건 셋(한 쪽, 짧은 창)
+    ('nene_view_open_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
+     {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(_items(endor.STEEL_SWORD), STOCK_SET, sales_set(0)))}),
+    ('nene_view_open', 'walk', PAGE_OPEN_WALK,
+     {'map': endor.TOWN, 'bytes': {'NENE_LINES': 3, 'NENE_SPLIT': 0, 'NENE_CELL_18_3': 0x8C, **MSG_CLEAR}}),
+    # 가게가 가득 참(0377 끝 물음 「예」, 8줄 창)
+    ('nene_full_view_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
+     {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(FULL_STOCK, sales_set(0)))}),
+    ('nene_full_view', 'walk', FULL_VIEW_WALK,
+     {'map': endor.TOWN, 'bytes': {'NENE_LINES': shop.VIEW_LINES, 'NENE_CELL_18_20': 0x8B, **MSG_CLEAR}}),
     # 둘째 쪽(물건 3개)은 FC 창 66 처럼 앞 쪽 위에 겹친 3줄 창: 8줄 높이 창의 버퍼 줄 10 에 3줄 창의 아래 테두리(8B), 그
     # 위 줄 9 는 가린 4번째 줄의 윗 타일 줄이라 빈칸, 창 아래 끝 줄 20 은 앞 쪽 창의 아래 테두리
     ('nene_page_two_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
@@ -162,7 +176,7 @@ SEGMENTS = [
     ('nene_page_two', 'walk', PAGE_TWO_WALK,
      {'map': endor.TOWN, 'bytes': {'NENE_MARK': shop.VIEW_MORE + 1, 'NENE_LINES': shop.VIEW_LINES, 'NENE_SPLIT': 3,
                                    'NENE_CELL_18_3': 0x8C, 'NENE_CELL_18_10': 0x8B, 'NENE_CELL_19_9': 0x01,
-                                   'NENE_CELL_18_20': 0x8B}}),
+                                   'NENE_CELL_18_20': 0x8B, **MSG_CLEAR}}),
     # 같은 열린 첫 쪽에서 창 오른쪽 테두리 열(화면 x 29)의 타일이 줄마다 테두리이고 바깥 열(x 30)은 창 밖인지(검사
     # NENE_RIGHT*). 열 칸 이름이 그대로 그려지면 테두리를 덮는다
     ('nene_wide_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
@@ -277,6 +291,8 @@ MESSAGES = {
     'nene_pages': ['nene_counter_ask', 'nene_pick', 'nene_done', 'nene_cheer'],
     'nene_page_open': ['nene_counter_ask', 'nene_pick', 'nene_done'],
     'nene_page_two': ['nene_counter_ask', 'nene_pick', 'nene_done'],
+    'nene_view_open': ['nene_counter_ask', 'nene_pick', 'nene_done'],
+    'nene_full_view': ['nene_counter_ask', 'nene_full'],
     'nene_wide': ['nene_counter_ask', 'nene_pick', 'nene_done'],
     'nene_empty': ['nene_counter_ask', 'nene_nothing', 'nene_done', 'nene_empty'],
     'nene_full': ['nene_counter_ask', 'nene_full', 'nene_cheer'],
