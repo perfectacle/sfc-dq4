@@ -29,6 +29,10 @@ math pri on
 !fc_lead = $124A
 !fc_dig = $124B
 !pay = $1256
+!fc_lp = $1260                      ; 줄 다섯의 배당(낱말)
+!fc_bt = $126A                      ; 세는 동안 깜박임 차례(0~31)
+!fc_ln = $126B                      ; 세는 줄
+!fc_cnt = $126C                     ; 0 이 아니면 세는 중(Frame 이 그 줄을 깜박임)
 !pad_new = $1212
 !oam = $0300
 !oam_hi = $0500
@@ -37,6 +41,7 @@ math pri on
 !ACCEL = 10
 !fc_spd = $124C
 !fc_acc = $124D
+!fc_rs = $1250                      ; 3바이트, 세우는 릴의 빠르기
 !STOP_FIRST = 185
 !STOP_GAP = 60
 !BTN_A = $0080
@@ -208,7 +213,9 @@ Sfx:
 
 Frame:
     JSR DrawReels
-    JSR DrawLamps
+    LDA !fc_cnt : BEQ +
+    JSR Blink
++   JSR DrawLamps
     JSR DrawCoins
     JSL $009506
     REP #$10 : SEP #$20
@@ -295,16 +302,28 @@ Spin:
 +   LDX #$0000
 .reel
     LDA !fc_run,X : BEQ .next
-    LDA !fc_off,X : CLC : ADC !fc_spd
-    CMP #$20 : BCC +
-    ; 한 칸 내려감. 세우는 중이면 칸에 맞춰 선다
-    PHA : LDA !fc_pos,X : INC : AND #$1F : STA !fc_pos,X : PLA
-    SEC : SBC #$20
-    PHA : LDA !fc_run,X : CMP #$02 : PLA : BNE +
+    CMP #$02 : BNE +
+    LDA !fc_rs,X : BRA ++
++   LDA !fc_spd
+++  CLC : ADC !fc_off,X
+    CMP #$20 : BCC .keep
+    ; 한 칸 내려감
+    SEC : SBC #$20 : STA !fc_off,X
+    LDA !fc_pos,X : INC : AND #$1F : STA !fc_pos,X
+    ; 세우는 중이면 칸마다 8 → 6 → 4 → 2 → 1 로 늦추고 1 로 칸에 닿으면 선다(FC 17:$A409 트랩: 릴마다 약 60프레임)
+    LDA !fc_run,X : CMP #$02 : BNE .next
+    LDA !fc_rs,X : CMP #$01 : BEQ .halt
+    CMP #$03 : BCC +
+    SBC #$02 : BRA ++
++   LDA #$01
+++  STA !fc_rs,X
+    BRA .next
+.halt
     STZ !fc_off,X : STZ !fc_run,X
     PHX : JSR SfxStop : PLX
     BRA .next
-+   STA !fc_off,X
+.keep
+    STA !fc_off,X
 .next
     INX : CPX #$0003 : BCC .reel
     REP #$20 : INC !fc_t : LDA !fc_t
@@ -319,6 +338,7 @@ Spin:
 .stop
     SEP #$20
     LDA #$02 : STA !fc_run,X
+    LDA !fc_spd : STA !fc_rs,X
 .frame
     JSR Frame
     LDA !fc_run : ORA !fc_run+1 : ORA !fc_run+2 : BEQ +
@@ -356,10 +376,15 @@ Judge:
     PLA : STA !fc_grid,Y
     INC !fc_row : LDA !fc_row : CMP #$03 : BCC .row
     INX : CPX #$0003 : BCC .reel
-    REP #$20 : STZ !pay : SEP #$20 : STZ !pay+2
+    REP #$20 : STZ !pay
+    LDX #$0000
+-   STZ !fc_lp,X : INX : INX : CPX #$000A : BCC -
+    SEP #$20 : STZ !pay+2
     STZ !fc_row                     ; 줄 번호
 .line
-    LDA !fc_row : CMP !fc_n : BCS .done
+    LDA !fc_row : CMP !fc_n : BCC +
+    JMP .done
++
     ASL : CLC : ADC !fc_row : %ix()                     ; 줄 × 3
     LDA.l Lines,X : %iy() : LDA !fc_grid,Y : STA !fc_first
     LDA.l Lines+1,X : %iy() : LDA !fc_grid,Y : CMP !fc_first : BNE .miss
@@ -368,14 +393,35 @@ Judge:
     STZ !fc_first                   ; 체리 둘 = 색인 0
 .hit
     LDA !fc_first : AND #$07 : ASL : %ix()
-    REP #$20 : LDA.l Pay,X : CLC : ADC !pay : STA !pay : SEP #$20
+    REP #$20 : LDA.l Pay,X : PHA : CLC : ADC !pay : STA !pay
+    LDA !fc_row : AND #$00FF : ASL : TAX : PLA : STA !fc_lp,X : SEP #$20
 .miss
-    INC !fc_row : BRA .line
+    INC !fc_row : JMP .line
 .done
-    REP #$20 : LDA !pay : SEP #$20 : BEQ .lose
+    REP #$20 : LDA !pay : SEP #$20 : BNE +
+    JMP .lose
++
     JSR SfxWin
-    REP #$20 : LDA !coins : CLC : ADC !pay : STA !coins : SEP #$20
-    LDA !coins+2 : ADC #$00 : STA !coins+2
+    ; 맞은 줄마다 배당을 한 프레임에 한 장씩 세며 장마다 소리, 그 줄 무늬는 32프레임마다 8프레임 숨김(FC 17:$9EDA)
+    STZ !fc_ln
+    LDA #$01 : STA !fc_cnt
+.cline
+    LDA !fc_ln : ASL : %ix()
+    REP #$20 : LDA !fc_lp,X : SEP #$20 : BEQ .nline
+    STZ !fc_bt
+.count
+    REP #$20 : INC !coins : SEP #$20 : BNE +
+    INC !coins+2
++   LDA !fc_ln : ASL : %ix()
+    REP #$20 : DEC !fc_lp,X : SEP #$20
+    JSR SfxCoin
+    JSR Frame
+    LDA !fc_bt : INC : AND #$1F : STA !fc_bt
+    LDA !fc_ln : ASL : %ix()
+    REP #$20 : LDA !fc_lp,X : SEP #$20 : BNE .count
+.nline
+    INC !fc_ln : LDA !fc_ln : CMP #$05 : BCC .cline
+    STZ !fc_cnt
     JSR Clear
     %text($05CC, !str_win)
     LDA #$5A : JSR Wait
@@ -438,6 +484,22 @@ DrawReels:                          ; 릴마다 화면 행 -1~2(위→아래)의
     INC !fc_ry : LDA !fc_ry : CMP #$03 : BNE .row
     INX : CPX #$0003 : BCC .reel
     RTS
+
+; 세는 줄(!fc_ln)의 세 칸을 !fc_bt 0~7 동안 숨김(FC 17:$9EB4). DrawReels 뒤에 불러야 한다
+Blink:
+    LDA !fc_bt : CMP #$08 : BCS .ret
+    LDA !fc_ln : ASL : CLC : ADC !fc_ln : %ix()
+    LDY #$0003
+-   PHX : PHY
+    LDA.l Lines,X : %ix() : LDA.l CellOam,X : %ix()
+    LDA #$F0 : STA !oam+!REELS_OAM+1,X
+    PLY : PLX
+    INX : DEY : BNE -
+.ret
+    RTS
+
+; 격자 칸(행 × 3 + 릴, 행 0 이 아래) → 그 칸 OAM 자리(DrawReels: 릴 × 4 + 3 − 행 번째)
+CellOam: db 12, 28, 44, 8, 24, 40, 4, 20, 36
 
 DrawLamps:                          ; 줄 램프 다섯. 켜진 줄(줄 번호 < 넣은 수)은 팔레트 3, 아니면 2(FC 실측)
     LDX #$0000

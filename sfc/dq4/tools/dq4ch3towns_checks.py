@@ -43,9 +43,9 @@ SELLER = W.cell(0x18, 0x02)
 EXCHANGE = W.cell(0x1C, 0x08)
 SLOT = W.cell(*W.SLOT_CELLS[2])
 POKER = W.cell(0x13, 0x0B)
-POKER_DECK = 0x7E1280
-POKER_RIG = 0x7E1265                 # 더블 업 손질 차례 셋(FC $83~$85)          # dq4fcpoker !deck(앞 다섯이 손)
-GAME_RNG = 0x7E075B
+POKER_DECK = 0x7E1280                # dq4fcpoker !deck(앞 다섯이 손)
+POKER_RIG = 0x7E1265                 # 더블 업 손질 차례 셋(FC $83~$85)
+SLOT_POS = 0x7E1224                  # dq4fcslot !fc_pos(릴마다 띠 칸)
 ARENA = W.cell(0x08, 0x0A)
 ARENA_RNG = '7E075B=11;7E075C=22;7E075D=33'
 # 시합 동안 셋째 몬스터(몬스터 칸 2, 7E:07C0 + 칸 × 16 의 +2 HP)를 999 로 묶어 난수와 상관없이 셋째가 이기게 한다
@@ -62,8 +62,8 @@ def _gold(n):
     return ';'.join(f'{(ch3.GOLD_AT & 0xFFFF) + k:04X}={n >> 8 * k & 0xFF:02X}' for k in range(3))
 
 
-def _slot_rng(fill):
-    return ';'.join(f'{GAME_RNG + k:06X}={fill:02X}' for k in range(3))
+def _slot_pos(cell):
+    return ';'.join(f'{SLOT_POS + k:06X}={cell:02X}' for k in range(3))
 
 
 def _coins(n):
@@ -100,15 +100,15 @@ SEGMENTS = [
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
     ('towns_slot', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:8;wait:60',
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'bytes': {'TOWNS_SLOT_COIN0': 99, 'TOWNS_SLOT_COIN1': 0}}),
-    # FC 슬롯 한 판(기계 2, 코인 둘 = 가운데·위 줄). 릴 처음 자리는 게임 난수(00:953A)로 고르므로 판 동안 7E:075B~075D 를
-    # 묶어 결과를 정한다: 모두 00 이면 배당 10 이라 100 − 2 + 10 = 108, 모두 11 이면 맞는 줄이 없어 98.
+    # FC 슬롯 한 판(기계 2, 코인 둘 = 가운데·위 줄). 릴 자리(7E:1224~1226, 띠 칸)를 판 동안 묶으면 멈추는 때·늦춤과
+    # 상관없이 결과가 정해진다: 셋 다 06 이면 위 줄이 맞아 배당 20 이라 100 − 2 + 20 = 118, 셋 다 00 이면 맞는 줄이 없어 98.
     # 「한 번 더?」 에 B(아니오)로 나온다
-    *(seg for name, fill, coins in (('win', 0x00, 108), ('lose', 0x11, 98))
+    *(seg for name, fill, coins in (('win', 0x06, 118), ('lose', 0x00, 98))
       for seg in ((f'towns_slot_{name}_side', 'warp', f'{W.CASINO},{SLOT[0]},{SLOT[1] + 1}',
                    {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
                   (f'towns_slot_{name}', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:4;wait:30;'
                    'up:4;wait:30;a:4;wait:700;b:8;wait:300',
-                   {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{_slot_rng(fill)}',
+                   {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{_slot_pos(fill)}',
                     'bytes': {'TOWNS_COIN0': coins, 'TOWNS_COIN1': 0}}))),
     # FC 포커 한 판. 섞기는 게임 난수(00:953A, $075B~075D 를 NMI 가 매 프레임 올림)라 코어마다 덱이 갈리므로, 판 동안
     # 덱 앞 다섯(7E:1280~, 손)을 묶고 다섯 장을 모두 남긴다(바꿔 넣기가 없어 묶은 손 그대로). 패(!pk_rank)와 나온 뒤
