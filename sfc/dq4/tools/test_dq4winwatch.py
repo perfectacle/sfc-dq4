@@ -266,7 +266,11 @@ class FileTest(unittest.TestCase):
         # 판정 글은 규칙 코드로 다시 만들므로 캐시 출력·재검증에서 빼고, 기록하는 WRAM 조각 목록은 캐시 키에 든다
         import dq4readset
         self.assertIn(ww.LOG, dq4readset.SKIP)
-        with tempfile.TemporaryDirectory() as d, mock.patch.object(ww, 'wram_env', side_effect=lambda ranges=None, attr='WRAM': attr):
+        # CI 의 시험 잡에는 MesenCE 가 없어 에뮬레이터 지문은 지어 둔다
+        with tempfile.TemporaryDirectory() as d, \
+                mock.patch.object(ww, 'wram_env', side_effect=lambda ranges=None, attr='WRAM': attr), \
+                mock.patch.object(dq4readset, 'mesence_settings', return_value='settings'), \
+                mock.patch.object(dq4readset, 'mesence_stamp', return_value='stamp'):
             parts = dq4readset.key_parts(__file__, b'rom', __file__, Path(d), {}, ())
         self.assertEqual(parts['winwatch'], ['WRAM', 'OAM_WRAM'])
 
