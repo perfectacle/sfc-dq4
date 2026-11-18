@@ -67,6 +67,10 @@ SLOT_PLAY = f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:4;wait:30
 SLOT_SPIN_AT = 77 + 698
 ARENA = W.cell(0x08, 0x0A)
 ARENA_RNG = '7E075B=77;7E075C=22;7E075D=33'
+# 격투장 최근 8시합(dq4ch3slots.ARENA_RECENT, 시합 번호 + 1, 맨 앞이 가장 최근)
+import dq4ch3slots  # noqa: E402
+FLAGS.update({f'ARENA_RECENT{k}': (dq4ch3slots.ARENA_RECENT + k, 0xFF) for k in range(3)})
+ARENA_TALK = f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:60;{";".join(["b:8;wait:90"] * 4)}'
 # 시합 동안 셋째 몬스터(몬스터 칸 2, 7E:07C0 + 칸 × 16 의 +2 HP)를 999 로 묶어 난수와 상관없이 셋째가 이기게 한다
 ARENA_STRONG = '7E07E2=E7;7E07E3=03'
 MAGIC_WATER = 0xA9              # DQ5 まほうのせいすい(FC 경품 첫 줄 5A)
@@ -115,6 +119,14 @@ SEGMENTS = [
                   (f'towns_arena_{("win", "lose")[k]}_fight', 'walk', f'a:8;wait:3000;{";".join(["b:8;wait:150"] * 6)}',
                    {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{ARENA_STRONG}',
                     'bytes': {'TOWNS_COIN0': coins, 'TOWNS_COIN1': 0}}))),
+    # 격투장 최근 8시합 막기(FC 18:$ABC3, 헤드리스 실측: FC 에서 열두 번 말을 걸어 고른 시합이 앞 여덟에 없음). 난수를
+    # 매 프레임 묶어 두 번 말을 걸면(시합 목록에서 B 로 나옴) 첫 뽑기는 둘 다 같은 시합 4 지만, 둘째는 그 번호가 기록에
+    # 있어 다시 뽑아 7 이 된다. 기록은 번호 + 1 이라 08·05·00
+    ('towns_arena_recent_side', 'warp', f'{W.CASINO},{ARENA[0]},{ARENA[1] + 1}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
+    ('towns_arena_recent', 'walk', f'{ARENA_TALK};{ARENA_TALK}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{ARENA_RNG}',
+      'bytes': {'ARENA_RECENT0': 0x08, 'ARENA_RECENT1': 0x05, 'ARENA_RECENT2': 0x00}}),
     # 슬롯(FC 기계 칸 가운데, 아래에서 위를 보고 말 걸기 → DQ5 1코인 기계): 583·584 에 「예」, 위로 한 장 넣으면 슬롯 안
     # 코인이 99. 돌린 뒤 배당은 코어 난수에 따라 달라 코인은 넣은 뒤에만 본다
     ('towns_slot_side', 'warp', f'{W.CASINO},{SLOT[0]},{SLOT[1] + 1}',

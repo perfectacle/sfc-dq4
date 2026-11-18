@@ -39,7 +39,9 @@ FIRST_MACHINE = 0x10               # 06:D14A 에 넘기는 기계 번호 = FIRST
 MACHINES = 5
 HOOK_AT, HOOK_ORIG = 0x11BF71, bytes.fromhex('08 8B C2 10')    # PHP / PHB / REP #$10
 HOOK_BACK = 0x11BF75
-from dq4ch3slots import CASINO_CODE  # noqa: E402
+# 격투장 시합 고르기(26:8E5A, sfc/dq5/docs/dq5-data-format.md 「격투장」)의 난수 부르기. FC 처럼 최근 8시합을 빼고 뽑는다
+ARENA_HOOK, ARENA_ORIG = 0x268E7C, bytes.fromhex('22 3A 95 00')    # JSL $00953A
+from dq4ch3slots import ARENA_RECENT, CASINO_CODE  # noqa: E402
 CODE_AT, CODE_END = CASINO_CODE
 # 뱅크 11 받침(JSR 루틴을 다른 뱅크에서 부르고, 4E 에서 못 쓰는 BRK 효과음을 낸다). 슬롯 글 자리(dq4slottext)의 뒤 남는 곳
 STUBS_AT, STUBS_END = 0x119030, 0x119044
@@ -221,6 +223,8 @@ def apply(data, dq4, font, asar=None):
     d = bytearray(data)
     if bytes(d[lorom(HOOK_AT):lorom(HOOK_AT) + 4]) != HOOK_ORIG:
         raise SystemExit(f'{HOOK_AT:06X}: 슬롯 본체 첫 바이트가 원래 값이 아님')
+    if bytes(d[lorom(ARENA_HOOK):lorom(ARENA_HOOK) + 4]) != ARENA_ORIG:
+        raise SystemExit(f'{ARENA_HOOK:06X}: 격투장 시합 난수 부르기가 원래 값이 아님')
     if any(d[lorom(CODE_AT):lorom(CODE_END - 1) + 1]) or any(d[lorom(STUBS_AT):lorom(STUBS_END)]):
         raise SystemExit('FC 슬롯 코드 자리가 비어 있지 않음')
     bg_tiles, bg_map = bg(prg)
@@ -235,6 +239,7 @@ def apply(data, dq4, font, asar=None):
              'sympal.bin': sympal, 'reelx.bin': xs, 'paycell.bin': pay_cells(prg)}
     defs = ''.join(f'!{k} = ${v:X}\n' for k, v in {
         'code_at': CODE_AT, 'code_end': CODE_END, 'stubs_at': STUBS_AT, 'stubs_end': STUBS_END, 'hook_at': HOOK_AT,
+        'arena_hook': ARENA_HOOK, 'arena_recent': ARENA_RECENT,
         'hook_back': HOOK_BACK, 'first_machine': FIRST_MACHINE, 'bg1_map': BG1_MAP, 'bg1_chr': BG1_CHR,
         'obj_chr': OBJ_CHR, 'bg_pal_cg': BG_PAL * 16, 'obj_pal_cg': 0x80 + OBJ_PAL * 16, 'small_name': SMALL_NAME,
         'cover_name': COVER_NAME, 'cover_pal': OBJ_PAL + COVER_PAL,

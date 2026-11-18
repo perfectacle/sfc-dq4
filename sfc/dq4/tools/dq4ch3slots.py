@@ -36,6 +36,10 @@ VARS2_SIZE = 25
 STOCK_SLOTS = (43, 44, 45, 46, 47)
 STOCK_PER_SLOT = 24
 STOCK_AT = 0x7E2332 + STOCK_SLOTS[0] * 26 + 1
+# 격투장 최근 8시합(dq4fcslot ArenaPick, FC $6E31~$6E38): 맡긴 동료 칸 42 의 +1~+8 에 시합 번호 + 1(0 = 빈칸), +9·+10 은
+# 고르는 동안의 임시값. 칸 0~33 은 전투 글 그림자(dq4battlemsg), 43~49 는 위 몫이라 그 사이의 빈 칸이다. 저장 기록 안이라
+# 이어 하기 뒤에도 남는다(FC 는 저장 영역 밖이고 리셋·불러오기·전멸 때 1E:$A5AD 가 FF 로 지움)
+ARENA_RECENT = 0x7E2332 + 42 * 26 + 1
 # 3장 끝(4장 넘김)에 0 으로 되돌릴 자리: 가게 물건과 변수 칸 48·49. 5장에서 진짜 맡긴 동료 칸으로 쓰일 수 있다
 CHAPTER_END_CLEAR = (0x7E2332 + STOCK_SLOTS[0] * 26, 0x7E2332 + (VARS_SLOT + 1) * 26)
 
