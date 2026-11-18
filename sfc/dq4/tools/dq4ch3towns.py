@@ -253,7 +253,6 @@ MESSAGES = {
     'night_out': say('이런 한밤중에 성에 들어오다니!', '내 눈에 띈 이상 가만있을 수는 없다. 자, 물러가시오!'),  # 038E
     # 열린 카지노(공사 재개 뒤)의 코인·교환·슬롯·포커 사람. 놀이는 옮기지 않았다(코인을 살 수 없음)
     'poker_ask': say('여기는 포커 테이블입니다. 즐기시겠습니까?'),                           # 07F6
-    'poker_short': say('어이쿠 손님, 코인이 모자라시네요. 코인을 사신 뒤 다시 오세요!'),      # 0482
     'poker_later': say('그럼 마음이 내키시면 언제든 오세요.'),                               # 07F7
 }
 
@@ -298,7 +297,8 @@ def talk_scripts(ctx):
         'night_guard': [s('night_out'), ctx.call('night_out')],
         # 고르기·걸기·돌리기는 DQ5 슬롯(대화 호출 slot → 06:D14A)
         **{name: [ctx.call(name)] for name in SLOTS},
-        'poker': [s('poker_ask'), when(YES, [s('poker_short')], [s('poker_later')])],
+        # 「예」 면 FC 포커(dq4fcpoker, 02:A8BC 틀). 코인이 없으면 포커 화면이 047C 를 띄운다
+        'poker': [s('poker_ask'), when(YES, [ctx.call('poker')], [s('poker_later')])],
     }
     bodies.update({name: [s(name)] for name in SIMPLE})
     return [bodies[name] for name in TALKS]
@@ -382,6 +382,7 @@ CASINO_DEVICES = {(0x13, 0x0B): 'poker'}
 # 실측). 06:D14A → 02:A8BC → 11:BF71 에서 FC 슬롯 본체(dq4fcslot)로 간다
 SLOT_CELLS = tuple((x, 0x02) for x in range(0x10, 0x15))
 SLOT_ENTRY, SLOT_COINS = 0x06D14A, 1
+POKER_ENTRY = 0x02A8BC
 # DQ5 가게 처리기를 그대로 부르는 사람(FC 칸 → DQ5 대화 번호): 코인 판매 0B(FC 047, 06:EE34)·코인 교환 0C(FC 046)·
 # 몬스터 격투장 0E(FC 048). 경품 목록·코인 값·한 장 값·시합 표는 dq4shopport(COIN_KEY·COIN_PRICES·COIN_SALE·arena)
 CASINO_SERVICES = {(0x18, 0x02): 0x0B, (0x1C, 0x08): 0x0C, (0x08, 0x0A): 0x0E}
@@ -565,7 +566,7 @@ def _resumed():
 # ---- 내보내기(파수꾼이 말한 뒤 일행을 다른 자리로) ----
 
 DATA_ENTRIES = tuple(f'{name}_event' for name in OUT_TO)
-CALLS = {**{name: (name, 0) for name in OUT_TO}, 'armor_buy': ('armor_buy', 0), **{name: (name, 0) for name in SLOTS}}
+CALLS = {**{name: (name, 0) for name in OUT_TO}, 'armor_buy': ('armor_buy', 0), **{name: (name, 0) for name in SLOTS}, 'poker': ('poker', 0)}
 # 네이티브 armor_buy 가 띄우는 메시지(대화 스크립트에는 없음)
 ARMOR_MESSAGES = ('armor_none', 'armor_which', 'armor_enough', 'armor_item', 'armor_offer', 'armor_taken', 'armor_sorry',
                   'armor_more', 'armor_bye')
@@ -596,7 +597,15 @@ def native(ctx):
     put('armor_buy', _armor_buy(ctx.msg or {k: 0 for k in MESSAGES}))
     for k, name in enumerate(SLOTS):
         put(name, _slot(k))
+    put('poker', _poker())
     return bytes(out), at
+
+
+def _poker():
+    """대화 호출: 슬롯과 같은 틀 02:A8BC(필드 저장·되돌림)에 FC 포커 번호를 넘긴다."""
+    from dq4chapterbox import ENTER, LEAVE
+    import dq4fcpoker
+    return ENTER + bytes((0xE2, 0x30, 0xA9, dq4fcpoker.POKER, 0x22, *POKER_ENTRY.to_bytes(3, 'little'))) + LEAVE
 
 
 def _slot(k):

@@ -198,6 +198,7 @@ def apply(data, dq4, font, asar=None):
     bgpal, objpal = palettes(prg)
     lines, pay, sympal, xs = tables(prg)
     import dq4slottext
+    import dq4fcpoker
     lay = dq4slottext.Layout(font)
     files = {'bgtiles.bin': bg_tiles, 'bgmap.bin': bg_map, 'objtiles.bin': obj_tiles, 'bgpal.bin': bgpal,
              'objpal.bin': objpal, 'machines.bin': machine_data(prg), 'lines.bin': lines, 'pay.bin': pay,
@@ -206,6 +207,7 @@ def apply(data, dq4, font, asar=None):
         'code_at': CODE_AT, 'code_end': CODE_END, 'stubs_at': STUBS_AT, 'stubs_end': STUBS_END, 'hook_at': HOOK_AT,
         'hook_back': HOOK_BACK, 'first_machine': FIRST_MACHINE, 'bg1_map': BG1_MAP, 'bg1_chr': BG1_CHR,
         'obj_chr': OBJ_CHR, 'bg_pal_cg': BG_PAL * 16, 'obj_pal_cg': 0x80 + OBJ_PAL * 16, 'small_name': SMALL_NAME,
+        'poker': dq4fcpoker.POKER, 'poker_body': dq4fcpoker.CODE_AT,
         'slottext_code': dq4slottext.CODE_AT, 'cursor_tile': lay.cursor & 0xFF,
         **{f'str_{name}': at for name, at in lay.addrs().items()},
     }.items())

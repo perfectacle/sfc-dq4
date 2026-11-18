@@ -779,6 +779,8 @@ def build(rom, dq5, dq4, work, prologue=True, chapter2=False, chapter3=False):
     out = bytearray(dq4slottext.apply(out, dq4menupatch.Font(dq4slottext.FONT)))
     import dq4fcslot
     out = bytearray(dq4fcslot.apply(out, dq4, dq4menupatch.Font(dq4slottext.FONT)))
+    import dq4fcpoker
+    out = bytearray(dq4fcpoker.apply(out, Path(dq5).read_bytes(), dq4, dq4menupatch.Font(dq4slottext.FONT)))
     import dq4signs
     out = bytearray(dq4signs.apply(out, ines.prg(dq4.read_bytes())))
     o = lorom(START_TABLE)

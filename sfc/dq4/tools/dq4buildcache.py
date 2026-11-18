@@ -35,7 +35,7 @@ OUT_FLAGS = ('-o', '--out', '--ips', '--report')
 ENV_INPUTS = ('ASAR', 'DQ4_GALMURI', 'NDS_FS', 'DQ4_ASSETS')
 # 폴더 전체 대신 이 아래 폴더만 키에 넣는 환경 변수(자원 저장소는 커서 통째로 해시하지 않는다). 도구가 그 밖을 읽으면
 # test_dq4buildcachekeys 가 잡는다
-ENV_SUBDIRS = {'DQ4_ASSETS': ('nds/dq4/monster/pose',)}
+ENV_SUBDIRS = {'DQ4_ASSETS': ('nds/dq4/monster/pose', 'nds/dq4/minigame/poker')}
 # 켜면 도구가 출력 인자 밖에 파일을 쓰는 환경 변수. 켜져 있으면 캐시하지 않는다
 ENV_OUTPUTS = ('DQ4_NAMEENTRY_SYMBOLS', 'DQ4_WINDOWNAME_SYMBOLS')
 # 이만큼 쓰이지 않은 칸은 새 칸을 넣을 때 지운다
