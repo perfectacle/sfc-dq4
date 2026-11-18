@@ -62,6 +62,9 @@ MESSAGE = '248BAF'
 WELL = dq4wellswitch.FLAG[0] & 0xFFFF
 # 우물 아래 3B/00 의 계단 옆. 전투가 끝나면 전멸 처리(01:88EF)를 지난다
 WIPE_TO = '3B/00,6,43'
+# 전멸 장면의 난수(7E:075B·075C)를 프레임마다 고정한다. NMI 가 난수 루틴 도중에 $075B 를 올려 결과가 코드의 사이클 수에 따라
+# 갈리므로, 고정하지 않으면 전투와 무관한 창 코드만 바뀌어도 HP 1 인 일행이 이겨 버리는 일이 생겼다
+WIPE_RNG = '075B=55;075C=AA'
 GOLD = 1000
 # 1장 귀환 자리(dq4chapter1.return_places): 전멸하면 마지막에 들어간 마을($195E)의 교회 신부 앞
 RETURNS = {'36/00': [10, 45], '37/00': [50, 9]}
@@ -189,7 +192,7 @@ def wipe_scene(mesence, rom, states, out):
     # 일행 레코드는 7E:2040 부터 42바이트씩, 지금 HP 는 +2
     hp = ';'.join(f'{0x2042 + 42 * n:04X}=01;{0x2043 + 42 * n:04X}=00' for n in range(2))
     got = dq4groupcheck.scene(mesence, rom, states / 'hoimin' / 'end.mss', out, name, TO=WIPE_TO, MAXF='6000',
-                              TEST=well.WIPE_TEST, SET=f'{gold};{hp};{WELL:04X}|{dq4wellswitch.FLAG[1]:02X}', ROMPATCH=enc.rates(rom.read_bytes()), TRACE='0188EF',
+                              TEST=well.WIPE_TEST, SET=f'{gold};{hp};{WELL:04X}|{dq4wellswitch.FLAG[1]:02X}', ROMPATCH=enc.rates(rom.read_bytes()), TRACE='0188EF', POKE=WIPE_RNG,
                               LOG='7E201D')
     rows = list(enc.lines(out / name / 'trace.txt')) if (out / name / 'trace.txt').exists() else []
     ram = (out / name / 'final.wram').read_bytes() if (out / name / 'final.wram').exists() else bytes(0x20000)
