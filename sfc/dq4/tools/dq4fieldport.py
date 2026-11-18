@@ -61,6 +61,12 @@ BLOCKS = {
     0x1D: 5,
     0x1E: 5,
 }
+# FC fights only on kinds below 8 (18:$9CB2 leaves the encounter routine on a tile of 8 and up). A kind of 8 and up
+# whose borrowed block has the terrain of a kind below 8 (the bridge has grass's, the rocky path desert's) takes the
+# terrain of NO_FIGHT_KIND's block instead (dq4fieldgfx.generate): terrain C, borrowed only by kinds 8 and up, so its
+# rate is 0 (dq4fieldencounter.terrain_rates) and 00:82AB skips the encounter check there.
+FIGHT_KINDS = 8
+NO_FIGHT_KIND = 0x0D
 # Per FC field, kinds whose terrain differs from BLOCKS. Field 3 makes its hills impassable (08:$8A34 gives block 01
 # property 80), so they take the mountain's terrain and keep the hill art.
 FIELD_BLOCKS = {3: {0x01: MOUNTAIN}}

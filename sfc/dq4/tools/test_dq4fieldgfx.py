@@ -17,6 +17,10 @@ import dq4fieldgfx as gfx  # noqa: E402
 import dq4fieldport as port  # noqa: E402
 
 ROM = Path(__file__).resolve().parents[3] / "rom" / "dq5.sfc"
+# FC kinds of 8 and up walked over on the field: the rocky paths (0E, 0F on castle tops; 14, 17, 1D, 1E on field 3)
+# and the bridge. FC walked 252 steps on 0E/0F at (99,44)-(9A,44) and 134 on the bridge at (6F,4F) without one
+# encounter check, against one on every one of the grass steps beside them.
+NO_FIGHT = (0x0E, 0x0F, 0x14, 0x16, 0x17, 0x1D, 0x1E)
 LINES = {0: {1: (0, 0, 0), 2: (0, 160, 0), 3: (0, 0, 200)}, 1: {1: (200, 0, 0), 2: (0, 160, 0), 3: (250, 250, 250)}}
 
 
@@ -189,8 +193,14 @@ class GenerateSyntheticTest(unittest.TestCase):
         self.assertEqual([b["index"] for b in self.blocks], [n for n, _, _ in port.new_blocks()])
 
     def test_blocks_keep_borrowed_terrain_and_quarter_attributes(self):
+        # Made-up terrain = block % 16. A kind of 8 and up whose terrain a kind below 8 also has (the rocky path's 5 is
+        # the desert's, the town's 18 % 16 = 2 the grass's) takes the tower's 13; the bridge's 22 % 16 = 6 is no
+        # fighting kind's here, so it keeps it.
+        fight = {0, 8 % 16, 2, 366 % 16, 354 % 16, 5, 9, 7}
         for block, (number, kind, borrowed) in zip(self.blocks, port.new_blocks()):
-            self.assertEqual(block["terrain"], borrowed % 16)
+            ground = borrowed % 16
+            want = 13 if kind >= 8 and ground in fight else ground
+            self.assertEqual(block["terrain"], want, f"{kind:02X}")
             if kind == gfx.REEF:
                 self.assertEqual(block["lower"], list(gfx.SEA_TILES))
                 quarters_attr = [self.orig["tile_attributes"][t] for t in upper_zero(None, "lower", borrowed)]
@@ -358,10 +368,21 @@ class GenerateTest(unittest.TestCase):
         for number, kind, borrowed in port.new_blocks():
             lower, upper, ground = self.dq5(borrowed)
             block = by_number[number]
-            self.assertEqual(block["terrain"], ground)
+            if kind not in NO_FIGHT:
+                self.assertEqual(block["terrain"], ground, f"{kind:02X}")
             want = [self.original["tile_attributes"][u or lo] for lo, u in zip(lower, upper)]
             got = [self.attrs[u or lo] for lo, u in zip(block["lower"], block["upper"])]
             self.assertEqual(got, want, f"{kind:02X}")
+
+    def test_fc_no_fight_kinds_take_terrain_c(self):
+        # DQ5 gives the borrowed bridge block grass's terrain 6 and the rocky path's block the desert's 1; they take
+        # terrain C (entrances, the tower art), whose rate is 0, while grass and desert keep theirs.
+        by_number = {b["index"]: b for b in self.blocks}
+        for field in port.WORLDS:
+            own = port.own_blocks(field)
+            for kind in NO_FIGHT:
+                self.assertEqual(by_number[own[kind]]["terrain"], 0x0C, f"field {field} kind {kind:02X}")
+            self.assertEqual((by_number[own[0x02]]["terrain"], by_number[own[0x05]]["terrain"]), (6, 1))
 
     def test_sea_takes_dq5_sea_colours(self):
         raw = gfx.water(self.original["palettes"])
