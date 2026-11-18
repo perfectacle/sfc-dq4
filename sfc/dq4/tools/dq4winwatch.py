@@ -652,9 +652,20 @@ def analyze(folder, rom, scene=None):
         cur.append((f, i, span))
     if cur:
         groups.append((key, cur))
+    # 전투 화면은 BG3 를 주사선마다 다시 스크롤하고(HDMA) 전투 배경 띠의 가로선을 테두리 타일로 그려, 프레임 끝 타일맵이
+    # 화면과 줄이 맞지 않는다. 전투 창 테두리는 dq4-battle-check 가 따로 본다
+    battles = [(f, b) for f, _, _, _, b, *_ in rec.maps]
+
+    def in_battle(frame):
+        on = 0
+        for f, b in battles:
+            if f > frame:
+                break
+            on = b
+        return bool(on)
     cache, out, t = {}, {}, 0
     for key, group in groups:
-        if key is None or sum(span for _, _, span in group) < PERSIST:
+        if key is None or sum(span for _, _, span in group) < PERSIST or in_battle(group[0][0]):
             continue
         seen = {}
         for f, i, span in group:
