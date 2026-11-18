@@ -195,6 +195,18 @@ class FcTest(unittest.TestCase):
         self.assertEqual([start[k] for k in ('hp', 'mp', 'str', 'agi', 'int', 'luck', 'vit')] + [start['next']],
                          want + [nxt])
 
+    @unittest.skipUnless((g.ROOT / 'rom' / 'dq5.sfc').exists(), 'rom/dq5.sfc 가 없음')
+    def test_new_game_holds_the_fc_chapter1_items_and_gold(self):
+        """새 게임 틀(라이안): FC 1장 시작 표대로 E どうのつるぎ·E かわのよろい, 금화 50. 원래 DQ5 틀은 ひのきのぼう·ぬののふく·20."""
+        import dq5item
+        dq5 = (g.ROOT / 'rom' / 'dq5.sfc').read_bytes()
+        out = {w['note']: bytes.fromhex(w['hex']) for w in g.writes(dq5)}
+        rec = out['라이안 1레벨 기록을 FC 장 시작 값으로']
+        rom = dq5item.Rom(dq5)
+        self.assertEqual([dq5item.item_name(rom, i) for i in rec[0x16:0x18]], ['どうのつるぎ', 'かわのよろい'])
+        self.assertEqual((rec[0x14:0x16], rec[0x18:0x22]), (b'\x03\x00', b'\xff' * 10))
+        self.assertEqual(int.from_bytes(out['새 게임 금화를 FC 1장 시작 금화로'], 'little'), 50)
+
     def test_recruit_records_are_the_fc_start(self):
         """합류 기록(dq4ch2event.RECRUITS)의 1레벨 값이 FC 실측 1레벨과 같다. MP 는 FC 곡선 1레벨."""
         import dq4ch2event as ev

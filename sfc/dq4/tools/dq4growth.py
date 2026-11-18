@@ -78,6 +78,7 @@ MEASURED = {FC_RYAN: RYAN_MEASURED, FC_ALENA: ALENA_MEASURED, FC_KIRYL: KIRYL_ME
             FC_TORNEKO: TORNEKO_MEASURED}
 
 PERSON_TABLE = 0x23C014         # 새 게임의 일행 기록 틀(42바이트, 칸 0 이 주인공)
+NEW_GAME_GOLD = 0x23D6ED + 0x19  # 새 게임 머리(23:D6A1 이 7E:2000~ 에 베낌)의 금화 3바이트. DQ5 원래 값 20
 FIRST_FIELDS = ((0x02, 2, 'hp'), (0x0E, 2, 'hp'), (0x04, 2, 'mp'), (0x10, 2, 'mp'), (0x06, 1, 'agi'),
                 (0x07, 1, 'str'), (0x08, 1, 'vit'), (0x09, 1, 'int'), (0x0A, 1, 'luck'), (0x26, 3, 'next'))
 
@@ -146,6 +147,13 @@ def first_record(dq4=DQ4, who=FC_RYAN):
     c = lambda stat: dq4data.curve(prg, who, stat, 1)[0]  # noqa: E731
     return {'hp': dq4data.rd(prg, dq4event.INIT, dq4event.CHAR_HP + who), 'mp': 0, 'str': c(1), 'agi': c(2),
             'vit': c(3), 'int': c(4), 'luck': c(5), 'next': fc_exp(dq4data, prg, 2, who)}
+
+
+def first_gold(dq4=DQ4):
+    """FC 1장 시작 금화(장 시작 표 12:$91D9)."""
+    _, prg = _fc(dq4)
+    import dq4event
+    return dq4event.start_table(prg)[0][5]
 
 
 def table_size():
@@ -263,10 +271,18 @@ def writes(dq5, dq4=DQ4, at=GROWTH_AT):
     first = first_record(dq4)
     for off, n, k in FIRST_FIELDS:
         rec[off:off + n] = first[k].to_bytes(n, 'little')
+    # 소지품·장비도 FC 1장 시작 라이안(12:$9192 표: E どうのつるぎ·E かわのよろい). 원래 틀은 DQ5 주인공의 ひのきのぼう·ぬののふく
+    import dq4ch3event
+    items = dq4ch3event.start(dq5, dq4, FC_RYAN)['items']
+    rec[0x14:0x16] = sum(1 << k for k, (_, worn) in enumerate(items) if worn).to_bytes(2, 'little')
+    rec[0x16:0x22] = bytes(i for i, _ in items) + b'\xff' * (12 - len(items))
+    gold_o = lorom(NEW_GAME_GOLD)
     # 빈 자리여야 한다: 0 을 orig 로 주어 다른 쓰기와 겹치면 빌드가 멈추게
     return [{'at': _cpu(at), 'hex': _hex(data), 'orig': _hex(bytes(len(data))),
              'note': '라이안·아리나·크리프트·브라이·톨네코 성장: FC 곡선 표와 훅'}, *calls(labels),
-            {'at': _cpu(PERSON_TABLE), 'hex': _hex(rec), 'orig': _hex(orig), 'note': '라이안 1레벨 기록을 FC 장 시작 값으로'}]
+            {'at': _cpu(PERSON_TABLE), 'hex': _hex(rec), 'orig': _hex(orig), 'note': '라이안 1레벨 기록을 FC 장 시작 값으로'},
+            {'at': _cpu(NEW_GAME_GOLD), 'hex': _hex(first_gold(dq4).to_bytes(3, 'little')),
+             'orig': _hex(dq5[gold_o:gold_o + 3]), 'note': '새 게임 금화를 FC 1장 시작 금화로'}]
 
 
 def hooked(rom):

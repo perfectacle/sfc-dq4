@@ -81,29 +81,29 @@ def stash_pieces():
     return out
 
 
-def _fc_items(dq4):
-    """FC 3장 시작 소지품(12:$9192 + 8 × 5)을 [(FC 이름, 장비 여부)]로."""
+def _fc_items(dq4, who=FC_TORNEKO):
+    """FC 장 시작 소지품(12:$9192 + 8 × 인물 번호, 3장 톨네코는 5)을 [(FC 이름, 장비 여부)]로."""
     import dq4growth
     dq4data, prg = dq4growth._fc(dq4)
     import dq4event
     names = {i: n for i, n, *_ in dq4data.items(prg)}
-    raw = [dq4event.rd(prg, dq4event.INIT, dq4event.CHAR_ITEMS + 8 * FC_TORNEKO + k) for k in range(8)]
+    raw = [dq4event.rd(prg, dq4event.INIT, dq4event.CHAR_ITEMS + 8 * who + k) for k in range(8)]
     return [(names[b & 0x7F], bool(b & 0x80)) for b in raw if b != 0xFF]
 
 
-def start(dq5, dq4):
-    """FC 3장 시작 톨네코: {'hp', 'mp', 'agility', 'stats', 'next', 'items': [(DQ5 물건, 장비)], 'dropped': [FC 이름]}.
+def start(dq5, dq4, who=FC_TORNEKO):
+    """FC 장 시작 인물(기본 3장 톨네코, dq4growth 의 FC 인물 번호): {'hp', 'mp', 'agility', 'stats', 'next', 'items': [(DQ5 물건, 장비)], 'dropped': [FC 이름]}.
     값은 FC 장 시작 루틴과 같은 dq4growth.first_record, 소지품은 FC 표. 사건 물건(おべんとう)은 dq4itemport 의 자리로.
     DQ5 에 같은 이름도 사건 물건 자리도 없는 물건은 dropped."""
     import dq4growth
     import dq4shopport
     from dq5map import Rom
     import dq4itemport
-    first = dq4growth.first_record(dq4, FC_TORNEKO)
+    first = dq4growth.first_record(dq4, who)
     known = dq4shopport.dq5_items(Rom(Path(dq5).read_bytes() if not isinstance(dq5, (bytes, bytearray)) else dq5))
     known.update({dq4shopport._fold(name): item for item, name in dq4itemport.EVENT_ITEMS.items()})
     items, dropped = [], []
-    for name, worn in _fc_items(dq4):
+    for name, worn in _fc_items(dq4, who):
         key = dq4shopport._fold(name)
         if key in known:
             items.append((known[key], worn))

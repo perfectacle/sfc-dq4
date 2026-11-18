@@ -363,11 +363,13 @@ def talk_yes(face, n=8):
 
 # (이름, 방법, 인자, 선택). 방법 warp 는 TO(맵,x,y), walk 는 웨이포인트(walk.lua).
 # 선택: poke(매 프레임 묶음), boss(보스 패치), maxf, changes(맵이 바뀔 횟수, 그 뒤 after 프레임에 끝), after,
-# want·off(끝에 켜져·꺼져 있을 깃발), map(끝 맵), field(끝에 필드인지), items(가진 물건)
+# want·off(끝에 켜져·꺼져 있을 깃발), map(끝 맵), field(끝에 필드인지), items(가진 물건),
+# start((FC 인물, 장): 끝의 일행 기록 0 장비·물건과 금화가 FC 장 시작 표대로, start_want)
 SEGMENTS = [
     # 저녁 대사를 넘기는 A 가 왕좌의 방 연출(장 제목·서술·왕의 연설)까지 넘긴다
     ('prologue', 'walk', ';'.join(w for _, w in pc.ROUTE),
-     {'maxf': 20000, 'changes': len(pc.MAPS), 'after': 2500, 'want': ['CHAPTER1'], 'map': '36/01'}),
+     {'maxf': 20000, 'changes': len(pc.MAPS), 'after': 2500, 'want': ['CHAPTER1'], 'map': '36/01',
+      'start': (6, 1)}),
     ('throne_out', 'walk', '32,70;down:60', {'changes': 1, 'map': '36/00'}),
     ('imuru_night', 'warp', '37/00,4,30', {'poke': NIGHT + ';' + HOLD_CHILD, 'map': '37/00'}),
     ('night_child', 'walk', talk('up') + ';6,31', {'poke': NIGHT + ';' + HOLD_CHILD, 'want': ['NIGHT_TOLD']}),
@@ -492,9 +494,31 @@ def run_failure(info, timeout):
 ITEMS = 0x7E2056     # 일행 레코드 0 의 물건 12칸(+16~+21)
 
 
+# 장 시작 직후 일행 기록 0 의 장비 비트·앞 물건 셋과 금화(구간 선택 start 가 FC 장 시작 표와 견줌)
+START_BYTES = {'START_EQUIP0': 0x7E2054, 'START_EQUIP1': 0x7E2055, 'START_ITEM0': 0x7E2056, 'START_ITEM1': 0x7E2057,
+               'START_ITEM2': 0x7E2058, 'START_GOLD0': 0x7E2019, 'START_GOLD1': 0x7E201A, 'START_GOLD2': 0x7E201B}
+
+
 def watch_flags(flags=None):
     flags = FLAGS if flags is None else flags
-    return ';'.join(f'{k}=7E{a & 0xFFFF:04X}:1' for k, (a, _) in flags.items()) + f';ITEMS0={ITEMS:X}:6;ITEMS1={ITEMS + 6:X}:6;BE=7E00BE:1'
+    return (';'.join(f'{k}=7E{a & 0xFFFF:04X}:1' for k, (a, _) in flags.items()) +
+            ''.join(f';{k}=7E{a & 0xFFFF:04X}:1' for k, a in START_BYTES.items()) +
+            f';ITEMS0={ITEMS:X}:6;ITEMS1={ITEMS + 6:X}:6;BE=7E00BE:1')
+
+
+def start_want(who, chapter):
+    """FC 장 시작 표대로의 START_BYTES 값: 인물 who(dq4growth 의 FC 인물 번호)의 소지품·장비(12:$9192)와 chapter 장(1~)의
+    시작 금화(12:$91D9). 물건은 dq4ch3event.start 처럼 이름으로 DQ5 물건에 잇는다."""
+    import dq4ch3event
+    import dq4event
+    import dq4growth
+    root = HERE.parents[2] / 'rom'
+    items = dq4ch3event.start(root / 'dq5.sfc', dq4growth.DQ4, who)['items']
+    gold = dq4event.start_table(dq4growth._fc(dq4growth.DQ4)[1])[chapter - 1][5]
+    bits = sum(1 << k for k, (_, worn) in enumerate(items) if worn)
+    ids = [i for i, _ in items] + [0xFF] * 3
+    return {'START_EQUIP0': bits & 0xFF, 'START_EQUIP1': bits >> 8, 'START_ITEM0': ids[0], 'START_ITEM1': ids[1],
+            'START_ITEM2': ids[2], 'START_GOLD0': gold & 0xFF, 'START_GOLD1': gold >> 8 & 0xFF, 'START_GOLD2': gold >> 16}
 
 
 def ending(mesence, rom, state, dest, seed=0, scene='end'):
@@ -628,6 +652,10 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
     for want in opt.get('items', []):
         if want not in items:
             problems.append(f'물건 {want:02X} 없음')
+    if 'start' in opt:
+        for k, v in start_want(*opt['start']).items():
+            if k not in seen or seen[k] & 0xFF != v:
+                problems.append(f'장 시작 {k} = {seen.get(k)}, 기대 {v:02X}(FC 장 시작 표)')
     # 시간 초과로 끊긴 실행은 출력이 남았어도 끝까지 간 것이 아니다. 다른 실패는 장면이 일부러 낸 종료일 수 있어
     # 구간이 실패했을 때만 덧붙인다
     if why and (problems or getattr(why, 'timed_out', False)):
