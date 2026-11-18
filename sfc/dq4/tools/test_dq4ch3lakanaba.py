@@ -99,14 +99,34 @@ class FlagTest(unittest.TestCase):
         # 재고 칸 차례가 가게 목록의 덧붙임 차례와 같다(ブーメラン·くさりがま·はじゃのつるぎ)
         self.assertEqual(len(dq4shopport.LAKANABA_STOCK), len(L.GOODS) - L.STOCKED)
 
-    @unittest.skipUnless(DQ5.is_file() and (ROOT / 'rom' / 'dq4.nes').is_file(), 'local source ROMs not present')
-    def test_looks_are_pictures_of_the_day_town(self):
+    def test_looks_are_the_fc_customer_pictures(self):
+        # 손님 여덟 겉모습이 FC 표(1D:$A3FC)의 그림 그대로다. 대역(같은 맵 마을 사람 그림)으로 되돌리면 실패
+        from dq4npcport import PICTURES
+        self.assertEqual(L.FC_LOOKS, (0x11, 0x14, 0x17, 0x18, 0x3B, 0x1F, 0x22, 0x21))
+        self.assertEqual(L.LOOKS, tuple(PICTURES[p] for p in L.FC_LOOKS))
+
+    @unittest.skipUnless((ROOT / 'rom' / 'dq4.nes').is_file(), 'local source ROM not present')
+    def test_fc_looks_table_is_read_from_the_rom(self):
+        nes = (ROOT / 'rom' / 'dq4.nes').read_bytes()
+        at = 0x10 + 0x1D * 0x4000 + 0xA3FC - 0x8000
+        self.assertEqual(tuple(nes[at:at + 8]), L.FC_LOOKS)
+
+    def test_first_day_master_is_the_counter_master_picture(self):
+        # 첫 출근 주인과 카운터 주인은 같은 사람(FC 대화 054). 그림이 갈리면 세트 하나가 더 실려 손님 옷장이 VRAM 을 넘었다
         import dq4npcport
-        lists, _, _ = dq4npcport.port(DQ5, ROOT / 'rom' / 'dq4.nes')
-        town = next(lst for lst in lists if lst.get('map') == L.TOWN)['entries']
-        day = {e['fields']['gfx'] for e in town if e['time'] == 'day'}
-        self.assertEqual(len(L.LOOKS), 8)
-        self.assertLessEqual(set(L.LOOKS), day)
+        self.assertEqual(L.MASTER_PIC, dq4npcport.NDS_LOOKS[(L.TOWN, 806)])
+
+    def test_customer_looks_pin_the_lakanaba_group(self):
+        # 손님 겉모습 인물은 배치 표에서 레이크나바 그룹(3E)의 줄 색에 들어야 제 색으로 그려진다
+        import dq4people
+        pins = dq4people.read_pins()
+        group = int(L.TOWN.split('/')[0], 16)
+        for pic in set(L.LOOKS):
+            people = [p for p in dq4people.PEOPLE if pic in p.pictures and p.group is None and p.palette is None
+                      and p.seen is None]
+            self.assertTrue(people, f'그림 {pic:02X} 의 NDS 인물이 없음')
+            for p in people:
+                self.assertIn(group, pins[p.role].groups, p.role)
 
     def test_vars_stay_in_the_l_var_slot(self):
         lo, hi = ev.SLOTS['L'].vars
@@ -274,6 +294,8 @@ class PortedListTest(unittest.TestCase):
         for name in ('customer', 'first_master', 'master', 'tom', 'helper', 'dog', 'helper_night', 'dog_night', 'son',
                      'son_night', 'dog_home', 'dog_home_night'):
             self.assertIn(L._src(name), froms, name)
+        # 손님 겉모습이 모두 낮 목록에 있다(옷장이 맵에 없는 그림을 VRAM 에 올림)
+        self.assertLessEqual(set(L.LOOKS), {e['fields']['gfx'] for e in town if e['time'] == 'day'})
         self.assertFalse([e for e in town if (e['time'], (e['fields']['x'], e['fields']['y'])) in
                           {(t, c_) for _, t, c_ in L.STRAYS}])
         house = by[L.HOUSE]['entries']

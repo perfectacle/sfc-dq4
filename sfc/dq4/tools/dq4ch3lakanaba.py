@@ -26,6 +26,7 @@ import dq4ch3event as ch3  # noqa: E402
 from dq4chapterbox import ENTER, LEAVE  # noqa: E402
 from dq4ch2endor import Asm, BCC, BCS, BEQ, BNE, BRA, lda, sta  # noqa: E402
 from dq4itemport import BENTO  # noqa: E402
+from dq4npcport import NDS_LOOKS, PICTURES, STAND  # noqa: E402
 from dq4ch3slots import SLOTS as _SLOTS, VARS2_AT  # noqa: E402
 from dq4shopkey import ONE_SHOT  # noqa: E402
 
@@ -173,14 +174,17 @@ NENE_WALKER = (HOUSE, 'day', cell(0x21, 0x02))
 POPOLO = {'day': (cell(0x1B, 0x07),), 'night': (cell(0x1B, 0x07), cell(0x10, 0x02))}
 QUIT_MASTER = (CELLAR, 'day', cell(0x07, 0x04))        # FC 16/02 대화 052
 CELLAR_NIGHT = (0x08, 0x06)                             # 같은 인물의 밤 자리(FC 칸, 대화 22A)
-MASTER_PIC = 0x07
+# 첫 출근 주인은 카운터 주인(FC 대화 054 = 메시지 806, dq4npcport.NDS_LOOKS 의 다츠)과 같은 그림. 다른 그림이면 같은
+# 사람이 두 모습이 되고, 그 세트만큼 낮 마을 OBJ VRAM 이 늘어 손님 옷장 세트가 512타일을 넘었다(실측 7E:1995 = 206)
+MASTER_PIC = NDS_LOOKS[(TOWN, 806)]
 WALK_SPEED = 0x02               # 인물 명령 1E: 7E:3360(01 이면 한 칸 8프레임)
 CUSTOMER_PIC = 0x40            # FC 손님 겉모습 17(15:$A3FC 의 하나). 이 맵 인물이 이미 쓰는 그림이라 OBJ 자리가 늘지 않음
 # FC 는 손님마다 1D:$A3FC[rand & 7](그림 11 14 17 18 3B 1F 22 21)로 겉모습을 고른다. 인물 그림은 맵에 들 때 세트마다 한 번
 # VRAM 에 올라가고 슬롯은 칸 목록 번호(7E:3200+슬롯)로 그 타일을 가리키므로, 같은 맵 낮의 다른 인물이 쓰는 그림이면 그
-# 인물의 칸 목록 번호를 베껴 겉모습만 바꿀 수 있다(실측). 낮 3E/00 에 올라와 있는 FC 짝은 14(29)·17·21(40)뿐이라 나머지
-# 칸은 같은 맵 마을 사람 그림 05(두건 쓴 여자)·0B(소년)로 채운다
-LOOKS = (0x05, 0x29, 0x40, 0x0B, 0x05, 0x29, 0x0B, 0x40)
+# 인물의 칸 목록 번호를 베껴 겉모습만 바꿀 수 있다(실측). 낮 3E/00 마을 사람이 쓰지 않는 그림은 손님 옷장(WARDROBE)
+# 인물을 맵 구석에 세워 VRAM 에 올린다
+FC_LOOKS = (0x11, 0x14, 0x17, 0x18, 0x3B, 0x1F, 0x22, 0x21)
+LOOKS = tuple(PICTURES[p] for p in FC_LOOKS)
 CUSTOMER_SLOT = 0x08           # 목록 맨 앞이라 물체 슬롯 08(실측)
 SLOT_CELLS, SLOT_PIC, SLOT_DRAW = 0x7E3200, 0x7E3220, 0x7E32A0
 # 가게를 닫을 때 주인(FC 슬롯 14)이 (01,1B)에 나타나 (02,1B), 곧 카운터 안 주인공 바로 아래로 한 걸음 걸어와 0341(실측)
@@ -991,6 +995,12 @@ def _at(e):
     return (e["fields"]["x"], e["fields"]["y"])
 
 
+def wardrobe(town):
+    """손님 겉모습(LOOKS) 가운데 낮 마을 인물이 쓰지 않는 그림. 맵 구석에 세워 그 세트를 VRAM 에 올린다."""
+    day = {e["fields"]["gfx"] for e in town if e["time"] == 'day'}
+    return sorted(set(LOOKS) - day)
+
+
 def npc_lists(lists, ctx):
     """옮긴 목록을 고친다(대체 목록 없이 인물 스크립트가 flag 를 보고 숨거나 나타난다). 이 모듈이 맨 앞 차례라 뒤 모듈이
     3E/00·3E/01 목록을 베끼면 여기서 고친 인물이 함께 간다."""
@@ -1034,6 +1044,11 @@ def npc_lists(lists, ctx):
                 _person('first_master', 'day', FIRST_MASTER, 'right', t['late'], MASTER_PIC),
                 _person('helper', 'day', HELPER_CELL, 'down', t['late'], 0),
                 _person('helper_night', 'night', HELPER_CELL, 'down', t['late'], 0)]
+    # 옷장은 목록 끝에 둔다: 앞에 두면 마을 사람의 물체 슬롯 번호가 밀린다. 세트는 목록 차례로 VRAM 에 실리므로 OBJ
+    # VRAM 512타일을 넘으면 옷장 그림부터 깨진다(dq4ch3lakanabacheck 의 looks 사례가 본다)
+    town += [{"from": STAND, "time": 'day',
+              "fields": {"x": PARK[0], "y": PARK[1], "facing": 'down', "talk": t['buyer_intro'], "gfx": pic, "layer": 0,
+                         "interval": 0}} for pic in wardrobe(town)]
     if HOUSE in lists:
         house = lists[HOUSE]["entries"]
         before = len(house)
