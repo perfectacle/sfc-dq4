@@ -88,8 +88,9 @@ class DayTest(unittest.TestCase):
 
 
 class ViewTest(unittest.TestCase):
-    """nene_view: 창(BRK 95 0F)이 열릴 때마다 톨네코 물건 칸 = 비지 않은 가게 물건 12개씩(빈 칸은 FF), 장비 비트 0.
-    끝나면 톨네코 칸·장비가 그대로이고 가게 칸은 바뀌지 않는다."""
+    """nene_view: 창(BRK 95 37)이 열릴 때마다 톨네코 물건 칸 = 비지 않은 가게 물건 8개씩(나머지는 FF), 장비 비트 0,
+    가게 종류 $0F20 = 다음 쪽이 있으면 VIEW_MORE, 마지막 쪽이면 +1. 끝나면 톨네코 칸·장비·$0F20 이 그대로이고 가게 칸은
+    바뀌지 않는다."""
 
     def run_view(self, stock, items, equip, answers=()):
         rom = bytearray(0x280000)
@@ -102,9 +103,11 @@ class ViewTest(unittest.TestCase):
             w[shop.stock_addr(i) & 0xFFFF] = 0 if item is None else item + 1
         w[it:it + 12] = bytes(items)
         w[it - 2], w[it - 1] = equip & 0xFF, equip >> 8
+        w[shop.SHOP_KIND] = 0x05
         before = [w[shop.stock_addr(i) & 0xFFFF] for i in range(shop.STOCK_SLOTS)]
         c = Cpu(bytes(rom), w)
-        seen, answers = [], iter(answers)
+        seen, kinds, answers = [], [], iter(answers)
+        self.kinds = kinds
 
         def rtl(cpu):
             cpu.rtl()
@@ -112,19 +115,21 @@ class ViewTest(unittest.TestCase):
 
         def window(cpu):
             seen.append((bytes(cpu.wram[it:it + 12]), cpu.wram[it - 2] | cpu.wram[it - 1] << 8))
+            kinds.append(cpu.wram[shop.SHOP_KIND])
             cpu.wram[0xE8] = next(answers, 0)            # 0 = A(다음 쪽), 80 = B(그만둠)
             return rtl(cpu)
         for a in (shop.SHOP_ENTER, shop.PICKER_RESET, *where.values()):
             c.hooks[a] = rtl
-        c.hooks[where['items']] = window
+        c.hooks[where['pick']] = window
         c.jsl(FAR, max_steps=500000)
         result = bool(c.wram[(0x2190 + ch3.RESULT[0])] & ch3.RESULT[1])
         after = (bytes(c.wram[it:it + 12]), c.wram[it - 2] | c.wram[it - 1] << 8)
         self.assertEqual([c.wram[shop.stock_addr(i) & 0xFFFF] for i in range(shop.STOCK_SLOTS)], before, '가게 칸')
+        self.assertEqual(c.wram[shop.SHOP_KIND], 0x05, '가게 종류 되돌림')
         return result, seen, after
 
-    def test_pages_of_twelve_skip_holes(self):
-        # 15개(사이에 빈 칸, 덩어리 경계 23·24 를 넘음) → 12 + 3
+    def test_pages_of_eight_skip_holes(self):
+        # 15개(사이에 빈 칸, 덩어리 경계 23·24 를 넘음) → 8 + 7
         stock = [None] * shop.STOCK_SLOTS
         filled = [0, 2, 5, 9, 11, 20, 22, 23, 24, 25, 40, 60, 80, 100, 119]
         for n, k in enumerate(filled):
@@ -132,7 +137,8 @@ class ViewTest(unittest.TestCase):
         items = [0x42, 0xBB, 0x0C] + [0xFF] * 9
         result, seen, after = self.run_view(stock, items, 0x0001)
         self.assertTrue(result)
-        self.assertEqual(seen, [(bytes(range(1, 13)), 0), (bytes([13, 14, 15] + [0xFF] * 9), 0)])
+        self.assertEqual(seen, [(bytes(range(1, 9)) + b'\xff' * 4, 0), (bytes(range(9, 16)) + b'\xff' * 5, 0)])
+        self.assertEqual(self.kinds, [shop.VIEW_MORE, shop.VIEW_MORE + 1])
         self.assertEqual(after, (bytes(items), 0x0001))
 
     def test_b_stops_after_the_first_page(self):
@@ -141,11 +147,22 @@ class ViewTest(unittest.TestCase):
         self.assertEqual(len(seen), 1)
         self.assertEqual(after, (bytes([0x42] + [0xFF] * 11), 0x0001))
 
-    def test_full_stock_is_ten_pages(self):
+    def test_full_stock_is_fifteen_pages(self):
         stock = [k % 0xD0 for k in range(shop.STOCK_SLOTS)]
         _, seen, _ = self.run_view(stock, [0xFF] * 12, 0)
-        self.assertEqual(len(seen), shop.STOCK_SLOTS // 12)
-        self.assertEqual(b''.join(p for p, _ in seen), bytes(stock))
+        self.assertEqual(len(seen), shop.STOCK_SLOTS // shop.VIEW_LINES)
+        self.assertEqual(b''.join(p[:shop.VIEW_LINES] for p, _ in seen), bytes(stock))
+        self.assertEqual(self.kinds, [shop.VIEW_MORE] * 14 + [shop.VIEW_MORE + 1])
+
+    def test_exactly_one_page_has_no_arrow(self):
+        stock = [3] * shop.VIEW_LINES + [None] * (shop.STOCK_SLOTS - shop.VIEW_LINES)
+        _, seen, _ = self.run_view(stock, [0xFF] * 12, 0)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(self.kinds, [shop.VIEW_MORE + 1])
+
+    def test_view_marker_matches_the_window_patch(self):
+        import dq4windowname
+        self.assertEqual(shop.VIEW_MORE, dq4windowname.NENE_VIEW_MORE)
 
     def test_empty_stock_opens_nothing(self):
         result, seen, after = self.run_view([None] * shop.STOCK_SLOTS, [0x42] + [0xFF] * 11, 0x0001)

@@ -80,6 +80,11 @@ ITEM_LIST = 0x0F
 COUNTER_WALK = f'{TALK_DOWN};{YES};open:{ITEM_LIST};settle:8;cursor:2;a:8;{YES};{NO};{NO};{wc.taps(1, 90)};{CLOSE}'
 # 036B 「예」(매상 없음), 물건 창을 B 로 그만두고 0374 「예」 → 가게 물건 창(BRK 95 0F)을 B 로 닫고 0375
 VIEW_WALK = f'{TALK_DOWN};{YES};wait:150;b:8;{YES};wait:150;b:8;wait:60;{wc.taps(1, 90)};{CLOSE}'
+# 가게 물건 11개 → 보기 창(창 37, 네네 꼴 8줄) 두 쪽을 A 로 넘겨 끝까지 본 뒤 0375
+PAGE_STOCK = ';'.join(f'{shop.stock_addr(k) & 0xFFFF:04X}={(k % 0x30) + 2:02X}' for k in range(11))
+VIEW_PAGE = 0x37
+PAGES_WALK = (f'{TALK_DOWN};{YES};wait:150;b:8;{YES};open:{VIEW_PAGE};wait:60;a:8;wait:150;open:{VIEW_PAGE};wait:60;a:8;wait:60;'
+              f'{wc.taps(1, 90)};{CLOSE}')
 # 톨네코 소지품이 없으면 0334 → 0374 「예」 → 가게가 비었으면 0376 만
 EMPTY_WALK = f'{TALK_DOWN};{YES};{YES};{wc.taps(1, 90)};{CLOSE}'
 NO_ITEMS = ';'.join(f'{(ch3.PARTY_ITEMS & 0xFFFF) + k:04X}=FF' for k in range(12)) + \
@@ -132,6 +137,10 @@ SEGMENTS = [
     ('nene_view', 'walk', VIEW_WALK,
      {'map': endor.TOWN, 'items': [0x42, parts.BENTO, endor.STEEL_SWORD],
       'bytes': {'NENE_STOCK0': endor.STEEL_SWORD + 1, 'EQUIP0': 0x01}}),
+    ('nene_pages_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
+     {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(_items(endor.STEEL_SWORD), PAGE_STOCK, sales_set(0)))}),
+    ('nene_pages', 'walk', PAGES_WALK,
+     {'map': endor.TOWN, 'items': [0x42, parts.BENTO, endor.STEEL_SWORD], 'bytes': {'NENE_STOCK0': 0x02, 'EQUIP0': 0x01}}),
     ('nene_empty_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(NO_ITEMS, NO_STOCK, sales_set(0)))}),
     ('nene_empty', 'walk', EMPTY_WALK, {'map': endor.TOWN, 'bytes': {'NENE_STOCK0': 0}}),
@@ -236,6 +245,7 @@ MESSAGES = {
     'nene_no': ['nene_rest', 'nene_shopkeep'], 'nene_lie': ['news', 'news_no', 'news_farewell'], 'nene_nonews': ['no_news'],
     'nene_day': ['nene_rest', 'nene_night'],
     'nene_view': ['nene_counter_ask', 'nene_pick', 'nene_done', 'nene_cheer'],
+    'nene_pages': ['nene_counter_ask', 'nene_pick', 'nene_done', 'nene_cheer'],
     'nene_empty': ['nene_counter_ask', 'nene_nothing', 'nene_done', 'nene_empty'],
     'nene_full': ['nene_counter_ask', 'nene_full', 'nene_cheer'],
     'nene_unsold': ['nene_rest', 'nene_night'],
