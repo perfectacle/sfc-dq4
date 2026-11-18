@@ -33,7 +33,7 @@ uv run --locked krpatch nds unpack rom/dq4ds-kr.nds work/nds/kr
 | `ndsscript.py` | 이벤트 스크립트 `SCRIPT/<맵>.bin` 의 블록 나무(`tree`), 명령 목록(`dump`, 메시지 명령 옆에 문장), 전체 검사(`stats`) |
 | `ndsparam.py` | `PARAM` 표: 몬스터(`monsters`, FC 와 짝 찾기), 아이템 번호 대조(`items`), 가게(`shops`), 카지노·メダル(`casino`), 얻는 물건(`chests`), 동료 대화 조건(`talk`), 대사 파일을 부르는 스크립트(`scripts`). [docs/param-format.md](docs/param-format.md) |
 | `ndskr.py` | 한글 대응표 검사(`check`)와 다시 만들기(`draft`) |
-| `ndsgfx.py` | 그래픽 디코더. `survey` 폴더·헤더별 파일 수, `export OUT` 으로 인물·몬스터(조립·애니메이션 WebP)·맵 텍스처와 위에서 본 렌더링·전투 배경·세계 지도(WTEX·기호)·3D 인물·효과 애니메이션·아이콘·글꼴·효과·타이틀을 PNG 로(`--only` 단계, `--kr work/nds/kr` 한글판 글꼴·로고), `gallery OUT` 으로 `index.html`. 결과는 비공개 에셋 저장소에만 |
+| `ndsgfx.py` | 그래픽 디코더. `survey` 폴더·헤더별 파일 수, `export OUT` 으로 인물·몬스터(조립·애니메이션 WebP)·맵 텍스처와 위에서 본 렌더링·전투 배경·세계 지도(WTEX·기호)·3D 인물·효과 애니메이션·아이콘·글꼴·효과·타이틀을 PNG 로(`--only` 단계(`poker` 는 포커 인덱스 PNG), `--kr work/nds/kr` 한글판 글꼴·로고), `gallery OUT` 으로 `index.html`. 결과는 비공개 에셋 저장소에만 |
 | `ndsvram.py` | desmume 세이브스테이트에서 메인 RAM·VRAM·I/O 레지스터·팔레트를 꺼냄. `info` 레이어 설정, `bg` 텍스트 BG 그림 |
 | `ndsgfxfig.py` | 그래픽 형식 문서의 그림(`images/nds-gfx-*`)을 다시 만듦 |
 | `ndsplay.py` | desmume libretro 코어(`DESMUME_CORE`)를 화면 없이 돌리며 버튼·터치를 넣고 화면 저장(`every N K 이름`), RAM 읽기·쓰기·고정(`peek`·`poke`·`freeze`·`until`), 세이브스테이트 |

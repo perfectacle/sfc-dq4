@@ -172,6 +172,55 @@ def texture_object_image(t, pal=None, transparent0=True):
     return texture(t["data"], t["fmt"], t["width"], t["height"], pal or t["pal"], transparent0)
 
 
+def texture_indices(t):
+    """Palette index and alpha (0..255) arrays of a TextureObject, no palette applied.
+
+    Formats 2·3·4 (index only, alpha is 255) and 1·6 (A3I5·A5I3, index and alpha).
+    """
+    import numpy as np
+    w, h, fmt = t["width"], t["height"], t["fmt"]
+    raw = np.frombuffer(t["data"], np.uint8)
+    if fmt in (2, 3):
+        bpp = TEX_BPP[fmt]
+        shifts = np.arange(8 // bpp, dtype=np.uint8) * bpp
+        raw = ((raw[:, None] >> shifts) & ((1 << bpp) - 1)).ravel()
+    elif fmt in (1, 6):
+        ibits = 5 if fmt == 1 else 3
+        amax = (1 << (8 - ibits)) - 1
+        alpha = ((raw >> ibits) * 255 // amax).astype(np.uint8)[: w * h].reshape(h, w)
+        return (raw & ((1 << ibits) - 1)).astype(np.uint8)[: w * h].reshape(h, w), alpha
+    elif fmt != 4:
+        raise ValueError(f"texture format {fmt}")
+    idx = np.zeros(w * h, np.uint8)
+    idx[: min(w * h, raw.size)] = raw[: w * h]
+    return idx.reshape(h, w), np.full((h, w), 255, np.uint8)
+
+
+def indexed_image(t, transparent0=True):
+    """Palette-mode PIL image with the stored indices and palette order intact.
+
+    Index 0 is marked transparent (tRNS) when `transparent0`. Formats with their own
+    alpha (A3I5·A5I3) cannot keep both: pixels whose alpha is 0 become an extra
+    palette entry after the stored colors, which is transparent.
+    """
+    idx, alpha = texture_indices(t)
+    pal = list(t["pal"])
+    trans = [0] if transparent0 else []
+    if t["fmt"] in (1, 6):
+        cut = len(pal)
+        idx = idx.copy()
+        idx[alpha == 0] = cut
+        pal.append((0, 0, 0))
+        trans = [cut]
+    if int(idx.max()) >= len(pal):
+        pal = pal + [(255, 0, 255)] * (int(idx.max()) + 1 - len(pal))
+    img = Image.fromarray(idx, "P")
+    img.putpalette([c for rgb in pal for c in rgb])
+    if trans:
+        img.info["transparency"] = bytes([0 if i in trans else 255 for i in range(max(trans) + 1)])
+    return img
+
+
 def pack_entries(b, off=0):
     """Entries of the engine's packs (`TexturePack`, `MapPackData`, `EffectPack`,
     `MonsterAnimation`, `PaletteAnimation`): +0x10 count, +0x14 data start,
@@ -768,6 +817,39 @@ class Exporter:
                 self.save(cat, name, img)
             self.ok(fmt, rel, one)
 
+    # MINIGAME/POKER: sheet layout in docs/graphics-format.md "MINIGAME/POKER".
+    POKER_SHEETS = {"slime1": "suit", "ken1": "suit", "tate1": "suit", "crown1": "suit",
+                    "joker_omote": "joker", "casino_upper": "table", "hikari": "light"}
+    POKER_CELL = (42, 64)
+    POKER_SUIT_COLS = 6
+
+    def poker(self):
+        meta = {}
+        cw, ch = self.POKER_CELL
+        for rel in self.files("MINIGAME/POKER", ".tex"):
+            name = Path(rel).stem
+
+            def one(rel=rel, name=name):
+                t = texture_object(self.read(rel))
+                kind = self.POKER_SHEETS[name]
+                img = indexed_image(t, transparent0=kind != "table")
+                self.save("minigame/poker", name + ".png", img, f"{name}({kind})")
+                idx, alpha = texture_indices(t)
+                meta[name] = dict(
+                    file=rel, kind=kind, format=TEX_NAME[t["fmt"]], width=t["width"],
+                    height=t["height"], palette_colors=len(t["pal"]),
+                    palette_rgb=["%02X%02X%02X" % c for c in t["pal"]],
+                    indices_used=int(len(set(idx[alpha > 0].tolist()))),
+                    transparent_index=int(img.info["transparency"].index(0)) if "transparency" in img.info else None,
+                )
+                if kind == "suit":
+                    meta[name].update(cell=[cw, ch], cols=self.POKER_SUIT_COLS, rows=3, cards=13,
+                                      order="A 2 3 4 5 6 7 8 9 10 J Q K, row-major")
+            self.ok("TextureObject(POKER)", rel, one)
+        if meta:
+            path = self.out / "minigame/poker/poker.json"
+            path.write_text(json.dumps(meta, ensure_ascii=False, indent=1, sort_keys=True), encoding="utf-8")
+
     def maps(self):
         for sub, cat, fmt in (("MAP", "map/tex", "MapPackData"), ("BTLMAP", "battle/3d", "MapPackData")):
             for rel in self.files(sub, ".lz"):
@@ -984,7 +1066,7 @@ class Exporter:
         steps = dict(
             chr=self.chr, monster=self.monster, map=self.maps, g2d=self.g2d,
             effect=self.effects, dssa=self.dssa_files, banner=self.banner, render=self.render,
-            field=self.field, world=self.world, model_anim=self.model_anim,
+            field=self.field, world=self.world, model_anim=self.model_anim, poker=self.poker,
             tex=lambda: [
                 self.textures("title", "2D", strip=["2D/MAP", "2D/FACE"]),
                 self.textures("ui/face", "2D/FACE"),
@@ -1052,6 +1134,7 @@ CATEGORY_TITLES = {
     "ui/rise": "말풍선 아이콘",
     "ui/act": "행동 아이콘",
     "ui/minigame": "미니게임(포커)",
+    "minigame/poker": "포커 그림(색 번호·팔레트 그대로인 인덱스 PNG)",
     "ui/mask": "마스크",
     "ui/snap": "스냅샷 자리",
     "ui/misc": "기타",
@@ -1131,7 +1214,7 @@ def main(argv=None):
     e.add_argument("out")
     e.add_argument("--root", default=DEFAULT_FS)
     e.add_argument("--kr", help="한글 팬패치 롬을 푼 폴더(바뀐 글꼴·로고를 kr/ 에)")
-    e.add_argument("--only", help="쉼표로 단계 이름(chr,monster,map,g2d,effect,dssa,banner,tex,render,field,world,model_anim)")
+    e.add_argument("--only", help="쉼표로 단계 이름(chr,monster,map,g2d,effect,dssa,banner,tex,render,field,world,model_anim,poker)")
     g = sub.add_parser("gallery", help="manifest.json 으로 index.html 을 씀")
     g.add_argument("out")
     lo = sub.add_parser("locn", help="맵의 LOCN 면·트리거를 찍음")
