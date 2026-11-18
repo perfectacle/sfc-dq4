@@ -76,10 +76,9 @@ SHOP_SPOT, SHOP_SPOT_END = 0x04FF40, 0x050000
 # 3장 네네 가게 보기 창(dq4neneshop._view): 창 37 을 열 때 $0F20 이 이 값(다음 쪽 있음)이나 +1(마지막 쪽)이면 FC 창 66 꼴
 # 레코드(자리 NENE_VIEW_XY, 그 쪽 줄 수만큼의 높이, 커서 없음)를 주고, 다음 쪽이 있으면 위 테두리에 「→」 를 깜박인다. 가게 종류(0~3)·맡기는 곳(6) 밖의 값
 NENE_VIEW_MORE = 7
-# 그 표지(낮은 WRAM, dq4neneshop.TEMP + 5). 보기 동안만 7·8 이고 끝나면 0. $0F20 은 가게 밖에서 아무 값이나 남아 있어
-# 그것만 보면 다른 창에서도 화살표 자리를 덮어썼다(dq4-window-check talk07·talk0A)
-NENE_MARK = 0x7E1BDB
-NENE_LINES = 0x7E1BDC              # 그 쪽의 줄 수(1~8, dq4neneshop.TEMP + 6). 창 높이를 고른다
+# 그 표지. 보기 동안만 7·8 이고 끝나면 0. $0F20 은 가게 밖에서 아무 값이나 남아 있어 그것만 보면 다른 창에서도 화살표
+# 자리를 덮어썼다(dq4-window-check talk07·talk0A). 3장 밖에서는 이 자리(DQ5 몬스터 맡김 칸 48)가 0 이다
+from dq4ch3slots import NENE_VIEW_MARK as NENE_MARK, NENE_VIEW_LINES as NENE_LINES  # noqa: E402  쪽 줄 수(1~8)는 창 높이를 고른다
 # 타일맵 버퍼 줄 y 가 화면에서는 한 줄 위(y − 1)에 보인다(BG3 세로 스크롤). FC 창 66 의 위 테두리가 화면 타일 2줄이라 y = 3
 NENE_VIEW_XY = (18, 3)
 # 그 레코드와 별칭 갈래 자리. 창 제목 목록(04:AD78~, 제목 43개)을 dq4windowtext.fixed_records 가 한국어로 줄이고 뒤 코드

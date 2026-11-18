@@ -175,10 +175,10 @@ class ViewTest(unittest.TestCase):
     def test_view_marker_matches_the_window_patch(self):
         import dq4windowname
         self.assertEqual(shop.VIEW_MORE, dq4windowname.NENE_VIEW_MORE)
-        self.assertEqual(shop.VIEW_MARK, shop.TEMP + 5 & 0xFFFF)
+        self.assertEqual(shop.VIEW_MARK, VARS2 + shop.MARK & 0xFFFF)
         self.assertEqual(0x7E0000 | shop.VIEW_MARK, dq4windowname.NENE_MARK)
         self.assertEqual(0x7E0000 | shop.VIEW_COUNT, dq4windowname.NENE_LINES)
-        self.assertEqual(shop.VIEW_COUNT, shop.TEMP + 6 & 0xFFFF)
+        self.assertEqual(shop.VIEW_COUNT, VARS2 + shop.LINES & 0xFFFF)
 
     def test_empty_stock_opens_nothing(self):
         result, seen, after = self.run_view([None] * shop.STOCK_SLOTS, [0x42] + [0xFF] * 11, 0x0001)

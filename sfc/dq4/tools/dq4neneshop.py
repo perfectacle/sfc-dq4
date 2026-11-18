@@ -30,12 +30,14 @@ pages = ch2._speaker_pages
 
 # 둘째 변수 칸 +0~+2 매상(3바이트), +3~+16 「보기」 동안 맡아 두는 톨네코 물건 12칸·장비 비트. 가게 물건은
 # dq4ch3slots.STOCK_SLOTS(맡긴 동료 칸 다섯의 +1~+24, 물건 번호 + 1, 0 은 빈 칸)
-SALES, SAVE = 0, 3
+SALES, SAVE, MARK, LINES = 0, 3, 17, 18   # 둘째 변수 칸 오프셋: 매상 3바이트, 보기 동안 맡긴 톨네코 칸 14바이트, 보기 표지·쪽 줄 수
 ITEM_SLOTS = 12
 VIEW_LINES = 8                                 # FC 보기 창 66 의 한 쪽 줄 수(15:$9F68)
 VIEW_MORE = 7                                  # dq4windowname.NENE_VIEW_MORE 와 같아야 함(시험이 견줌)
-VIEW_MARK = 0x1BDB                             # = TEMP + 5, dq4windowname.NENE_MARK. 보기 동안 VIEW_MORE·+1, 끝나면 0
-VIEW_COUNT = 0x1BDC                            # = TEMP + 6, dq4windowname.NENE_LINES. 그 쪽의 줄 수(창 높이)
+# 보기 표지(dq4windowname.NENE_MARK, 보기 동안 VIEW_MORE·+1, 끝나면 0)와 쪽 줄 수(NENE_LINES, 창 높이). 매 프레임 모든 고르기
+# 창에서 읽히므로 날 바뀜 루틴이 쓰는 TEMP 나 DQ5 가 지우는 낮은 WRAM(7E:1BC5~1BFC, dq4ch3slots.DQ5_PEOPLE)에 두면 안 된다
+VIEW_MARK = ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + MARK & 0xFFFF    # = dq4ch3slots.NENE_VIEW_MARK
+VIEW_COUNT = ch3.VARS2_AT + ch3.SLOTS['E'].vars2[0] + LINES & 0xFFFF   # = dq4ch3slots.NENE_VIEW_LINES
 STOCK_SLOTS = len(_STOCK_SLOTS) * STOCK_PER_SLOT
 STOCK_END = STOCK_AT + 26 * len(_STOCK_SLOTS)        # 마지막 칸 다음 덩어리 건너뛰기 뒤의 주소
 # FC 15:$9F9E 의 r < C0. DQ5 00:953A 는 (r × A) >> 8 이라 A = 4 로 받아 3 보다 작으면 같은 갈래가 된다
