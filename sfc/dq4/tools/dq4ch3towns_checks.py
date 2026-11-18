@@ -100,9 +100,9 @@ SEGMENTS = [
     ('towns_slot', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:8;wait:60',
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'bytes': {'TOWNS_SLOT_COIN0': 99, 'TOWNS_SLOT_COIN1': 0}}),
     # FC 슬롯 한 판(기계 2, 코인 둘 = 가운데·위 줄). 릴 처음 자리는 게임 난수(00:953A)로 고르므로 판 동안 7E:075B~075D 를
-    # 묶어 결과를 정한다: 모두 11 이면 위 줄이 물방울 셋(배당 20)이라 100 − 2 + 20 = 118, 모두 00 이면 맞는 줄이 없어 98.
+    # 묶어 결과를 정한다: 모두 00 이면 배당 10 이라 100 − 2 + 10 = 108, 모두 11 이면 맞는 줄이 없어 98.
     # 「한 번 더?」 에 B(아니오)로 나온다
-    *(seg for name, fill, coins in (('win', 0x11, 118), ('lose', 0x00, 98))
+    *(seg for name, fill, coins in (('win', 0x00, 108), ('lose', 0x11, 98))
       for seg in ((f'towns_slot_{name}_side', 'warp', f'{W.CASINO},{SLOT[0]},{SLOT[1] + 1}',
                    {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
                   (f'towns_slot_{name}', 'walk', f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:4;wait:30;'

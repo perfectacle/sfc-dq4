@@ -33,7 +33,10 @@ math pri on
 !oam = $0300
 !oam_hi = $0500
 
-!SPEED = 4
+!SPEED = 8
+!ACCEL = 10
+!fc_spd = $124C
+!fc_acc = $124D
 !STOP_FIRST = 185
 !STOP_GAP = 60
 !BTN_A = $0080
@@ -162,7 +165,7 @@ Dma:                                ; X = 원본 주소, A = 원본 뱅크, Y = 
 HideAll:
     LDX #$0000
 -   STZ !oam,X
-    LDA #$E0 : STA !oam+1,X
+    LDA #$F0 : STA !oam+1,X            ; y E0 는 화면 아래 끝(224줄째)에 걸쳐 보인다
     INX : INX : INX : INX
     CPX #$0200 : BCC -
     LDX #$0000
@@ -282,19 +285,26 @@ Spin:
     LDA #$01 : STA !fc_run,X
     INX : CPX #$0003 : BCC -
     REP #$20 : STZ !fc_t : SEP #$20
+    LDA.b #1 : STA !fc_spd
+    STZ !fc_acc
 .loop
-    LDX #$0000
+    ; 빠르기: 1점/프레임에서 !ACCEL 프레임마다 1씩, !SPEED 까지(FC 17:$A409 트랩: 약 75프레임에 8점/프레임)
+    LDA !fc_spd : CMP.b #!SPEED : BCS +
+    INC !fc_acc : LDA !fc_acc : CMP.b #!ACCEL : BCC +
+    STZ !fc_acc : INC !fc_spd
++   LDX #$0000
 .reel
     LDA !fc_run,X : BEQ .next
-    LDA !fc_off,X : CLC : ADC.b #!SPEED
+    LDA !fc_off,X : CLC : ADC !fc_spd
     CMP #$20 : BCC +
-    SBC #$20
-    PHA : LDA !fc_pos,X : INC : AND #$1F : STA !fc_pos,X : PLA   ; 한 칸 내려가면 위로 다음 칸
-+   STA !fc_off,X
-    LDA !fc_run,X : CMP #$02 : BNE .next
-    LDA !fc_off,X : BNE .next
-    STZ !fc_run,X                   ; 세우는 중이고 칸에 맞았으면 섬
+    ; 한 칸 내려감. 세우는 중이면 칸에 맞춰 선다
+    PHA : LDA !fc_pos,X : INC : AND #$1F : STA !fc_pos,X : PLA
+    SEC : SBC #$20
+    PHA : LDA !fc_run,X : CMP #$02 : PLA : BNE +
+    STZ !fc_off,X : STZ !fc_run,X
     PHX : JSR SfxStop : PLX
+    BRA .next
++   STA !fc_off,X
 .next
     INX : CPX #$0003 : BCC .reel
     REP #$20 : INC !fc_t : LDA !fc_t
@@ -311,8 +321,9 @@ Spin:
     LDA #$02 : STA !fc_run,X
 .frame
     JSR Frame
-    LDA !fc_run : ORA !fc_run+1 : ORA !fc_run+2 : BNE .loop
-    RTS
+    LDA !fc_run : ORA !fc_run+1 : ORA !fc_run+2 : BEQ +
+    JMP .loop
++   RTS
 
 ; X = 릴(0~2) → !fc_base = Machines 안 그 릴 띠 첫 칸(기계 × 97 + 1 + 릴 × 32). X 는 그대로
 StripBase:
