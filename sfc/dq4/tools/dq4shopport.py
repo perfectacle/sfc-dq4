@@ -85,8 +85,9 @@ FC_ARENA_BANK, FC_ARENA_TABLE, FC_ARENA_COUNTS, FC_ARENA_CHAPTER = 0x18, 0xADBA,
 ARENA_MATCHES, ARENA_LEVELS, ARENA_SIZE = 0x23DA97, 0x23DC27, 50
 # 옮기지 않는 FC 시합: 넷의 그림 가로 합이 전투 화면을 넘어 넷째가 놓이지 않는다(dq5monlimits.Pictures.place, 빌드 롬에서
 # dq4ch3townscheck --rom 이 옮긴 시합마다 본다). 놓이지 않은 몬스터에도 걸 수 있어 빼 둔다. 그림이 바뀌면 다시 재어
-# 놓이는 시합은 이 집합에서 뺀다(차례를 바꿔도 놓이지 않는 것만 남김)
-ARENA_WIDE = {6, 17}
+# 놓이는 시합은 이 집합에서 뺀다(차례를 바꿔도 놓이지 않는 것만 남김). 6번(はえおとこ·リリパット·とさかへび·かまいたち)은
+# NDS 그림으로도 넷째가 놓이지 않는다
+ARENA_WIDE = {6}
 ONE_SHOT_AT = _CH3_VARS2 + _CH3_SLOTS['L'].vars2[0]     # 한 번 쓰는 키 바이트(레이크나바 몫)
 # Sellers who come only with a chapter's event (dq4shop.npc_lists 「목록 플래그 n&m」): FC map -> the person list that
 # brings them. The event that switches the map to that list puts the seller; here its shop list goes under the map's

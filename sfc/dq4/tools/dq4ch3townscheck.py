@@ -220,6 +220,34 @@ def check(keep, texts, dq4):
 ARENA_MESSAGES = range(0x112, 0x11F)
 
 
+ARENA_PICK_SITE = 0x268E7C      # JSL ArenaPick(dq4fcslot): 26:8E7B TXA 로 A = 마지막 시합 번호
+GAME_RNG = 0x7E075B             # 00:953A 의 난수 상태 3바이트
+
+
+def arena_pick(data, last, state, recent=bytes(10)):
+    """빌드 롬의 시합 고르기(ArenaPick, FC 18:$ABC3)를 65816 해석기로 한 번: A = last(26:8E7B 의 TXA), 게임 난수 상태
+    state(3바이트), 최근 기록 recent(dq4ch3slots.ARENA_RECENT 의 10바이트). (고른 번호, 뒤 난수 상태, 뒤 기록)."""
+    import dq4ch3slots
+    import w65816
+    from dq5map import lorom
+    o = lorom(ARENA_PICK_SITE)
+    target = data[o + 1] | data[o + 2] << 8 | data[o + 3] << 16
+    cpu = w65816.Cpu(data, bytearray(0x20000))
+    cpu.p, cpu.dbr, cpu.a = 0x30, 0x26, last
+    g, r = GAME_RNG & 0x1FFFF, dq4ch3slots.ARENA_RECENT & 0x1FFFF
+    cpu.wram[g:g + 3] = state
+    cpu.wram[r:r + 10] = recent
+    cpu.jsl(target)
+    return cpu.a & 0xFF, bytes(cpu.wram[g:g + 3]), bytes(cpu.wram[r:r + 10])
+
+
+def arena_picks(data, count, tries=400):
+    """시합 count 개일 때 여러 난수 상태에서 고른 번호 집합(빈 기록). FC 는 모든 시합을 고를 수 있다."""
+    import random
+    rng = random.Random(0)
+    return {arena_pick(data, count - 1, bytes(rng.randrange(256) for _ in range(3)))[0] for _ in range(tries)}
+
+
 def arena_problems(rom_path, texts):
     """빌드 롬의 격투장(dq4shopport.arena_writes): 고를 수 있는 시합(문턱 0)마다 몬스터가 모두 전투 화면에 놓이고
     (dq5monlimits.Pictures.place, 한도도), 격투장 메시지가 한글로 덮였는지. 슬롯 화면 안 글에 가나가 남지 않았는지."""
@@ -245,6 +273,9 @@ def arena_problems(rom_path, texts):
                 pictures.reach_slots(groups) + reserve > limits.SLOT_LIMIT or \
                 pictures.band_rows(groups) > limits.ROW_LIMIT:
             out.append(f'시합 {k}: 그림 한도를 넘음')
+    picks = arena_picks(rom_path.read_bytes(), len(matches))
+    if matches and picks != set(range(len(matches))):
+        out.append(f'격투장 시합 고르기가 {len(matches)}개 가운데 {sorted(picks)} 만 뽑음')
     messages = json.loads(texts.read_text())['messages']
     out += [f'격투장 메시지 {m:03X} 가 한글이 아님' for m in ARENA_MESSAGES if f'{m:03X}' not in messages]
     # 슬롯 화면 안 글(메시지 표 밖, dq4slottext): bit8 을 끈 채 찍히는 가나 타일이 없어야 한다
