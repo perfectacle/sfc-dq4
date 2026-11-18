@@ -85,6 +85,10 @@ PAGE_STOCK = ';'.join(f'{shop.stock_addr(k) & 0xFFFF:04X}={(k % 0x30) + 2:02X}' 
 VIEW_PAGE = 0x37
 PAGES_WALK = (f'{TALK_DOWN};{YES};wait:150;b:8;{YES};open:{VIEW_PAGE};wait:60;a:8;wait:150;open:{VIEW_PAGE};wait:60;a:8;wait:60;'
               f'{wc.taps(1, 90)};{CLOSE}')
+# 보기 창 너비 12(FC 창 66): 열 칸 한글 이름 여섯(독나방의 나이프·마법 봉인 지팡이·마그마의 지팡이·외톨이 메탈 갑옷·
+# 외톨이 메탈 방패·하늘을 나는 구두)을 첫 쪽에 둔다. 띄어쓰기 뺀 아홉 칸 그림으로 그려져야 오른쪽 테두리(화면 x 29)를 덮지 않는다
+WIDE_ITEMS = (0x0B, 0x29, 0x2A, 0x61, 0x84, 0xCD)
+WIDE_STOCK = ';'.join(f'{shop.stock_addr(k) & 0xFFFF:04X}={item + 1:02X}' for k, item in enumerate(WIDE_ITEMS))
 PAGE_OPEN_WALK = f'{TALK_DOWN};{YES};wait:150;b:8;{YES};open:{VIEW_PAGE};wait:60'
 # 톨네코 소지품이 없으면 0334 → 0374 「예」 → 가게가 비었으면 0376 만
 EMPTY_WALK = f'{TALK_DOWN};{YES};{YES};{wc.taps(1, 90)};{CLOSE}'
@@ -149,6 +153,13 @@ SEGMENTS = [
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(_items(endor.STEEL_SWORD), PAGE_STOCK, sales_set(0)))}),
     ('nene_page_open', 'walk', PAGE_OPEN_WALK,
      {'map': endor.TOWN, 'bytes': {'NENE_MARK': shop.VIEW_MORE, 'NENE_LINES': shop.VIEW_LINES}}),
+    # 같은 열린 첫 쪽에서 창 오른쪽 테두리 열(화면 x 29)의 타일이 줄마다 테두리이고 바깥 열(x 30)은 창 밖인지(검사
+    # NENE_RIGHT*). 열 칸 이름이 그대로 그려지면 테두리를 덮는다
+    ('nene_wide_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
+     {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(_items(endor.STEEL_SWORD), WIDE_STOCK, sales_set(0)))}),
+    ('nene_wide', 'walk', PAGE_OPEN_WALK,
+     {'map': endor.TOWN, 'bytes': {'NENE_MARK': shop.VIEW_MORE + 1, 'NENE_OUTSIDE': 0x2C,
+                                   **{f'NENE_RIGHT{k}': 0x8E for k in range(len(WIDE_ITEMS))}}}),
     ('nene_empty_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(NO_ITEMS, NO_STOCK, sales_set(0)))}),
     ('nene_empty', 'walk', EMPTY_WALK, {'map': endor.TOWN, 'bytes': {'NENE_STOCK0': 0}}),
@@ -255,6 +266,7 @@ MESSAGES = {
     'nene_view': ['nene_counter_ask', 'nene_pick', 'nene_done', 'nene_cheer'],
     'nene_pages': ['nene_counter_ask', 'nene_pick', 'nene_done', 'nene_cheer'],
     'nene_page_open': ['nene_counter_ask', 'nene_pick', 'nene_done'],
+    'nene_wide': ['nene_counter_ask', 'nene_pick', 'nene_done'],
     'nene_empty': ['nene_counter_ask', 'nene_nothing', 'nene_done', 'nene_empty'],
     'nene_full': ['nene_counter_ask', 'nene_full', 'nene_cheer'],
     'nene_unsold': ['nene_rest', 'nene_night'],
