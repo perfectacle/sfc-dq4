@@ -48,6 +48,8 @@ FLAGS = {
     'HP0': (ch2.PARTY_AT + 2, 0xFF), 'ITEM1': (ch2.PARTY_AT + 0x17, 0xFF),
     # 걷는 그림 수·둘째 그림(dq4ch1event 따라 걷는 그림)과 일행 기록 수(전투에 드는 수)
     'WALKERS': (0x7E1967, 0xFF), 'WALKER1': (0x7E1970, 0xFF), 'PARTY_N': (0x7E201D, 0xFF),
+    # 낮 네네의 자리와 바로 전 방향(L.NENE_SLOT, L.NENE_LAST)
+    'NENE_X': (0x7E3020 + L.NENE_SLOT, 0xFF), 'NENE_Y': (0x7E3080 + L.NENE_SLOT, 0xFF), 'NENE_LAST': (L.NENE_LAST, 0xFF),
 }
 DOG_PICTURE = PICTURES[FC_DOG_PICTURE]
 TALK = 'a:8;wait:60'
@@ -138,13 +140,18 @@ CASES = {
     # 네네: 오늘 도시락 전(3장 처음)이면 잠 → 아침 → 도시락 말. HP 를 낮춰 두면 채워진다. 날수 + 1
     # 잠은 톰 노인 flag 도 지운다(FC 15:$9F79)
     'nene_sleep': {'steps': [HOP, ('house', 'warp', f'{L.HOUSE},54,6',
-                                   {'set': '2042=05;' + _set(L0=L0(L.TOM_DONE))}),
-                             ('talk', 'walk', f'{wc.talk("down", 10)}', {'maxf': 2400})],
+                                   {'poke': L.NENE_HOLD, 'set': '2042=05;' + _set(L0=L0(L.TOM_DONE))}),
+                             ('talk', 'walk', f'{wc.talk("down", 10)}', {'maxf': 2400, 'poke': L.NENE_HOLD})],
                    'msgs': ['home', 'goodnight', 'morning', 'bento'],
                    'check': same(SCOTT_DAYS=1, LAWRENCE_DAYS=1, TIME0=0x50, HP0=20, ITEM1=L.BENTO,
                                  L0=L0(L.BENTO_TODAY))},
-    'nene_forgot': {'steps': [HOP, ('house', 'warp', f'{L.HOUSE},54,6', {'set': _set(L0=L0(L.BENTO_TODAY))}),
-                              ('talk', 'walk', f'{wc.talk("down", 3)}', {'maxf': 1200})],
+    # 낮 네네는 FC 블록 2B 처럼 집 안 칸(L.NENE_CELLS)만 한 걸음씩 돌아다닌다: 칸 표 안에 있고 바로 전 방향이 남는다
+    'nene_walk': {'steps': [HOP, ('house', 'warp', f'{L.HOUSE},60,16', {}),
+                            ('wait', 'walk', 'wait:1500', {'maxf': 1600})],
+                  'msgs': [], 'check': lambda s: _nene_walked(s)},
+    'nene_forgot': {'steps': [HOP, ('house', 'warp', f'{L.HOUSE},54,6', {'poke': L.NENE_HOLD,
+                                                                        'set': _set(L0=L0(L.BENTO_TODAY))}),
+                              ('talk', 'walk', f'{wc.talk("down", 3)}', {'maxf': 1200, 'poke': L.NENE_HOLD})],
                     'msgs': ['forgot'], 'check': same(SCOTT_DAYS=0)},
     # 첫 출근: 문 밖에 서면 꾸지람 → 카운터 안으로 걸려 들어가 031D
     'first_day': {'steps': [('door', 'warp', f'{L.TOWN},20,52', {}),
@@ -237,6 +244,14 @@ CASES = {
                         ('in', 'walk', '208,73', {'map': L.TOWN, 'field': False, 'cell': (0, 27), 'poke': wc.DAY})],
               'msgs': [], 'check': same(L0=L0(L.SEEN))},
 }
+
+
+def _nene_walked(seen):
+    x, y = seen.get('NENE_X', 0) & 0x7F, seen.get('NENE_Y', 0) & 0x7F
+    cell = (x >> 1, (y - 1) >> 1)
+    # 바로 전 방향(bit7)은 맵에 들 때 지워지고 한 걸음 걸어야 남는다. 자리는 걷다가 첫 칸에 돌아와 있을 수도 있다
+    return ([] if cell in L.NENE_CELLS else [f'네네 FC 칸 {cell} 이 집 칸 표 밖']) + \
+        ([] if seen.get('NENE_LAST', 0) & 0x80 else ['바로 전 방향이 남지 않음(걷지 않음)'])
 
 
 def message_ids(messages_path):
