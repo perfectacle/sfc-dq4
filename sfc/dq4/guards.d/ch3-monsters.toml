@@ -61,6 +61,7 @@ paths = [
   "sfc/dq5/tools/dq5progresscheck.py",
   "sfc/dq5/tools/lua/dq5battle.lua",
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
+  "tools/mesence_settings.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/monspecial && uv run --locked python sfc/dq4/tools/dq4monspecialcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/monspecial --jobs 4"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
