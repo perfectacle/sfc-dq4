@@ -119,7 +119,7 @@ def run_scene(mesence, rom, data, base, out, name, scene, seed, jobs=REPEAT):
         state = dest / seg[0] / 'end.mss'
     texts, found, nmis_seen, msgs_seen, ended = [], None, 0, 0, []
     env = {'NEXT': str(bc.BATTLE), 'STATE': str(state), 'ROMPATCH': bc.force_patch(scene['group']),
-           'AFTERPATCH': wc.NO_ENCOUNTERS, 'SET': f'{wc.rng_for(seed)};{wc.DAY_SET}', 'POKE': wc.HERO_HP,
+           'AFTERPATCH': wc.NO_ENCOUNTERS, 'SET': f'{wc.rng_for(seed)};{wc.DAY_SET}', 'POKE': f'{wc.HERO_HP};{wc.rng_hold(seed)}',
            'STEP': scene['step'], 'KEYS': 'a', 'MOVE': 'up', 'MAXF': str(MAXF), 'KANATABLE': bc.kana_range(),
            'INJECT': str(INJECT), 'FINISH_AT': str(FINISH_AT)}
     run_dirs = [dest / f'run{i + 1}' for i in range(REPEAT)]

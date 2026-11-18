@@ -185,7 +185,8 @@ def run(mesence, rom, data, state, out, name):
     patch = ";".join((bc.force_patch(GROUP), bc.weak_patch(data, [m for m, _ in GROUP])))
     fight = dest / "battle"
     wc.run(mesence, rom, bc.BATTLE, fight, {"STATE": str(state), "ROMPATCH": patch, "AFTERPATCH": wc.NO_ENCOUNTERS,
-                                            "SET": f"{wc.rng_for(0)};{wc.DAY_SET}", "POKE": wc.HERO_HP, "STEP": way,
+                                            "SET": f"{wc.rng_for(0)};{wc.DAY_SET}", "POKE": f"{wc.HERO_HP};{wc.rng_hold(0)}",
+                                            "STEP": way,
                                             "KEYS": "a", "MOVE": way, "MOVEF": "48", "MAXF": "6000"}, 300)
     log = fight / "battle.txt"
     st = bc.parse(log.read_text(encoding="utf-8") if log.exists() else "")

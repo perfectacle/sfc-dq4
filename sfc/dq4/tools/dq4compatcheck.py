@@ -486,14 +486,14 @@ class Walker:
         results = []
         for k, i in enumerate(indices):
             name, how, arg, opt = self.segs[i]
-            self.pokes = [(int(a, 16), int(v, 16)) for a, v in re.findall(r'(\w+)=(\w+)', opt.get('poke', ''))]
+            # 서장은 시드와 상관없이 시드 0(서장 끝 상태를 시드끼리 나눠 쓴다)
+            seed = 0 if i == 0 else self.seed
+            self.pokes = [(int(a, 16), int(v, 16)) for a, v in re.findall(r'(\w+)=(\w+)', wc.battle_poke(opt, seed))]
             if how == 'ending':
                 r = {**self.ending(), 'name': name}
             else:
                 # 걷기 검사와 같이 구간을 시작할 때 난수·시각(묶음 첫 구간이면 앞 구간들의 깃발·물건도)을 둔다
                 first, mates = (extra, party) if k == 0 else ('', '')
-                # 서장은 시드와 상관없이 시드 0(서장 끝 상태를 시드끼리 나눠 쓴다)
-                seed = 0 if i == 0 else self.seed
                 start = ';'.join(v for v in (wc.pins(opt, seed), first, opt.get('set', '')) if v)
                 if how == 'warp':
                     maps = self.warp(arg, start, sets(wc.pins(opt, seed)), mates)

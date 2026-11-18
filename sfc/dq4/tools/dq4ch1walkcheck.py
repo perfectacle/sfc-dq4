@@ -140,6 +140,23 @@ def rng_for(seed):
     return ';'.join(f'{a:04X}={pick.randrange(256):02X}' for a in (0x075B, 0x075C, 0x075D))
 
 
+# 사건 전투를 지나는 구간은 난수를 프레임마다 붙든다. 난수(00:9878)를 섞는 도중 NMI 가 075B 를 올리므로 시작에 한 번
+# 둔 값만으로는 매 프레임 도는 코드의 사이클 수가 바뀔 때(다른 PR 이 소리·창 코드를 고침) 전투가 다른 갈래로 간다.
+# 075D 는 부를 때마다 오르므로 붙들지 않는다(한 프레임 안에서 부른 차례마다 다른 값이 나옴)
+BATTLE_KEYS = ('battle', 'boss', 'fight')
+
+
+def rng_hold(seed=0):
+    """시드의 075B·075C 를 매 프레임 두는 POKE."""
+    return ';'.join(f'7E{kv}' for kv in rng_for(seed).split(';')[:2])
+
+
+def battle_poke(opt, seed=0):
+    """구간 POKE(opt['poke'])에, 사건 전투 구간(BATTLE_KEYS)이면 rng_hold 를 더한 것."""
+    hold = rng_hold(seed) if any(k in opt for k in BATTLE_KEYS) else ''
+    return ';'.join(v for v in (opt.get('poke', ''), hold) if v)
+
+
 def pins(opt, seed=0):
     """구간 시작에 두는 난수·시각. 밤을 묶는 구간은 밤, 나머지는 낮."""
     return f"{rng_for(seed)};{NIGHT_SET if NIGHT in opt.get('poke', '') else DAY_SET}"
@@ -544,7 +561,7 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
     if how == 'ending':
         # 인자는 끝 상자 장면 이름(없으면 1장에서 끝내는 판의 end)
         return {**ending(mesence, rom, state, dest, seed, arg or 'end'), 'name': name}
-    poke = opt.get('poke', '')
+    poke = battle_poke(opt, seed)
     start = ';'.join(v for v in (pins(opt, seed), extra) if v)
     if how == 'warp':
         # 도착해 조작이 풀린 첫 프레임에 난수를 다시 둔다. 어디서 떠났느냐에 따라 도착 프레임까지 굴린 수가 다르다

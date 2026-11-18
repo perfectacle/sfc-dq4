@@ -49,7 +49,7 @@ def run(mesence, rom, state, out, name):
     sets, want = SCENES[name]
     gold = ";".join(f"{0x2019 + k:04X}={GOLD >> 8 * k & 0xFF:02X}" for k in range(3))
     got = dq4groupcheck.scene(mesence, rom, state, out, name, TO=TO, MAXF="6000", TEST=dq4wellresetcheck.WIPE_TEST,
-                              SET=f"{wc.RNG};2042=01;2043=00;{gold};{sets}",
+                              SET=f"{wc.RNG};2042=01;2043=00;{gold};{sets}", POKE=wc.rng_hold(0),
                               ROMPATCH=dq4dungeonencountercheck.rates(rom.read_bytes()), TRACE="0188ED")
     final = out / name / "final.wram"
     if not final.exists():
