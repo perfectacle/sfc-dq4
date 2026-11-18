@@ -81,7 +81,10 @@ def hero_cases():
                           # 돌아다니는 낮 네네를 첫머리 자리에 묶는다(lakanaba.NENE_HOLD)
                           'poke': lakanaba.NENE_HOLD}}
     for name, warp in SHOP_APPROACH:
+        # 손님은 쉼(PACE)을 묶어 오지 않게 한다: 꾸지람 말을 다 넘기는 사이 FC 처럼 첫 손님이 와서 말을 걸면 조작이 막혀
+        # 위로 걷지 못한다(이 장면은 첫 출근 주인이 주인공을 막지 않는지만 본다)
         out[name] = {'warp': f'{lakanaba.TOWN},{warp}', 'set': '', 'walk': f'16,53;{taps(12)};{CLOSE}',
+                     'poke': lakanaba.CUSTOMER_HOLD,
                      'free': f'{lakanaba.COUNTER_IN[0]},{lakanaba.COUNTER_IN[1] - 4}', 'hero_at': lakanaba.COUNTER_IN,
                      'want': [('SEEN', lakanaba.SEEN), ('SHIFT', lakanaba.SHIFT)], 'maxf': 2600}
     return out
