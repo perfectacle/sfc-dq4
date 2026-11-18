@@ -251,7 +251,8 @@ class CodeBytesTests(unittest.TestCase):
     def test_wait_screen_switches(self):
         self.assertEqual(box.wait(7), bytes((0, 9, 7)))
         self.assertEqual(box.screen_off()[-5:], bytes((0xA9, 0x80, 0x8D, 0x00, 0x21)))
-        self.assertEqual(box.screen_on(), bytes((0xAD, 0x1E, 0x00, 0x8D, 0x00, 0x42)))
+        # NMI 를 켜기 전에 OAM 주소를 0 으로: 강제 끔 중 vblank 는 주소를 다시 싣지 않아 OAM DMA 가 어긋난다
+        self.assertEqual(box.screen_on(), bytes((0x9C, 0x02, 0x21, 0x9C, 0x03, 0x21, 0xAD, 0x1E, 0x00, 0x8D, 0x00, 0x42)))
 
     def test_map_rows_blanks_or_copies_each_row(self):
         blank = box.map_rows(lambda r: None, 2)
