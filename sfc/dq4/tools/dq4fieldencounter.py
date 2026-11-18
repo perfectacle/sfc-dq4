@@ -635,9 +635,10 @@ DROP_SPECIES = ((0x258977, bytes.fromhex('cd 13 11'), bytes.fromhex('cd 1c 11'))
 # たからばこを もっていた！」, 아니면 01C8「まもののむれは たからばこを もっていた！」. 0B1 의 한글을 FC 뜻으로 두고, 섞인
 # 무리면 1A8. BRK 가 부른 뱅크를 DB 로 쓰므로 WRAM 거울이 있는 뱅크 0B(dq4monspecial 코드 뒤)에 둔다
 DROP_MSG_SITE, DROP_MSG_ORIG = 0x2589BF, bytes.fromhex('00 9e b1 00')
-# 돌아갈 곳: 25:89C2~89CB 의 BRK 셋(9E 00 / 16 35 00 / 9E B2)을 이 코드가 대신 하고 그 뒤 LDA $10F7 로. JML 대상이 BRK
-# 이면 롬 장부 검사(dq4romledgercheck inv_hooks)가 빈 자리로 잘못 뛴 훅과 가르지 못한다
-DROP_MSG_TAIL, DROP_MSG_NEXT = bytes.fromhex('00 9e 00 00 16 35 00 00 9e b2'), 0x2589CC
+# 덮은 넷째 바이트는 다음 BRK 9E 00 의 첫 바이트라 그 BRK 를 이 코드가 하고 25:89C5(BRK 16 35 00, 상자 여는 소리)로
+# 돌아간다. 그 BRK 16 은 사운드 패치가 효과음 번호를 바꾸는 자리(dq4sound-game.args 2589C5=35:3F)라 옮기지 않는다.
+# BRK 를 가리키는 JML 은 롬 장부 검사(dq4romledgercheck inv_hooks)가 빈 자리로 뛴 훅과 가르지 못해 RTL 로 돌아간다
+DROP_MSG_TAIL, DROP_MSG_NEXT = bytes.fromhex('00 9e 00'), 0x2589C5
 DROP_MSG_AT = 0x0BFFA0
 # 전투가 끝날 때 무리(7E:1001~)는 비어 있고 그림 종류(7E:117C~)는 도망친 종류가 빠진다. 무리 몬스터 사본 7E:1156~1159
 # (전투 시작 26:82B4, 부르기 20:DAC2 가 씀)은 남아 있어 FC 의 $6E45~ 처럼 도망친 무리도 센다
@@ -647,7 +648,7 @@ MSG_DROP, MSG_DROP_GROUP = 0x0B1, 0x1A8
 
 def drop_msg_code(at=DROP_MSG_AT):
     """(바이트, 라벨): 전투의 무리 몬스터 7E:1156~1159 의 FF 아닌 것이 모두 같으면 BRK 9E B1, 아니면 BRK 9F A8, 그 뒤 원래의
-    BRK 셋(DROP_MSG_TAIL)과 25:89CC. M·X 8비트."""
+    BRK 9E 00 과 25:89C5(RTL 로). M·X 8비트."""
     from dq4environmentrom import _Asm
     a = _Asm(at)
     a.label('drop_msg').b(0xA0, 0xFF, 0xA2, 0x00)
@@ -658,7 +659,7 @@ def drop_msg_code(at=DROP_MSG_AT):
     a.label('dm_next').b(0xE8, 0xE0, 0x04).rel(0x90, 'dm_loop')
     a.b(0x00, 0x9E, MSG_DROP).rel(0x80, 'dm_tail')
     a.label('dm_group').b(0x00, 0x9F, MSG_DROP_GROUP & 0xFF)
-    a.label('dm_tail').b(*DROP_MSG_TAIL, 0x5C, *_long(DROP_MSG_NEXT))
+    a.label('dm_tail').b(*DROP_MSG_TAIL, 0xA9, DROP_MSG_NEXT >> 16, 0x48, 0xF4, *((DROP_MSG_NEXT - 1) & 0xFFFF).to_bytes(2, 'little'), 0x6B)
     data, labels = a.assemble()
     if at + len(data) > 0x0C0000:
         raise ValueError('떨어뜨림 메시지 코드가 뱅크 0B 끝을 넘음')
@@ -1161,7 +1162,7 @@ def ch3_writes(prg, dq5, report, at=CH3_CODE_AT):
         out.append(put(site, new, orig, '떨어뜨림 종류는 마지막으로 쓰러뜨린 종류 $111C(FC, 도망은 바꾸지 않음)'))
     msg, msg_labels = drop_msg_code()
     tail = dq5[_lorom(DROP_MSG_SITE + 3):_lorom(DROP_MSG_NEXT)]
-    if tail != DROP_MSG_TAIL:
+    if tail != DROP_MSG_TAIL or dq5[_lorom(DROP_MSG_NEXT):_lorom(DROP_MSG_NEXT) + 2] != bytes((0x00, 0x16)):
         raise ValueError(f'25:89C2~89CB 가 {tail.hex()}')
     out.append({'at': f'{DROP_MSG_AT >> 16:02X}:{DROP_MSG_AT & 0xFFFF:04X}', 'hex': msg.hex(' ').upper(),
                 'note': '떨어뜨림 메시지: 섞인 무리면 마물 무리(FC 01C8)'})

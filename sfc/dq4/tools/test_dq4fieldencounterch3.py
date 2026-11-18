@@ -71,7 +71,7 @@ class ModelTests(unittest.TestCase):
 
     def test_drop_message_by_battle_species(self):
         # 전투 무리 몬스터 사본(7E:1156~1159)의 FF 아닌 것이 모두 같으면 0B1(BRK 9E B1), 아니면 1A8(BRK 9F A8), 그 뒤 원래의
-        # BRK 9E 00 과 25:89C5. BRK 는 자리에서 가로채 적는다
+        # BRK 9E 00 과 25:89C5(RTL). BRK 는 자리에서 가로채 적는다
         import w65816
         import dq4monspecial
         data, labels = m.drop_msg_code()
@@ -98,10 +98,10 @@ class ModelTests(unittest.TestCase):
                         c.pc += n
                         return True
                     cpu.hooks[m.DROP_MSG_AT + i] = brk
-            cpu.hooks[m.DROP_MSG_NEXT] = lambda c: (_ for _ in ()).throw(Done())
+            cpu.hooks[m.DROP_MSG_NEXT] = lambda c: (_ for _ in ()).throw(Done())   # RTL 로 25:89C5
             with self.assertRaises(Done):
                 cpu.jsl(labels['drop_msg'])
-            self.assertEqual(shown, [want, 0x9E00, 0x1635, 0x9EB2], species)
+            self.assertEqual(shown, [want, 0x9E00], species)
 
     def test_last_kill_patch(self):
         # 20:A363 의 16바이트(다른 종류를 쓰러뜨리면 후보 FF)를 LDA $46 / STA $1116 과 NOP 로, 떨어뜨림 종류 읽기 둘을 $111C 로
