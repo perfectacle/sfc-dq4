@@ -133,14 +133,15 @@ def _offset(a):
 
 def _hire(ctx, records_at):
     """대화 호출(인자 0 스콧·1 로렌스): 일행 끝에 그 기록을 넣고 수·순서·걷는 수를 고치고 걷는 그림을 다시 세운다. 고용
-    flag 를 켜고 날수를 0 으로."""
+    flag 와 방금 고용함(dq4ch3event.HIRED_NOW)을 켜고 날수를 0 으로."""
     from dq4ch2endor import BNE, lda, sta
     a = _asm()(ENTER, 0xC2, 0x10, lda(ch3.ARG)).br(BNE, 'law')
     for k, who in enumerate(WHO):
         if k:
             a.label('law')
         f = FLAGS[who]
-        a(lda(_flag_addr(f)), 0x09, f[1], sta(_flag_addr(f)), 0xA9, 0x00, sta(DAY_VARS[who]))
+        assert f[0] == ch3.HIRED_NOW[0]
+        a(lda(_flag_addr(f)), 0x09, f[1] | ch3.HIRED_NOW[1], sta(_flag_addr(f)), 0xA9, 0x00, sta(DAY_VARS[who]))
         a(0xA0, *((records_at + 42 * k) & 0xFFFF).to_bytes(2, 'little'))
         if not k:
             a.br(0x80, 'copy')
