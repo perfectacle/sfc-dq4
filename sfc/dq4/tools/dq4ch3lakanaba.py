@@ -142,11 +142,13 @@ SON = cell(0x17, 0x03)                                  # FC 16/00 슬롯 2, 대
 # 빌려주지 않았을 때만 선다. 빌려주면 슬롯 09 가 아들에게 걸어가 줄에 붙는다
 DOG = cell(0x1B, 0x04)
 DOG_HOME = cell(0x1B, 0x03)
-# 빌릴 때 개가 걷는 길(FC (1B,03)→(18,03), 아들 (17,03) 옆에서 멈춤). 돌려줄 때는 줄 끝 자리 FC (17,05)에 나타나 아들을
-# 비켜 (18,05)→(18,03)→(1B,03) 으로 우리에 돌아간다(FC 는 아들이 비키고 (17,04)→(17,03)→… 을 지남)
-LEND_PATH = (cell(0x18, 0x03),)
+# FC 이벤트 07·08(실측): 빌리면 아들이 위 (17,02)로 비켜 아래를 보고 개가 (1B,03)→(17,03) 아들 칸까지 걸어온다. 돌려주면
+# 줄 끝 자리 (17,05)에 나타나 주인공 칸을 지나 (17,03)→(1B,03) 으로 우리에 가고, 아들은 그동안 위로 비켰다 (17,03)에
+# 돌아와 왼쪽을 본다
+SON_ASIDE = cell(0x17, 0x02)
+LEND_PATH = (cell(0x17, 0x03),)
 RETURN_FROM = cell(0x17, 0x05)
-RETURN_PATH = (cell(0x18, 0x05), cell(0x18, 0x03), DOG_HOME)
+RETURN_PATH = (cell(0x17, 0x03), DOG_HOME)
 NENE = {'day': ch3.NENE_CELL, 'night': cell(0x1D, 0x03)}     # FC 16/01 대화 057
 NENE_FC_STEP = 8                                         # FC 슬롯 07 의 걸음 간격(차례, 머리 바이트 80 = 128프레임)
 # FC 16/01 낮 목록의 둘째 네네(슬롯 07, 돌아다님). FC 는 첫머리 뒤 이쪽만 두지만, 첫머리 자리 (1B,04) 의 네네를 남기고 이쪽을
@@ -350,6 +352,15 @@ def _hero_across():
     """인물 명령 05: 주인공이 카운터 바깥(손님 쪽)이면 0."""
     a = Asm()(ENTER, 0xE2, 0x30, lda(0x7E3020), 0x29, 0x7F, 0xC9, COUNTER_X).br(BCS, 'go')
     return a(POLL_END[1]).label('go')(POLL_END[0]).bytes()
+
+
+def _someone_at(c):
+    """인물 명령 05: 인물 칸 3~1F 가운데 하나가 셀 c 에 서 있으면 0."""
+    a = Asm()(ENTER, 0xE2, 0x30, 0xA2, 0x03)
+    a.label('scan')(0xBF, *_al(0x7E3020), 0x29, 0x7F, 0xC9, c[0]).br(BNE, 'next')
+    a(0xBF, *_al(0x7E3080), 0x29, 0x7F, 0xC9, c[1]).br(BEQ, 'go')
+    a.label('next')(0xE8, 0xE0, 0x20).br(BCC, 'scan')(POLL_END[1])
+    return a.label('go')(POLL_END[0]).bytes()
 
 
 def _pace():
@@ -621,6 +632,7 @@ def native(ctx):
     import dq4ch1event
     put('refresh', ENTER + dq4ch1event.REFRESH + LEAVE)
     put('hero_across', _hero_across())
+    put('dog_home', _someone_at(DOG_HOME))
     put('arrive', _arrive())
     put('set_talk', _set_talk(talk))
     put('prep', _prep(at))
@@ -831,10 +843,9 @@ def scripts(ctx):
                     _and_off(BENTO_TODAY, SHIFT, label='field'), _cmd('16')]
     # 아들이 풀려나기 전의 개(FC 슬롯 06)
     dog = [_if_on(SON_FREED, 'hide'), _cmd('16'), *hide]
-    # 풀려난 뒤의 개(FC 슬롯 09). 빌려주면 FC 이벤트 07 처럼 우리에서 아들 옆 칸까지 걸어가 짖고(02F1) 아들이 03AD 를 한
-    # 뒤 걷는 줄 끝에 붙는다(dq4ch1event 따라 걷는 그림, 줄을 다시 그림 02:C7E4). FC 는 아들이 한 칸 비켜 개가 아들 칸까지
-    # 오지만 아들은 그대로 두고 옆 칸에서 멈춘다. 돌려주면 FC 이벤트 08 처럼 줄 끝 자리에 나타나 우리로 걸어 돌아간다.
-    # 줄에서 빠진 동안은 맵 구석에 둔다: 다시 그리기가 숨긴 인물(28·52)을 되살렸다(실측)
+    # 풀려난 뒤의 개(FC 슬롯 09). 빌려주면 FC 이벤트 07 처럼 우리에서 (비킨) 아들 칸까지 걸어가 짖고(02F1) 아들이 03AD 를
+    # 한 뒤 걷는 줄 끝에 붙는다(dq4ch1event 따라 걷는 그림, 줄을 다시 그림 02:C7E4). 돌려주면 FC 이벤트 08 처럼 줄 끝 자리에
+    # 나타나 우리로 걸어 돌아간다. 줄에서 빠진 동안은 맵 구석에 둔다: 다시 그리기가 숨긴 인물(28·52)을 되살렸다(실측)
     dog_home = [_if_off(SON_FREED, 'hide'), _if_on(DOG_BACK, 'stay'), _cmd('1E', WALK_SPEED), _cmd('1C'),
                 _if_on(ch3.DOG, 'gone'), _wait_on(ch3.DOG), _cmd('3F'),
                 *[c for x, y in LEND_PATH for c in (_cmd('13', x, y), _cmd('14'))], _cmd('2F', 0x22),
@@ -845,7 +856,11 @@ def scripts(ctx):
                 _cmd('2B', *PARK, label='gone'), _cmd('03', target='back'),
                 _cmd('16', label='stay'), *hide]
     # 아들은 본몰 감옥에서 풀려난 뒤에만(FC 1C:$A29A 가 $6280&04 로 목록을 고침), 아래층 주인은 출근 중에만(1C:$A326)
-    son = [_if_off(SON_FREED, 'hide'), _cmd('16'), *hide]
+    # 개를 빌려주면 위로 한 칸 비켜 아래를 보고, 돌려받으면 (다시) 비켜 있다가 개가 우리에 닿으면 제자리로 돌아와 왼쪽을 본다
+    son = [_if_off(SON_FREED, 'hide'), _cmd('1E', WALK_SPEED), _cmd('1C'), _if_on(ch3.DOG, 'lent'),
+           _wait_on(ch3.DOG), _cmd('13', *SON_ASIDE), _cmd('14'), _cmd('2F', 0x44),
+           _cmd('09', ch3.DOG[0], ch3.DOG[1], label='lent'), _cmd('13', *SON_ASIDE), _cmd('14'), _cmd('2F', 0x44),
+           poll(at['dog_home']), _cmd('13', *SON), _cmd('14'), _cmd('2F', 0x22), _cmd('16'), *hide]
     cellar = [_if_off(SHIFT, 'hide'), _if_on(DONE, 'hide'), _cmd('16'), *hide]
     bodies = {'customer': customer, 'first_master': first, 'master': master, 'tom': tom, 'helper': helper,
               'dog': dog, 'helper_night': helper_night, 'dog_night': list(dog), 'son': son, 'son_night': list(son),
