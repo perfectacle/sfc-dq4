@@ -11,7 +11,7 @@ $62A3(X)·$62A0(Y, 바위 왼쪽 위 FC 칸)·$629A(아래 2비트 방향 0 멈�
   3. bit6 을 뒤집음.
 맵에 다시 들어오면 바위는 (03,05), 구덩이는 열림. 실측은 fc/dq4/docs/dq4-chapter3-format.md 사건 5b.
 
-SFC 에서 바위는 DQ5 바위 그림(4B) 인물 넷(FC 한 칸에 하나, 2×2)이고, 보이지 않는 인물의 스크립트가 매 프레임 ctl 을
+SFC 에서 바위는 NDS 큰 바위의 사분면을 방향 프레임으로 실은 그림(ROCK_GFX) 인물 넷(FC 한 칸에 하나, 2×2)이고, 보이지 않는 인물의 스크립트가 매 프레임 ctl 을
 불러 TICK 프레임마다 FC 와 같은 한 차례를 돈다. 움직이면 넷을 새 자리로 옮기고(셀 차지 비트를 지우고 다시 켬), 구덩이에
 빠지면 넷을 치우고 구덩이 셀을 위 바닥 셀로 덮어 다시 그린 뒤, 영역 이동 훅(00:CE26)이 그 구덩이의 떨어짐을 끈다.
 처음 풀릴 때 바위 아래의 막이 블록 (03~04,07~08)을 위 바닥 셀로 덮는다.
@@ -21,7 +21,10 @@ from dq4chapterbox import ENTER, LEAVE
 # FC 한 차례는 약 21프레임(실측: 일행이 서 있을 때 바위 한 칸이 42프레임). ctl 은 이동 간격 1 인물의 명령 05 라 8프레임에
 # 한 번 불린다 → 세 번에 한 차례(실측: 바위가 막히지 않고 6칸 가는 데 275프레임, 한 칸 46프레임)
 TICK = 3
-ROCK_GFX = 0x4B                  # DQ5 바위 그림(10/00·31/07 의 미는 바위)
+# NDS 큰 바위를 2×2 사분면으로 실은 그림(dq4people.PROPS 「구르는 바위」). 사분면은 방향 프레임이라 바위 넷은
+# ROCK_FACINGS 차례(왼쪽 위·오른쪽 위·왼쪽 아래·오른쪽 아래)의 방향으로 선다
+ROCK_GFX = 0x2A
+ROCK_FACINGS = ('down', 'left', 'right', 'up')
 START = (0x03, 0x05)             # FC 바위 처음 자리(맵에 들 때 $62A3·$62A0)
 TRIGGER = ((0x03, 0x04), 0x0E)   # FC 1D:$9CB7: X 03~04, Y 0E
 GATE = (0x03, 0x07)              # 바위 아래 막이 블록(FC B0, 2×2 칸)
@@ -32,6 +35,9 @@ FALL_X = {0x01: 0x06, 0x02: 0x16}   # 메움 비트 → 그 구덩이 영역 이
 # 인물 표(dq5-map-format 「인물 표」)와 엔진 루틴
 SLOT_X, SLOT_X2, SLOT_Y, SLOT_Y2, SLOT_GFX = 0x3020, 0x30E0, 0x3080, 0x3140, 0x3220
 SLOTS = 0x40                     # 훑을 인물 슬롯 수
+SLOT_FACING = 0x31E0
+# 인물 표 방향 바이트(실측: 목록 방향 down·left·right·up 으로 세운 바위 넷의 7E:31E0)
+FACING_CODES = {'down': 0x44, 'left': 0x22, 'right': 0x11, 'up': 0x88}
 FOLLOWERS = 0x1967               # 걷는 일행 그림 수(dq4ch1event 「따라 걷는 그림」)
 CLEAR_CELLS = 0x00DEB5           # Y = 슬롯: 지금 자리의 셀 차지 비트를 지움
 SET_CELLS = 0x00DF37             # Y = 슬롯: 지금 자리의 셀 차지 비트를 켬
@@ -239,6 +245,21 @@ def cell(x, y):
     return (2 * x, 2 * y)
 
 
+def _face_back(a):
+    """_rocks 의 body: X 슬롯의 방향 바이트를 몇째(1,S)의 ROCK_FACINGS 방향으로."""
+    from dq4ch2endor import BEQ, BRA
+    codes = [FACING_CODES[f] for f in ROCK_FACINGS]
+    a(0xA3, 0x01)
+    for k in range(1, 4):
+        a(0xC9, k).br(BEQ, f'fb{k}')
+    a(0xA9, codes[0]).br(BRA, 'fbput')
+    for k in range(1, 4):
+        a.label(f'fb{k}')(0xA9, codes[k])
+        if k < 3:
+            a.br(BRA, 'fbput')
+    a.label('fbput')(0x9F, _al(0x7E0000 | SLOT_FACING))
+
+
 def ctl(v, at):
     """인물 명령 05 가 부를 때마다(약 8프레임, 늘 A = 1 을 돌려 되풀이): 멈춰 있고 처음 자리면 주인공이 풀리는 칸에 섰는지
     보고 막이를 걷고 움직이기 시작. 움직이는 동안은 TICK 번째 부름마다 step 뒤 자리가 바뀌었으면 place, 구덩이에 닿았으면
@@ -247,6 +268,9 @@ def ctl(v, at):
     따라 놓친다(snes9x 실측. FC 는 걸음마다 1D 이벤트로 본다)."""
     from dq4ch2endor import BCC, BCS, BEQ, BNE, BRA, lda, sta
     a = _asm()(0x08, 0xE2, 0x30)
+    # 말을 걸면 바위 인물이 주인공 쪽으로 돌아 다른 사분면 프레임이 되어 바위가 깨져 보였다(실측). 부를 때마다
+    # 몇째 바위인지(ROCK_FACINGS)의 방향으로 되돌린다
+    _rocks(a, v, _face_back, 'fb')
     a(lda(v(ST)), 0x29, 0x03).br(BEQ, 'idle')
     a(lda(v(CNT)), 0x1A, sta(v(CNT)), 0xC9, TICK).br(BCS, 'tick').brl('out')
     a.label('tick')(0xA9, 0x00, sta(v(CNT))).brl('run')

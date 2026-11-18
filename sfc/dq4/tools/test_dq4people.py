@@ -1339,9 +1339,36 @@ class PrepareTests(unittest.TestCase):
 
     def prepare(self, limit, sets=(0x41, 0x42, 0x43), **kw):
         table = dict(zip(self.people, sets))
-        with unittest.mock.patch.object(P, 'PEOPLE', self.people), \
+        with unittest.mock.patch.object(P, 'PEOPLE', self.people), unittest.mock.patch.object(P, 'PROPS', ()), \
                 unittest.mock.patch.object(P, 'target', lambda person, rom: (table[person], 'simple', limit)):
             return P.prepare(None, self.assets, self.work, pins={}, **kw)
+
+    def test_prop_quadrants_take_the_nearest_shared_line_without_moving_it(self):
+        # 사건 그림은 줄 색 계산에 들지 않고(사람 색이 그대로), 그룹의 가장 가까운 공용 줄 색으로 사분면 넷이 실린다
+        from PIL import ImageDraw
+        disk = Image.new('RGBA', (100, 100))
+        d = ImageDraw.Draw(disk)
+        d.ellipse((0, 0, 99, 99), fill=(160, 100, 40, 255))
+        d.ellipse((20, 20, 60, 60), fill=(90, 50, 20, 255))
+        disk.save(self.assets / 'prop.png')
+        prop = P.Person((0x2A,), 0x3E, 'disk', 'disk', anim='prop', spare=0x2A, outline=True)
+        table = dict(zip(self.people, (0x41, 0x42, 0x43)))
+        table[prop] = 0x15
+        alone, _ = self.prepare(limit=99)
+        with unittest.mock.patch.object(P, 'PEOPLE', self.people), unittest.mock.patch.object(P, 'PROPS', (prop,)), \
+                unittest.mock.patch.object(P, 'PROP_SHEETS', {'disk': Path('prop.png')}), \
+                unittest.mock.patch.object(P, 'target', lambda person, rom: (table[person], 'simple', 99)):
+            rows, board = P.prepare(None, self.assets, self.work, pins={})
+        self.assertEqual([r[7] for r in rows[:3]], [r[7] for r in alone])
+        p, s, layout, limit, n, steps, line, pal = rows[3]
+        self.assertEqual((p, s, layout), (prop, 0x15, 'simple'))
+        self.assertIn(line, P.SHARED_LINES)
+        self.assertEqual(pal, board[(0x3E, line)])
+        self.assertLessEqual(n, 16)
+        sheet = Image.open(self.work / '15.png')
+        for r in range(4):                    # 방향마다 위 8줄은 비고 아래 16줄에 사분면
+            self.assertFalse(any(sheet.getpixel((x, r * 24 + y)) for x in range(16) for y in range(8)))
+            self.assertTrue(any(sheet.getpixel((x, r * 24 + y)) for x in range(16) for y in range(8, 24)))
 
     def test_each_person_gets_a_sheet_a_line_and_colours(self):
         rows, board = self.prepare(limit=99)

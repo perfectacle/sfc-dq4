@@ -130,6 +130,19 @@ class NativeTest(unittest.TestCase):
                 self.assertEqual(self.run_ctl((*b.START, 0), cnt, (x, y)) & 3, 2, (cnt, x))
         self.assertEqual(self.run_ctl((*b.START, 0), 0, (x0, y + 1)), 0)
 
+    def test_ctl_turns_rocks_back_to_their_quadrant(self):
+        # 말을 걸면 바위 인물이 주인공 쪽으로 돈다. 부를 때마다 몇째 바위인지의 방향 프레임으로 되돌려야 사분면이 맞는다
+        w = bytearray(0x20000)
+        w[V(b.BX) & 0xFFFF], w[V(b.BY) & 0xFFFF] = b.START
+        w[b.SLOT_X], w[b.SLOT_Y] = 0x20, 0x21
+        rocks = range(0x0A, 0x0E)
+        for s in rocks:
+            w[b.SLOT_GFX + s], w[b.SLOT_X + s], w[b.SLOT_Y + s], w[b.SLOT_FACING + s] = b.ROCK_GFX, 6, 11, 0x88
+        c = self.Cpu(self.rom, w)
+        c.pbr = BASE >> 16
+        c.jsl(self.at['ctl'], max_steps=20000)
+        self.assertEqual([c.wram[b.SLOT_FACING + s] for s in rocks], [b.FACING_CODES[f] for f in b.ROCK_FACINGS])
+
     def test_idle_boulder_does_nothing(self):
         self.assertEqual(self.run_step((3, 5, 0x00), [(3, 0x0E)]), (3, 5, 0x00))
         self.assertEqual(self.run_step((3, 0x25, 0x40), [(3, 0x24)]), (3, 0x25, 0x40))
@@ -167,6 +180,31 @@ class NativeTest(unittest.TestCase):
     def test_area_site_holds_the_original_bytes(self):
         data = (HERE.parents[2] / 'rom' / 'dq5.sfc').read_bytes()
         self.assertEqual(data[lorom(b.AREA_SITE):lorom(b.AREA_SITE) + len(b.AREA_ORIG)], b.AREA_ORIG)
+
+
+class PictureTest(unittest.TestCase):
+    def test_rock_is_the_nds_boulder_prop(self):
+        # 바위 그림은 NDS 큰 바위(dq4people.PROPS)의 사분면이다. DQ5 미는 바위(4B) 넷으로 되돌리면 실패
+        import dq4people
+        prop = next(p for p in dq4people.PROPS if p.role == '구르는 바위')
+        self.assertEqual(prop.pictures, (b.ROCK_GFX,))
+        self.assertNotEqual(b.ROCK_GFX, 0x4B)
+        self.assertEqual(dq4people.PROP_SHEETS[prop.sheet].name, 'oiwa_0_0.webp')
+        self.assertEqual(b.ROCK_FACINGS, dq4people.PROP_QUADRANTS)
+        self.assertEqual(sorted(b.FACING_CODES), sorted(b.ROCK_FACINGS))
+
+    def test_safe_rocks_stand_in_quadrant_order(self):
+        import dq4ch3safe as safe
+        lists = {m: {"map": m, "entries": []} for m in (safe.GATES, safe.VAULT, safe.ROLL)}
+
+        class Ctx:
+            talk = {'button': 1, 'floor': 2}
+        safe.npc_lists(lists, Ctx())
+        rocks = [e["fields"] for e in lists[safe.ROLL]["entries"] if e["fields"]["gfx"] == b.ROCK_GFX
+                 and e["time"] == 'day']
+        x, y = b.START
+        self.assertEqual([(r["x"], r["y"], r["facing"]) for r in rocks],
+                         [(2 * (x + k % 2), 2 * (y + k // 2) + 1, f) for k, f in enumerate(b.ROCK_FACINGS)])
 
 
 if __name__ == '__main__':
