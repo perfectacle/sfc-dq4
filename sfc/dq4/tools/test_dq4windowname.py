@@ -304,6 +304,21 @@ def window(d, n):
     return lorom(0x040000 | int.from_bytes(d[lorom(WINDOWS + 2 * n):lorom(WINDOWS + 2 * n) + 2], 'little'))
 
 
+class WindowListTest(unittest.TestCase):
+    """asm 이 창 번호로 가르는 목록이 dq4windowname 상수(정적 검사 dq4windowlint 도 읽음)와 같아야 한다."""
+
+    def test_nine_column_windows_match(self):
+        text = ASM.read_text()
+        body = re.search(r'^WtNineWins:\n    db (.*)$', text, re.M).group(1)
+        self.assertEqual(tuple(int(v, 16) for v in re.findall(r'\$([0-9A-Fa-f]{2})', body)), wn.NINE_WINDOWS)
+
+    def test_name_step_windows_match(self):
+        text = ASM.read_text()
+        body = text[text.index('WnList:'):text.index('WnKorean:')]
+        block = body[body.index('LDA.w $0A00'):body.index('\n++\n')]
+        self.assertEqual(sorted(int(v, 16) for v in re.findall(r'CMP #\$([0-9A-F]{2})', block)), sorted(wn.NAME_STEP5_WINDOWS))
+
+
 class ApplyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

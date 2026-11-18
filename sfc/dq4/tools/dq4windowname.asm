@@ -1092,6 +1092,7 @@ WnList:
     CMP #$CC
     BEQ ++
     ; 대열 바꾸기 창(46·45)은 이름 뒤에 「Lv:」 가 붙는다. 지금 그리는 창 번호($0A00)로 가른다
+    ; (dq4windowname.NAME_STEP5_WINDOWS)
     LDA.w $0A00
     CMP #$45
     BEQ ++
@@ -1811,12 +1812,15 @@ WnText:
     AND #$00FF
     CMP #$0009
     BEQ .nine
+    JSR WtNineWin
+    BCS .ninewin
     LDA.l !nene_mark
     AND #$00FF
     SEC
     SBC.w #!nene_view_more
     CMP #$0002
     BCS +
+.ninewin
     LDA.w !wt_cols
     CMP #$000A
     BCC +
@@ -3198,6 +3202,64 @@ WtLen:
 ; 그림(A = 뱅크 안 주소, 0 이면 그대로 돌아감)을 7E:!wn_stage 로 옮긴다. X = 0 이면 뱅크 !wt_bank, 아니면 몬스터 그림
 ; 뱅크 !wt_mbank. 몬스터 이름 그림이 !wt_bank 에 다 들어가지 않아 나눴고, 그리기 쪽은 뱅크와 상관없이 사본을 읽는다.
 ; A·X·Y·DB 를 지킨다(M = X = 16)
+; 지금 그리는 창($0A00)이 물건 이름을 아홉 칸 그림으로 그리는 창(WtNineWins)이면 C = 1. M·X 는 그대로
+WtNineWin:
+    PHP
+    SEP #$20
+    REP #$10
+    PHX
+    LDA.l $7E0A00
+    LDX #$0000
+-
+    CMP.l WtNineWins,X
+    BEQ .yes
+    INX
+    CPX.w #WtNineWinsEnd-WtNineWins
+    BCC -
+    PLX
+    PLP
+    CLC
+    RTS
+.yes
+    PLX
+    PLP
+    SEC
+    RTS
+; dq4windowname.NINE_WINDOWS 와 같아야 한다(test_dq4windowname)
+WtNineWins:
+    db $08, $14, $43, $3E, $3F, $40, $41, $2E, $44
+WtNineWinsEnd:
+
+; WtNameDraw 의 그림 고르기(M = 16, X = 16, A = 색인 자리, !wt_ptr = 그 그림). 아홉 칸 창에서 열 칸 물건 이름이면
+; 그림 뒤(1 + 열 × 9)의 아홉 칸 그림으로 바꾼다(그 그림의 열 수가 0 이면 그대로). A = !wt_ptr 로 돌아간다
+WtNineName:
+    PHX
+    AND #$FE00
+    CMP.w #5*$200
+    BNE .keep
+    JSR WtNineWin
+    BCC .keep
+    LDA.l $7E0000|!wt_ptr
+    BEQ .keep
+    TAX
+    LDA.l !wt_bank<<16,X
+    AND #$00FF
+    CMP #$000A
+    BCC .keep
+    TXA
+    CLC
+    ADC.w #(10*9)+1                ; 이 파일은 math pri 가 꺼져 왼쪽부터 셈한다(1+10*9 는 99)
+    TAX
+    LDA.l !wt_bank<<16,X
+    AND #$00FF
+    BEQ .keep
+    TXA
+    STA.l $7E0000|!wt_ptr
+.keep
+    PLX
+    LDA.l $7E0000|!wt_ptr
+    RTS
+
 WtFetchPic:
     PHB
     PHY
@@ -3265,7 +3327,9 @@ WtNameDraw:
     TAX
     LDA.l (!wt_bank<<16)|$8000,X
     STA.l $7E0000|!wt_ptr
+    TXA
     PLX
+    JSR WtNineName
     JSR WtFetchPic
     PEA $7E7E
     PLB
