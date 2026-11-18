@@ -9,7 +9,7 @@
   table    훅의 3장 전용 표(문턱 16칸·물건 16칸)가 FC 12:$928E·$929E 와 그 물건의 DQ5 짝
 장면(서장 끝 출발 상태에서 dq5warp.lua FIELD 로 3장 필드 구역에 서고 3장 flag 를 켬):
   zone-ZZ-day·night  조우 계수를 FF 로 덮어 걸음마다 싸우게 하고 시각($075E)을 낮·밤으로 묶어 걷는다. 무리 고르기 훅이
-           낸 첫 칸·종 수·둘째부터의 칸이 들어올 때의 난수 상태로 FC 모형이 낸 것과 같다(dq4fieldencountercheck.pick_problems).
+           지은 무리(몬스터·마릿수)가 들어올 때의 난수 상태·시계·장으로 FC 모형(fc_formation)이 지은 것과 같다(dq4fieldencountercheck.pick_problems).
            싸운 무리는 그 구역에서 그 때 고를 수 있는 몬스터뿐(낮의 메라 고스트 없음)
   drop-LL  무리를 버블 슬라임 하나(HP 1)로 덮고 걸으며 이겨, 이길 때마다 훅이 굴린 시작 칸·rand(256)·그때 레벨로
            dq4fieldencounter.drop_roll 이 낸 칸과 훅이 얻은 칸(없음 포함)이 같고, 얻었으면 25:89B3 이 그 물건을 받는다.
@@ -370,7 +370,7 @@ def main():
                                   LOG=f'{fec.PICK_LOG},{fec.LOG}', SET=ch3_set, POKE=CLOCK[mode])
         trace = list(fec.lines(out / name / 'trace.txt')) if (out / name / 'trace.txt').exists() else []
         area = report[f'{z:02X}']['zone']
-        seen, problems = fec.pick_problems(trace, labels, picks)
+        seen, problems = fec.pick_problems(trace, labels, picks, dq4fieldencounter.fc_tables(prg))
         allowed = {dq4fieldencounter.MONSTERS[m]
                    for m in dq4encounter.zone_monsters(prg, z, mode)}
         fights = [(FIGHT_EXITS[at], fec.groups(kv)) for _, at, kv in trace if at in FIGHT_EXITS]
