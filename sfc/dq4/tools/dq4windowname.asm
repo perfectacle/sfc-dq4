@@ -1045,10 +1045,10 @@ WnBattleCell:
     SEP #$20
     STA.l $7E5546,X
     XBA
-    STA.l $7E0000|!bm_pt+1  ; 타일 bit8(풀 C 의 099~0AF 는 0)
+    STA.l $7E0000|(!bm_pt+1)  ; 타일 bit8(풀 C 의 099~0AF 는 0)
     LDA.l $7E5547,X
     AND #$FE
-    ORA.l $7E0000|!bm_pt+1
+    ORA.l $7E0000|(!bm_pt+1)
     STA.l $7E5547,X
     RTL
 .plain
@@ -4505,7 +4505,7 @@ WtStaleFind:
 +
     ; 메시지 창 왼쪽(2열)·오른쪽(29열) 테두리(타일 08E)가 18~26줄 어디에도 없으면 후보를 두지 않는다(게이트가 매 NMI
     ; 슬롯을 재는 시간만큼 게임의 창 타일맵 2KB 전송이 밀림). 메시지 창이 없으면 창이 닫혀도 드러날 칸이 없다
-    LDX.w #(18*32+2)*2
+    LDX.w #((18*32)+2)*2
 -
     LDA.w $5000,X
     AND #$03FF
@@ -4519,7 +4519,7 @@ WtStaleFind:
     CLC
     ADC #$0040
     TAX
-    CPX.w #(27*32+2)*2
+    CPX.w #((27*32)+2)*2
     BCC -
     JMP .out
 .msg
@@ -5336,7 +5336,7 @@ WhReqMask:
     AND.l $7E0000|!wt_dirty
     BNE +
     LDA.l WtBitHi,X
-    AND.l $7E0000|!wt_dirty+2
+    AND.l $7E0000|(!wt_dirty+2)
     BEQ .next
 +
     LDA.l $7E0000|!wt_ages,X
@@ -5762,7 +5762,7 @@ WhMsgWin:
     STA.l !wh_maskthis
     ; 왼쪽(2열)과 오른쪽(29열) 테두리가 같은 줄에 함께 있어야 메시지 창이다. 2열에서 시작하는 다른 창(상태 창 등)도 같은
     ; 테두리 칸을 써, 한쪽만 보면 메시지 창이 없는 화면에서도 이름을 묶어 목록 줄이 몇 프레임 비었다
-    LDX.w #(18*32+2)*2
+    LDX.w #((18*32)+2)*2
 -
     LDA.w $5000,X
     AND #$03FF
@@ -5777,7 +5777,7 @@ WhMsgWin:
     CLC
     ADC #$0040
     TAX
-    CPX.w #(27*32+2)*2
+    CPX.w #((27*32)+2)*2
     BCC -
     LDA.w !wq_head
     AND #$0080

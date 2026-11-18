@@ -881,7 +881,7 @@ BmCarryWrap:
     LDA #$24
     PHA
     PLB
-    LDA.l $7E0000|!bm_pt+1
+    LDA.l $7E0000|(!bm_pt+1)
     JSL BmPutChar
     LDA #$7E
     PHA
@@ -946,7 +946,7 @@ BmClear:
     BEQ +
     RTS
 +
-    LDX.w #!bm_w*9-2
+    LDX.w #(!bm_w*9)-2
 -
     STZ.w !bm_band,X
     DEX
@@ -1001,7 +1001,7 @@ BmJosa:
 BmGlyph:
     STA.w !bm_last
     LDA.w !bm_x
-    CMP.w #(!bm_w-3)*8+1
+    CMP.w #((!bm_w-3)*8)+1
     BCC +
     JMP .skip
 +
