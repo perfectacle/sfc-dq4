@@ -1,6 +1,9 @@
 """굴 공사·개통·장 끝(dq4ch3tunnel)의 검사 표. 내놓는 것은 dq4eventchecks 머리말."""
 import dq4ch1walkcheck as wc
+import dq4ch2event as ch2
 import dq4ch3endor as endor
+import dq4ch3event as ch3
+import dq4ch3slots as slots
 import dq4ch3tunnel as tunnel
 from dq4ch3walkparts import CLOSE, set_flag, talk, talk_yes, taps
 
@@ -10,7 +13,18 @@ FLAGS = {
     'TUNNEL_RESUMED': wc.flag(tunnel.RESUMED),
     'TUNNEL_OPENED': wc.flag(tunnel.OPENED),
     'TUNNEL_GOLD0': (0x7E2019, 0xFF), 'TUNNEL_GOLD1': (0x7E201A, 0xFF), 'TUNNEL_GOLD2': (0x7E201B, 0xFF),
+    'HAND_CH3': wc.flag(ch3.CHAPTER3),
+    # 넘김(dq4ch3tunnel._handover)이 비우는 칸의 앞·끝 바이트: 3장 칸 43~49, 맡긴 물건, 맡긴 금화
+    'HAND_CLEAR0': (slots.CHAPTER_END_CLEAR[0] + 1, 0xFF), 'HAND_CLEAR1': (slots.CHAPTER_END_CLEAR[1] - 1, 0xFF),
+    'HAND_BANK0': (ch2.BANK_ITEMS_AT, 0xFF), 'HAND_BANK1': (ch2.BANK_ITEMS_AT + ch2.BANK_ITEMS - 1, 0xFF),
+    'HAND_BANKG0': (ch2.BANK_GOLD_AT, 0xFF), 'HAND_BANKG1': (ch2.BANK_GOLD_AT + 1, 0xFF),
 }
+# 장 끝 넘김 앞에 둘 표지 값(금화 12345, 비울 칸마다 55)
+HAND_MARKS = ';'.join(['2019=39', '201A=30', '201B=00'] + [f'{FLAGS[k][0] & 0xFFFF:04X}=55' for k in
+                                              ('HAND_CLEAR0', 'HAND_CLEAR1', 'HAND_BANK0', 'HAND_BANK1', 'HAND_BANKG0',
+                                               'HAND_BANKG1')])
+HAND_WANT = {'TUNNEL_GOLD0': tunnel.NEXT_GOLD, 'TUNNEL_GOLD1': 0, 'TUNNEL_GOLD2': 0,
+             **{k: 0 for k in ('HAND_CLEAR0', 'HAND_CLEAR1', 'HAND_BANK0', 'HAND_BANK1', 'HAND_BANKG0', 'HAND_BANKG1')}}
 
 # 굴(dq4ch3tunnel). 47/00 노인 아래 칸에서 위를 보고 말을 건다. 쪽마다 A 하나(글이 다 찍히도록 90프레임 간격), 마지막
 # A 하나가 연 명령 창은 닫는다. 「예」 는 커서 그대로 A
@@ -79,9 +93,10 @@ SEGMENTS = [
     ('tunnel_end', 'ending', tunnel.END_SCENE, {}),
     # 서술을 넘기면 엔딩 곡(14)이 지금 곡이 된 뒤 끝 상자가 버튼을 기다린다. 장 끝 구간과 묶음을 나누는 까닭은 2장 끝
     # song_in 과 같다(남은 A 가 리셋 뒤 타이틀에서 눌림)
-    ('tunnel_song_side', 'warp', TUNNEL_EAST, {'map': tunnel.OPEN_MAP}),
+    # 넘김(_handover): 끝 상자가 뜰 때 3장 flag 가 꺼지고 비울 칸이 0, 금화가 FC 4장 시작 금화
+    ('tunnel_song_side', 'warp', TUNNEL_EAST, {'map': tunnel.OPEN_MAP, 'set': HAND_MARKS}),
     ('tunnel_song', 'walk', f'{TUNNEL_TO_END};wait:60;{taps(3, 120)};wait:400',
-     {'map': tunnel.OPEN_MAP, 'bytes': {'SONG': tunnel.ENDING_SONG}}),
+     {'map': tunnel.OPEN_MAP, 'bytes': {'SONG': tunnel.ENDING_SONG, **HAND_WANT}, 'off': ['HAND_CH3']}),
     # 계단 앞 칸에 서기만 해서는 걸리지 않고(다시 걸어 나옴), 아래 칸 (1F,03) 에서 위로 누르면 걸린다
     ('tunnel_near_side', 'warp', TUNNEL_EAST, {'map': tunnel.OPEN_MAP}),
     ('tunnel_near', 'walk', '60,9;60,5;wait:200;60,9', {'map': tunnel.OPEN_MAP, 'cell': (60, 9)}),

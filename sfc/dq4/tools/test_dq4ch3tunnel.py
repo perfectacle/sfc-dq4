@@ -116,11 +116,12 @@ class ScriptTest(unittest.TestCase):
         ender = next(s['commands'] for s in tunnel.scripts(ctx) if s['address'] == tunnel.SCRIPTS['ender'][1])
         ops = [c['op'] for c in ender]
         # 계단을 막고 있어야 하므로 52 로 치우지 않는다
-        self.assertEqual(ops, ['28', '05', '3F', '37', '21', '37', '37', '16'])
+        self.assertEqual(ops, ['28', '05', '3F', '37', '21', '37', '37', '37', '16'])
         at = ctx.at
         self.assertEqual(ender[1]['args'], list(tunnel._al(at['bump'])))
-        self.assertEqual([ender[k]['args'] for k in (3, 5, 6)],
-                         [list(tunnel._al(at['dark'])), list(tunnel._al(at['ending_song'])), [0x68, 0x8C, 0x5F]])
+        self.assertEqual([ender[k]['args'] for k in (3, 5, 6, 7)],
+                         [list(tunnel._al(at['dark'])), list(tunnel._al(at['ending_song'])),
+                          list(tunnel._al(at['handover'])), [0x68, 0x8C, 0x5F]])
         m = ctx.msg['end']
         self.assertEqual(ender[4]['args'], [m & 0xFF, m >> 8])
 
@@ -217,6 +218,28 @@ class RunTest(unittest.TestCase):
         cpu.read = lambda a: pad if a == 0x004219 else read(a)     # 자동 조이패드 읽기 결과(위 바이트)
         cpu.jsl(at['bump'], max_steps=300)
         return cpu.a & 0xFFFF
+
+    def test_handover_clears_what_chapter3_leaves(self):
+        """FC 3장 끝 뒤(실측): 금화 100, 가방·맡긴 돈 비움. 3장 칸 43~49 와 3장 flag 도 끈다. 그 밖은 건드리지 않는다."""
+        import dq4ch2event as ch2
+        import dq4ch3event as ch3
+        import dq4ch3slots as slots
+        cpu, at = machine()
+        w = cpu.wram
+        w[0x2000:0x2A00] = bytes([0x55]) * 0xA00
+        flag = 0x2190 + ch3.CHAPTER3[0]
+        w[flag] = 0xFF
+        cpu.p = 0x30
+        cpu.jsl(at['handover'], max_steps=2000)
+        lo, hi = (a & 0xFFFF for a in slots.CHAPTER_END_CLEAR)
+        bank = ch2.BANK_ITEMS_AT & 0xFFFF
+        self.assertEqual(bytes(w[lo:hi]), bytes(hi - lo))
+        self.assertEqual(bytes(w[bank:bank + ch2.BANK_ITEMS]), bytes(ch2.BANK_ITEMS))
+        self.assertEqual((w[0x203A], w[0x203B]), (0, 0))
+        self.assertEqual(int.from_bytes(w[0x2019:0x201C], 'little'), tunnel.NEXT_GOLD)
+        self.assertEqual(w[flag], 0xFF ^ ch3.CHAPTER3[1])
+        self.assertEqual((w[lo - 1], w[hi], w[bank - 1], w[bank + ch2.BANK_ITEMS], w[0x2018], w[0x203C]),
+                         (0x55,) * 6)
 
     def test_bump_needs_the_front_cell_and_the_key_toward_the_stairs(self):
         right, up, down = 0x01, 0x08, 0x04
