@@ -113,6 +113,11 @@ class TransferTest(unittest.TestCase):
         self.assertEqual(ev.BANK_ITEMS_AT + ev.BANK_ITEMS, 0x7E2250 + 0xDF + 1)
         self.assertLessEqual(ev.BANK_ITEMS_AT + ev.BANK_ITEMS, 0x7E2332)
 
+    def test_first_shows_the_chapter1_done_box(self):
+        """FC 처럼 장 끝 서술 뒤 「제1장 … / 완」 상자(dq4chapterbox.DONE1)를 먼저 부른다."""
+        import dq4chapterbox as box
+        self.assertEqual(self.body()[:4], bytes((0x22, *box.entry_points(box.GAME_SCENES)['done1'].to_bytes(3, 'little'))))
+
     def test_clear_runs_with_16_bit_a(self):
         code = self.body()
         items = bytes.fromhex('A9 0000 8F 5022 7E') + bytes.fromhex('A2 5022 A0 5122 A9 DE00 54 7E 7E')

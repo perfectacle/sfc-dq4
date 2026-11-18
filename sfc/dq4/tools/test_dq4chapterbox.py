@@ -304,12 +304,13 @@ class LayoutTests(unittest.TestCase):
         lay, tiles, maps = self.layout(box.GAME_SCENES)
         self.assertTrue(lay.blob.endswith(tiles))
         data_at = lay.data_at - lay.base
-        load = lay.blob[lay.load_at - lay.base:data_at]
+        load = lay.blob[lay.load_at - lay.base:lay.tail_at - lay.base]
         self.assertEqual(lay.boot_at + len(box.soft_boot()), lay.load_at)
         self.assertEqual(load[-1:], b'\x60')                      # RTS
+        self.assertTrue(lay.blob[:data_at].endswith(box.soft_reset()))            # 꼬리 둘(「완」·끝 상자)의 끝
         for name in lay.box_at:
             code = lay.blob[lay.box_at[name] - lay.base:]
-            self.assertIn(bytes((0x20, *(lay.load_at & 0xFFFF).to_bytes(2, 'little'))), code[:64], name)
+            self.assertIn(bytes((0x20, *(lay.load_at & 0xFFFF).to_bytes(2, 'little'))), code[:128], name)
         self.assertEqual(lay.blob[data_at:data_at + 2], b'\x00\xff')
         self.assertEqual(lay.blob[data_at + 2:data_at + 2 + len(lay.pal)], lay.pal)
         self.assertEqual(lay.blob[data_at + 2 + len(lay.pal):][:box.ROW], maps[0][:box.ROW])
@@ -318,18 +319,38 @@ class LayoutTests(unittest.TestCase):
 
     def test_ending_scene_waits_for_a_button_and_resets(self):
         lay, _, _ = self.layout(box.GAME_SCENES)
+        # 끝 상자는 행을 놓고 공용 꼬리로 간다: 꼬리가 버튼을 기다리고 리셋한다(돌아오지 않음)
+        tail = lay.blob[lay.tail_at - lay.base:lay.data_at - lay.base]
+        end_tail = tail[tail.rindex(box.LEAVE) + len(box.LEAVE):]
+        self.assertIn(box.wait_button(), end_tail)
+        self.assertTrue(end_tail.endswith(box.soft_reset()))
+        jump = bytes((0x4C, *((lay.data_at - len(end_tail)) & 0xFFFF).to_bytes(2, 'little')))
         ending = lay.blob[lay.box_at['end'] - lay.base:lay.box_at['end2'] - lay.base]
-        self.assertIn(box.wait_button(), ending)
-        self.assertTrue(ending.endswith(box.soft_reset()))
+        self.assertTrue(ending.endswith(jump))
         title = lay.blob[lay.box_at['box'] - lay.base:lay.box_at['box2'] - lay.base]
         self.assertNotIn(box.wait_button(), title)
         self.assertTrue(title.endswith(box.LEAVE))
         chapter3 = lay.blob[lay.box_at['box3'] - lay.base:lay.box_at['end3'] - lay.base]
         self.assertNotIn(box.wait_button(), chapter3)
         self.assertTrue(chapter3.endswith(box.LEAVE))
-        ending3 = lay.blob[lay.box_at['end3'] - lay.base:lay.reveal_at - lay.base]
-        self.assertIn(box.wait_button(), ending3)
-        self.assertTrue(ending3.endswith(box.soft_reset()))
+        ending3 = lay.blob[lay.box_at['end3'] - lay.base:lay.box_at['done1'] - lay.base]
+        self.assertTrue(ending3.endswith(jump))
+        # 끝 상자는 먼저 「완」 상자를 부른다(JSL)
+        for end, done in (('end2', 'done2'), ('end3', 'done3')):
+            at = lay.box_at[end] - lay.base
+            self.assertEqual(lay.blob[at:at + 4], bytes((0x22, *lay.box_at[done].to_bytes(3, 'little'))), end)
+
+    def test_done_boxes_hold_without_a_button_and_share_the_tail(self):
+        """「완」 상자: 버튼을 기다리지 않고 리셋하지 않으며, X = 띄울 프레임으로 공용 꼬리에 JMP 한다. 1장만 곡 12 를 튼다."""
+        lay, _, _ = self.layout(box.GAME_SCENES)
+        ends = {'done1': lay.box_at['done2'], 'done2': lay.box_at['done3'], 'done3': lay.reveal_at}
+        for scene in (box.DONE1, box.DONE2, box.DONE3):
+            code = lay.blob[lay.box_at[scene.name] - lay.base:ends[scene.name] - lay.base]
+            self.assertNotIn(box.wait_button(), code)
+            self.assertTrue(code.endswith(bytes((0xA2, *scene.hold.to_bytes(2, 'little'), 0x4C,
+                                                 *(lay.tail_at & 0xFFFF).to_bytes(2, 'little')))), scene.name)
+            self.assertEqual(bytes((0xA9, 0x12, 0x22)) in code, scene is box.DONE1, scene.name)
+        self.assertEqual([s.hold for s in (box.DONE1, box.DONE2, box.DONE3)], [475, 511, 415])
 
     def test_each_box_copies_its_own_rows(self):
         import re

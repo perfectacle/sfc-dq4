@@ -41,9 +41,6 @@ END_SCENE = 'end3'              # dq4chapterbox.ENDING3 의 이름
 ENDING_SONG = 0x14
 SONG_STOP, SONG_PLAY = 0x24FE91, 0x24FE9A
 SONG_WAIT_MAX = 300             # 곡 자료를 SPC 로 보내는 데 약 120프레임(dq4ch2ending.SONG_WAIT_MAX 와 같음)
-# 장 끝 곡이 울기 시작한 뒤 검은 화면으로 둘 프레임: FC 는 곡을 튼 뒤 415프레임 기다렸다가(1A:$8071 이 $6BF9 를 봄)
-# 기록 물음(03BE)으로 간다. 이 해킹은 그 자리에 끝 상자를 띄운다
-ENDING_HOLD = 415
 HERO_X, HERO_Y = 0x7E3020, 0x7E3080
 FLAG_AT = 0x7E2190
 
@@ -232,14 +229,14 @@ def _dark():
 
 def _ending_song():
     """맵 곡을 멈추고(1A) 장 끝 곡을 튼 뒤, 지금 곡($1D8B)이 그 곡이 될 때까지(상한 SONG_WAIT_MAX) 검은 화면으로 기다린다.
-    기다리지 않으면 끝 상자가 곡보다 먼저 뜬다(dq4ch2ending.native 와 같은 기다림). 그 뒤 FC 처럼 ENDING_HOLD 프레임 더
-    검은 화면으로 둔다."""
+    기다리지 않으면 끝 상자가 곡보다 먼저 뜬다(dq4ch2ending.native 와 같은 기다림). FC 징글 동안(415프레임)은 끝 상자가
+    먼저 부르는 「완」 상자(dq4chapterbox.DONE3)가 뜬다."""
     loop = (bytes((0xDA,)) + wait(1) + bytes((0xFA,                          # PHX / BRK 09 01 / PLX
             0xAD, 0x8B, 0x1D, 0xC9, ENDING_SONG, 0xF0, 0x03, 0xCA)))          # LDA $1D8B / CMP #곡 / BEQ 끝 / DEX
     return (ENTER + bytes((0x22,)) + _al(SONG_STOP) +                         # JSL 24:FE91
             bytes((0xA9, ENDING_SONG, 0x22)) + _al(SONG_PLAY) +               # LDA #곡 / JSL 24:FE9A
             bytes((0xE2, 0x20, 0xC2, 0x10, 0xA2, *SONG_WAIT_MAX.to_bytes(2, 'little'))) + loop +
-            bytes((0xD0, -(len(loop) + 2) & 0xFF)) + _hold(ENDING_HOLD) + LEAVE)  # BNE 고리
+            bytes((0xD0, -(len(loop) + 2) & 0xFF)) + LEAVE)  # BNE 고리
 
 
 # FC 3장 끝(1A:$B8FF·다음 장 시작)을 지난 뒤의 값(실측: 금화 12345·맡긴 돈 1234·가방 다섯을 두고 계단으로): 금화 100(4장 시작
@@ -262,16 +259,6 @@ def _handover():
     body += bytes((0xE2, 0x20, 0xA9, 0x00, 0x8F)) + _al(ch2.GOLD_AT + 2)
     body += ch3._flag_off(ch3.CHAPTER3)
     return ENTER + bytes(body) + LEAVE
-
-
-def _hold(frames):
-    """BRK 09 n(n ≤ 255)을 이어 frames 프레임 기다린다."""
-    out = b''
-    while frames:
-        n = min(frames, 255)
-        out += wait(n)
-        frames -= n
-    return out
 
 
 def _enter_hook():
@@ -413,7 +400,7 @@ def scripts(ctx):
     # 끝 상자 장면. 4장으로 넘기는 빌드가 생기면 handover 뒤 끝 상자 대신 4장 넘김을 부른다
     end_box = (ctx.points or {}).get(END_SCENE, 0)
     out = {
-        # 계단으로 나가려 하면: 조작을 막고 검은 화면 → 서술 → 장 끝 곡 → 넘김 값 → 「다음에 계속」 상자, 버튼을 누르면
+        # 계단으로 나가려 하면: 조작을 막고 검은 화면 → 서술 → 장 끝 곡 → 넘김 값 → 「완」·「다음에 계속」 상자, 버튼을 누르면
         # 타이틀(돌아오지 않음)
         'ender': [_cmd('28'), _cmd('05', *_al(at['bump'])), _cmd('3F'), call(at['dark']),
                   _cmd('21', lo(msg['end']), hi(msg['end'])), call(at['ending_song']), call(at['handover']),

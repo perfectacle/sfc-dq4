@@ -195,7 +195,10 @@ def _transfer(record_at, name_at, event_at):
     body += _flag_or(CHAPTER2) + _flag_or(OPENING)
     body += DB0                                         # MVN 이 DB 를 7E 로 두었다. 이벤트 걸기는 DB 0 의 절대 주소
     start = dq4prologue._event_start(event_at)[len(ENTER):-len(LEAVE)]
-    return ENTER + bytes(body) + start + LEAVE
+    # FC 처럼 장 끝 서술 뒤 「제1장 … / 완」 상자(dq4chapterbox.DONE1)를 먼저 띄운다. 상자 주소는 빌드와 상관없다
+    import dq4chapterbox
+    done = dq4chapterbox.entry_points(dq4chapterbox.GAME_SCENES)['done1']
+    return bytes((0x22,)) + _al(done) + ENTER + bytes(body) + start + LEAVE
 
 
 def _skip_song():

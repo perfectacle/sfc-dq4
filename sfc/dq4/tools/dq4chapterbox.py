@@ -34,9 +34,14 @@ class Scene:
     있어야 한다(flag 는 없어도 됨). subtitle 이 있으면 끝 상자다: 상자 아래 한 줄을 더 띄우고, 버튼을 기다린 뒤
     타이틀로 돌아간다(돌아오지 않음). 끝 상자는 맵이 없어 인물 스크립트가 직접 부른다."""
 
-    def __init__(self, name, where, flag, title, since=None, subtitle=None):
+    def __init__(self, name, where, flag, title, since=None, subtitle=None, hold=None, song=None, before=None):
         self.name, self.where, self.flag, self.title, self.since = name, where, flag, title, since
         self.subtitle = subtitle
+        # before: 이 상자 앞에 먼저 부를 장면(끝 상자 앞의 「완」 상자)
+        self.before = before
+        # hold 가 있으면 장 끝 「완」 상자다: 버튼을 기다리지 않고 hold 프레임 띄운 뒤 지우고 돌아온다. song 이 있으면
+        # 상자 앞에 지금 곡을 멈추고 그 곡을 튼 뒤 지금 곡이 될 때까지 검은 화면으로 기다린다
+        self.hold, self.song = hold, song
 
 
 # 1장 연출·서장 수련 끝 깃발. DQ5 롬에서 켜고 끄고 보는 곳도, 그 바이트를 통째로 쓰는 곳도 없는 비트다(dq5flags.py)
@@ -47,14 +52,21 @@ CHAPTER2 = Scene('box2', (0x3D, 0x01), None, '제2장  말괄량이 공주의 �
 # 1장에서 끝내는 배포판: 1장 끝 서술 뒤 2장 제목과 「다음에 계속」 을 띄우고 타이틀로 돌아간다
 ENDING = Scene('end', None, None, CHAPTER2.title, subtitle='― 다음에 계속 ―')
 # 2장 끝(빈 산트하임 성 앞마당, dq4ch2ending): 3장 제목과 「다음에 계속」. 3장 이름은 nds/dq4/tables/adopt.tsv(사용자 결정)
-ENDING2 = Scene('end2', None, None, '제3장  무기상인 톨네코', subtitle=ENDING.subtitle)
+ENDING2 = Scene('end2', None, None, '제3장  무기상인 톨네코', subtitle=ENDING.subtitle, before='done2')
 # 2장 끝에서 레이크나바 톨네코의 집(3E/01)으로 옮긴 뒤 첫머리를 마칠 때까지(첫머리 대기 깃발 7E:2208 bit5, --chapter3)
 CHAPTER3 = Scene('box3', (0x3E, 0x01), None, ENDING2.title, since=(0x7E2208, 0x20))
 # 3장 끝(굴을 지남, dq4ch3tunnel): 4장 제목과 「다음에 계속」. 4장 이름은 nds/dq4/tables/adopt.tsv
-ENDING3 = Scene('end3', None, None, '제4장  몬바바라의 자매', subtitle=ENDING.subtitle)
+ENDING3 = Scene('end3', None, None, '제4장  몬바바라의 자매', subtitle=ENDING.subtitle, before='done3')
+# 장 끝 「완」 상자(FC 1A:$B8FF: 장 끝 서술 뒤 징글 25~27 동안 「第N章 ○○ / 完」). 띄우는 프레임은 FC 징글 길이
+# (곡 시작부터 EB 까지, fc/dq4/docs/dq4-sound-format.md: 25 475·26 511·27 414, 3장은 기다림 끝까지 415 로 실측)
+DONE = '완'
+# 1장 끝은 곡이 없어 「완」 상자가 엔딩 곡 12(NDS エンディング第一章)를 튼다. 2·3장은 앞에서 튼 13·14 가 울리는 중
+DONE1 = Scene('done1', None, None, TITLE, subtitle=DONE, hold=475, song=0x12)
+DONE2 = Scene('done2', None, None, CHAPTER2.title, subtitle=DONE, hold=511)
+DONE3 = Scene('done3', None, None, ENDING2.title, subtitle=DONE, hold=415)
 # 게임에 넣는 장면 차례. 상자·밝히기 네이티브 주소가 이 목록으로 정해지므로, 주소를 부르는 스크립트(서장·1장)와
 # 빌드가 같은 목록을 써야 한다. 새 장면은 끝에 더해 앞 장면의 상자 주소를 지킨다
-GAME_SCENES = (PROLOGUE, CHAPTER1, CHAPTER2, ENDING, ENDING2, CHAPTER3, ENDING3)
+GAME_SCENES = (PROLOGUE, CHAPTER1, CHAPTER2, ENDING, ENDING2, CHAPTER3, ENDING3, DONE1, DONE2, DONE3)
 SUB_GAP = 1                                 # 상자와 부제 띠 사이 행
 ROW = BOX_W * 2                             # 상자 타일맵 한 행의 바이트
 
@@ -75,6 +87,7 @@ FADE_STEP = 1       # 밝기 한 단계 프레임
 HOLD = 60           # 상자를 다 밝힌 채 두는 프레임(FC 는 페이드까지 75~90프레임쯤)
 REVEAL_STEP = 1
 SONG_WAIT_MAX = 300  # 맵 곡이 시작되기를 기다리는 상한(프레임). FC 는 서술 창이 닫히고 67프레임 뒤 성 곡
+SONG_STOP, SONG_PLAY = 0x24FE91, 0x24FE9A    # 지금 곡 멈추기 / A 의 곡 틀기(dq4ch2ending 과 같음)
 # 맵 곡 건너뛰기 비트(7E:21A5 bit6). 원래 롬에서는 03:C729 만 켠다. 켜져 있으면 01:C2FA 가 동료 자리 맞추기(00:D515)도
 # 건너뛰지만, 새 게임부터 맵을 밝힐 때까지 01:C2FA·00:D515 는 한 번도 돌지 않았다(실측)
 SKIP_SONG = (0x7E21A5, 0x40)
@@ -400,7 +413,8 @@ class Layout:
         # 코드 길이는 자료 주소에 따라 바뀌지 않으므로(즉값 폭 고정) 두 번 짜서 자리를 맞춘다
         # 주소만 셀 때는 빈 타일맵을 받으므로 장면의 행 수까지 0 으로 채운다(코드 길이는 자료와 상관없음)
         maps = [m.ljust(ROW * rows(s.subtitle), b'\0') for s, m in zip(self.scenes, self.maps)]
-        addr = {'tiles': 0, 'maps': [[0] * (len(m) // ROW) for m in maps], 'pal': 0, 'blank': 0, 'load': 0}
+        addr = {'tiles': 0, 'maps': [[0] * (len(m) // ROW) for m in maps], 'pal': 0, 'blank': 0, 'load': 0, 'tail': 0,
+                'boxes': {s.name: 0 for s in self.scenes}}
         # 타일맵은 행(52바이트)마다 따로 부르므로 같은 행은 한 벌만 둔다. 상자의 테두리 행·빈 행과 끝 상자의 부제
         # 행은 장면마다 같고, 제목 행만 다르다
         kept, where = [], []
@@ -411,7 +425,7 @@ class Layout:
                     kept.append(row)
             where.append([kept.index(row) for row in rows_])
         for _ in range(2):
-            start, hook, boxes, reveal, boot, load = self.code(addr)
+            start, hook, boxes, reveal, boot, load, tail = self.code(addr)
             self.start_at = self.base
             self.hook_at = self.start_at + len(start)
             at = self.hook_at + len(hook)
@@ -422,12 +436,13 @@ class Layout:
             self.reveal_at = at
             self.boot_at = self.reveal_at + len(reveal)
             self.load_at = self.boot_at + len(boot)
-            self.data_at = data_at = self.load_at + len(load)
+            self.tail_at = self.load_at + len(load)
+            self.data_at = data_at = self.tail_at + len(tail)
             maps_at = data_at + 2 + len(self.pal)
-            addr = {'blank': data_at, 'pal': data_at + 2, 'load': self.load_at,
+            addr = {'blank': data_at, 'pal': data_at + 2, 'load': self.load_at, 'tail': self.tail_at, 'boxes': self.box_at,
                     'maps': [[maps_at + k * ROW for k in rows_] for rows_ in where],
                     'tiles': maps_at + ROW * len(kept)}
-        self.blob = (start + hook + b''.join(boxes) + reveal + boot + load + b'\x00\xff' + self.pal + b''.join(kept) +
+        self.blob = (start + hook + b''.join(boxes) + reveal + boot + load + tail + b'\x00\xff' + self.pal + b''.join(kept) +
                      self.tiles)
         if (self.base & 0xFFFF) + len(self.blob) > 0x10000:
             raise ValueError('뱅크를 넘음')
@@ -476,18 +491,47 @@ class Layout:
                    fill_vram(BG3_CHR + CANVAS * 8, a['blank'], len(self.tiles) // 2) +
                    restore + dma_cgram(PAL_BORDER * 4, CGRAM_BUFFER + pal_off, n) +
                    bytes((0xA9, 0x0F, 0x8D, 0x1D, 0x00)) + screen_on() + LEAVE)      # 메시지 창은 밝은 채로
+        # 끝 상자의 공용 꼬리(JMP 로 옴): 밝히고 버튼을 누르면 어둡게 해 리셋한다(돌아오지 않음)
+        end_tail = (dma_vram(BG3_MAP, MAP_BUFFER, 0x800) + screen_on() +
+                    fade(1, 15, FADE_STEP) + wait_button() + fade(14, 0, FADE_STEP) + soft_reset())
+
         def ending(row_at, n):
-            # 메시지 창이 남지 않게 BG3 타일맵 버퍼를 모두 비운 뒤 상자·부제를 놓고, 버튼을 누르면 어둡게 해 리셋한다
+            # 메시지 창이 남지 않게 BG3 타일맵 버퍼를 모두 비운 뒤 상자·부제를 놓고 꼬리로
             clear_all = (bytes((0xC2, 0x30, 0xA9, *le(BLANK, 2), 0x8F, *le(MAP_BUFFER, 3))) +
                          mvn(MAP_BUFFER, MAP_BUFFER + 2, 0x800 - 2) + DB0 + bytes((0xE2, 0x20)))
             return (ENTER + bytes((0x9C, 0x1D, 0x00)) + screen_off() + bytes((0xC2, 0x10)) +
                     call_load + clear_all + map_rows(lambda r: row_at[r], n) +
-                    dma_vram(BG3_MAP, MAP_BUFFER, 0x800) + screen_on() +
-                    fade(1, 15, FADE_STEP) + wait_button() + fade(14, 0, FADE_STEP) + soft_reset())
-        boxes = [ending(row_at, rows(scene.subtitle)) if scene.subtitle else box(row_at)
+                    bytes((0x4C, *le((a['tail'] + len(tail)) & 0xFFFF, 2))))           # JMP 꼬리(done 꼬리 뒤)
+        clear_all = (bytes((0xC2, 0x30, 0xA9, *le(BLANK, 2), 0x8F, *le(MAP_BUFFER, 3))) +
+                     mvn(MAP_BUFFER, MAP_BUFFER + 2, 0x800 - 2) + DB0 + bytes((0xE2, 0x20)))
+        # 「완」 상자의 공용 꼬리(JMP 로 옴, X = 띄울 프레임): 밝히고 X 프레임 둔 뒤 box 처럼 지우고 팔레트를 되돌린다.
+        # 들어올 때 X 를 스택에 두었다가 기다리기 직전에 꺼낸다(되돌리기 전에 스택이 맞음)
+        hold_loop = bytes((0xDA,)) + wait(1) + bytes((0xFA, 0xCA))          # PHX / BRK 09 01 / PLX / DEX
+        tail = (bytes((0xDA,)) + dma_vram(BG3_MAP, MAP_BUFFER, 0x800) + screen_on() + fade(1, 15, FADE_STEP) +
+                bytes((0xC2, 0x10, 0xFA)) + hold_loop + bytes((0xD0, -(len(hold_loop) + 2) & 0xFF)) +   # REP #$10 / PLX
+                fade(14, 0, FADE_STEP) + screen_off() + bytes((0xC2, 0x10)) + clear_all +
+                dma_vram(BG3_MAP, MAP_BUFFER, 0x800) +
+                fill_vram(BG3_CHR + CANVAS * 8, a['blank'], len(self.tiles) // 2) +
+                restore + dma_cgram(PAL_BORDER * 4, CGRAM_BUFFER + pal_off, n) +
+                bytes((0xA9, 0x0F, 0x8D, 0x1D, 0x00)) + screen_on() + LEAVE)
+
+        def done(row_at, rows_n, frames, song):
+            # 끝 상자처럼 창을 비우고 상자·부제를 놓은 뒤 X = frames 로 공용 꼬리에 간다(버튼·리셋 없음)
+            play = b''
+            if song is not None:
+                loop = bytes((0xDA,)) + wait(1) + bytes((0xFA, 0xAD, 0x8B, 0x1D, 0xC9, song, 0xF0, 0x03, 0xCA))
+                play = (bytes((0x22, *le(SONG_STOP, 3), 0xA9, song, 0x22, *le(SONG_PLAY, 3),   # JSL 멈춤 / LDA / JSL 틀기
+                               0xE2, 0x20, 0xC2, 0x10, 0xA2, *le(SONG_WAIT_MAX, 2))) + loop +
+                        bytes((0xD0, -(len(loop) + 2) & 0xFF)))                           # $1D8B 가 곡이 될 때까지
+            return (ENTER + play + save + bytes((0x9C, 0x1D, 0x00)) + screen_off() + bytes((0xC2, 0x10)) +
+                    call_load + clear_all + map_rows(lambda r: row_at[r], rows_n) +
+                    bytes((0xC2, 0x10, 0xA2, *le(frames, 2), 0x4C, *le(a['tail'] & 0xFFFF, 2))))   # LDX / JMP 꼬리
+        boxes = [(bytes((0x22, *le(a['boxes'].get(scene.before, 0), 3))) if scene.before else b'') +   # JSL 「완」 상자
+                 (done(row_at, rows(scene.subtitle), scene.hold, scene.song) if scene.hold else
+                  ending(row_at, rows(scene.subtitle)) if scene.subtitle else box(row_at))
                  for scene, row_at in zip(self.scenes, a['maps'])]
         reveal = reveal_code()
-        return start, hook, boxes, reveal, soft_boot(), load
+        return start, hook, boxes, reveal, soft_boot(), load, tail + end_tail
 
 
 def reveal_code(step=REVEAL_STEP, song_wait=True):
