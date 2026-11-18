@@ -50,14 +50,18 @@ class RomTest(unittest.TestCase):
     def test_clear_hooks(self):
         writes = well.writes(0x3CFF00, self.prg, self.place)
         data = bytes.fromhex(writes[0]["hex"])
-        load, wipe = writes[2:]
+        load, wipe, zero = writes[2:]
         self.assertEqual((load["at"], load["orig"]), ("25:8278", "E2 30 A9 50 8D 5E 07"))
         self.assertEqual((wipe["at"], wipe["orig"]), ("01:88EF", "22 9A FE 24"))
-        clear = "AF E1 21 7E 29 FD 8F E1 21 7E"
+        # 깃발을 끄고 격투장 최근 기록 지우기(5B:FF00)를 부른다(FC 1E:$A5AD 가 $6E05 와 $6E31~38 을 함께 지움)
+        clear = "AF E1 21 7E 29 FD 8F E1 21 7E 22 00 FF 5B"
         at = int.from_bytes(bytes.fromhex(load["hex"])[1:4], "little") - 0x3CFF00
-        self.assertEqual(data[at:at + 18].hex(" ").upper(), f"E2 30 {clear} A9 50 8D 5E 07 6B")
+        self.assertEqual(data[at:at + 22].hex(" ").upper(), f"E2 30 {clear} A9 50 8D 5E 07 6B")
         at = int.from_bytes(bytes.fromhex(wipe["hex"])[1:4], "little") - 0x3CFF00
-        self.assertEqual(data[at:at + 20].hex(" ").upper(), f"08 E2 20 48 {clear} 68 28 5C 9A FE 24")
+        self.assertEqual(data[at:at + 24].hex(" ").upper(), f"08 E2 20 48 {clear} 68 28 5C 9A FE 24")
+        # 16비트로 기록 여덟 바이트(7E:2777~277E)에 0, A·P 를 지킴
+        self.assertEqual(zero["at"], "5B:FF00")
+        self.assertEqual(zero["hex"], "08 C2 30 48 A9 00 00 8F 77 27 7E 8F 79 27 7E 8F 7B 27 7E 8F 7D 27 7E 68 28 6B")
 
 
 if __name__ == "__main__":

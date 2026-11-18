@@ -6,6 +6,8 @@ clears $6E05 (MesenCE headless, from a start state built from the ROM under test
          off once the party stands again. "36" first sets the restart slot $195E to 36, whose way back goes by
          01:899F to バトランド's church; slot 02 goes back without it; "own" keeps the start state's slot (36 at
          the end of the chapter-1 prologue). "-unhooked" puts 01:88EF back and keeps the switch on
+  Both also write 01~08 into the arena record (dq4wellswitch.ZEROED) first: the hooks must leave it 0, the unhooked
+  scenes as written.
   load   switch on, save at a church (the cabin's talk number 05; load_start), reset and continue: the save
          slot holds the switch on, the continue path (25:824F, 25:8278) runs the hook, and the loaded game has it off. Only FLAG
          differs from the same scene with 25:8278 as before
@@ -37,6 +39,10 @@ import dq4readset  # noqa: E402
 import dq4pins  # noqa: E402
 
 FLAG, BIT = dq4wellswitch.FLAG[0] & 0xFFFF, dq4wellswitch.FLAG[1]
+# 격투장 최근 기록(dq4wellswitch.ZEROED): 장면 앞에 01~08 을 써 두고 훅을 지난 뒤 0 인지 본다(원래 바이트면 그대로)
+ARENA, ARENA_N = dq4wellswitch.ZEROED[0] & 0xFFFF, dq4wellswitch.ZEROED[1]
+ARENA_SET = ";".join(f"{ARENA + k:04X}={k + 1:02X}" for k in range(ARENA_N))
+ARENA_MARK = bytes(range(1, ARENA_N + 1))
 WIPE_TEST = ",".join(["left:24,right:24"] * 4 + ["a:4,wait:40"] * 90)
 # The restart slot $195E each wipe scene sets, and whether its way back must go by 01:899F. "wipe-own" keeps the start
 # state's own slot: 36 at the end of the chapter-1 prologue (measured), 02 in a DQ5 new game's cabin. It is not judged
@@ -61,7 +67,7 @@ def wipe(mesence, rom, state, out, name):
     unhooked = name.endswith("-unhooked")
     orig = ";{:X}={}".format(lorom(dq4wellswitch.WIPE), dq4wellswitch.WIPE_ORIG.hex().upper()) if unhooked else ""
     got = dq4groupcheck.scene(mesence, rom, state, out, name, TO="3B/00,6,43", MAXF="6000", TEST=WIPE_TEST,
-                              SET=f"{dq4pins.RNG};{FLAG:04X}|{BIT:02X};2042=01;2043=00{WIPES[name][0]}",
+                              SET=f"{dq4pins.RNG};{FLAG:04X}|{BIT:02X};{ARENA_SET};2042=01;2043=00{WIPES[name][0]}",
                               POKE=dq4pins.RNG_HOLD,
                               ROMPATCH=dq4dungeonencountercheck.rates(rom.read_bytes()) + orig, TRACE="0188EF,01899F",
                               LOG=f"7E{FLAG:04X}")
@@ -69,9 +75,11 @@ def wipe(mesence, rom, state, out, name):
     start = [int(kv[f"7E{FLAG:04X}"], 16) & BIT for _, pc, kv in rows if pc == "0188EF"]
     ram = (out / name / "final.wram").read_bytes()
     lookup = any(pc == "01899F" for _, pc, _ in rows)
+    arena = ram[ARENA:ARENA + ARENA_N]
     return name, {"got": got, "on_at_wipe": bool(start and start[0]), "lookup_899F": lookup,
-                  "after": ram[FLAG] & BIT, "ok": bool(start and start[0]) and bool(ram[FLAG] & BIT) == unhooked
-                  and WIPES[name][1] in (None, lookup)}
+                  "after": ram[FLAG] & BIT, "arena_after": arena.hex(),
+                  "ok": bool(start and start[0]) and bool(ram[FLAG] & BIT) == unhooked
+                  and arena == (ARENA_MARK if unhooked else bytes(ARENA_N)) and WIPES[name][1] in (None, lookup)}
 
 
 def hook_code(data, size=48):
@@ -106,7 +114,8 @@ def load(mesence, rom, state, out, name, patch=""):
     shared = rom.read_bytes()[lorom(SHARED_JP):lorom(SHARED_JP) + SHARED_SIZE]
     env = dict(os.environ, STATE=str(state),
                SHOT_DIR=str(dest), NEXT=str(DQ5_TOOLS / "lua" / "dq5msg.lua"), POKE="7E36EB=05;7E370B=00",
-               SET=";".join([f"{FLAG:04X}|{BIT:02X}"] + [f"{SHARED_WRAM + i:04X}={b:02X}" for i, b in enumerate(shared)]),
+               SET=";".join([f"{FLAG:04X}|{BIT:02X}", ARENA_SET]
+                            + [f"{SHARED_WRAM + i:04X}={b:02X}" for i, b in enumerate(shared)]),
                PRE=f"{TALK},wait:400,{CONTINUE}", RESETAT=str(RESET), MAXF=str(LOADED + 100),
                CALLS="25824F,258278", ROMPATCH=patch,
                DUMP=f"{SAVED - 50}:7E2000:{SAVE_SIZE};{SAVED}:{SLOT:06X}:{SAVE_SIZE};{LOADED}:7E2000:{SAVE_SIZE}")
@@ -119,7 +128,8 @@ def load(mesence, rom, state, out, name, patch=""):
     before, saved, loaded = (dumps.get(k, b"") for k in ((SAVED - 50, 0x7E2000), (SAVED, SLOT), (LOADED, 0x7E2000)))
     return {"calls": calls, "on_before": bool(before and before[FLAG - 0x2000] & BIT),
             "saved": bool(saved and saved[FLAG - 0x2000] & BIT), "after": bool(loaded and loaded[FLAG - 0x2000] & BIT),
-            "loaded": loaded}
+            "arena_saved": saved[ARENA - 0x2000:ARENA - 0x2000 + ARENA_N].hex(),
+            "arena_after": loaded[ARENA - 0x2000:ARENA - 0x2000 + ARENA_N].hex(), "loaded": loaded}
 
 
 def main():
@@ -148,7 +158,10 @@ def main():
     differ = [f"{0x2000 + i:04X}" for i, (a, b) in enumerate(zip(hooked.pop("loaded"), plain.pop("loaded"))) if a != b]
     results["load"] = {**hooked, "unhooked": plain, "differ": differ,
                        "ok": hooked["calls"] == ["25824F", "258278"] and hooked["on_before"] and hooked["saved"]
-                       and not hooked["after"] and plain["after"] and differ == [f"{FLAG:04X}"]}
+                       and not hooked["after"] and plain["after"]
+                       and hooked["arena_saved"] == ARENA_MARK.hex() and hooked["arena_after"] == bytes(ARENA_N).hex()
+                       and plain["arena_after"] == ARENA_MARK.hex()
+                       and differ == [f"{FLAG:04X}"] + [f"{ARENA + k:04X}" for k in range(ARENA_N)]}
     ok = all(r["ok"] for r in results.values())
     result = {"status": "passed" if ok else "failed", "scenes": results}
     (out / "results.json").write_text(json.dumps(result, ensure_ascii=False, indent=1) + "\n")

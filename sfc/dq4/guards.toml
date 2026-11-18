@@ -1642,11 +1642,12 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-well-reset"
-why = "우물 바닥 스위치가 전멸·이어 하기 뒤 꺼져야 한다(FC $6E05). 전멸 장면은 1장 롬(서장 끝의 다시 시작 자리 36 그대로인 wipe-own 포함)에서 돌지만, 기록·리셋·이어 하기 장면은 1장 롬에 선실이 없어 groups.sfc 에서 돈다(25:8278 훅과 부르는 코드가 1장 롬과 같은지 보고 시작)"
+why = "우물 바닥 스위치가 전멸·이어 하기 뒤 꺼져야 하고 격투장 최근 8시합 기록(dq4ch3slots.ARENA_RECENT)도 0 이어야 한다(FC 1E:$A5AD 가 $6E05·$6E31~38 을 지움). 전멸 장면은 1장 롬(서장 끝의 다시 시작 자리 36 그대로인 wipe-own 포함)에서 돌지만, 기록·리셋·이어 하기 장면은 1장 롬에 선실이 없어 groups.sfc 에서 돈다(25:8278 훅과 부르는 코드가 1장 롬과 같은지 보고 시작)"
 paths = [
   "sfc/dq4/tools/dq4freshstate.py",
   "sfc/dq4/tools/dq4wellresetcheck.py",
   "sfc/dq4/tools/dq4wellswitch.py",
+  "sfc/dq4/tools/dq4ch3slots.py",
   "sfc/dq4/tools/dq4dungeonrate.py",
   "sfc/dq4/tools/dq4build.py",
   "sfc/dq4/tools/dq4chapter1.py",

@@ -63,8 +63,15 @@ FLAGS.update({'SLOT_COUNTING': (0x7E126C, 0xFF), 'SLOT_LINE': (0x7E126B, 0xFF), 
               'SLOT_LAMP_LINE0': (SLOT_OAM + 2 * 4 + 3, 0xFF), 'SLOT_LAMP_LINE1': (SLOT_OAM + 1 * 4 + 3, 0xFF)})
 SLOT_PLAY = f'up:8;wait:30;{";".join(["a:8;wait:90"] * 4)};wait:200;up:4;wait:30;up:4;wait:30;a:4'
 # 걷기는 앞 구간이 남긴 창을 닫는 PRE 뒤 77 프레임째부터 누르므로 SLOT_PLAY 의 A(돌리기)는 77 + 698 프레임째다.
-# 그 뒤(헤드리스 실측, 릴 자리 06 묶음·코인 둘): 판정 +367, 첫 코인 +516, 마지막 코인의 9프레임 끝 +696, 「한 번 더?」 +889
+# 그 뒤(헤드리스 실측, 릴 자리 06 묶음·코인 둘): 판정 +367, 첫 코인 +516, 마지막 코인의 9프레임 끝 +696, 창 지움 +880,
+# 「한 번 더?」 +884
 SLOT_SPIN_AT = 77 + 698
+# 도는 동안의 릴 OAM 그림자(dq4fcslot !REELS_OAM = $0100, 화면 행 -1~2 마다 8x8 넷: 위 반 둘·아래 반 둘). 행 r 의 위 반 왼쪽 y
+SLOT_REEL_Y = 0x7E0300 + 0x100 + 1
+FLAGS.update({f'SLOT_REEL{r}{h}': (SLOT_REEL_Y + 16 * r + 8 * h, 0xFF) for r in range(4) for h in range(2)})
+SLOT_OFF = 0x7E1227                  # dq4fcslot !fc_off(릴마다 칸 안 밀림 0~31)
+# 「한 번 더?」 의 「예」 칸(dq4fcslot !yes_cell, BG3 맵 7E:6000 행 25 열 11): 커서면 위 바이트 21, 창 안 빈칸이면 20
+FLAGS.update({'SLOT_ASK_CURSOR': (0x7E6000 + (25 * 32 + 11) * 2 + 1, 0xFF)})
 ARENA = W.cell(0x08, 0x0A)
 ARENA_RNG = '7E075B=77;7E075C=22;7E075D=33'
 # 격투장 최근 8시합(dq4ch3slots.ARENA_RECENT, 시합 번호 + 1, 맨 앞이 가장 최근)
@@ -152,6 +159,23 @@ SEGMENTS = [
                    {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{_slot_pos(0x06)}', 'maxf': SLOT_SPIN_AT + at,
                     'bytes': {'SLOT_COUNTING': counting, 'SLOT_LIT': 0x02, 'SLOT_LAMP_LINE0': 0x34,
                               'SLOT_LAMP_LINE1': 0x36, **({'SLOT_LINE': 1} if counting else {})}}))),
+    # 안 맞은 판(릴 자리 00): FC 처럼 판정 뒤 4프레임에 창을 지우고 10 에 「아쉽네요!」, 74 에 지우고 78 에 「한 번 더?」(FC
+    # 17:$9FAC 부터 헤드리스 실측). 판정 +84 에는 커서가 떠 있어야 한다(전에는 판정 바로 「아쉽네요!」, 90 프레임 뒤 물음)
+    ('towns_slot_ask_side', 'warp', f'{W.CASINO},{SLOT[0]},{SLOT[1] + 1}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
+    ('towns_slot_ask', 'walk', SLOT_PLAY,
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{_slot_pos(0x00)}', 'maxf': SLOT_SPIN_AT + 367 + 84,
+      'bytes': {'SLOT_ASK_CURSOR': 0x21, 'SLOT_LIT': 0}}),
+    # 도는 동안 릴 무늬는 FC 처럼 8점 줄마다 창(FC y 43~139, 17:$A409) 밖이면 숨는다. 밀림을 매 프레임 21 로 묶으면 그 프레임
+    # 빠르기 8 이 더해진 29 로 그려져 화면 행 -1·0·1 의 무늬는 y 45·77·109(아래 반 +8)로 보이고 행 2 는 141·149 라 둘 다
+    # 숨음(F0). 16x16 한 장이던 때는 행 2 가 코인 상자 위에 비쳤다
+    ('towns_slot_spin_side', 'warp', f'{W.CASINO},{SLOT[0]},{SLOT[1] + 1}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
+    ('towns_slot_spin', 'walk', SLOT_PLAY,
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{_slot_pos(0x06)};' + ';'.join(f'{SLOT_OFF + k:06X}=15' for k in range(3)),
+      'maxf': SLOT_SPIN_AT + 100,
+      'bytes': {'SLOT_REEL00': 45, 'SLOT_REEL01': 53, 'SLOT_REEL10': 77, 'SLOT_REEL11': 85, 'SLOT_REEL20': 109,
+                'SLOT_REEL21': 117, 'SLOT_REEL30': 0xF0, 'SLOT_REEL31': 0xF0}}),
     # 포커 「남길 카드를 골라 주세요」 화면에 멈춰 BG1 맵을 본다(FC 포커 화면 자리, 덱은 묶지 않아도 칸 자리는 같음)
     ('towns_poker_screen_side', 'warp', f'{W.CASINO},{POKER[0]},{POKER[1] + 1}',
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
