@@ -616,6 +616,7 @@ class UpperFlipTest(unittest.TestCase):
 
     def test_base_row_reads_flipped_rows(self):
         body = self.asm[self.asm.index('\nWnBaseRow:'):self.asm.index('\nWnMirror:')]
+        self.assertIn('BIT #$C000\n    BNE .flipped', body)
         self.assertIn('BIT.w !wn_base\n    BPL +\n    EOR #$0007', body)
         self.assertIn('BVC +\n    JSR WnMirror', body)
 
