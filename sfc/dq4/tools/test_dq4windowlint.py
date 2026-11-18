@@ -156,6 +156,24 @@ class SceneTest(unittest.TestCase):
         self.assertEqual(len(ws.name_sets().split(';')), 8)
 
 
+@unittest.skipUnless(DQ5_ROM.is_file() and wl.FC_ROM.is_file(), 'rom/dq5.sfc 와 rom/dq4.nes 가 필요')
+class ReachableItemTest(unittest.TestCase):
+    """아홉 칸 창에서 빼는 가나 열 칸 물건이 넓은 예외가 아니게: DQ4 명칭표에 없는 DQ5 전용 물건은 DQ4 데이터가 주는
+    물건(reachable_items)과 하나도 겹치지 않고, DQ4 에서 손에 드는 물건은 모두 한글 이름이 있다."""
+
+    def test_dq5_only_items_never_come_from_dq4_data(self):
+        widths = wl.Widths(DQ5_ROM.read_bytes(), 'hack')
+        reach = wl.reachable_items(wl.FC_ROM)
+        self.assertGreater(len(reach), 90)
+        self.assertEqual(sorted(widths.dq5_only() & reach), [])
+
+    def test_every_item_dq4_gives_has_a_korean_name(self):
+        # 이름이 같은 물건은 위 시험(DQ5 전용과 겹치지 않음 = 명칭표에 있음)이 덮고, 빌린 자리는 한글 이름 표가 따로다
+        import dq4itemport
+        borrowed = set(dq4itemport.BORROWED) | set(dq4itemport.EVENT_ITEMS)
+        self.assertEqual(sorted(borrowed - set(dq4itemport.korean_names())), [])
+
+
 @unittest.skipUnless(DQ5_ROM.is_file(), 'rom/dq5.sfc 가 필요')
 class OriginalRomTest(unittest.TestCase):
     """코드별 너비 표가 원래 DQ5 창에 모두 들어맞아야 표가 맞다."""

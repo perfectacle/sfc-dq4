@@ -32,6 +32,24 @@ PARTY_MAX = 4
 TEXT_BANK, INDEX, FIXED_KIND, MONSTER_KIND, ITEM_KIND = 0x58, 0x8000, 7, 4, 5   # dq4windowtext 의 색인
 
 
+FC_ROM = Path(__file__).resolve().parents[3] / 'rom' / 'dq4.nes'
+DQ5_ROM = Path(__file__).resolve().parents[3] / 'rom' / 'dq5.sfc'
+
+
+def reachable_items(dq4, dq5=DQ5_ROM):
+    """DQ4 데이터가 줄 수 있는 DQ5 물건 번호. 가게·보물·몬스터가 떨어뜨림·초기 소지품·사건 지급을 옮기는 길은 모두 FC 물건을
+    이름이 같은 DQ5 물건으로 바꾸고(dq4shopport.dq5_items), 이름이 다른 것은 빌린 자리(dq4itemport.BORROWED·EVENT_ITEMS)에 둔다.
+    그래서 FC 물건 표 전체를 그 길로 바꾼 집합 밖의 물건은 1·2·3장 어디서도 나오지 않는다."""
+    import dq4growth
+    import dq4itemport
+    import dq4shopport
+    from dq5map import Rom
+    dq4data, prg = dq4growth._fc(dq4)
+    known = dq4shopport.dq5_items(Rom(Path(dq5).read_bytes()))
+    out = {known[k] for k in (dq4shopport._fold(name) for _, name, *_ in dq4data.items(prg)) if k in known}
+    return out | set(dq4itemport.BORROWED) | set(dq4itemport.EVENT_ITEMS)
+
+
 def nine_windows():
     """물건 이름을 아홉 칸 그림으로 그리는 창. 3장 네네 보기 창(extras)도 같은 갈래를 탄다(dq4windowname.asm WnText)."""
     import dq4windowname
@@ -176,8 +194,8 @@ def record(data, n, depth=0):
 class Widths:
     """롬 하나의 코드 너비. kind = 'base'(원래 DQ5 롬) / 'hack'(빌드한 롬)."""
 
-    def __init__(self, data, kind):
-        self.data, self.kind = data, kind
+    def __init__(self, data, kind, dq4=None):
+        self.data, self.kind, self.dq4 = data, kind, dq4
         self._tables = {}
         self._fixed = {}
         self.wide_items = []        # 아홉 칸 창에서 뺀 열 칸 물건(DQ5 전용, 가나 그림만)
@@ -222,8 +240,8 @@ class Widths:
                 cols = self.data[lorom(TEXT_BANK << 16 | at)]
                 if cols >= 10:
                     second = self.data[lorom(TEXT_BANK << 16 | at + 1 + cols * 9)]
-                    if not second and n in self.dq5_only():
-                        # 한글이 없어 가나 그림만 있는 열 칸 이름은 DQ4 명칭표에 없는 DQ5 전용 물건이라 DQ4 에서 손에 들지 않는다
+                    if not second and n in self.dq5_only() and n not in self.reachable():
+                        # 한글이 없어 가나 그림만 있는 열 칸 이름은 DQ4 명칭표에 없고 DQ4 데이터가 주지 않는 DQ5 전용 물건이다
                         self.wide_items.append(n)
                         continue
                     cols = second or cols
@@ -242,6 +260,13 @@ class Widths:
             self._tables['dq5only'] = {n for n, name in enumerate(names)
                                        if n not in numbered and wt.kana_key(name) not in known}
         return self._tables['dq5only']
+
+    def reachable(self):
+        """DQ4 에서 손에 들 수 있는 DQ5 물건 번호(reachable_items). FC 롬이 없으면 빈 집합이라 아무것도 빼지 않는다."""
+        if 'reach' not in self._tables:
+            self._tables['reach'] = reachable_items(self.dq4) if self.dq4 else None
+        reach = self._tables['reach']
+        return set(range(0x100)) if reach is None else reach
 
     def code(self, b, window=None):
         """코드 b 의 칸 수와 근거. 모르면 (None, None)."""
@@ -439,8 +464,8 @@ def label(data, n):
     return next(name for k, name, _, _ in extras(data) if k == n)
 
 
-def windows(data, kind):
-    widths = Widths(data, kind)
+def windows(data, kind, dq4=None):
+    widths = Widths(data, kind, dq4)
     out = {}
     if kind == 'hack':
         for k, _, a, rec in extras(data):
@@ -455,9 +480,10 @@ def windows(data, kind):
     return widths, out
 
 
-def check(data, base=None):
-    """[(창, 종류, 설명)]. base(원래 DQ5 롬)를 주면 모르는 코드가 든 줄을 원래 줄이 꽉 찼다고 놓고 잰다."""
-    widths, wins = windows(data, 'hack')
+def check(data, base=None, dq4=None):
+    """[(창, 종류, 설명)]. base(원래 DQ5 롬)를 주면 모르는 코드가 든 줄을 원래 줄이 꽉 찼다고 놓고 잰다. dq4(FC 롬)가 없으면
+    가나 그림만 있는 열 칸 물건을 아홉 칸 창에서 빼지 않는다."""
+    widths, wins = windows(data, 'hack', dq4)
     base_wins = windows(base, 'base')[1] if base is not None else {}
     found = []
     for n, win in wins.items():
@@ -589,6 +615,7 @@ def main():
     ap.add_argument('--rom', required=True, help='빌드한 롬')
     ap.add_argument('--base', required=True, help='원래 DQ5 롬(모르는 코드가 든 줄의 보수 상한, 겹침의 원래 꼴)')
     ap.add_argument('--dump', action='store_true', help='창마다 줄 칸을 찍음')
+    ap.add_argument('--dq4', default=str(FC_ROM), help='FC 롬(DQ4 에서 손에 드는 물건을 셈)')
     args = ap.parse_args()
     data = Path(args.rom).read_bytes()
     base = Path(args.base).read_bytes()
@@ -599,7 +626,7 @@ def main():
                   f'{" 일행" if win.per_member else ""}{" 세로" if win.vertical else ""}')
             for cells in win.rows:
                 print('   ', describe(cells))
-    found = check(data, base)
+    found = check(data, base, args.dq4)
     fail = 0
     for n, kind, text in found:
         why = ALLOW.get((n, kind))
@@ -610,7 +637,7 @@ def main():
     for n, kind in stale:
         print(f'{label(data, n)} {kind} 지난 예외: 더 걸리지 않으니 ALLOW 에서 지울 것')
     fail += len(stale)
-    widths = Widths(data, 'hack')
+    widths = Widths(data, 'hack', args.dq4)
     widths.nine()
     if widths.wide_items:
         print('-- 남은 것 아홉 칸 창에서 뺀 DQ5 전용 열 칸 물건: ' + ' '.join(f'{n:02X}' for n in widths.wide_items))
