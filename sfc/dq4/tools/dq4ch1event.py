@@ -380,6 +380,9 @@ def fc_monster(prg, fc_id, actions=FC_ACTIONS):
     ten = lambda lo, hi: r[lo] | (r[hi] & 3) << 8  # noqa: E731
     return {"HP": ten(4, 15), "MP": r[3], "민첩": r[2], "공격": ten(5, 16), "수비": ten(6, 17),
             "경험치": r[0] | r[1] << 8, "금화": ten(7, 18), "행동수": 0, "재생": 0, "동료확률": 0, "드롭": "FF",
+            # FC AI 종류(바이트 20 bit7-6) 0 은 행동 칸을 거르지 않고(10:$AEB5) 1~3 은 행동마다 평가해 거른다. DQ5 는 필드
+            # 68(조건 표의 칸 수, 21:B3EB)이 0 이면 거르지 않으므로 0 과 첫 칸 하나(1)로 맞춘다
+            "f68": 0 if r[20] >> 6 == 0 else 1,
             **{f"행동{k + 1}": actions[r[9 + k] & 0x7F] for k in range(6)}}
 
 

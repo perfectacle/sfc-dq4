@@ -14,6 +14,8 @@ import json
 from pathlib import Path
 
 FIRST = 0xC6
+# dq4monport 의 부르기 칸(같은 몬스터 B5, ホイミスライム B4)과 FC ホイミスライム 번호. dq4monport 가 이 모듈을 부르므로 값을 둔다
+SUMMON_SAME, SUMMON_FIXED, SUMMON_FIXED_FC = 0xB5, 0xB4, 0x14
 HERB, PIORIMU, GUARD, MAHOSTE, BOOMERANG = range(FIRST, FIRST + 5)
 LAST = BOOMERANG
 FC_ACTIONS = {0x5F: HERB, 0x1E: PIORIMU, 0x49: GUARD, 0x1B: MAHOSTE, 0x64: BOOMERANG}
@@ -54,6 +56,7 @@ COND_ORIG, COND_RESET, COND_HEAL, COND_FINISH, COND_DONE = 0x21B3F3, 0x21B4AD, 0
 MONSTER_SLOT_A = 0x7E07CA           # 몬스터 칸 +A: bit7 있는 칸, bit6 살아 있음
 # 전투 그림 칸: 그림 칸마다 몬스터 번호 넷, 쓴 칸 수, 쓴 너비, 칸마다 상태·너비(22:D1A9 가 읽는 것)
 PICTURES, USED_CELLS, USED_WIDTH, PIC_STATE, PIC_WIDTH = 0x7E117C, 0x7E0D0C, 0x7E0D0D, 0x7E0C24, 0x7E0C29
+PIC_COUNT, PIC_USED = 0x7E0D0E, 0x7E0C1A          # 그림 칸 수, 칸마다 쓰는 수(22:D322·D32B)
 PIC_TILES, TILE_COUNT, TILE_KIND = 0x0C3D, 0x0D13, 0x0D1B      # DB 7E 로 읽고 쓰는 abs 자리
 TILE_FREE, RTL_22 = 0x22D62E, 0x22D1F3  # 빈 타일 자리 찾기(RTS), 뱅크 22 의 RTL 한 바이트
 TILE_SAVED, TILE_DP = (0x7E0D13, 0x7E0D1B, 0x7E0CA3), (0x60, 0x61, 0x62, 0x63, 0x64, 0x65)
@@ -69,7 +72,9 @@ def _l(x):
 
 def far_code(summon_same, at=CODE_AT):
     """(바이트, 라벨). summon_same 은 같은 몬스터 부르기 코드(dq4monport.summon_code 의 'same')."""
+    import dq4fieldencounter
     from dq4environmentrom import _Asm
+    hoimi = dq4fieldencounter.MONSTERS[SUMMON_FIXED_FC]
     a = _Asm(at)
     jml = lambda x: a.b(0x5C, *_l(x))  # noqa: E731
     brk = lambda *v: a.b(0x00, *v)  # noqa: E731
@@ -174,6 +179,7 @@ def far_code(summon_same, at=CODE_AT):
 
     # AI 조건(COND_AT 에서 JSL). 맞으면 $10F6 = 0·대상 마스크 FF, 아니면 $10F6 = FF·마스크 0(21:BA02·B9F6 과 같은 꼴)
     a.label('cond').b(0xAD, 0xF7, 0x10, 0xC9, GUARD).rel(0xF0, 'c_guard')
+    a.b(0xC9, SUMMON_SAME).rel(0xF0, 'c_guard').b(0xC9, SUMMON_FIXED).rel(0xF0, 'c_guard')
     a.b(0x2C, 0x10, 0x11).rel(0x10, 'c_yes')                         # $1110 bit7: 행동하는 쪽이 몬스터
     a.b(0xAD, 0xF5, 0x10, 0x29, 0x0F, 0x85, 0x42, 0xA9, STATUS_MAHOSTE, 0x85, 0x43)
     brk(0x88, 0x79)
@@ -192,8 +198,17 @@ def far_code(summon_same, at=CODE_AT):
     # 빈 타일 자리(22:D62E, $0D13·$0D1B 를 넣고 DB 7E 로), 100 − 쓴 너비 $0D0D − 그림 너비 $0C29,X ≥ 0(22:D1B6~D1E1).
     # D62E 가 쓰는 $60~$65·$0CA3·$0D13·$0D1B 는 되돌린다(7E:5C00 은 부를 때마다 새로 채우는 표). FC 도 그림 자리가
     # 없으면 고르지 않는다(10:$BC50)
-    a.b(0xAD, 0xF5, 0x10, 0x29, 0x0F, 0x0A, 0x0A, 0x0A, 0x0A, 0xAA, 0xBF, *_l(MONSTER_SLOT_A - 0x0A), 0xA2, 0x00)
-    a.label('c_pic').b(0xDF, *_l(PICTURES)).rel(0xF0, 'c_room').b(0xE8, 0xE0, 0x04).rel(0x90, 'c_pic').rel(0x80, 'c_far_yes')
+    # 부를 몬스터: B4 는 ホイミスライム, 나머지는 행동하는 몬스터와 같은 몬스터
+    a.b(0xAD, 0xF7, 0x10, 0xC9, SUMMON_FIXED).rel(0xD0, 'c_own').b(0xA9, hoimi).rel(0x80, 'c_find')
+    a.label('c_own').b(0xAD, 0xF5, 0x10, 0x29, 0x0F, 0x0A, 0x0A, 0x0A, 0x0A, 0xAA, 0xBF, *_l(MONSTER_SLOT_A - 0x0A))
+    a.label('c_find').b(0xA2, 0x00)
+    a.label('c_pic').b(0xDF, *_l(PICTURES)).rel(0xF0, 'c_room').b(0xE8, 0xE0, 0x04).rel(0x90, 'c_pic')
+    # 그림이 아직 없으면(B4) 새 그림 칸: 22:D2FE 처럼 쓴 칸 수 < 16, 그림 칸 $0D0E < 4 이거나 빈 그림 칸($0C1A,X = 0)이
+    # 있어야 한다. 그 뒤의 타일 풀기(22:9088)·자리(22:D62E)는 그림을 실어야 알 수 있어 따라 하지 않는다
+    a.b(0xAF, *_l(USED_CELLS), 0xC9, 0x10).rel(0xF0, 'c_far_no')
+    a.b(0xAF, *_l(PIC_COUNT), 0xC9, 0x04).rel(0x90, 'c_far_yes').b(0xA2, 0x00)
+    a.label('c_slot').b(0xBF, *_l(PIC_USED)).rel(0xF0, 'c_far_yes').b(0xE8, 0xE0, 0x04).rel(0x90, 'c_slot')
+    a.rel(0x80, 'c_far_no')
     a.label('c_room').b(0xAF, *_l(USED_CELLS), 0xC9, 0x10).rel(0xD0, 'c_cells').rel(0x80, 'c_far_no')
     a.label('c_cells').b(0xBF, *_l(PIC_STATE)).rel(0xF0, 'c_tiles').rel(0x10, 'c_far_no')
     a.label('c_tiles')
@@ -227,7 +242,8 @@ def cond_code(far_cond, at=COND_AT):
     from dq4environmentrom import _Asm
     a = _Asm(at)
     a.b(0xAD, 0xF7, 0x10, 0xC9, HERB).rel(0xF0, 'herb')
-    a.b(0xC9, GUARD).rel(0xF0, 'far').b(0xC9, MAHOSTE).rel(0xF0, 'far')
+    for n in (GUARD, MAHOSTE, SUMMON_SAME, SUMMON_FIXED):
+        a.b(0xC9, n).rel(0xF0, 'far')
     a.b(0x4C, *_w(COND_ORIG))
     a.label('herb').b(0x20, *_w(COND_RESET), 0x20, *_w(COND_HEAL)).rel(0x80, 'finish')
     a.label('far').b(0x20, *_w(COND_RESET), 0x22, *_l(far_cond))
