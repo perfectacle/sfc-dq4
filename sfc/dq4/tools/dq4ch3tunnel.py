@@ -242,6 +242,28 @@ def _ending_song():
             bytes((0xD0, -(len(loop) + 2) & 0xFF)) + _hold(ENDING_HOLD) + LEAVE)  # BNE 고리
 
 
+# FC 3장 끝(1A:$B8FF·다음 장 시작)을 지난 뒤의 값(실측: 금화 12345·맡긴 돈 1234·가방 다섯을 두고 계단으로): 금화 100(4장 시작
+# 금화), 가방·맡긴 돈 비움, 3장 끝낸 장 비트. 톨네코 레코드는 그대로
+NEXT_GOLD = 100
+
+
+def _handover():
+    """장 끝 곡 뒤, 끝 상자 앞에서 부른다. 3장 flag 를 끄고 3장만 쓰던 맡긴 동료 칸 43~49(dq4ch3slots.CHAPTER_END_CLEAR: 네네
+    가게 물건·3장 변수)와 맡긴 물건·맡긴 금화를 0 으로, 금화를 NEXT_GOLD 로 둔다. 4장 넘김은 이 뒤에 4장 일행을 싣는다."""
+    import dq4ch3event as ch3
+    import dq4ch3slots as slots
+    lo, hi = slots.CHAPTER_END_CLEAR
+    body = bytearray(bytes((0xC2, 0x30)))
+    # 첫 두 칸을 0 으로 두고 한 칸 뒤로 베껴 나가면 MVN 이 0 을 끝까지 민다(dq4ch3event._transfer 와 같음)
+    for at, n in ((lo, hi - lo), (ch2.BANK_ITEMS_AT, ch2.BANK_ITEMS)):
+        body += bytes((0xA9, 0x00, 0x00, 0x8F)) + _al(at) + ch2._mvn(at, at + 1, n - 1)
+    body += bytes((0xA9, 0x00, 0x00, 0x8F)) + _al(ch2.BANK_GOLD_AT)
+    body += bytes((0xA9, *NEXT_GOLD.to_bytes(2, 'little'), 0x8F)) + _al(ch2.GOLD_AT)
+    body += bytes((0xE2, 0x20, 0xA9, 0x00, 0x8F)) + _al(ch2.GOLD_AT + 2)
+    body += ch3._flag_off(ch3.CHAPTER3)
+    return ENTER + bytes(body) + LEAVE
+
+
 def _hold(frames):
     """BRK 09 n(n ≤ 255)을 이어 frames 프레임 기다린다."""
     out = b''
@@ -271,7 +293,7 @@ def native(ctx):
     """(바이트, {이름: 주소}). 모두 ctx.code_at 부터 이 모듈 몫 안에 둔다."""
     out = bytearray()
     at = {}
-    for name, code in (('bump', _bump()), ('dark', _dark()), ('ending_song', _ending_song()),
+    for name, code in (('bump', _bump()), ('dark', _dark()), ('ending_song', _ending_song()), ('handover', _handover()),
                        ('enter', _enter_hook())):
         at[name] = ctx.code_at + len(out)
         out += code
@@ -388,13 +410,14 @@ def scripts(ctx):
     at, msg = ctx.at, ctx.msg
     lo, hi = (lambda v: v & 0xFF), (lambda v: v >> 8)
     call = lambda a: _cmd('37', *_al(a))  # noqa: E731
-    # 끝 상자 장면. 4장으로 넘기는 빌드가 생기면 여기서 끝 상자 대신 4장 넘김을 부른다(3장 flag 를 끄고 옮김)
+    # 끝 상자 장면. 4장으로 넘기는 빌드가 생기면 handover 뒤 끝 상자 대신 4장 넘김을 부른다
     end_box = (ctx.points or {}).get(END_SCENE, 0)
     out = {
-        # 계단으로 나가려 하면: 조작을 막고 검은 화면 → 서술 → 장 끝 곡 → 「다음에 계속」 상자, 버튼을 누르면
+        # 계단으로 나가려 하면: 조작을 막고 검은 화면 → 서술 → 장 끝 곡 → 넘김 값 → 「다음에 계속」 상자, 버튼을 누르면
         # 타이틀(돌아오지 않음)
         'ender': [_cmd('28'), _cmd('05', *_al(at['bump'])), _cmd('3F'), call(at['dark']),
-                  _cmd('21', lo(msg['end']), hi(msg['end'])), call(at['ending_song']), call(end_box), _cmd('16')],
+                  _cmd('21', lo(msg['end']), hi(msg['end'])), call(at['ending_song']), call(at['handover']),
+                  call(end_box), _cmd('16')],
         # 조작을 막지 않고 FC 빠르기로 한 칸씩 걷는다. 주인공이 앞 길 둘레에 있으면 비킬 때까지 기다린다(위 GAP)
         'migrant': _walk(ctx, 'migrant') + [_cmd('52'), _cmd('16')],
         'traveler': _walk(ctx, 'traveler') + [_cmd('52'), _cmd('16')],
