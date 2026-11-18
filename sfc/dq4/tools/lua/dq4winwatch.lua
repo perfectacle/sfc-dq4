@@ -8,10 +8,18 @@
 -- 바뀌는 글자 찍기와 200~3FF(필드에서는 BG1·BG2 그림이라 물결마다 바뀜)는 새 모습으로 치지 않는다.
 -- 모습은 앞서 적은 모습과 달라진 타일맵 낱말과, 이 타일맵이 가리키는 칸(과 테두리 칸 08B~095) 가운데 앞서 적은 그림과
 -- 달라진 칸의 그림만 적는다. 같은 때의 OAM(544바이트)·CGRAM(512바이트)도 앞 모습과 달라진 낱말만 적는다(스프라이트·색
--- 규칙용). 파일 첫머리는 판 기록 V(지금 3).
+-- 규칙용). 파일 첫머리는 판 기록 V(지금 4).
 --
 -- 엔진이 창 하나의 틀을 버퍼에 그릴 때(04:A56C, 창 틀 그리기가 $0A46 높이를 읽는 첫 명령)마다 D 기록(프레임, 창 번호 $0A00,
 -- x·y·너비·높이 $0A43~$0A46)을 적는다. 창을 닫으면 엔진이 남은 창을 아래부터 다시 그리므로 판정이 그 차례로 겹친 순서를 안다.
+--
+-- 화면이 켜져 있으면(강제 블랭크·밝기 0 이 아님) BG3 과 상관없이 프레임마다 스프라이트·장면 표지도 적는다(판 4):
+--   O  OAM 이 바뀐 프레임과 바뀐 낱말
+--   B  OBJ 설정(이름 자리·둘째 표 거리·크기 꼴)과 밝기·강제 블랭크가 바뀐 프레임
+--   M  맵 번호($BC/$BD)·세계($1949)·전투 여부(NMI 작업 $1944 = 8952)가 바뀐 프레임
+--   J  M 뒤 OBJ_SETTLE 프레임에 OBJ VRAM 두 이름 표(16KB)를 32바이트 덩이로 앞서 적은 것과 달라진 덩이만
+--   R  파일 첫머리(V 뒤)에 한 번, WRAM 조각 목록 글(WINWATCH_WRAM = "주소:길이,…", 7E 뱅크 16진 주소·10진 길이)
+--   W  S 바로 뒤에, 그 조각을 이은 바이트 가운데 앞서 적은 것과 달라진 것(이은 자리 번호, 값)
 --
 -- emu.stop 뒤에도 프레임이 몇 개 더 도는데 그 수가 실행마다 달라, 그 뒤로는 적지 않는다(dq4readset.lua 와 같은 까닭).
 local path, target = os.getenv("WINWATCH_OUT"), os.getenv("WINWATCH_TARGET")
@@ -24,7 +32,7 @@ emu.stop = function(...)
   return stopOrig(...)
 end
 if out then
-  out:write(string.pack("<c1I2", "V", 3))
+  out:write(string.pack("<c1I2", "V", 4))
   local n, last, ids, nid = 0, nil, {}, 0
   local map, art, oam, cg = {}, {}, {}, {}
   local CPU = emu.memType.snesMemory
@@ -44,10 +52,61 @@ if out then
     end
     return t
   end
+  local OBJ_SETTLE = 30
+  local wram, wstore, spec = {}, {}, os.getenv("WINWATCH_WRAM") or ""
+  for a, len in string.gmatch(spec, "(%x+):(%d+)") do
+    for k = 0, tonumber(len) - 1 do wram[#wram + 1] = 0x7E0000 + tonumber(a, 16) + k end
+  end
+  out:write(string.pack("<c1s2", "R", spec))
+  local ostore, bkey, mkey, jat, jstore = {}, nil, nil, nil, {}
+  local function scene(s)
+    local on = not s["ppu.forcedBlank"] and (s["ppu.screenBrightness"] or 0) > 0
+    local k = string.format("%d/%d/%d/%d/%s", s["ppu.oamBaseAddress"] or 0, s["ppu.oamAddressOffset"] or 0,
+                            s["ppu.oamMode"] or 0, s["ppu.screenBrightness"] or 0, tostring(s["ppu.forcedBlank"]))
+    if k ~= bkey then
+      bkey = k
+      out:write(string.pack("<c1I4I2I2BBB", "B", n, s["ppu.oamBaseAddress"] or 0, s["ppu.oamAddressOffset"] or 0,
+                            s["ppu.oamMode"] or 0, s["ppu.screenBrightness"] or 0, s["ppu.forcedBlank"] and 1 or 0))
+    end
+    local m = {emu.read(0x7E00BC, CPU), emu.read(0x7E00BD, CPU), emu.read(0x7E1949, CPU),
+               emu.read16(0x7E1944, CPU) == 0x8952 and 1 or 0}
+    local mk = table.concat(m, "/")
+    if mk ~= mkey then
+      mkey = mk
+      out:write(string.pack("<c1I4BBBB", "M", n, m[1], m[2], m[3], m[4]))
+      jat = n + OBJ_SETTLE
+    end
+    if not on then return end
+    local t = delta(ostore, OAM, 272)
+    if #t > 0 then
+      out:write(string.pack("<c1I4I2", "O", n, #t), table.concat(t))
+    end
+    if jat and n >= jat then
+      jat = nil
+      local base, off = (s["ppu.oamBaseAddress"] or 0) * 2, (s["ppu.oamAddressOffset"] or 0) * 2
+      local blocks = {}
+      for half = 0, 1 do
+        -- 둘째 이름 표는 첫째에서 oamAddressOffset 낱말 뒤(SNES OBSEL 의 (N + 1) × 4K 낱말)
+        local start = (base + half * off) & 0xFFFF
+        for b = 0, 0xFF do
+          local px = {}
+          for k = 0, 15 do px[k + 1] = string.pack("<I2", emu.read16((start + b * 32 + 2 * k) & 0xFFFF, VRAM)) end
+          px = table.concat(px)
+          local key = half * 256 + b
+          if jstore[key] ~= px then
+            jstore[key] = px
+            blocks[#blocks + 1] = string.pack("<I2", key) .. px
+          end
+        end
+      end
+      out:write(string.pack("<c1I4I2I2I2", "J", n, base // 2, off // 2, #blocks), table.concat(blocks))
+    end
+  end
   emu.addEventCallback(function()
     n = n + 1
     if stopped then return end
     local s = emu.getState()
+    scene(s)
     if s["ppu.forcedBlank"] or (s["ppu.screenBrightness"] or 0) == 0 or ((s["ppu.mainScreenLayers"] or 0) & 4) == 0 then
       if last ~= -1 then
         out:write(string.pack("<c1I4i4", "E", n, -1))
@@ -94,6 +153,15 @@ if out then
       out:write(string.pack("<c1I4I4I2I2I2I2I2I2I2I2", "S", id, n, base // 2, chr // 2, hs, vs, #cells, #tiles,
                             #sprites, #colors),
                 table.concat(cells), table.concat(tiles), table.concat(sprites), table.concat(colors))
+      local bytes = {}
+      for i, a in ipairs(wram) do
+        local v = emu.read(a, CPU)
+        if wstore[i] ~= v then
+          wstore[i] = v
+          bytes[#bytes + 1] = string.pack("<I2B", i - 1, v)
+        end
+      end
+      out:write(string.pack("<c1I2", "W", #bytes), table.concat(bytes))
     end
     if id ~= last then
       out:write(string.pack("<c1I4i4", "E", n, id))

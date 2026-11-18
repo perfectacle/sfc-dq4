@@ -2,6 +2,7 @@
 import struct
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 import dq4winwatch as ww
@@ -197,12 +198,13 @@ class FileTest(unittest.TestCase):
         broken[18 * 32 + 29] = 0x2001
         chr_ = vram_chr()
         used = sorted({w & 0x3FF for w in m} | set(range(0x8B, 0x96)) | {1})
-        data = b'V' + struct.pack('<H', ww.VERSION) + record_s(1, 10, list(enumerate(m)), [(t, chr_[t * 16:t * 16 + 16]) for t in used]) + record_e(10, 1)
+        data = b'V' + struct.pack('<H', ww.VERSION) + struct.pack('<cH', b'R', 0) + record_s(1, 10, list(enumerate(m)), [(t, chr_[t * 16:t * 16 + 16]) for t in used]) + record_e(10, 1)
         # 깨진 모습이 한 프레임만(전환 중) 보였다가, 다시 깨진 채 길게 보인다
         data += record_s(2, 20, [(18 * 32 + 29, 0x2001)], []) + record_e(20, 2) + record_e(21, 1) + record_e(40, 2)
         data += record_e(41, 1)
         data += struct.pack('<cIBBBBB', b'D', 5, 0x3A, 1, 15, 29, 11)
-        shots, events, draws = ww.parse(data)
+        rec = ww.parse(data)
+        shots, events = rec.shots, rec.events
         self.assertEqual(shots[2].map[18 * 32 + 29], 0x2001)
         self.assertEqual(shots[2].map[18 * 32 + 30], m[18 * 32 + 30])
         self.assertEqual(shots[2].chr, shots[1].chr)
@@ -214,6 +216,43 @@ class FileTest(unittest.TestCase):
             found = ww.analyze(d, fake_rom())
             self.assertEqual([(s.id, first, n) for s, first, n, _ in found], [(2, 20, 4)])
             self.assertEqual([b[:3] for b in found[0][3]], [(18, 29, '테두리')])
+
+    def test_sprite_scene_and_wram_records(self):
+        head = b'V' + struct.pack('<H', ww.VERSION)
+        spec = b'201D:1,2040:2'
+        data = head + struct.pack('<cH', b'R', len(spec)) + spec
+        data += record_s(1, 10, [], []) + struct.pack('<cH', b'W', 2) + struct.pack('<HB', 0, 3) + struct.pack('<HB', 2, 0x41)
+        data += struct.pack('<cIH', b'O', 11, 1) + struct.pack('<HH', 0, 0x1234)
+        data += struct.pack('<cIHHBBB', b'B', 11, 0x6000, 0x1000, 0, 15, 0)
+        data += struct.pack('<cIBBBB', b'M', 12, 0x37, 0x00, 0, 0)
+        data += struct.pack('<cIHHH', b'J', 42, 0x6000, 0x1000, 1) + struct.pack('<H', 3) + bytes(range(32))
+        rec = ww.parse(data)
+        self.assertEqual(rec.shots[1].wram, {0x201D: 3, 0x2041: 0x41})
+        self.assertEqual(rec.oam[0][0], 11)
+        self.assertEqual(rec.oam[0][1][:2], b'\x34\x12')
+        self.assertEqual(rec.obj, [(11, 0x6000, 0x1000, 0, 15, 0)])
+        self.assertEqual(rec.maps, [(12, 0x37, 0x00, 0, 0)])
+        self.assertEqual(rec.objvram[0][3][96:128], bytes(range(32)))
+        self.assertEqual(ww.Screen(rec.shots[1], None).wram(0x2040, 2), [None, 0x41])
+
+    def test_run_rule_reports_frames(self):
+        import types
+        rule = types.SimpleNamespace(NAME='스프라이트', MODE='report', ALLOW=(),
+                                     check_run=lambda run: [(f, '맵 바뀜') for f, *_ in run.record.maps])
+        data = b'V' + struct.pack('<H', ww.VERSION) + struct.pack('<cH', b'R', 0)
+        data += struct.pack('<cIBBBB', b'M', 12, 0x37, 0x00, 0, 0)
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(ww, 'rules', return_value=[rule]):
+            (Path(d) / ww.DATA).write_bytes(data)
+            self.assertEqual(ww.run_hits(d, fake_rom()), [(12, '스프라이트', '맵 바뀜', 'report')])
+            self.assertEqual(ww.report(d, fake_rom()), (1, 0))
+            self.assertIn('프레임 12 스프라이트: 맵 바뀜', (Path(d) / ww.LOG).read_text(encoding='utf-8'))
+
+    def test_wram_ranges_merge(self):
+        import types
+        rules = [types.SimpleNamespace(WRAM=[(0x2040, 30), (0x201D, 1)]), types.SimpleNamespace(WRAM=[(0x2050, 30)])]
+        with mock.patch.object(ww, 'rules', return_value=rules):
+            self.assertEqual(ww.wram_ranges(), [(0x201D, 1), (0x2040, 0x2050 + 30 - 0x2040)])
+            self.assertEqual(ww.wram_env(), '201D:1,2040:46')
 
     def test_broken_file_is_an_error(self):
         with self.assertRaises(ValueError):

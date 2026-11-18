@@ -32,7 +32,7 @@ import sys
 HERE = Path(__file__).resolve().parent
 LOG = 'winwatch.log'
 DATA = 'winwatch.bin'
-VERSION = 3
+VERSION = 4
 # 엔진 창 틀 그리기 기록 뒤 이만큼 프레임 안에 이어진 그리기는 한 번의 다시 그리기(창을 닫은 뒤 남은 창을 아래부터)로 본다
 REPAINT_GAP = 8
 BORDER_ROM = 0x04E978           # 08B~095, 타일마다 평면 0 8바이트 + 평면 1 8바이트
@@ -55,25 +55,66 @@ def lorom(addr):
 
 
 class Shot:
-    __slots__ = ('id', 'frame', 'map', 'chr', 'hs', 'vs', 'oam', 'cgram')
+    __slots__ = ('id', 'frame', 'map', 'chr', 'hs', 'vs', 'oam', 'cgram', 'wram')
 
-    def __init__(self, id_, frame, words, chr_, hs, vs, oam=bytes(544), cgram=bytes(512)):
+    def __init__(self, id_, frame, words, chr_, hs, vs, oam=bytes(544), cgram=bytes(512), wram=None):
         self.id, self.frame, self.map, self.chr, self.hs, self.vs = id_, frame, words, chr_, hs, vs
         self.oam, self.cgram = oam, cgram
+        self.wram = wram or {}      # {7E 뱅크 주소: 바이트} 규칙이 선언한 WRAM 조각(wram_ranges)
 
 
-def parse(data):
-    """({모습 번호: Shot}, [(프레임, 모습 번호 또는 -1 = 화면 꺼짐)], [(프레임, 창 번호, 사각형)] 엔진 창 그리기). 모습 기록은 앞 모습과 달라진 낱말·칸 그림·OAM·CGRAM
-    낱말만 담아 차례로 덮어 간다. 한 번도 적지 않은 칸 그림은 0 으로 둔다(그 모습의 타일맵이 가리키지 않는 칸)."""
-    shots, events, draws, o = {}, [], [], 0
+@dataclass
+class Record:
+    """winwatch.bin 한 벌. 프레임 차례 목록은 모두 (프레임, …)."""
+    shots: dict                 # {모습 번호: Shot}
+    events: list                # [(프레임, 모습 번호 또는 -1)]
+    draws: list                 # [(프레임, 창 번호, 사각형)] 엔진 창 틀 그리기
+    oam: list                   # [(프레임, OAM 544바이트)] 화면이 켜진 동안 OAM 이 바뀐 프레임
+    obj: list                   # [(프레임, 이름 자리, 둘째 표 거리(낱말), 크기 꼴, 밝기, 강제 블랭크)]
+    maps: list                  # [(프레임, $BC, $BD, $1949, 전투 1/0)]
+    objvram: list               # [(프레임, 이름 자리, 둘째 표 거리, OBJ VRAM 16KB)] 맵이 바뀐 뒤 한 번
+
+
+def wram_ranges():
+    """[(7E 뱅크 주소, 길이)] 규칙 파일들이 WRAM 에 선언한 조각(겹치면 합침)."""
+    spans = sorted({(a, n) for m in rules() for a, n in getattr(m, 'WRAM', ())})
+    out = []
+    for a, n in spans:
+        if out and a <= out[-1][0] + out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], a + n - out[-1][0]))
+        else:
+            out.append((a, n))
+    return out
+
+
+def wram_env(ranges=None):
+    """dq4winwatch.lua 의 WINWATCH_WRAM 값."""
+    return ','.join(f'{a:04X}:{n}' for a, n in (wram_ranges() if ranges is None else ranges))
+
+
+def parse(data, ranges=None):
+    """Record. 모습 기록은 앞 모습과 달라진 낱말·칸 그림·OAM·CGRAM 낱말만 담아 차례로 덮어 간다. 한 번도 적지 않은 칸 그림은
+    0 으로 둔다(그 모습의 타일맵이 가리키지 않는 칸). WRAM 조각은 기록 첫머리 R 의 목록(ranges 로 덮을 수 있음)으로 W 의
+    번호를 주소로 바꾼다."""
+    shots, events, draws, oams, objs, maps, objvram = {}, [], [], [], [], [], []
     if data[:1] != b'V' or struct.unpack_from('<H', data, 1)[0] != VERSION:
         raise ValueError(f'winwatch 기록 판이 {VERSION} 이 아님')
     o = 3
     head = struct.Struct('<IIHHHHHHHH')
     words, chr_, oam, cgram = [0] * 1024, bytearray(TILES * 16), bytearray(544), bytearray(512)
+    live, jv = bytearray(544), bytearray(0x4000)
+    addrs = [a + k for a, n in (ranges or ()) for k in range(n)]
+    wram, last = {}, None
     while o < len(data):
         kind = data[o:o + 1]
-        if kind == b'S':
+        if kind == b'R':
+            (n,) = struct.unpack_from('<H', data, o + 1)
+            spec = data[o + 3:o + 3 + n].decode('ascii')
+            o += 3 + n
+            if ranges is None:
+                pairs = [p.split(':') for p in spec.split(',') if p]
+                addrs = [int(a, 16) + k for a, m in pairs for k in range(int(m))]
+        elif kind == b'S':
             id_, frame, _, _, hs, vs, ncell, ntile, noam, ncg = head.unpack_from(data, o + 1)
             o += 1 + head.size
             for _ in range(ncell):
@@ -89,7 +130,17 @@ def parse(data):
                     i, w = struct.unpack_from('<HH', data, o)
                     store[2 * i:2 * i + 2] = struct.pack('<H', w)
                     o += 4
-            shots[id_] = Shot(id_, frame, tuple(words), bytes(chr_), hs, vs, bytes(oam), bytes(cgram))
+            last = shots[id_] = Shot(id_, frame, tuple(words), bytes(chr_), hs, vs, bytes(oam), bytes(cgram), dict(wram))
+        elif kind == b'W':
+            (n,) = struct.unpack_from('<H', data, o + 1)
+            o += 3
+            for _ in range(n):
+                i, v = struct.unpack_from('<HB', data, o)
+                if i < len(addrs):
+                    wram[addrs[i]] = v
+                o += 3
+            if last is not None:
+                last.wram = dict(wram)
         elif kind == b'D':
             frame, no, x, y, w, h = struct.unpack_from('<IBBBBB', data, o + 1)
             draws.append((frame, no, (y, x, y + h - 1, x + w - 1)))
@@ -98,11 +149,33 @@ def parse(data):
             frame, id_ = struct.unpack_from('<Ii', data, o + 1)
             events.append((frame, id_))
             o += 9
+        elif kind == b'O':
+            frame, n = struct.unpack_from('<IH', data, o + 1)
+            o += 7
+            for _ in range(n):
+                i, w = struct.unpack_from('<HH', data, o)
+                live[2 * i:2 * i + 2] = struct.pack('<H', w)
+                o += 4
+            oams.append((frame, bytes(live)))
+        elif kind == b'B':
+            objs.append(struct.unpack_from('<IHHBBB', data, o + 1))
+            o += 12
+        elif kind == b'M':
+            maps.append(struct.unpack_from('<IBBBB', data, o + 1))
+            o += 9
+        elif kind == b'J':
+            frame, base, off, n = struct.unpack_from('<IHHH', data, o + 1)
+            o += 11
+            for _ in range(n):
+                (k,) = struct.unpack_from('<H', data, o)
+                jv[k * 32:k * 32 + 32] = data[o + 2:o + 34]
+                o += 34
+            objvram.append((frame, base, off, bytes(jv)))
         else:
             raise ValueError(f'winwatch 기록이 {o} 에서 깨짐')
         if o > len(data):
             raise ValueError('winwatch 기록이 중간에 끊김')
-    return shots, events, draws
+    return Record(shots, events, draws, oams, objs, maps, objvram)
 
 
 def stacks(draws):
@@ -159,6 +232,7 @@ class Ref:
     """롬에서 읽은 테두리·가나 그림."""
 
     def __init__(self, rom):
+        self.rom = rom
         o = lorom(BORDER_ROM)
         self.border = {t: planar(rom[o + i * 16:o + i * 16 + 8], rom[o + i * 16 + 8:o + i * 16 + 16])
                        for i, t in enumerate(range(BORDER_FIRST, BORDER_LAST + 1))}
@@ -355,6 +429,10 @@ class Screen:
     def visible(self, r):
         return visible(self.shot, r)
 
+    def wram(self, addr, n=1):
+        """이 모습 때의 WRAM(7E 뱅크 주소부터 n 바이트). 규칙 파일의 WRAM 선언에 든 바이트만, 없는 바이트는 None."""
+        return [self.shot.wram.get(addr + k) for k in range(n)]
+
     @functools.cached_property
     def window_screen(self):
         """BG3 테두리 칸 그림이 롬과 같은가(창을 그리는 화면인가)."""
@@ -466,9 +544,11 @@ def rules():
     out = []
     for p in sorted(HERE.glob('dq4winrule_*.py')):
         m = importlib.import_module(p.stem)
-        for attr in ('NAME', 'MODE', 'ALLOW', 'check'):
+        for attr in ('NAME', 'MODE', 'ALLOW'):
             if not hasattr(m, attr):
                 raise ValueError(f'{p.name}: {attr} 가 없음')
+        if not hasattr(m, 'check') and not hasattr(m, 'check_run'):
+            raise ValueError(f'{p.name}: check 나 check_run 이 없음')
         if m.MODE not in ('report', 'fail'):
             raise ValueError(f'{p.name}: MODE 는 report·fail')
         if any(not a.why.strip() for a in m.ALLOW):
@@ -484,6 +564,8 @@ def check(shot, ref, scene='', only=None, engine=None, numbers=None):
     for rule in rules():
         if only and rule.NAME not in only:
             continue
+        if not hasattr(rule, 'check'):
+            continue
         for r, c, why in rule.check(screen):
             if (r, c) in marked or not screen.visible(r) or any(a.matches(scene, r, c) for a in rule.ALLOW):
                 continue
@@ -498,8 +580,8 @@ def analyze(folder, rom, scene=None):
     path = Path(folder) / DATA
     if not path.is_file():
         return None
-    shots, events, draws = parse(path.read_bytes())
-    timeline = stacks(draws)
+    rec = parse(path.read_bytes())
+    shots, events, timeline = rec.shots, rec.events, stacks(rec.draws)
     ref = Ref(rom)
     scene = scene or str(folder)
     frames = {}
@@ -527,6 +609,30 @@ def analyze(folder, rom, scene=None):
     return out
 
 
+@dataclass
+class Run:
+    """장면 하나 전체(check_run 규칙의 재료). record 는 Record, ref 는 Ref, scene 은 장면 폴더 경로 글."""
+    record: Record
+    ref: object
+    scene: str
+
+
+def run_hits(folder, rom, scene=None):
+    """[(프레임, 규칙 이름, 설명, 규칙 MODE)] check_run 규칙이 장면 전체에서 건 것. 기록이 없으면 None."""
+    path = Path(folder) / DATA
+    if not path.is_file():
+        return None
+    run = Run(parse(path.read_bytes()), Ref(rom), scene or str(folder))
+    out = []
+    for rule in rules():
+        if not hasattr(rule, 'check_run'):
+            continue
+        for frame, why in rule.check_run(run):
+            if not any(a.cells is None and fnmatch.fnmatch(run.scene, a.scene) for a in rule.ALLOW):
+                out.append((frame, rule.NAME, why, rule.MODE))
+    return sorted(out)
+
+
 def picture(shot, bad, margin=1):
     """걸린 칸 둘레의 타일맵 낱말(걸린 칸은 * 표)."""
     rows = sorted({b[0] for b in bad})
@@ -548,6 +654,11 @@ def report(folder, rom, label=None):
         return None
     lines, failing = [], 0
     force = mode()
+    hits = run_hits(folder, rom, label) or []
+    for frame, rule, why, rmode in hits:
+        fail = force == 'fail' or (force == 'rules' and rmode == 'fail')
+        failing += fail
+        lines.append(f'프레임 {frame} {rule}: {why}{" 실패" if fail else ""}')
     for shot, first, n, bad in found:
         rules_ = sorted({b[2] for b in bad})
         fail = force == 'fail' or (force == 'rules' and any(b[4] == 'fail' for b in bad))
@@ -557,11 +668,14 @@ def report(folder, rom, label=None):
         lines += [f'  {r},{c} {rule}: {why}' for r, c, rule, why, _ in bad[:40]]
         lines += picture(shot, bad)
     (Path(folder) / LOG).write_text('\n'.join(lines) + ('\n' if lines else ''), encoding='utf-8')
+    if hits:
+        print(f'[winwatch] {label or folder}: 장면 규칙 {len(hits)}건(첫 프레임 {hits[0][0]} {hits[0][1]}) — '
+              f'{Path(folder) / LOG}', file=sys.stderr)
     if found:
         first = found[0][3][0]
         print(f'[winwatch] {label or folder}: UI 깨짐 {len(found)}개 모습(실패 {failing}, 첫 프레임 {found[0][1]}, '
               f'{first[2]} {first[0]},{first[1]}) — {Path(folder) / LOG}', file=sys.stderr)
-    return len(found), failing
+    return len(found) + len(hits), failing
 
 
 def mode():
