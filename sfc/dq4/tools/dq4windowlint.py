@@ -235,8 +235,9 @@ def name_step(widths, window, nxt):
     return 5 if nxt in (0xDD, 0xCC) or window in (0x45, 0x46) else 4
 
 
-def parse(data, n, widths):
-    addr, rec = record(data, n)
+def parse(data, n, widths, rec=None, addr=None):
+    if rec is None:
+        addr, rec = record(data, n)
     win = Window(n, addr, rec[0] & 0x1F, rec[1] & 0x1F, rec[2] & 0x1F, rec[3] & 0x0F,
                  per_member=False, vertical=bool(rec[0] & 0x40), party_height=bool(rec[0] & 0x40 and rec[0] & 0x20))
     win.tall = bool(rec[3] & 0x80)
@@ -357,9 +358,49 @@ def bounds(win):
     return win.x, win.y, w, h
 
 
+# 창 표에 없고 창을 열 때 코드가 바꿔 주는 레코드(dq4windowname.asm). 키는 창 번호와 겹치지 않게 100 부터
+EXTRA = 0x100
+SHOP_SPOT, SHOP_SPOT_END = 0x04FF40, 0x050000          # dq4windowname.SHOP_SPOT: ShopQtyRec·ShopSellRec
+NENE_SPOT, NENE_RECORD, NENE_PAGES = 0x04AE21, 10, 8   # dq4windowname.NENE_SPOT: 쪽 줄 수 1~8 마다 레코드 하나
+
+
+def extras(data):
+    """[(키, 이름, 주소, 레코드)]. 가게 팔기 목록(창 37 을 가게일 때 바꿈, 자리는 37 의 것)·가게 개수 창·3장 네네 보기 창."""
+    import re
+    out = []
+    lo, hi = lorom(SHOP_SPOT), lorom(SHOP_SPOT_END - 1) + 1
+    seg = bytes(data[lo:hi])
+    alias = record(data, 0x37)[1]
+    for name, pat, at in (('가게 팔기 목록', rb'\x4f\x03[\x80-\x9f]\xb9\x00\x81\xfe\xd3\x01\xd9\xff', alias),
+                          ('가게 개수 창', rb'\x16\x05\x08\x25\x00\x01\x01\xff\x52', None)):
+        m = re.search(pat, seg)
+        if m:
+            rec = seg[m.start():]
+            if at is not None:
+                rec = bytes((rec[0] & 0xE0 | at[0] & 0x1F, rec[1] & 0xE0 | at[1] & 0x1F)) + rec[2:]
+            out.append((name, SHOP_SPOT + m.start(), rec))
+    for k in range(NENE_PAGES):
+        a = NENE_SPOT + k * NENE_RECORD
+        rec = bytes(data[lorom(a):lorom(a) + NENE_RECORD])
+        if rec[0] != 0xFF:
+            out.append((f'네네 보기 창 {k + 1}줄', a, rec))
+    return [(EXTRA + i, name, a, rec) for i, (name, a, rec) in enumerate(out)]
+
+
+def label(data, n):
+    if n is None:
+        return '--'
+    if n < EXTRA:
+        return f'{n:02X}'
+    return next(name for k, name, _, _ in extras(data) if k == n)
+
+
 def windows(data, kind):
     widths = Widths(data, kind)
     out = {}
+    if kind == 'hack':
+        for k, _, a, rec in extras(data):
+            out[k] = parse(data, k, widths, rec, a)
     for n in range(WINDOW_COUNT):
         try:
             win = parse(data, n, widths)
@@ -518,12 +559,12 @@ def main():
     fail = 0
     for n, kind, text in found:
         why = ALLOW.get((n, kind))
-        print(f'{"--" if n is None else f"{n:02X}"} {kind} {text}' + (f' [예외: {why}]' if why else ''))
+        print(f'{label(data, n)} {kind} {text}' + (f' [예외: {why}]' if why else ''))
         fail += not why
     # 고쳐서 더 걸리지 않는 예외는 지워야 다음 넘침을 가리지 않는다
     stale = sorted(set(ALLOW) - {(n, kind) for n, kind, _ in found})
     for n, kind in stale:
-        print(f'{n:02X} {kind} 지난 예외: 더 걸리지 않으니 ALLOW 에서 지울 것')
+        print(f'{label(data, n)} {kind} 지난 예외: 더 걸리지 않으니 ALLOW 에서 지울 것')
     fail += len(stale)
     for code, what, why in unknown_numbers():
         print(f'-- 남은 것 {code:02X} {what}: {why}')

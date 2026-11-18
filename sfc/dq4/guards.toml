@@ -3711,7 +3711,8 @@ paths = [
   "sfc/dq4/tools/dq4windowtext.py",
   "sfc/dq4/tools/dq4menupatch.py",
   "sfc/dq4/tools/dq4neneshop.py",
+  "@ch3-modules",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4windowlint.py --rom work/ch1/dq4-ch1.sfc --base rom/dq5.sfc"
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4windowlint.py --rom work/ch1/dq4-ch1.sfc --base rom/dq5.sfc && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4windowlint.py --rom work/ch2/dq4-ch1.sfc --base rom/dq5.sfc && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4windowlint.py --rom work/ch3/dq4-ch1.sfc --base rom/dq5.sfc"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 groups = ["ch1-build"]

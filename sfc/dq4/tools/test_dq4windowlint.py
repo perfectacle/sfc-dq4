@@ -98,6 +98,19 @@ class EdgeTest(unittest.TestCase):
         self.assertEqual(wl.misaligned(wins, (0x01, 0x02)), {(0x01, 0x02, '왼쪽'), (0x01, 0x02, '오른쪽')})
 
 
+class ExtraRecordTest(unittest.TestCase):
+    def test_shop_sell_record_opens_at_the_alias_place_and_is_checked(self):
+        target = bytes.fromhex('4f038db90081fed3ff83')
+        d = bytearray(rom({0x0F: target, 0x37: bytes.fromhex('89020f')}))
+        sell = bytes.fromhex('4f0395b90081fed301d9ff83')           # 너비 21, 자리는 창 37 의 x 9 y 2
+        o = wl.lorom(wl.SHOP_SPOT + 9)
+        d[o:o + len(sell)] = sell
+        (key, name, _, _), = [e for e in wl.extras(bytes(d)) if e[1] == '가게 팔기 목록']
+        win = wl.windows(bytes(d), 'hack')[1][key]
+        self.assertEqual((win.x, win.y, win.w), (9, 2, 21))
+        self.assertEqual(wl.label(bytes(d), key), '가게 팔기 목록')
+
+
 class PlaceTest(unittest.TestCase):
     def test_window_past_the_right_edge(self):
         rec = bytes.fromhex('190408a30001') + bytes.fromhex('fe02ff') + b'\x80'
