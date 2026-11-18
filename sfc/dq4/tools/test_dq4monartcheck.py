@@ -80,6 +80,104 @@ class ScreenTests(unittest.TestCase):
         self.assertIsNone(mc.grid_diff(PICTURE, PICTURE[:4]))
 
 
+def two_screen(lines, colors):
+    """같은 그림(PICTURE)을 (40,60)·(100,60) 에 OAM 팔레트 lines 로 두고 CGRAM 줄 k 에 colors[k] 를 둔 덤프."""
+    oam, vram = screen(40, 60, PICTURE, lines[0])
+    oam = bytearray(oam)
+    oam[4:8] = bytes((100, 59, 0, lines[1] << 1))
+    cgram = [0] * 256
+    for k, c in enumerate(colors):
+        cgram[mc.OBJ_PALETTES + 16 * k + 1:mc.OBJ_PALETTES + 16 * k + 1 + len(c)] = c
+    return bytes(oam), vram, cgram
+
+
+class GroupTests(unittest.TestCase):
+    COLORS = [0x1111, 0x2222, 0x3333]
+
+    def test_same_species_on_two_lines(self):
+        # 같은 종 두 무리는 줄 둘을 쓰고, 둘 다 그 종의 색이어야 한다
+        oam, vram, cgram = two_screen((0, 1), [self.COLORS, self.COLORS])
+        out, problems = mc.judge_group(oam, vram, cgram, (0x30, 0x30), {0x30: (PICTURE, self.COLORS)})
+        self.assertEqual(problems, [])
+        self.assertEqual(sorted(f['palettes'][0] for f in out['30']), [0, 1])
+
+    def test_second_line_with_other_colors_fails(self):
+        oam, vram, cgram = two_screen((0, 1), [self.COLORS, [0x1111, 0x2222, 0x7FFF]])
+        _, problems = mc.judge_group(oam, vram, cgram, (0x30, 0x30), {0x30: (PICTURE, self.COLORS)})
+        self.assertEqual(problems, ['30 줄 1 CGRAM 색이 기대와 다름'])
+
+    def test_drawn_on_wrong_line_fails(self):
+        oam, vram, cgram = two_screen((0, 0), [self.COLORS, self.COLORS])
+        _, problems = mc.judge_group(oam, vram, cgram, (0x30, 0x30), {0x30: (PICTURE, self.COLORS)})
+        self.assertIn('30 그림의 OBJ 팔레트 [0, 0], 무리 줄 [0, 1]', problems)
+
+    def test_unplaced_group_is_not_judged(self):
+        # 화면 폭에 들지 않는 무리(놓인 수 0)는 그림도 줄 색도 없다
+        oam, vram = screen(40, 60, PICTURE, 0)
+        cgram = [0] * 256
+        cgram[mc.OBJ_PALETTES + 1:mc.OBJ_PALETTES + 4] = self.COLORS
+        _, problems = mc.judge_group(oam, vram, cgram, (0x30, 0x30), {0x30: (PICTURE, self.COLORS)}, [1, 0])
+        self.assertEqual(problems, [])
+
+
+class CoverTests(unittest.TestCase):
+    def test_covers_every_line_pair_in_order(self):
+        # 무리 차례 그대로 센다: (1, 2) 와 (2, 1) 은 짝이 다르다
+        orders = [(1, 2), (2, 1), (1, 3, 2), (4,)]
+        picked, twice = mc.cover(orders, {1, 2, 3})
+        self.assertEqual(mc.pairs_of(picked, {1, 2, 3}), mc.pairs_of(orders, {1, 2, 3}))
+        self.assertEqual(twice, [])
+
+    def test_done_pairs_and_unplaced_groups_are_left_out(self):
+        orders = [(1, 2), (2, 1)]
+        self.assertEqual(mc.cover(orders, {1, 2}, done={(1, 0), (2, 1)})[0], [(2, 1)])
+        placed = {(1, 2): [1, 0], (2, 1): [1, 1]}.get
+        self.assertEqual(mc.pairs_of(orders, {1, 2}, placed), {(1, 0), (2, 0), (1, 1)})
+
+    def test_one_twice_order_per_species(self):
+        orders = [(5, 5, 6), (5, 5), (6, 7, 6), (7,)]
+        picked, twice = mc.cover(orders, {5, 6, 7})
+        doubled = {m for o in picked + twice for m in o if o.count(m) > 1}
+        self.assertEqual(doubled, {5, 6})
+
+
+class FakeRom:
+    """LoROM 주소 → 바이트 사전(dq5map.Rom 과 같은 u8·u16)."""
+    def __init__(self, data):
+        self.data = data
+
+    def u8(self, a):
+        return self.data.get(a, 0)
+
+    def u16(self, a):
+        return self.u8(a) | self.u8(a + 1) << 8
+
+
+def background_rom(first, count, colors=1):
+    """배경 31 칸이 모두 칸 0(낮)·2(밤)을 쓰고, 표의 모든 칸이 [count][first] 에 줄마다 색 colors 개인 레코드를 가리키는 롬."""
+    data = {}
+    record = [count, first] + [b for _ in range(count) for b in [colors] + [0x11, 0x22] * colors]
+    for slot in range(0, 0x100, 2):
+        data[mc.BG_RECORDS + slot], data[mc.BG_RECORDS + slot + 1] = 0x00, 0xC0
+    for i, b in enumerate(record):
+        data[0x28C000 + i] = b
+    return FakeRom(data)
+
+
+class BackgroundTests(unittest.TestCase):
+    def test_slots_follow_day_night_and_modes(self):
+        slots = mc.background_slots(background_rom(5, 3))
+        self.assertEqual(sorted(slots), [0, 2, 0x98, 0xB4])
+        self.assertEqual(len(slots[2]), mc.BG_COUNT)
+        self.assertTrue(all(night for _, mode, night in slots[2]))
+
+    def test_record_on_obj_lines_fails(self):
+        self.assertEqual(mc.background_problems(background_rom(5, 3)), [])
+        # 줄 5~8: 줄 8 은 CGRAM 128~(OBJ 팔레트 0)이라 무리 0 의 색을 덮는다
+        self.assertEqual(len(mc.background_problems(background_rom(5, 4))), 4)
+        self.assertEqual(len(mc.background_problems(background_rom(0, 1, colors=16))), 4)
+
+
 @unittest.skipUnless((ROOT / 'rom' / 'dq5.sfc').is_file() and os.environ.get('DQ4_ASSETS'),
                      'local source ROM or DQ4_ASSETS not present')
 class StaticRomTests(unittest.TestCase):
@@ -120,6 +218,42 @@ class StaticRomTests(unittest.TestCase):
         rows, problems = mc.static_check(self.dq5, self.Rom(bytes(data)), self.want, self.shared)
         self.assertEqual(rows[f'{m:02X}']['status'], 'wrong')
         self.assertTrue(any(p.startswith(f'{m:02X}(') for p in problems), problems)
+
+
+@unittest.skipUnless((ROOT / 'rom' / 'dq5.sfc').is_file(), 'local source ROM not present')
+class PaletteRomTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from dq5map import Rom, lorom
+        cls.Rom, cls.lorom = Rom, staticmethod(lorom)
+        cls.data = (ROOT / 'rom' / 'dq5.sfc').read_bytes()
+        cls.dq5 = Rom(cls.data)
+
+    def test_original_backgrounds_stay_below_obj_lines(self):
+        self.assertEqual(mc.background_problems(self.dq5), [])
+        # 22:8983 표 31 칸 바로 뒤는 22:89E5 의 첫 명령 PHP(08)다
+        self.assertEqual(self.dq5.u8(mc.BG_INDEX + 2 * mc.BG_COUNT), 0x08)
+
+    def test_background_on_obj_line_fails(self):
+        at = 0x280000 | self.dq5.u16(mc.BG_RECORDS)
+        data = bytearray(self.data)
+        data[self.lorom(at) + 1] = mc.OBJ_LINE - 1
+        problems = mc.background_problems(self.Rom(bytes(data)))
+        self.assertTrue(problems and all(f'{at & 0xFFFF:04X}' in p for p in problems), problems)
+
+    def test_original_monsters_use_their_own_colors(self):
+        self.assertEqual(mc.color_problems(self.dq5), [])
+
+    def test_fewer_record_colors_than_picture_fails(self):
+        import dq5mongfx as M
+        import dq5monwrite as W
+        m = 0x02
+        g, _ = M.monster(self.dq5, m)
+        top = max(max(row) for row in W.picture_grid(self.dq5, g)[0])
+        table, bank = M.record_table(self.dq5)
+        data = bytearray(self.data)
+        data[self.lorom(bank << 16 | self.dq5.u16(table + m * 2)) + 1] = top - 1
+        self.assertTrue(any(p.startswith('02:') for p in mc.color_problems(self.Rom(bytes(data)))))
 
 
 if __name__ == '__main__':
