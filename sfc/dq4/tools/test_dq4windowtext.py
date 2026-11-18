@@ -346,6 +346,18 @@ class BuildTests(unittest.TestCase):
         self.assertEqual(self.ptr(out, 5, wt.KANA_LIMIT), 0)
         self.assertEqual(report[5], (256, 1))
 
+    def test_full_width_items_carry_a_nine_column_picture(self):
+        # 아홉 글자 고정 창(WnText)이 읽는 둘째 그림: 한글은 띄어쓰기를 뺀 그림, 가나 그대로인 이름은 열 수 0
+        names = [''] * 256
+        names[1], names[2] = 'ぬのの', 'かさかさかさかさ'
+        kinds = {**wt.KINDS, 5: ('아이템', 11, True)}
+        with mock.patch.object(wt, 'NINE_COLS', 11):
+            out, _ = self.build({5: names}, adopted={'ぬのの': '가나다라 마바사'}, kinds=kinds)
+            for n, alt in ((1, fake_columns(FakeFont(), '가나다라마바사')), (2, [])):
+                p = self.ptr(out, 5, n)
+                self.assertEqual(len(self.blob(out, p)), 11)
+                self.assertEqual(self.blob(out, p + 1 + 11 * 9), alt)
+
     def test_monster_pictures_go_to_their_own_bank(self):
         # 몬스터(4)는 한글이 없어도 가나 그림을 넣고, banks 를 주면 그림은 MONSTER_BANK 에, 색인은 그 뱅크 안 주소
         names = [''] * 256

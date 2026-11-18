@@ -51,6 +51,7 @@ ARENA_RNG = '7E075B=77;7E075C=22;7E075D=33'
 # 시합 동안 셋째 몬스터(몬스터 칸 2, 7E:07C0 + 칸 × 16 의 +2 HP)를 999 로 묶어 난수와 상관없이 셋째가 이기게 한다
 ARENA_STRONG = '7E07E2=E7;7E07E3=03'
 MAGIC_WATER = 0xA9              # DQ5 まほうのせいすい(FC 경품 첫 줄 5A)
+METAL_SHIELD = 0x84             # はぐれメタルのたて(DQ5 メタルキングのたて 자리를 빌림)
 
 
 def _resumed():
@@ -146,6 +147,13 @@ SEGMENTS = [
     ('towns_prize', 'walk', f'right:8;wait:30;a:8;wait:60;a:8;wait:120;{";".join(["a:8;wait:90"] * 8)};{wc.pc.CLOSE}',
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'bytes': {'TOWNS_COIN0': 0, 'TOWNS_COIN1': 0},
       'items': [MAGIC_WATER]}),
+    # 여섯째 경품 はぐれメタルのたて(50000 코인, DQ5 メタルキングのたて 84 자리를 빌림, dq4itemport.BORROWED)
+    ('towns_prize_shield_side', 'warp', f'{W.CASINO},{EXCHANGE[0] - 4},{EXCHANGE[1] - 1}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(50000)))}),
+    ('towns_prize_shield', 'walk', 'right:8;wait:30;a:8;wait:60;a:8;wait:120;a:8;wait:90;a:8;wait:120;a:8;wait:120;'
+     f'{"down:4;wait:20;" * 5}a:8;wait:120;{";".join(["a:8;wait:90"] * 4)};{wc.pc.CLOSE}',
+     {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'bytes': {'TOWNS_COIN0': 0, 'TOWNS_COIN1': 0},
+      'items': [METAL_SHIELD]}),
     ('towns_coin_buy', 'walk', f'up:8;wait:30;a:8;wait:60;a:8;wait:120;a:8;wait:90;a:8;wait:120;up:8;wait:40;'
      f'{";".join(["a:8;wait:90"] * 6)};{wc.pc.CLOSE}',
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}'}),
