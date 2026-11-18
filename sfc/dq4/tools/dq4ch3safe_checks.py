@@ -32,8 +32,9 @@ FLAG_BLOCKS = {
 SAFE_RIGHT = (safe.RIGHT['rect'][0], safe.RIGHT['rect'][3])
 SAFE_LEFT = (safe.LEFT['rect'][0], safe.LEFT['rect'][3])
 SAFE_OFF = ['SAFE_ANSWERED', 'SAFE_YES']
-SAFE_ASK = 'wait:30'
-SAFE_FLOOR = 'a:8;wait:80;a:8;wait:80;a:8;wait:120'
+# 칸을 밟으면 말 창 뒤 물음 창이 뜬다. 뜰 때까지 A 로 넘기고 커서를 「예」 에(dq4walk.lua ask·cursor)
+SAFE_ASK = 'ask:400;cursor:0'
+SAFE_FLOOR = 'ask:900;cursor:0'
 
 # 풀림 칸 FC (03~04,0E)를 멈추지 않고 걸어 지나가도 바위가 풀림(FC 는 그 칸을 밟는 걸음에 풀림). 걷기 앞 쉼을 0~21 프레임
 # 3 씩 두어 dq4boulder.ctl 부름(약 8프레임)·차례(TICK 번째 부름) 위상을 고루 어긋나게 한다(8 의 나머지 0~7 을 다 지남).
@@ -50,11 +51,11 @@ SEGMENT_BLOCKS = {
         ('safe_gates', 'warp', f'{safe.GATES},{SAFE_RIGHT[0]},{SAFE_RIGHT[1] + 2}', {'map': safe.GATES}),
         ('safe_no', 'walk', f'{SAFE_RIGHT[0]},{SAFE_RIGHT[1]};ask:400;cursor:1;a:8;wait:200;{CLOSE}',
          {'map': safe.GATES, 'cell': SAFE_RIGHT, 'off': SAFE_OFF}),
-        ('safe_right', 'walk', f'down:20;wait:60;up:30;wait:200;{SAFE_ASK};a:8;wait:60;a:8;wait:1300',
+        ('safe_right', 'walk', f'down:20;wait:60;up:30;{SAFE_ASK};a:8;wait:60;a:8;wait:1300',
          {'map': safe.ENTRY, 'cell': safe.RIGHT['to'][1], 'off': SAFE_OFF, 'changes': 1, 'after': 60}),
         # 왼쪽 수문은 통로 끝 구덩이로 떨어뜨리고 물이 빠졌다는 flag 를 켠다
         ('safe_left_side', 'warp', f'{safe.GATES},{SAFE_LEFT[0]},{SAFE_LEFT[1] + 2}', {'map': safe.GATES}),
-        ('safe_left', 'walk', f'up:40;wait:200;{SAFE_ASK};a:8;wait:60;a:8;wait:1300',
+        ('safe_left', 'walk', f'up:40;{SAFE_ASK};a:8;wait:60;a:8;wait:1300',
          {'map': safe.PIT, 'cell': safe.LEFT['to'][1], 'want': ['SAFE_DRAINED'], 'changes': 1, 'after': 60}),
         # 물이 빠진 뒤 입구 층의 계단(출구 번호 1)은 3E/04 대신 3E/05 의 같은 계단으로
         ('safe_dry_side', 'warp', f'{safe.ENTRY},6,34', {'map': safe.ENTRY}),
@@ -62,7 +63,7 @@ SEGMENT_BLOCKS = {
         # 금고 상자 아래에서 위를 보고 しらべる → 철 금고. 상자 칸을 떠났다 밟으면 바닥 글, 「예」 면 되돌리고 상자가 닫힘
         ('safe_vault', 'warp', f'{safe.VAULT},8,8', {'map': safe.VAULT}),
         ('safe_open', 'walk', SEARCH, {'poke': FACE_UP, 'items': [safe.IRON_SAFE]}),
-        ('safe_return', 'walk', f'8,9;wait:60;8,8;wait:300;{SAFE_FLOOR};a:8;wait:200;a:8;wait:200;{CLOSE}',
+        ('safe_return', 'walk', f'8,9;wait:60;8,8;{SAFE_FLOOR};a:8;wait:200;a:8;wait:200;{CLOSE}',
          {'map': safe.VAULT, 'cell': (8, 8), 'bytes': {'SAFE_SLOT': 0xFF}, 'off': SAFE_OFF}),
         ('safe_reopen', 'walk', f'8,9;wait:60;{SEARCH}', {'poke': FACE_UP, 'items': [safe.IRON_SAFE]}),
     ],
@@ -76,7 +77,7 @@ SEGMENT_BLOCKS = {
         ('safe_cave_top', 'walk', '20,9;20,7;6,7;6,9;wait:200', {'map': safe.GATES, 'changes': 1, 'after': 60}),
         ('safe_cave_round', 'walk', '14,9;28,9;28,23;40,23;40,55;wait:200', {'map': safe.ENTRY, 'changes': 1, 'after': 60}),
         ('safe_cave_left', 'walk', '12,51;12,33;4,33;4,35;wait:200', {'map': safe.GATES, 'changes': 1, 'after': 60}),
-        ('safe_cave_button', 'walk', f'16,31;16,29;wait:200;{SAFE_ASK};a:8;wait:60;a:8;wait:1300',
+        ('safe_cave_button', 'walk', f'16,31;16,29;{SAFE_ASK};a:8;wait:60;a:8;wait:1300',
          {'map': safe.PIT, 'want': ['SAFE_DRAINED'], 'changes': 1, 'after': 60}),
         ('safe_cave_down', 'walk', '16,13;8,13;8,7;4,7;wait:200', {'map': safe.ROLL, 'changes': 1, 'after': 60}),
         ('safe_boulder', 'walk', '38,29;34,29;34,21;6,21;6,29;6,39;22,39;22,43;wait:800;22,61;16,61;wait:330;8,61;8,53;wait:260;'
@@ -103,7 +104,7 @@ SEGMENT_BLOCKS = {
         ('raft_low', 'walk', 'wait:200;6,63;6,55;8,55;22,55;22,39;26,39;26,35;64,35;64,53;68,53;68,63;wait:300',
          {'map': endor.CAVE_WET, 'changes': 1, 'after': 60, 'off': ['RAFT_RIDING'], 'bytes': {'RAFT_X': 3, 'RAFT_Y': 0x1B}}),
         ('raft_button', 'walk', 'wait:200;56,55;56,47;52,47;52,39;48,39;48,35;20,35;20,25;22,25;22,21;24,21;24,19;26,19;'
-         '26,11;30,11;30,7;34,7;34,5;wait:200;a:8;wait:60;a:8;wait:600',
+         '26,11;30,11;30,7;34,7;34,5;ask:400;cursor:0;a:8;wait:60;a:8;wait:600',
          {'map': endor.CAVE_DRY, 'cell': endor.BUTTON_LAND[1], 'want': ['ENDOR_BUTTON'], 'changes': 1, 'after': 60}),
         ('raft_dry', 'walk', 'wait:200;24,5;24,31;28,31;28,33;54,33;54,45;60,45;60,49;wait:300',
          {'map': endor.CAVE_LOW_DRY, 'changes': 1, 'after': 60}),
@@ -122,7 +123,7 @@ RAFT_SLOT = 0x08
 def hero_cases():
     out = {}
     # 북쪽 동굴 수문 앞 칸(FC 한 칸 = 주인공 두 열)마다: 아래에서 올라서 「예」 면 물살에 밀려 옮겨 가고 조작이 돌아온다
-    yes = 'up:40;wait:230;a:8;wait:60;a:8;wait:1300'
+    yes = f'up:40;{SAFE_ASK};a:8;wait:60;a:8;wait:1300'
     for side, spec, free, want in (('right', safe.RIGHT, '18,47', []), ('left', safe.LEFT, '20,27', [('SAFE_DRAINED', safe.DRAINED)])):
         x0, _, _, y1 = spec['rect']
         for x in (x0, x0 + 1):

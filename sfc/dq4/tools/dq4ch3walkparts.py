@@ -2,7 +2,7 @@
 import dq4ch1walkcheck as wc
 import dq4ch3event as ch3
 
-talk, taps = wc.talk, wc.taps
+talk, taps, talk_yes = wc.talk, wc.taps, wc.talk_yes
 CLOSE = wc.pc.CLOSE
 
 TOWN = '3E/00'                 # FC 16/00 레이크나바

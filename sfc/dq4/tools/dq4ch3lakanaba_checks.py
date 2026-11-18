@@ -2,7 +2,7 @@
 import dq4ch1walkcheck as wc
 import dq4ch3event as ch3
 import dq4ch3lakanaba as lakanaba
-from dq4ch3walkparts import CLOSE, HOP, TOWN, gold, talk, taps
+from dq4ch3walkparts import CLOSE, HOP, TOWN, gold, talk, talk_yes, taps
 
 FLAGS = {'BENTO': wc.flag(lakanaba.BENTO_TODAY), 'SEEN': wc.flag(lakanaba.SEEN), 'SHIFT': wc.flag(lakanaba.SHIFT),
          'TOM_PUSH': wc.flag(lakanaba.TOM_PUSH), 'DONE': wc.flag(lakanaba.DONE)}
@@ -25,7 +25,7 @@ SEGMENTS = [
                                               'poke': lakanaba.NENE_HOLD}),
     # 톰 노인: 「예」 뒤 밀리는 인물이 되고, 밀며 집 남쪽으로 걸어 나간다(막히면 끝 셀이 다름)
     ('tom_room', 'warp', f'{TOWN},48,24', {'map': TOWN}),
-    ('tom_ask', 'walk', talk('up', 5), {'map': TOWN, 'want': ['TOM_PUSH']}),
+    ('tom_ask', 'walk', talk_yes('up', 5), {'map': TOWN, 'want': ['TOM_PUSH']}),
     ('tom_push', 'walk', '50,25;50,21;48,21;48,25', {'map': TOWN, 'cell': (48, 25)}),
     # 무기점 첫 출근: 문 밖에 서면 꾸지람 뒤 카운터 안으로 걸려 들어간다
     ('shop_door', 'warp', f'{TOWN},20,52', {'map': TOWN}),
@@ -39,7 +39,7 @@ SEGMENTS = [
     # 주인(FC (07,04)) 아래에서 위로 말을 걸어 일찍 그만둔다(087F 「예」 → 0880). 손님이 들어오는 카운터 칸 (4,53)은 밟지 않는다
     ('shop_floor', 'warp', f'{TOWN},10,48', {'map': TOWN, 'set': f'{gold(0)};{(lakanaba.WAGE_AT & 0xFFFF):04X}=32'}),
     ('cellar_quit', 'walk', f'8,47;left:8;{DOOR};4,47;2,47;2,53;down:16;wait:150;8,13;8,11;right:8;{DOOR};14,11;'
-     f'{talk("up", 6)}',
+     f'{talk_yes("up", 6)}',
      {'map': lakanaba.CELLAR, 'cell': (14, 11), 'want': ['DONE'], 'bytes': {'GOLD0': 50}, 'changes': 1, 'after': 1800,
       'maxf': 4000}),
     # 일찍 그만둔 뒤(출근 중·오늘 일 마침) 아래층 계단(FC (04,06))으로 낮 마을 카운터 안에 올라와도 마을이 멈추지 않고

@@ -2,7 +2,7 @@
 import dq4ch1walkcheck as wc
 import dq4ch3endor as endor
 import dq4ch3tunnel as tunnel
-from dq4ch3walkparts import CLOSE, set_flag, talk, taps
+from dq4ch3walkparts import CLOSE, set_flag, talk, talk_yes, taps
 
 FLAGS = {
     'TUNNEL_PAID': wc.flag(tunnel.PAID),
@@ -22,6 +22,11 @@ def tunnel_talk(presses):
     return f'up:8;wait:30;a:8;wait:60;a:8;wait:90;{taps(presses + 1, 90)};wait:60;{CLOSE}'
 
 
+def tunnel_yes(presses):
+    """tunnel_talk 와 같되 물음마다 「예」, 말이 끝날 때까지 넘긴다(dq4walk.lua done). presses 는 기다릴 상한만 정한다."""
+    return f'up:8;wait:30;a:8;wait:60;a:8;wait:90;done:{98 * (presses + 1) + 400}'
+
+
 # 노인 아래 칸 ↔ 47/00 계단: FC (11,0B) → 줄 08 → (05,08) → 계단 (05,0B). 계단은 웨이포인트 대신 아래 누르기로
 # 밟는다(필드에 나온 뒤에도 웨이포인트 셀로 걸어가 버림)
 TUNNEL_TO_STAIRS = '34,23;34,17;10,17;10,21;down:16;wait:60'
@@ -36,20 +41,20 @@ SEGMENTS = [
     # 금화가 모자라면 「예」 를 해도 그대로(0895)
     ('tunnel_short_side', 'warp', f'{tunnel.BLOCKED},{TUNNEL_BELOW_OLD[0]},{TUNNEL_BELOW_OLD[1] - 1}',
      {'map': tunnel.BLOCKED, 'set': TUNNEL_GOLD(10000)}),
-    ('tunnel_short', 'walk', tunnel_talk(5),
+    ('tunnel_short', 'walk', tunnel_yes(5),
      {'map': tunnel.BLOCKED, 'off': ['TUNNEL_PAID', 'TUNNEL_WAITING'],
       'bytes': {'TUNNEL_GOLD0': 0x10, 'TUNNEL_GOLD1': 0x27, 'TUNNEL_GOLD2': 0}}),
     # 가게를 사기 전이면 「예」 뒤 0894(엔돌 모듈 SHOP 을 끔)
     ('tunnel_noshop_side', 'warp', f'{tunnel.BLOCKED},{TUNNEL_BELOW_OLD[0]},{TUNNEL_BELOW_OLD[1] - 1}',
      {'map': tunnel.BLOCKED, 'set': f'{TUNNEL_GOLD(65000)};{0x2190 + endor.SHOP[0]:04X}=00'}),
-    ('tunnel_noshop', 'walk', tunnel_talk(5),
+    ('tunnel_noshop', 'walk', tunnel_yes(5),
      {'map': tunnel.BLOCKED, 'off': ['TUNNEL_PAID', 'TUNNEL_WAITING'],
       'bytes': {'TUNNEL_GOLD0': 0xE8, 'TUNNEL_GOLD1': 0xFD, 'TUNNEL_GOLD2': 0}}),
     # 60000 을 내고(0896·0897), 다시 말을 걸면 0897. 필드에 나갔다 들어오면 WAITING 이 꺼지고, 말을 걸면 공사 재개(0898)
     # 앞의 엔돌 구간(endor_nene_notice)이 켠 OPENED 를 끄고 시작한다
     ('tunnel_pay_side', 'warp', f'{tunnel.BLOCKED},{TUNNEL_BELOW_OLD[0]},{TUNNEL_BELOW_OLD[1] - 1}',
      {'map': tunnel.BLOCKED, 'set': f'{TUNNEL_GOLD(65000)};{0x2190 + tunnel.IDX:04X}=00'}),
-    ('tunnel_pay', 'walk', tunnel_talk(6),
+    ('tunnel_pay', 'walk', tunnel_yes(6),
      {'map': tunnel.BLOCKED, 'want': ['TUNNEL_PAID', 'TUNNEL_WAITING'],
       'bytes': {'TUNNEL_GOLD0': 0x88, 'TUNNEL_GOLD1': 0x13, 'TUNNEL_GOLD2': 0}}),
     ('tunnel_wait', 'walk', tunnel_talk(1), {'map': tunnel.BLOCKED, 'want': ['TUNNEL_WAITING'], 'off': ['TUNNEL_RESUMED']}),
@@ -97,7 +102,7 @@ SEAM = [
     ('seam_notice', 'walk', 'wait:60', {'map': tunnel.NOTICE_MAP, 'want': ['ENDOR_NOTICE'], 'off': ['TUNNEL_OPENED']}),
     ('seam_nene_side', 'warp', f'{endor.TOWN},{endor.NENE_SIDE[1][0]},{endor.NENE_SIDE[1][1] - 1}',
      {'map': endor.TOWN, 'set': set_flag(endor.SHOP)}),
-    ('seam_nene', 'walk', talk('right', 12), {'map': endor.TOWN, 'want': ['TUNNEL_OPENED']}),
+    ('seam_nene', 'walk', talk_yes('right', 12), {'map': endor.TOWN, 'want': ['TUNNEL_OPENED']}),
     ('seam_tunnel_side', 'warp', f'{tunnel.BLOCKED},{TUNNEL_ARRIVAL[0]},{TUNNEL_ARRIVAL[1] - 3}', {'map': tunnel.BLOCKED}),
     ('seam_out', 'walk', 'down:16;wait:60', {'field': True, 'cell': TUNNEL_FIELD, 'poke': wc.DAY}),
     ('seam_in', 'walk', f'{TUNNEL_FIELD[0]},{TUNNEL_FIELD[1] - 2};wait:60',

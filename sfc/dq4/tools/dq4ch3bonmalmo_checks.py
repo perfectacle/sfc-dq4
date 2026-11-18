@@ -2,7 +2,7 @@
 두고 말을 건다."""
 import dq4ch1walkcheck as wc
 import dq4ch3bonmalmo as bm
-from dq4ch3walkparts import CLOSE, talk, taps
+from dq4ch3walkparts import CLOSE, talk, talk_yes, taps
 
 FLAGS = {
     'BM_FOXED': wc.flag(bm.FOXED),
@@ -48,7 +48,7 @@ SEGMENTS = [
      {'want': ['BM_SON_FREED'], 'bytes': {'BM_SLOT2': 0xFF}, 'poke': wc.DAY}),
     # 여우 마을 촌장: 개가 없으면 「예」·「예」 로 묵고 숲에서 아침에 깬다
     ('bm_inn_town', 'warp', f'{bm.FOX_TOWN},{bm.CHIEF[0] - 2},{bm.CHIEF[1] - 1}', {'map': bm.FOX_TOWN, 'poke': wc.NIGHT}),
-    ('bm_inn', 'walk', f'{talk("right", 8)};wait:600', {'map': bm.FOREST, 'cell': bm.FOREST_WAKE, 'off': ['BM_FOXED']}),
+    ('bm_inn', 'walk', f'{talk_yes("right", 8)};wait:600', {'map': bm.FOREST, 'cell': bm.FOREST_WAKE, 'off': ['BM_FOXED']}),
     # 왕자: 낮에 처음 말을 걸면 유모가 꾸짖고 일행은 그 자리. 밤에는 무기점 뒤에서 왕자의 편지를 준다
     ('bm_prince_side', 'warp', f'{bm.CASTLE},{bm.PRINCE["day"][0] + 2},{bm.PRINCE["day"][1] - 1}',
      {'map': bm.CASTLE, 'poke': BM_PRINCE_HOLD}),
@@ -118,7 +118,7 @@ def hero_cases():
     px, py = bm.PRINCE['day']
     wx, wy = bm.FOREST_WAKE
     return {'bm-fox-right': {'warp': f'{bm.FOX_TOWN},{cx + 2},{cy - 1}', 'set': '21FF|02',
-                             'walk': f'{talk("left", 4)};wait:400;{taps(16, 80)};wait:600;{CLOSE}',
+                             'walk': f'left:8;wait:30;a:8;wait:60;a:8;wait:60;done:3500',
                              'free': f'{wx},{wy - 4}', 'want': [('BM_FOXED', bm.FOXED)], 'map': bm.FOREST, 'maxf': 7000},
             'bm-prince-below': {'warp': f'{bm.CASTLE},{px},{py + 1}', 'set': '',
                                 'walk': f'{talk("up", 10)};wait:300', 'free': f'{px + 4},{py + 2}',
