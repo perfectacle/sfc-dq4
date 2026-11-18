@@ -22,6 +22,7 @@
 | `dq4battlemsg.py`·`dq4battletexts.py`·`dq4battlemsg.asm` | 전투 메시지 432개의 한글(구간 인코더·글자 표·이름 표·칸 풀 엔진). `dq4windowname.py` 가 메뉴 빌드에서 얹음. [전투 메시지 한글](../docs/dq4-battle-text-format.md) |
 | `dq4battlemsgcheck.py --rom 1장롬 --out 폴더 [--field --ids 번호]` | 탑 위 보스 전투에서 전투 메시지 번호를 차례로 바꿔 끼워 끝까지 찍히는지·풀 사용량·화면 모음. `--field` 는 성 앞에서 「はなす」로 뜨는 보행 메시지를 바꿔 끼움. [전투 메시지 검사](../docs/dq4-battle-text-format.md#전투-메시지-검사) |
 | `dq4msgbankcheck.py --rom 1장롬 --out 폴더` | 메시지 묶음 셋을 넷째 자리(`55`·`56`, 뱅크 걸침 포함)로 옮긴 시험 롬에서 대화 명령·보스에게 거는 말의 메시지를 바꿔 끼워, 표 꼴 색인 훅 뒤 스트림 뱅크와 디코더 코드를 원래 메시지와 견줌. [다른 메시지 더하기](../docs/dq4-menu-format.md#다른-메시지-더하기) |
+| `dq4lowwram.py` | 낮은 WRAM(`7E:1A86`~`1D83`)에서 dq4 모듈이 쓰는 칸과 사는 동안, 둘레의 원래 DQ5 쓰기 범위(사람 자리 표 `1BC5`~`1BFC`·맵별 루틴 `1BB5`~`1BC1`)의 예약표. `test_dq4lowwram` 이 칸끼리·맵을 넘어 사는 칸과 DQ5 범위의 겹침을 막는다 |
 | `dq4josa.py`·`dq4sysmsg.py` | 받침을 보고 조사를 고르는 메시지 코드(`101E`~`1024`)와 DQ5 필드 시스템 메시지 116개와 가게·여관·교회 대사 172개의 한글. `dq4chapter1.py` 가 얹음. [조사 코드](../docs/dq4-josa-format.md) |
 | `dq4chapterbox.py preview --out PNG` | 1장 시작의 검은 화면 금테 장 제목 상자 미리보기. 상자 타일은 `rom/dq4.nes` 에서, 제목은 `DQ4_GALMURI` 의 Galmuri11 로. 맵 훅·네이티브 루틴은 `dq4chapter1.py build` 가 얹음. [1장 첫머리](../docs/dq4-chapter1-format.md#검은-화면과-장-제목-상자) |
 | `dq4ch1event.py` | 1장 진행 사건(이무르 밤의 아이 → 프레아 → 감옥 재회, 우물 아래 목소리, 호이민 합류, そらとぶくつ 로 탑에, 아이 납치, 탑 위 보스, 보스 뒤 목록·병사·아이 귀가, 왕에게 보고·1장 끝)의 깃발·덧붙인 대화·인물 스크립트·메시지·네이티브(`5E:D000`·전투 `06:FF00`). `dq4chapter1.py`·`dq4npcport.py` 가 씀. [진행 사건](../docs/dq4-chapter1-format.md#진행-사건) |
