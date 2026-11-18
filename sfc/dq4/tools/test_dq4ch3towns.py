@@ -42,7 +42,7 @@ class RegisterTest(unittest.TestCase):
         code, at = W.native(ctx())
         start, end = ev.SLOTS['W'].code
         self.assertLessEqual(start + len(code), end)
-        self.assertEqual(set(W.CALLS), {*W.OUT_TO, 'armor_buy', 'slot'})
+        self.assertEqual(set(W.CALLS), {*W.OUT_TO, 'armor_buy', *W.SLOTS})
 
     def test_every_talk_has_a_body_and_every_message_is_used(self):
         c = ctx()
@@ -168,7 +168,8 @@ class ListTest(unittest.TestCase):
         slots = [e for e in names['ch3_towns_4001_open']["entries"]
                  if (e["fields"]["x"], e["fields"]["y"]) in {W.cell(*fc) for fc in W.SLOT_CELLS}]
         self.assertEqual(len(slots), 2 * len(W.SLOT_CELLS))
-        self.assertTrue(all(e["fields"]["talk"] == t['slot'] and e["fields"]["gfx"] == 0x01 for e in slots))
+        self.assertEqual({e["fields"]["talk"] for e in slots}, {t[n] for n in W.SLOTS})
+        self.assertTrue(all(e["fields"]["gfx"] == 0x01 for e in slots))
         # 엔돌 밤 사람 한 칸 옮김, 왕좌의 방 대신은 섬
         town = {(e["time"], (e["fields"]["x"], e["fields"]["y"])): e for e in names['ch3_towns_4000']["entries"]}
         self.assertIn(('night', W.cell(0x17, 0x1E)), town)

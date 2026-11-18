@@ -21,6 +21,8 @@ paths = [
   "sfc/dq4/tools/dq4shopport.py",
   "sfc/dq4/tools/dq4sysmsg.py",
   "sfc/dq4/tools/dq4slottext.py",
+  "sfc/dq4/tools/dq4fcslot.py",
+  "sfc/dq4/tools/dq4fcslot.asm",
   "sfc/dq4/tools/dq4wrap.py",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4freshstate.py",

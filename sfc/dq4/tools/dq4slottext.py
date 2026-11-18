@@ -18,6 +18,9 @@ sys.path[:0] = [str(HERE), str(HERE.parents[1] / 'dq5' / 'tools')]
 from dq5map import lorom  # noqa: E402
 
 STRINGS_AT, STRINGS_END = 0x118FC9, 0x119044
+# 문자열은 STRINGS_LIMIT 앞까지. 그 뒤 끝까지는 FC 슬롯(dq4fcslot)의 뱅크 11 받침
+STRINGS_LIMIT = 0x119030
+CURSOR = '▶'
 HOOK_AT, HOOK_ORIG = 0x11BF83, bytes.fromhex('22 CC BF 11')          # JSL $11BFCC(슬롯 화면 BG3 글자 타일)
 SCREEN_INIT = 0x11BFCC
 CODE_AT = 0x4FF800
@@ -78,13 +81,27 @@ class Layout:
                         # 수는 원래 글처럼 bit8 을 끄고 찍는다(코인 수 숫자 칸은 bit8 을 켠 100~ 이 따로 있음)
                         out += bytes((BIT8, NUMBER, *piece[1], BIT8))
             self.strings[name] = bytes(out + bytes((END,)))
-        if sum(map(len, self.strings.values())) > STRINGS_END - STRINGS_AT:
+        # FC 슬롯의 「예·아니요」 손가락(BG3 칸 하나)
+        cursor = dq4menupatch.render(font, CURSOR)[0]
+        tile = dq4menupatch.tile_2bpp(cursor[:8])
+        self.cursor = index.get(tile) or next(numbers)
+        if tile not in index:
+            self.tiles.append((self.cursor, tile))
+        if sum(map(len, self.strings.values())) > STRINGS_LIMIT - STRINGS_AT:
             raise ValueError(f'슬롯 글 {sum(map(len, self.strings.values()))}바이트가 원래 자리를 넘음')
+
+    def addrs(self):
+        """{이름: 뱅크 11 안 주소} — writes 가 TEXTS 차례로 STRINGS_AT 부터 둔다."""
+        out, at = {}, STRINGS_AT
+        for name, _, _, _ in TEXTS:
+            out[name] = at & 0xFFFF
+            at += len(self.strings[name])
+        return out
 
     def code(self):
         """JSL 11:BFCC(원래) 뒤, 강제 블랭크 그대로 한글 타일을 BG3 글자 칸 FIRST_TILE~ 에 올린다. 그때 DB 는 11."""
         from dq4chapterbox import dma_vram
-        last = self.tiles[-1][0]
+        last = max(n for n, _ in self.tiles)
         data = bytearray(16 * (last + 1 - FIRST_TILE))
         for n, tile in self.tiles:
             data[16 * (n - FIRST_TILE):16 * (n + 1 - FIRST_TILE)] = tile
@@ -103,7 +120,7 @@ def writes(font):
         out.append((ldy, le(at & 0xFFFF, 2), le(orig_at & 0xFFFF, 2)))
         out.append((at, lay.strings[name], None))
         at += len(lay.strings[name])
-    out.append((at, bytes(STRINGS_END - at), None))
+    out.append((at, bytes(STRINGS_LIMIT - at), None))
     return out
 
 

@@ -262,12 +262,15 @@ def _not(cond):
     return {**cond, "not": True}
 
 
+# FC 슬롯 기계 다섯(SLOT_CELLS 차례)의 대화
+SLOTS = tuple(f'slot{k}' for k in range(5))
+
 # 메시지 하나만 띄우는 대화(엔돌 3장 목록의 사람). 이름이 곧 MESSAGES 의 이름
 SIMPLE = ('profit', 'clouds', 'monsters_back', 'tournament_over', 'shop_permit', 'emperor_rumor', 'ryan', 'keep_out',
           'arena_closed', 'pizarro_gone', 'emperor_rumor2', 'hero_rumor', 'kitchen', 'gaade_bridges', 'pizarro_fan',
           'sky_sword', 'king_meets_all', 'empty_shop')
 TALKS = ('safe_man', 'nun', 'warrior', 'neighbor', 'prisoner', 'castle_man', 'bridge', 'jail',
-         'armor_buyer', 'gate', 'drunk', 'statue_merchant', 'jail_guard', 'night_guard', 'nanny', 'slot', 'poker') + SIMPLE
+         'armor_buyer', 'gate', 'drunk', 'statue_merchant', 'jail_guard', 'night_guard', 'nanny', *SLOTS, 'poker') + SIMPLE
 
 
 def talk_scripts(ctx):
@@ -294,7 +297,7 @@ def talk_scripts(ctx):
         'nanny': [when(flag(NANNY_SCOLDED), [s('nanny_out')], [s('nanny_room')])],
         'night_guard': [s('night_out'), ctx.call('night_out')],
         # 고르기·걸기·돌리기는 DQ5 슬롯(대화 호출 slot → 06:D14A)
-        'slot': [ctx.call('slot')],
+        **{name: [ctx.call(name)] for name in SLOTS},
         'poker': [s('poker_ask'), when(YES, [s('poker_short')], [s('poker_later')])],
     }
     bodies.update({name: [s(name)] for name in SIMPLE})
@@ -375,9 +378,10 @@ CASINO_PEOPLE = ((0x04, 0x0C), (0x08, 0x0A), (0x0C, 0x03), (0x0F, 0x07), (0x10, 
 # 열린 카지노의 장치 사람(FC 칸 → 대화): 교환소(046)·코인 판매(047)·슬롯(048)·포커(049)
 CASINO_DEVICES = {(0x13, 0x0B): 'poker'}
 # 슬롯머신: FC 는 (10~14,03) 에서 위를 보고 말을 걸면 연다(1D:$A45B, 038A 뒤 BRK 02 7F, 실측). FC 기계 칸 (10~14,02) 에
-# 보이지 않는 사람을 세워 DQ5 슬롯을 부른다(DQ5 는 しらべる 로 여는 것을 FC 처럼 말 걸기로). 기계는 DQ5 1코인 기계 5
+# 보이지 않는 사람을 세워, 대화 slotk 가 DQ5 슬롯 틀(06:D14A)에 기계 dq4fcslot.FIRST_MACHINE + k 를 넘긴다(FC 기계 k = X − 10,
+# 실측). 06:D14A → 02:A8BC → 11:BF71 에서 FC 슬롯 본체(dq4fcslot)로 간다
 SLOT_CELLS = tuple((x, 0x02) for x in range(0x10, 0x15))
-SLOT_ENTRY, SLOT_MACHINE, SLOT_COINS = 0x06D14A, 5, 1
+SLOT_ENTRY, SLOT_COINS = 0x06D14A, 1
 # DQ5 가게 처리기를 그대로 부르는 사람(FC 칸 → DQ5 대화 번호): 코인 판매 0B(FC 047, 06:EE34)·코인 교환 0C(FC 046)·
 # 몬스터 격투장 0E(FC 048). 경품 목록·코인 값·한 장 값·시합 표는 dq4shopport(COIN_KEY·COIN_PRICES·COIN_SALE·arena)
 CASINO_SERVICES = {(0x18, 0x02): 0x0B, (0x1C, 0x08): 0x0C, (0x08, 0x0A): 0x0E}
@@ -476,8 +480,8 @@ def npc_lists(lists, ctx):
         raise SystemExit(f'마을 사람: {CASINO} 에 카지노 장치 사람이 모자람')
     template = {tm: next(e for e in opened if e["time"] == tm and (tm, _at(e)) in devices) for tm in ('day', 'night')}
     opened += [{**copy.deepcopy(template[tm]), "fields": {**template[tm]["fields"], "x": x, "y": y, "gfx": 0x01,
-                                                          "talk": t['slot'], "interval": 0}}
-               for tm in ('day', 'night') for x, y in (cell(*fc) for fc in SLOT_CELLS)]
+                                                          "talk": t[name], "interval": 0}}
+               for tm in ('day', 'night') for name, (x, y) in zip(SLOTS, (cell(*fc) for fc in SLOT_CELLS))]
     new.append({"name": 'ch3_towns_4001_open', "entries": opened})
     over.append({"map": CASINO, "flag": tunnel.RESUMED[0], "when": "on", "mask": tunnel.RESUMED[1],
                  "list": "new:ch3_towns_4001_open"})
@@ -561,7 +565,7 @@ def _resumed():
 # ---- 내보내기(파수꾼이 말한 뒤 일행을 다른 자리로) ----
 
 DATA_ENTRIES = tuple(f'{name}_event' for name in OUT_TO)
-CALLS = {**{name: (name, 0) for name in OUT_TO}, 'armor_buy': ('armor_buy', 0), 'slot': ('slot', 0)}
+CALLS = {**{name: (name, 0) for name in OUT_TO}, 'armor_buy': ('armor_buy', 0), **{name: (name, 0) for name in SLOTS}}
 # 네이티브 armor_buy 가 띄우는 메시지(대화 스크립트에는 없음)
 ARMOR_MESSAGES = ('armor_none', 'armor_which', 'armor_enough', 'armor_item', 'armor_offer', 'armor_taken', 'armor_sorry',
                   'armor_more', 'armor_bye')
@@ -590,14 +594,16 @@ def native(ctx):
         put(f'{name}_event', _warp_event(name))
         put(name, dq4prologue._event_start(at[f'{name}_event']))
     put('armor_buy', _armor_buy(ctx.msg or {k: 0 for k in MESSAGES}))
-    put('slot', _slot())
+    for k, name in enumerate(SLOTS):
+        put(name, _slot(k))
     return bytes(out), at
 
 
-def _slot():
-    """대화 호출: DQ5 슬롯(06:D14A, A = 기계, $F5 = 한 번에 거는 코인). 메시지 583·584 와 「예」 면 02:A8BC 슬롯."""
+def _slot(k):
+    """대화 호출: 슬롯 틀 06:D14A(A = 기계, $F5 = 한 번에 거는 코인). 메시지 583·584 와 「예」 면 02:A8BC → FC 슬롯 k."""
     from dq4chapterbox import ENTER, LEAVE
-    return ENTER + bytes((0xE2, 0x30, 0xA9, SLOT_COINS, 0x85, 0xF5, 0xA9, SLOT_MACHINE,
+    import dq4fcslot
+    return ENTER + bytes((0xE2, 0x30, 0xA9, SLOT_COINS, 0x85, 0xF5, 0xA9, dq4fcslot.FIRST_MACHINE + k,
                           0x22, *SLOT_ENTRY.to_bytes(3, 'little'))) + LEAVE
 
 
