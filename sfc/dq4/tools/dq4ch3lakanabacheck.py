@@ -205,6 +205,10 @@ CASES = {
                                  ('wait', 'walk', 'wait:1200', {'maxf': 1300}),
                                  ('counter', 'walk', f'4,53;{taps(14)};{CLOSE}', {'maxf': 2400})],
                        'msgs': [*INTRO, 'buy', 'bought'], 'check': wage_is(0)},
+    # 손님 여덟 겉모습(FC 1D:$A3FC)의 그림이 모두 낮 마을 슬롯에 실려 있다(손님이 그 칸 목록을 베낌). 옷장 인물은 목록
+    # 끝이라 OBJ VRAM 512타일을 넘으면 그 세트부터 깨진다
+    'looks': {'steps': [('work', 'warp', WORK_AT, {'set': _set(L0=SEEN_SHIFT)})], 'msgs': [],
+              'check': lambda s: [], 'wram': lambda w: looks_problems(w)},
     # 밤의 아래층 주인은 FC 처럼 (08,06)에 누워 자고, 아래 칸에서 위로 말을 걸면 05C9(옮긴 메시지 CC9)
     'cellar_night': {'steps': [('cellar', 'warp', f'{L.CELLAR},16,14', {'set': f'{_a(ch2.TIME_AT):04X}={L.NIGHT_TIME:02X}'}),
                                ('talk', 'walk', f'{wc.talk("up", 3)};{CLOSE}', {'maxf': 900})],
@@ -263,6 +267,16 @@ def _nene_walked(seen):
     # 바로 전 방향(bit7)은 맵에 들 때 지워지고 한 걸음 걸어야 남는다. 자리는 걷다가 첫 칸에 돌아와 있을 수도 있다
     return ([] if cell in L.NENE_CELLS else [f'네네 FC 칸 {cell} 이 집 칸 표 밖']) + \
         ([] if seen.get('NENE_LAST', 0) & 0x80 else ['바로 전 방향이 남지 않음(걷지 않음)'])
+
+
+def looks_problems(w):
+    """낮 마을 WRAM: 손님 겉모습 그림마다 그 그림을 쓰는 슬롯이 있고, 다음 OBJ 타일(7E:1995)이 512 를 넘지 않는다."""
+    if not w:
+        return ['WRAM 덤프 없음']
+    pics = {w[L.SLOT_PIC - 0x7E0000 + s] for s in range(L.CUSTOMER_SLOT + 1, 0x20)}
+    out = [f'손님 겉모습 그림 {p:02X} 을 쓰는 슬롯이 없음' for p in sorted(set(L.LOOKS) - pics)]
+    top = w[0x1995] | w[0x1996] << 8
+    return out + ([f'OBJ 타일 {top:03X} 이 512 를 넘음'] if top > 0x200 else [])
 
 
 def message_ids(messages_path):
@@ -374,6 +388,9 @@ def run_case(mesence, data, base, ctx, ids, name, dest, seed):
     # 모듈 밖 메시지(옮긴 FC 대사)는 번호로 본다
     problems += [f'메시지 {w} 가 뜨지 않음: {got}' for w in case.get('raw_msgs', ()) if w not in got]
     problems += case['check'](seen)
+    if case.get('wram'):
+        wram = dest / case['steps'][-1][0] / 'final.wram'
+        problems += case['wram'](wram.read_bytes() if wram.exists() else b'')
     if case.get('dog_gone'):
         wram = dest / case['steps'][-1][0] / 'final.wram'
         w = wram.read_bytes() if wram.exists() else b''

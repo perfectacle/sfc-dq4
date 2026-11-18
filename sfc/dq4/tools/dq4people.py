@@ -1394,10 +1394,18 @@ def prepare(rom, assets, work, base=None, squeeze=False, pins=None):
     return rows, board
 
 
-def repin(assets, base, free=(), path=PINS):
-    """배치 표를 다시 뜬다. 표에 있는 인물은 그대로, 표에 없는 인물과 free 의 인물만 계산해 더한다."""
+def repin(assets, base, free=(), path=PINS, regroup=()):
+    """배치 표를 다시 뜬다. 표에 있는 인물은 그대로, 표에 없는 인물과 free 의 인물만 계산해 더한다.
+    regroup 의 인물은 줄·칸을 그대로 두고 그룹에 곡 롬 인물 목록에서 새로 나오는 그룹만 더한다(그 그룹의 줄 색만 움직임)."""
     pins = {role: pin for role, pin in read_pins(path).items()
             if role not in free and any(p.role == role and p.palette is None for p in PEOPLE)}
+    if regroup:
+        now = where(PEOPLE, usage(base))
+        for role in regroup:
+            p = next((q for q in PEOPLE if q.role == role), None)
+            if role not in pins or p is None:
+                raise SystemExit(f'{role}: 배치 표에 없는 인물은 --regroup 할 수 없음')
+            pins[role] = pins[role]._replace(groups=tuple(sorted(set(pins[role].groups) | now[p])))
     hists = histograms({p: rgb_frames(p, assets) for p in PEOPLE})
     if problems := pin_problems(PEOPLE, pins, hists):
         raise SystemExit('\n'.join(problems))
@@ -1575,11 +1583,14 @@ def main():
     ap.add_argument('--pin', action='store_true',
                     help=f'배치 표({PINS.name})에 없는 인물을 계산해 더하고 표에만 있는 인물을 뺀다(--base 의 곡 롬 필요)')
     ap.add_argument('--free', default='', help='--pin 과 함께: 표에서 풀어 다시 계산할 역할(쉼표로)')
+    ap.add_argument('--regroup', default='',
+                    help='--pin 과 함께: 줄·칸은 두고 인물 목록에 새로 나온 맵 그룹만 더할 역할(쉼표로)')
     args = ap.parse_args()
     if args.pin:
         if not args.base:
             ap.error('--pin 은 --base(인물 목록을 읽을 곡 롬)가 필요함')
-        added = repin(args.assets, Rom(args.base.read_bytes()), tuple(filter(None, args.free.split(','))))
+        added = repin(args.assets, Rom(args.base.read_bytes()), tuple(filter(None, args.free.split(','))),
+                      regroup=tuple(filter(None, args.regroup.split(','))))
         print(f'{PINS.name}: 새로 정한 인물 {", ".join(added) or "없음"}')
         return
     if not args.plan and not (args.base and args.out):
