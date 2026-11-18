@@ -27,6 +27,7 @@ paths = [
   "sfc/dq4/tools/dq4cores.py",
   "sfc/dq4/tools/dq4libretro.py",
   "sfc/dq4/tools/dq4bridgescreencheck.py",
+  "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4screens.py",
   "sfc/dq4/tools/dq4screencheck.py",
   "sfc/dq4/tools/dq4fieldgfx.py",
