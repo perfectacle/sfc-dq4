@@ -355,6 +355,19 @@ def tests_for(changed, dirs, sources):
     return out
 
 
+def check_run(url):
+    m = re.search(r'/actions/runs/(\d+)', url or '')
+    return m and int(m[1])
+
+
+def current_checks(checks, run_ids):
+    """PR 머리 커밋의 CI 실행(run_ids)에 속한 체크만. run_ids 가 None 이면(실행 목록을 못 읽음) 거르지 않는다.
+    머리 커밋을 새로 올린 직후 롤업이 앞 커밋의 실행을 보여 주거나 새 실행이 아직 없을 수 있어, 그 실패를 쫓지 않는다."""
+    if run_ids is None:
+        return list(checks)
+    return [c for c in checks if (r := check_run(c.get('detailsUrl'))) is None or r in run_ids]
+
+
 def check_job(url):
     m = re.search(r'/actions/runs/(\d+)/job/(\d+)', url or '')
     return m and m[2]
@@ -818,6 +831,15 @@ class Ship:
         runs = [x for x in json.loads(r.stdout or '[]') if x.get('headSha') == head] if r.returncode == 0 else []
         return runs[0] if runs else None
 
+    def head_run_ids(self):
+        """이 PR 머리 커밋의 ci 워크플로 실행 번호 집합. 못 읽으면 None."""
+        r = self.gh(['run', 'list', '--branch', self.branch, '--workflow', 'ci.yml', '--limit', '10',
+                     '--json', 'databaseId,headSha'], check=False)
+        if r.returncode != 0:
+            return None
+        head = self.head()
+        return {x['databaseId'] for x in json.loads(r.stdout or '[]') if x.get('headSha') == head}
+
     def rerun_job(self, name):
         """마지막 CI 실행의 잡 하나(와 그 뒤 잡)만 다시. 본문만 고쳐 새 커밋이 없을 때 required-checks 를 다시 읽힌다."""
         run = self.ci_run()
@@ -859,7 +881,7 @@ class Ship:
         last = None
         while True:
             v = json.loads(self.gh(['pr', 'view', str(self.pr), '--json',
-                                    'state,mergeable,mergeStateStatus,statusCheckRollup,isDraft']).stdout)
+                                    'state,mergeable,mergeStateStatus,statusCheckRollup,isDraft,headRefOid']).stdout)
             if v['state'] == 'MERGED':
                 self.say('MERGED')
                 return
@@ -871,6 +893,13 @@ class Ship:
                 self.step = 'watch'
                 continue
             checks = v.get('statusCheckRollup') or []
+            if v.get('headRefOid') and v['headRefOid'] != self.head():
+                checks = []
+            else:
+                kept = current_checks(checks, self.head_run_ids()) if checks else checks
+                if len(kept) != len(checks):
+                    self.say(f'앞 커밋의 검사 {len(checks) - len(kept)}개는 보지 않음(머리 커밋의 실행을 기다림)')
+                checks = kept
             bad = [c for c in checks if c.get('conclusion') in FAILED_CHECK]
             if bad:
                 self.fail(bad)
