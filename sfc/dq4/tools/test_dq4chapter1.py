@@ -494,6 +494,7 @@ class BuildFlowTests(unittest.TestCase):
         import dq4menupatch
         import dq4party
         import dq4msgnames
+        import dq4swampdeath
         import dq4slottext
         import dq4fcslot
         import dq4fcpoker
@@ -561,6 +562,7 @@ class BuildFlowTests(unittest.TestCase):
                                         writes=lambda dq5, dq4: [], apply_recruits=step('party')), \
                     mock.patch.object(dq4josa, 'apply', step('josa')), \
                     mock.patch.object(dq4msgnames, 'apply', step('msgnames')), \
+                    mock.patch.object(dq4swampdeath, 'apply', step('swampdeath')), \
                     mock.patch.object(dq4slottext, 'apply', step('slottext')), \
                     mock.patch.object(dq4fcslot, 'apply', lambda data, dq4, font: step('fcslot')(data)), \
                     mock.patch.object(dq4fcpoker, 'apply', lambda data, dq5, dq4, font: step('fcpoker')(data)), \
@@ -651,8 +653,8 @@ class BuildFlowTests(unittest.TestCase):
         checksum = int.from_bytes(out[0x7FDE:0x7FE0], 'little')
         self.assertEqual(checksum ^ int.from_bytes(out[0x7FDC:0x7FDE], 'little'), 0xFFFF)
         self.assertEqual(checksum, sum(out) & 0xFFFF)
-        self.assertEqual(order[:11], ['chapterbox', 'ch1event', 'ch2event', 'ch3event', 'party', 'josa', 'msgnames',
-                                      'slottext', 'fcslot', 'fcpoker', 'signs'])
+        self.assertEqual(order[:12], ['chapterbox', 'ch1event', 'ch2event', 'ch3event', 'party', 'josa', 'msgnames',
+                                      'swampdeath', 'slottext', 'fcslot', 'fcpoker', 'signs'])
         # 그룹 빌드 롬과 견주는 것은 체크섬까지 끝낸 롬이다
         self.assertEqual(self.verify.call_args.args[:2], (bytes(out), b'groups'))
 
