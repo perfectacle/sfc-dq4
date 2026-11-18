@@ -191,13 +191,22 @@ def _in_map(a, label):
 WALKERS, SLOT_HIDE = 0x7E1967, 0x7E3380
 
 
-def _followers_shown(a, shown, tag):
-    """걷는 줄 칸 1 부터 끝까지 안 보이게 비트를 끄거나(shown) 켠다. FC 는 배를 탄 동안 따라 걷는 칸을 숨긴다(40/00
-    실측: 탄 뒤 개 칸 $7021 = 81, 배 그림만 보임, 내리면 곧 다시 따라옴). 그대로 두면 일행이 주인공 자취대로 물 칸에 들어가
-    물 뒤에 가려졌다. 8비트 A·X 로 들어온다."""
-    a(0xE2, 0x30, 0xAF, *_al(WALKERS), 0xAA)
-    a.label(f'{tag}_loop')(0xCA).br(0xF0, f'{tag}_end')
-    a(0xBF, *_al(SLOT_HIDE), *((0x29, 0x7F) if shown else (0x09, 0x80)), 0x9F, *_al(SLOT_HIDE)).br(0x80, f'{tag}_loop')
+# 이 동굴 맵 셀 +1 의 물 비트: 물(08, 탄 동안 0A, 내린 배 칸 09)과 땅(01·11)을 가른다(셀 +1 은 08·01·11 뿐, 실측)
+WATER_CELL = 0x08
+
+
+def _followers_by_water(a, tag):
+    """걷는 줄 칸 1 부터 끝까지, 그 칸이 물 칸에 서 있으면 안 보이게 비트(7E:3380 bit7)를 켜고 땅이면 끈다. FC 40/00(실측)은
+    배에 오를 때 칸 1 → 2 → 3 이 배 칸에 드는 차례로 한 걸음(15~16프레임)마다 하나씩 숨기고, 내리면 주인공 걸음
+    하나마다 칸 1 → 2 차례로 배 칸에서 나와 다시 보인다. 칸마다 서 있는 셀로 보면 같은 차례가 된다. 쌓기: 칸 번호 1,S
+    (물 판정의 P 를 쌓는 동안은 2,S)."""
+    a(0xE2, 0x30, 0xAF, *_al(WALKERS), 0xC9, 0x02).br(0x90, f'{tag}_end')(0x3A, 0x48)       # 따라 걷는 칸이 없으면 건너뜀
+    a.label(f'{tag}_loop')(0xA3, 0x01, 0xAA)
+    a(0xBF, *_al(SLOT_X), 0x29, 0x7F, 0x48, 0xBF, *_al(SLOT_Y), 0x29, 0x7F, 0xA8, 0x68, 0xAA, 0x22, *_al(CELL_AT))
+    a(0xE2, 0x30, 0xA0, 0x01, 0xB7, 0x00, 0x29, WATER_CELL, 0x08, 0xA3, 0x02, 0xAA, 0x28).br(0xD0, f'{tag}_hide')
+    a(0xBF, *_al(SLOT_HIDE), 0x29, 0x7F).br(0x80, f'{tag}_put')
+    a.label(f'{tag}_hide')(0xBF, *_al(SLOT_HIDE), 0x09, 0x80)
+    a.label(f'{tag}_put')(0x9F, *_al(SLOT_HIDE), 0x68, 0x3A).br(0xF0, f'{tag}_end')(0x48).brl(f'{tag}_loop')
     a.label(f'{tag}_end')
 
 
@@ -300,17 +309,17 @@ def natives(code, base, tbls):
         a(lda(code.v(RA)), sta(HERO_ATTR))
         code.all_cells(a, False)
         code.raft_cell(a, True, 'rc_l')
-        _followers_shown(a, True, 'fs_l')
         a.brl('c_out')
         a.label('c_water')(0xA5, 0x0C, sta(code.v(RX)), 0xA5, 0x0D, sta(code.v(RY)))
-        _followers_shown(a, False, 'fs_w')
         code.move_raft(a, 'mv3')
         a(0xA5, 0xBD, 0xC9, CROSS['map']).br(BNE, 'c_out2')(0xA5, 0x0C, 0xC9, CROSS['x']).br(BNE, 'c_out2')
         for row in CROSS['rows']:
             a(0xA5, 0x0D, 0xC9, row).br(BNE, f'c_r{row:X}')(0x22, _al(at.get(f'cross{row:X}', base))).br(BRA, 'c_out2')
             a.label(f'c_r{row:X}')
         a.label('c_out2')
-        a.label('c_out')(DP_RESTORE)
+        a.label('c_out')
+        _followers_by_water(a, 'fw')
+        a(DP_RESTORE)
         put('ctl', a.bytes() + LEAVE_ONE)
         # 물 표 머리 [맵, 주소 lo, hi] … FF 와 줄 표
         heads, body, p = b'', b'', pos + 3 * len(tbls) + 1
