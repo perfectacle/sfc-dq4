@@ -42,5 +42,43 @@ class KeyTableTest(unittest.TestCase):
         self.assertEqual(ir.key_rows(FakeRom(data)), rows)
 
 
+class MatchTest(unittest.TestCase):
+    """가게·상자 단위 FC 대조(dq4itemmatch): 알려진 줄은 넘기고, 더 다르지 않은 알려진 줄은 실패한다."""
+
+    def run_main(self, found, known):
+        import contextlib
+        import io
+        from unittest import mock
+        import dq4itemmatch as im
+        out = io.StringIO()
+        with mock.patch.object(im, 'differences', lambda data: found), mock.patch.object(im, 'KNOWN', known), \
+                mock.patch('sys.argv', ['x', '--rom', __file__]), contextlib.redirect_stdout(out):
+            return im.main(), out.getvalue()
+
+    def test_known_difference_passes(self):
+        rc, _ = self.run_main([('발밑', '0E/00 (12,3)', 'いのちのきのみ', '없음')], {('발밑', '0E/00 (12,3)'): '까닭'})
+        self.assertEqual(rc, 0)
+
+    def test_new_difference_fails(self):
+        rc, _ = self.run_main([('가게', '05/01 종류 3', 'x', '없음')], {})
+        self.assertEqual(rc, 1)
+
+    def test_fixed_known_line_is_stale(self):
+        rc, text = self.run_main([], {('발밑', '0E/00 (12,3)'): '까닭'})
+        self.assertEqual(rc, 1)
+        self.assertIn('지난 줄', text)
+
+    def test_feet_gifts_name_items_dq5_has(self):
+        import dq4itemmatch as im
+        from dq5map import Rom
+        import dq4shopport
+        if not im.DQ5_ROM.is_file():
+            self.skipTest('rom/dq5.sfc 가 필요')
+        items = dq4shopport.dq5_items(Rom(im.DQ5_ROM.read_bytes()))
+        for code, gift in im.FEET_GIFTS.items():
+            if isinstance(gift, str):
+                self.assertIn(dq4shopport._fold(gift), items, f'{code:02X}')
+
+
 if __name__ == '__main__':
     unittest.main()
