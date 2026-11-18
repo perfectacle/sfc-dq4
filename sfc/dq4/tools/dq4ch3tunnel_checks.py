@@ -93,9 +93,11 @@ SEGMENTS = [
 # 40/01 에 들면 소식(NOTICE) → 네네 「예」 → OPENED → 엔돌 쪽 입구가 뚫린 굴로 → 굴을 지나 동쪽 계단 → 장 끝. 소식·개통
 # flag 는 set 으로 켜지 않는다(묶음 사이로는 앞 구간 want 만 이어짐). 가게를 산 것(SHOP)만 네네가 서도록 둔다
 SEAM_NOTICE_CELL = (24, 14)                 # 40/01(FC 04/01) 의 바닥 FC (12,07) 위 셀(한 셀 아래에 내림)
-# 47/01 도착 계단 (10,31) → 이주민이 지나가게 (6,31) 로 비켰다가 계단을 밟지 않게 열 03 으로 → (03,0C) → (0A,0C) → (0A,06) →
-# (12,06) → (12,04) → (1E,04) → 계단 앞 (1E,02)
-SEAM_THROUGH = '6,31;wait:1200;6,25;20,25;20,13;36,13;36,9;60,9;60,5'
+# 47/01 이주민 둘의 인물 슬롯: 47/01 목록 첫 두 사람(인물 슬롯 8 부터 목록 차례)
+MIGRANT_SLOTS = (8, 9)
+# 47/01 도착 계단 (10,31) → 이주민이 지나가게 (6,31) 로 비켜 둘 다 서쪽 계단에서 빠질 때까지 기다렸다가(FC 빠르기라 3000프레임
+# 남짓) 계단을 밟지 않게 열 03 으로 → (03,0C) → (0A,0C) → (0A,06) → (12,06) → (12,04) → (1E,04) → 계단 앞 (1E,02)
+SEAM_THROUGH = '6,31;' + ';'.join(f'gone:{s}' for s in MIGRANT_SLOTS) + ';6,25;20,25;20,13;36,13;36,9;60,9;60,5'
 SEAM = [
     ('seam_notice_side', 'warp', f'{tunnel.NOTICE_MAP},{SEAM_NOTICE_CELL[0]},{SEAM_NOTICE_CELL[1]}',
      {'map': tunnel.NOTICE_MAP}),
@@ -108,7 +110,7 @@ SEAM = [
     ('seam_in', 'walk', f'{TUNNEL_FIELD[0]},{TUNNEL_FIELD[1] - 2};wait:60',
      {'map': tunnel.OPEN_MAP, 'field': False, 'cell': tunnel.OPEN_ARRIVAL, 'poke': wc.DAY}),
     ('seam_through', 'walk', f'{SEAM_THROUGH};right:16;wait:60;{taps(3, 120)};wait:400',
-     {'map': tunnel.OPEN_MAP, 'maxf': 9000, 'bytes': {'SONG': tunnel.ENDING_SONG}}),
+     {'map': tunnel.OPEN_MAP, 'maxf': 12000, 'bytes': {'SONG': tunnel.ENDING_SONG}}),
 ]
 # 공사 재개(tunnel_resume)·「재개만으로는 막힘」(tunnel_closed_in, OPENED 꺼짐) 뒤, OPENED 를 set 하는 tunnel_open 묶음 앞에
 _at = next(k for k, seg in enumerate(SEGMENTS) if seg[0] == 'tunnel_closed_in') + 1
@@ -119,18 +121,21 @@ def hero_cases():
     out = {}
     # 뚫린 굴의 이주민 둘은 조작을 막지 않고 서쪽 계단 (05,0F) 까지 걸어 사라진다. 주인공이 그 계단(엔돌 쪽에서 든 도착
     # 칸)이나 길 가운데 (0A,08) 에 서 있으면 다가와 기다리고, 주인공이 길 옆((03,0F)·(0B,08))으로 비키면 지나가 사라진다
+    # 기다리는 프레임은 FC 빠르기(한 칸 96프레임)로 이주민이 주인공 앞 토막까지 오는 데 넉넉한 것: 계단은 26칸, 길 가운데는
+    # 15칸 뒤
     sx, sy = tunnel.OPEN_ARRIVAL
-    for name, (x, y), (ax, ay) in (('stairs', (sx, sy), tunnel.cell(0x03, 0x0F)),
-                                   ('path', tunnel.cell(0x0A, 0x08), tunnel.cell(0x0B, 0x08))):
+    for name, (x, y), (ax, ay), before in (('stairs', (sx, sy), tunnel.cell(0x03, 0x0F), 2900),
+                                           ('path', tunnel.cell(0x0A, 0x08), tunnel.cell(0x0B, 0x08), 1800)):
         away = f'{ax},{ay}'
-        out[f'tunnel-migrants-{name}'] = {'warp': f'{tunnel.OPEN_MAP},{x},{y - 1}', 'set': '', 'walk': f'wait:900;{away};wait:600',
-                                          'free': away, 'want': [], 'map': tunnel.OPEN_MAP, 'maxf': 3000}
+        out[f'tunnel-migrants-{name}'] = {'warp': f'{tunnel.OPEN_MAP},{x},{y - 1}', 'set': '',
+                                          'walk': f'wait:{before};{away};wait:700', 'free': away, 'want': [],
+                                          'map': tunnel.OPEN_MAP, 'maxf': before + 1500}
     return out
 
 
 # 조작을 막지 않고 걷는 인물(test_dq4heroblock.WALK_EXEMPT)
 WALK_EXEMPT = {
-    tunnel.SCRIPTS['migrant'][1]: '뚫린 굴 이주민: 조작을 막지 않고 서쪽 계단으로 나간다. 토막마다 그 둘레에 주인공이 '
-                                  '없을 때 걷는다(dq4ch3tunnel.GAP, tunnel-migrants-* 사례 겹침 0)',
+    tunnel.SCRIPTS['migrant'][1]: '뚫린 굴 이주민: 조작을 막지 않고 FC 빠르기로 한 칸씩 서쪽 계단으로 나간다. 앞 길 둘레에 '
+                                  '주인공이 있으면 기다린다(dq4ch3tunnel.GAP·pace, tunnel-migrants-* 사례 겹침 0)',
     tunnel.SCRIPTS['traveler'][1]: '뚫린 굴 나그네: 조작을 막지 않고 동쪽 계단으로 나간다. 이주민과 같음',
 }
