@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 import dq4msgnames as names
 
@@ -49,6 +50,23 @@ class HookTests(unittest.TestCase):
         self.assertEqual(monster, bytes((0x68, 0x68, 0xC2, 0x20, 0x68, 0x28, 0x7A, 0xFA, 0xC2, 0x30,
                                          0x5C, *names.le(names.QUEUE_RUN, 3))))
         self.assertIn(names.MONSTER, names.KINDS)
+
+
+ROM = Path(__file__).resolve().parents[3] / 'rom' / 'dq5.sfc'
+
+
+@unittest.skipUnless(ROM.is_file(), 'local source ROM not present')
+class NumberedTests(unittest.TestCase):
+    def test_borrowed_slots_take_their_fc_names(self):
+        # 빌린 주문 칸(1D·38)은 롬 이름이 DQ5 マホキテ·シャナク 라 이름으로는 한글이 없고, 메시지 「{100B}을/를」 이 가나와
+        # 받침 없는 조사로 찍혔다. 창 글자·전투 글과 같은 번호 덮기가 메시지에도 든다
+        import dq4party
+        import dq4windowtext
+        got = names.korean_names(ROM.read_bytes())
+        self.assertEqual({n: got[3][n] for n in dq4party.BORROWED_SPELLS}, dq4party.korean_names())
+        for kind, table in dq4windowtext.numbered_names(window=False).items():
+            if kind in (3, 5):
+                self.assertLessEqual(table.items(), got[kind].items(), kind)
 
 
 if __name__ == '__main__':
