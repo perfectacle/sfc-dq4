@@ -789,6 +789,7 @@ org $24A5E9
 !wt_tmp   = $AA1A           ; WtAlloc 안에서만: 찾는 칸 수, 찾은 첫 칸
 !wt_hash  = $1D0C           ; WtAlloc 안에서만: 그린 문구 표식. 이름 그리기(WnKorean)의 !wn_s 와 자리를 함께 씀(겹쳐 돌지 않음)
 !wt_slot2 = $A972           ; 이번에 쓴 슬롯 × 2, FFFF = 명령 창 전용 칸
+!wt_lead  = $AB50           ; WnText 안에서만: 이름 앞에 04:C0DD 가 넣은 빈칸 수(0 = 없음)
 !wt_fixkeys = $3EA0         ; 8 워드: 전용 칸에 그린 명령 창·가게 창 문구의 버퍼 자리, 0 = 빈 칸. WtVis 가 안 보이는 것을 지움
 !wt_k     = $A974           ; 그리는 고정 문구 번호
 !wt_dirty = $A9F0           ; 2 워드: 슬롯마다 1비트, 메시지 캔버스 안에 그림을 올린 슬롯
@@ -1731,11 +1732,16 @@ WnText:
     ORA.w #!wt_fixed_kind<<8
     STA.b $42
 +
-    ; 빈 자리(주문이 없는 칸 등)는 이름을 받지 않고 빈칸을 찍어, $42·$43 에 앞서 받은 이름이 남아 있다
+    ; 빈 자리(주문이 없는 칸 등)는 이름을 받지 않고 빈칸을 찍어, $42·$43 에 앞서 받은 이름이 남아 있다. 04:C0DD 가
+    ; 가운데 맞추려고 앞에 빈칸을 넣은 이름(상태 보기의 몬스터 동료 종족 줄, 코드 D2)은 빈 자리가 아니다
+    LDA #$0000
+    STA.l $7E0000|!wt_lead
     LDA.b $01
     AND #$00FF
     CMP #$0001
     BNE +
+    JSR WtLeadBlanks
+    BCC +
     JMP .original
 +
     LDA.b $43
@@ -1895,6 +1901,10 @@ WnText:
     STZ.w !wt_first
     LDA.b $E0
     STA.w !wt_buf
+    LDA.w !wt_lead
+    BEQ +
+    JSR WtCenter
++
     JSR WtAlloc
     BCS .full
     JSR WtQueue
@@ -4909,6 +4919,63 @@ WnShift:
     dw 0, 2, 4, 6
 WnOffset:
     dw 0, 1, 2, 3
+
+; WnText(길이 $00, 방식 0)의 문자열이 빈칸 01 로 시작할 때: 끝까지 빈칸이면 C = 1(빈 자리). 아니면 C = 0, 앞 빈칸 수를
+; !wt_lead 에. 04:C0DD 는 일곱 글자보다 짧은 이름 앞뒤에 빈칸을 넣어 가운데 맞춘다
+WtLeadBlanks:
+    LDA.l $7E0000|!wt_mode
+    AND #$00FF
+    BNE .empty16
+    SEP #$20
+    LDX #$0000
+-
+    TXA
+    CMP.b $00
+    BCS .empty
+    LDA.b $01,X
+    CMP #$01
+    BNE .found
+    INX
+    BRA -
+.found
+    REP #$20
+    TXA
+    STA.l $7E0000|!wt_lead
+    CLC
+    RTS
+.empty
+    REP #$20
+.empty16
+    SEC
+    RTS
+
+; .counted 에서(DB = 7E): 앞 빈칸이 있던 이름은 그림을 원래 글자 칸(!wt_len) 가운데에 둔다. 앞 칸은 빈칸으로 쓰고
+; 그만큼 Y 를 나아가고 남은 칸 수를 줄인다(창 해석이 보는 끝 Y 는 그대로)
+WtCenter:
+    LDA.w !wt_len
+    SEC
+    SBC.w !wt_cols
+    BCC .none
+    BEQ .none
+    LSR
+    BEQ .none
+    STA.w !wt_lead
+-
+    LDA.w !wt_buf
+    CLC
+    ADC.w !wn_y
+    TAX
+    LDA.w $0000,X
+    AND #$FC00
+    ORA #$0001
+    STA.w $0000,X
+    INC.w !wn_y
+    INC.w !wn_y
+    DEC.w !wt_len
+    DEC.w !wt_lead
+    BNE -
+.none
+    RTS
 
 assert pc() <= !wn_code2_end
 
