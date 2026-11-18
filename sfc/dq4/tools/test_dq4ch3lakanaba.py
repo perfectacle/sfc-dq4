@@ -111,6 +111,11 @@ class FlagTest(unittest.TestCase):
         at = 0x10 + 0x1D * 0x4000 + 0xA3FC - 0x8000
         self.assertEqual(tuple(nes[at:at + 8]), L.FC_LOOKS)
 
+    def test_first_day_master_is_the_counter_master_picture(self):
+        # 첫 출근 주인과 카운터 주인은 같은 사람(FC 대화 054). 그림이 갈리면 세트 하나가 더 실려 손님 옷장이 VRAM 을 넘었다
+        import dq4npcport
+        self.assertEqual(L.MASTER_PIC, dq4npcport.NDS_LOOKS[(L.TOWN, 806)])
+
     def test_customer_looks_pin_the_lakanaba_group(self):
         # 손님 겉모습 인물은 배치 표에서 레이크나바 그룹(3E)의 줄 색에 들어야 제 색으로 그려진다
         import dq4people

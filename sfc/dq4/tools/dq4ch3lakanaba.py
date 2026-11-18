@@ -26,7 +26,7 @@ import dq4ch3event as ch3  # noqa: E402
 from dq4chapterbox import ENTER, LEAVE  # noqa: E402
 from dq4ch2endor import Asm, BCC, BCS, BEQ, BNE, BRA, lda, sta  # noqa: E402
 from dq4itemport import BENTO  # noqa: E402
-from dq4npcport import PICTURES, STAND  # noqa: E402
+from dq4npcport import NDS_LOOKS, PICTURES, STAND  # noqa: E402
 from dq4ch3slots import SLOTS as _SLOTS, VARS2_AT  # noqa: E402
 from dq4shopkey import ONE_SHOT  # noqa: E402
 
@@ -174,7 +174,9 @@ NENE_WALKER = (HOUSE, 'day', cell(0x21, 0x02))
 POPOLO = {'day': (cell(0x1B, 0x07),), 'night': (cell(0x1B, 0x07), cell(0x10, 0x02))}
 QUIT_MASTER = (CELLAR, 'day', cell(0x07, 0x04))        # FC 16/02 대화 052
 CELLAR_NIGHT = (0x08, 0x06)                             # 같은 인물의 밤 자리(FC 칸, 대화 22A)
-MASTER_PIC = 0x07
+# 첫 출근 주인은 카운터 주인(FC 대화 054 = 메시지 806, dq4npcport.NDS_LOOKS 의 다츠)과 같은 그림. 다른 그림이면 같은
+# 사람이 두 모습이 되고, 그 세트만큼 낮 마을 OBJ VRAM 이 늘어 손님 옷장 세트가 512타일을 넘었다(실측 7E:1995 = 206)
+MASTER_PIC = NDS_LOOKS[(TOWN, 806)]
 WALK_SPEED = 0x02               # 인물 명령 1E: 7E:3360(01 이면 한 칸 8프레임)
 CUSTOMER_PIC = 0x40            # FC 손님 겉모습 17(15:$A3FC 의 하나). 이 맵 인물이 이미 쓰는 그림이라 OBJ 자리가 늘지 않음
 # FC 는 손님마다 1D:$A3FC[rand & 7](그림 11 14 17 18 3B 1F 22 21)로 겉모습을 고른다. 인물 그림은 맵에 들 때 세트마다 한 번
