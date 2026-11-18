@@ -86,6 +86,11 @@ RAFT_CODE = (0x5DF000, 0x5DF800)
 MONSTERS_CODE = (0x4E8000, 0x4EC000)
 # 엔돌(E) 몫의 낮은 뱅크 BRK 받침(dq4neneshop.BRKS). 원래 롬 빈 자리(dq5build free) 가운데 아무 도구도 쓰지 않던 곳
 LOW_STUBS = (0x29FF80, 0x29FFF0)
+# 낮은 WRAM 의 3장 몫: 네네 가게 임시 칸(dq4neneshop.TEMP, 보기 표지 +5·쪽 줄 수 +6 포함). 7E:1BBE~ 는 DQ5 실행에서 쓰이지
+# 않은 자리(dq5-hangul-format)이고, 앞은 1장·용병 SCRATCH(~1BD5), 뒤는 이름 입력(1BE0~). 원래 롬에서 이 열 바이트를 직접
+# 가리키는 코드는 없지만 02:87D2·02:93AE 의 사람 자리 표(1BC5·1BD3·1BE1·1BEF + Y, Y 1~13)와 02:8B1A(STA $1BDF)가 겹친다.
+# 뱅크 02 의 DQ5 맵 사건 코드라 어느 장면에서 도는지와 3장에서 닿는지는 재지 않았다
+NENE_TEMP = (0x7E1BD6, 0x7E1BE0)
 # 본몰(B) 몫의 낮은 뱅크 BRK 받침(dq4ch3bonmalmo.LOW_BRKS). 같은 빈 자리의 끝
 BONMALMO_STUBS = (0x29FFF0, 0x2A0000)
 # 3장 넘김·공용 장치 코드(dq4ch3event.CODE_AT~TABLE_AT)와 대화 호출 표(TABLE_AT~CODE_END)

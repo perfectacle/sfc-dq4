@@ -35,6 +35,7 @@ ITEM_SLOTS = 12
 VIEW_LINES = 8                                 # FC 보기 창 66 의 한 쪽 줄 수(15:$9F68)
 VIEW_MORE = 7                                  # dq4windowname.NENE_VIEW_MORE 와 같아야 함(시험이 견줌)
 VIEW_MARK = 0x1BDB                             # = TEMP + 5, dq4windowname.NENE_MARK. 보기 동안 VIEW_MORE·+1, 끝나면 0
+VIEW_COUNT = 0x1BDC                            # = TEMP + 6, dq4windowname.NENE_LINES. 그 쪽의 줄 수(창 높이)
 STOCK_SLOTS = len(_STOCK_SLOTS) * STOCK_PER_SLOT
 STOCK_END = STOCK_AT + 26 * len(_STOCK_SLOTS)        # 마지막 칸 다음 덩어리 건너뛰기 뒤의 주소
 # FC 15:$9F9E 의 r < C0. DQ5 00:953A 는 (r × A) >> 8 이라 A = 4 로 받아 3 보다 작으면 같은 갈래가 된다
@@ -213,7 +214,7 @@ def _stock(vars2, m, brk):
     # DQ5 창 루틴은 일행 기록(7E:2040~)을 DB 로 읽으므로 DB = 7E 로 부른다(ENTER 는 DB = 0)
     a = _asm()(ENTER, 0xF4, 0x7E, 0x7E, 0xAB, 0xAB, 0xE2, 0x30, lda(r), 0x29, ~ch3.RESULT[1] & 0xFF, sta(r))
     # 대화에서 가게로 넘어갈 때와 같이(06:C26C 의 JSL 04:D977, 06:DC0B) 창 상태를 가게 쪽으로 바꾼다. 빼면 BRK 95 가 04:DADA 에서 돈다
-    a(0x22, *_al(SHOP_ENTER), 0xE2, 0x30, j('window'), j('close'))
+    a(0x22, *_al(SHOP_ENTER), 0xE2, 0x30, j('close'))  # FC 네네 가게는 맡기기·보기 모두 골드 창이 없다(실측 화면)
     a.label('round')(0xC2, 0x10)
     _first(a)
     a.label('scan')(0xBF, *LONG).br(BEQ, 'free')
@@ -266,8 +267,9 @@ def _view(vars2, brk):
     """대화 호출(FC 0374 「예」, 15:$9F55): 가게 칸이 비었으면 결과 flag 끔. 아니면 켜고, 톨네코 물건 12칸·장비 비트를
     둘째 변수 칸 SAVE~ 에 맡겨 두고, 비지 않은 가게 물건을 차례로 8개씩(FC 창 66 의 한 쪽) 톨네코 칸에 채워 창 37 을 쪽마다
     연다($E4 = 사람 0). 그동안 가게 종류 $0F20 을 VIEW_MORE(다음 쪽 있음)·+1(마지막 쪽)로 두면 dq4windowname 이 창 37 을
-    FC 꼴(위 테두리 x 18 y 2, 8줄, 커서 없음)로 열고 다음 쪽이 있을 때 위 테두리에 ▶ 를 깜박인다. A 로 다음 쪽(FC 15:$9F68 JSR $C8CC),
-    B 로 그만둔다. 물건이 다하면 끝내고 톨네코 칸·장비·$0F20 을 되돌린다. 가게 칸은 읽기만 한다."""
+    FC 꼴(위 테두리 x 18 y 2, 그 쪽 줄 수 VIEW_COUNT 만큼의 높이, 커서 없음)로 열고 다음 쪽이 있을 때 위 테두리에 「→」 를
+    깜박인다. FC 처럼 골드 창은 열지 않는다. A 로 다음 쪽(FC 15:$9F68 JSR $C8CC), B 로 그만둔다. 물건이 다하면 끝내고 톨네코
+    칸·장비·$0F20 을 되돌린다. 가게 칸은 읽기만 한다."""
     from dq4ch2endor import BCC, BCS, BEQ, BNE, lda, sta
 
     def j(name):
@@ -283,7 +285,7 @@ def _view(vars2, brk):
     _next(a, 'turn')
     a(0xE0, *_w(STOCK_END)).br(BCC, 'scan').brl('end')
     a.label('some')(0xE2, 0x10, lda(r), 0x09, ch3.RESULT[1], sta(r))
-    a(0x22, *_al(SHOP_ENTER), 0xE2, 0x30, j('window'), j('close'))
+    a(0x22, *_al(SHOP_ENTER), 0xE2, 0x30, j('close'))
     for i in range(ITEM_SLOTS + 2):                       # 톨네코 물건 12칸 + 장비 2바이트
         src = items + i if i < ITEM_SLOTS else equip + i - ITEM_SLOTS
         a(lda(src), sta(save + i))
@@ -303,6 +305,9 @@ def _view(vars2, brk):
     a.label('keep')(0x8E, *_w(it), 0x8C, *_w(itc), 0xE2, 0x10, 0xAE, *_w(k), 0x9F, *_al(items), 0xE8, 0x8E, *_w(k))
     a(0xE0, VIEW_LINES).br(BCC, 'fill')
     a.label('pad')(0xA9, 0xFF, 0x9F, *_al(items), 0xE8, 0xE0, ITEM_SLOTS).br(BCC, 'pad')
+    a(0xA2, 0x00)
+    a.label('count')(0xBF, *_al(items), 0xC9, 0xFF).br(BEQ, 'counted')(0xE8, 0xE0, VIEW_LINES).br(BCC, 'count')
+    a.label('counted')(0x8E, *_w(VIEW_COUNT))
     a(lda(items), 0xC9, 0xFF).br(BEQ, 'done')
     # 다음 쪽이 있는지(남은 가게 칸에 물건이 있나)로 위 테두리 ▶ 를 정한다
     a(0xC2, 0x10, 0xAE, *_w(it), 0xAC, *_w(itc))

@@ -329,5 +329,17 @@ class Dq5RomTest(unittest.TestCase):
                     self.assertIn(times[lst, i], ('day', 'night'), f'{k} {lst} 칸 {i}')
 
 
+class LowWramTest(unittest.TestCase):
+    def test_nene_temp_sits_between_the_other_low_users(self):
+        import dq4ch1event
+        import dq4neneshop as shop
+        import dq4prologue
+        self.assertEqual(shop.TEMP, slots.NENE_TEMP[0])
+        self.assertGreater(slots.NENE_TEMP[0], dq4ch1event.SCRATCH + 0x0F)       # SCRATCH 는 1BD5 까지
+        self.assertLessEqual(slots.NENE_TEMP[1], 0x7E1BE0)                       # 이름 입력 방향 상태
+        self.assertLessEqual(slots.NENE_TEMP[1], dq4prologue.ROUTE_BUF)
+        for at in (shop.VIEW_MARK, shop.VIEW_COUNT, shop.PICK & 0xFFFF):
+            self.assertTrue(slots.NENE_TEMP[0] & 0xFFFF <= at < slots.NENE_TEMP[1] & 0xFFFF)
+
 if __name__ == '__main__':
     unittest.main()

@@ -642,29 +642,22 @@ ShopListRes:
 
 ; 3장 네네 가게 보기(dq4neneshop._view 가 $0F20(가게 갈래를 비키게)과 표지 !nene_mark 를 !nene_view_more·!nene_view_last 로 두고
 ; 창 37 을 연다. 끝나면 표지를 0 으로). FC 창 66 처럼
-; x 18 y 3(화면 위 테두리 2줄), 8줄(높이 18), 줄에 커서 자리 FE 가 없어 ▶ 가 그려지지 않는다. 입력 갈래(끝 83)는 그대로라 A·B 를 받는다.
+; x 18 y 3(화면 위 테두리 2줄), 그 쪽 줄 수만큼(높이 2n + 2), 줄에 커서 자리 FE 가 없어 ▶ 가 그려지지 않는다. 입력 갈래(끝 83)는 그대로라 A·B 를 받는다.
 ; 가게 몫 자리가 차서 메뉴 패치가 창 문자열을 줄이고 남긴 빈자리(!nene_spot, dq4windowname.NENE_SPOT)에 둔다
 pushpc
 org !nene_spot
-NeneViewRec:
-    db $40|!nene_view_x, !nene_view_y, $8D, $B2, $00, $81, $01, $D3, $FF, $83
+; 남은 줄 n(1~8)마다 높이 2n + 2 인 레코드. FC 창 66 은 마지막 쪽을 남은 줄 수만큼의 창으로 그린다
+NeneViewRecs:
+    db $40|!nene_view_x, !nene_view_y, $8D, $A4, $00, $81, $01, $D3, $FF, $83   ; 1줄
+    db $40|!nene_view_x, !nene_view_y, $8D, $A6, $00, $81, $01, $D3, $FF, $83   ; 2줄
+    db $40|!nene_view_x, !nene_view_y, $8D, $A8, $00, $81, $01, $D3, $FF, $83   ; 3줄
+    db $40|!nene_view_x, !nene_view_y, $8D, $AA, $00, $81, $01, $D3, $FF, $83   ; 4줄
+    db $40|!nene_view_x, !nene_view_y, $8D, $AC, $00, $81, $01, $D3, $FF, $83   ; 5줄
+    db $40|!nene_view_x, !nene_view_y, $8D, $AE, $00, $81, $01, $D3, $FF, $83   ; 6줄
+    db $40|!nene_view_x, !nene_view_y, $8D, $B0, $00, $81, $01, $D3, $FF, $83   ; 7줄
+    db $40|!nene_view_x, !nene_view_y, $8D, $B2, $00, $81, $01, $D3, $FF, $83   ; 8줄
 NeneListRes:
-    LDA.l !nene_mark
-    AND #$00FF
-    SEC
-    SBC.w #!nene_view_more
-    CMP.w #$0002
-    BCS +
-    SEP #$20
-    LDA #!nene_view_x       ; 별칭 창은 레코드 자리 대신 별칭 레코드(89 02 0F)의 x·y 가 든 $0A43·$0A44 를 쓴다
-    STA.w $0A43
-    LDA #!nene_view_y
-    STA.w $0A44
-    REP #$20
-    LDA.w #NeneViewRec
-    RTS
-+
-    LDA.w $EB48,X
+    JSL NeneListFar
     RTS
 pullpc
 
@@ -2521,6 +2514,43 @@ QpFrame:
     CLC
     RTL
 
+; 별칭 창 37 을 풀 때 네네 보기 표지(7·8)면 그 쪽 줄 수(!nene_lines)의 NeneViewRecs 레코드와 자리를, 아니면 원래 레코드를
+; 돌려준다. M = 16, X = 16(창 번호 × 2, 보존), DB = 04
+NeneListFar:
+    LDA.l !nene_mark
+    AND #$00FF
+    SEC
+    SBC.w #!nene_view_more
+    CMP.w #$0002
+    BCS .plain
+    SEP #$20
+    LDA #!nene_view_x       ; 별칭 창은 레코드 자리 대신 별칭 레코드(89 02 0F)의 x·y 가 든 $0A43·$0A44 를 쓴다
+    STA.l $7E0A43
+    LDA #!nene_view_y
+    STA.l $7E0A44
+    REP #$20
+    LDA.l !nene_lines
+    AND #$00FF
+    DEC
+    CMP.w #$0008
+    BCC +
+    LDA.w #$0007
++
+    ASL
+    PHA
+    ASL
+    ASL
+    CLC
+    ADC 1,S                 ; (n − 1) × 10
+    STA 1,S
+    PLA
+    CLC
+    ADC.w #NeneViewRecs
+    RTL
+.plain
+    LDA.w $EB48,X
+    RTL
+
 ; 개수 창 칸을 ▲ / 숫자 / ▼ 세 줄로 고쳐 쓴다(M = 8, X = 16). 원래 창은 다섯 자리를 하나씩 고르는 은행용이라
 ; 「0000N」 에 커서 자리가 ✱ 와 번갈아 깜박인다. 가게는 끝 자리만 쓰므로 높이 5 의 ShopQtyRec 으로 열고(ShopOpenRes)
 ; 숫자 위·아래에 더 갈 수 있는 쪽 화살표만 둔다(▲ 는 ▼ 타일을 위아래로 뒤집어 쓴다).
@@ -2582,7 +2612,7 @@ QpWindow:
     PLX
     RTS
 
-; 네네 보기 창 위 테두리 둘째 칸에 다음 쪽이 있으면 ▶(커서 타일)를 커서 깜박임 박자($0AD9 bit7)로 번갈아 쓴다(FC 의 깜빡이는
+; 네네 보기 창 위 테두리 둘째 칸에 다음 쪽이 있으면 「→」 를 커서 깜박임 박자($0AD9 bit7)로 번갈아 쓴다(FC 와 같은 깜빡이는
 ; 「→」). 끄는 박자와 마지막 쪽에는 테두리 타일을 쓴다. M = 8, X = 16
 NeneArrow:
     PHP
@@ -2592,7 +2622,7 @@ NeneArrow:
     LDA.w $0AD9
     BMI .off
     REP #$20
-    LDA.w #$207C
+    LDA.w #$207D            ; → (DQ5 BG3 글자 칸 7D, ▶ 다음 칸)
     BRA .put
 .off
     REP #$20
