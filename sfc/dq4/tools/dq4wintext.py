@@ -310,16 +310,17 @@ def _read(screen, w, rom_table, grid, words):
                 real.append((x, ch, pix))
             if real:
                 results.append((score - UNREAD_COST * unread, y0, name, real))
-    results.sort(key=lambda v: (-v[0], v[1], FONTS.index(v[2])))
     claimed = set()
-    # 점수 높은 읽기부터, 글자마다 아직 아무 글자도 덮지 않은 점만 쓰는 것을 받는다(한 띠에 두 글꼴이 섞인 메시지 줄:
-    # 한글은 빌드 글리프, ＊「·숫자는 원본 DQ5 글자)
-    for _, y0, name, real in results:
-        for x, ch, pix in real:
-            if pix & claimed:
-                continue
-            chars.append((y0 + 2, x, ch, width(name, ch), name, y0))
-            claimed |= pix
+    # 덮는 점이 많은 글자부터(같으면 점수 높은 읽기부터), 아직 아무 글자도 덮지 않은 점만 쓰는 것을 받는다(한 띠에 두
+    # 글꼴이 섞인 메시지 줄: 한글은 빌드 글리프, ＊「·숫자는 원본 DQ5 글자). 줄 점수 차례로만 고르면 점수 높은 다른 글꼴
+    # 읽기의 작은 부호(Galmuri7 「-」)가 원본 DQ5 「２」 의 아랫줄을 먼저 가져가 「２」 를 버렸다
+    picks = [(len(pix), score, y0, name, x, ch, pix) for score, y0, name, real in results for x, ch, pix in real]
+    picks.sort(key=lambda v: (-v[0], -v[1], v[2], FONTS.index(v[3]), v[4]))
+    for _, _, y0, name, x, ch, pix in picks:
+        if pix & claimed:
+            continue
+        chars.append((y0 + 2, x, ch, width(name, ch), name, y0))
+        claimed |= pix
     # 어느 글자로도 읽지 못한 잉크: 이어진 점 묶음(8방향)마다, 아는 기호(KNOWN)면 그 이름, 아니면 못 읽음 하나
     left = {(y, x) for y in range(H) for x in range(len(ink[0])) if ink[y][x] and (y, x) not in claimed}
     covered = getattr(screen, '_covered', {}).get(w, set())
