@@ -22,7 +22,9 @@ class KindTest(unittest.TestCase):
 
     def test_deterministic_scenes_stay_in_the_pr_guard(self):
         fixed = {n for n in self.names() if not wc.is_random(n)}
-        self.assertEqual(fixed, {'shopwho', 'shopflip', 'talk02-full', 'ruler', 'partyitems'})
+        # 새 결정적 장면은 이름이 무작위 꼴이 아니면 PR 가드에 저절로 든다
+        self.assertLessEqual({'shopwho', 'shopflip', 'talk02-full', 'ruler', 'partyitems', 'partyspell', 'partytactic'},
+                             fixed)
 
     def test_new_scene_names_default_to_the_pr_guard(self):
         for n in ('give-bag', 'sell-armor', 'equip-ring', 'partyspell', 'partytactic', 'partyitems', 'talk02-full'):
