@@ -16,16 +16,12 @@ EQUIP = ('3장 장비 화면 「무기」 창 (2,18)-(12,29) 의 줄 글자 칸�
          '(창 글자 칸 넘침과 같은 화면)')
 GIVE = '도구 → 건네기 때 「누구에게」 창 (17,10)-(25,18) 위 변을 글자 칸이 덮음(창 검사 give-full·give-shop 의 바뀜·비침과 같은 때)'
 STATUS1 = '1인 상태 창 (19,22)-(27,28) 위 변 이름 자리에 이름 대신 조각 글자가 보임'
-SAVE = '모험의 서 고르기 창 (8,5)-(11,29) 에서 장소 이름(바트랜드) 끝 글자 칸이 오른쪽 테두리를 덮음'
-# 1장 세이브 검사(dq4ch1savecheck)와 그 호환 장면(dq4compatscenes save-high)은 같은 세이브 장면을 돈다
-SAVES = tuple((f'*/{run}/{name}', SAVE, (((9, 29), 137),)) for run in ('ch1save', 'save-high')
-              for name in ('boss', 'hoimin', 'night', 'prologue', 'report'))
 KNOWN = tuple(ww.Known(scene, frozenset({cell}), frames, why) for scene, why, cells in (
     ('*/equip-ch3', EQUIP, (((4, 3), 7), ((4, 29), 7), ((5, 29), 334))),
     ('*/give-full', GIVE, (((17, 17), 12),)),
     ('*/give-shop-ch1', GIVE, tuple(((17, c), 15) for c in range(11, 18))),
     ('*/screens/status-mesence', STATUS1, (((19, 23), 10), ((19, 24), 10))),
-) + SAVES for cell, frames in cells)
+) for cell, frames in cells)
 
 
 def check(screen):

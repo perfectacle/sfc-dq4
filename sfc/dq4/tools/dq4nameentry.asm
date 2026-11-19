@@ -44,6 +44,9 @@ incsrc "dq4nameentry-defs.asm"
 !in_pressed = $1BE6
 !in_steady = $1BE7          ; 1 이면 반복해도 $0ADA 를 0 으로 둔다(원래 04:D27A 갈래)
 !ne_tiles = $F100           ; 이름 칸 2bpp: 글자 줄 8타일(128바이트), 이어서 아래 줄 8타일
+; 모험의 서 목록 이름 열 수. 게임 안 창 이름(dq4windowname WnKorean)과 같이 글자마다 10점 간격으로 40점에 그린다.
+; 한 줄(번호·이름·Lv·레벨·곳 이름)이 목록 창 안쪽 23열에 들어야 한다(dq4windowtext.SAVE_LINE_COLS)
+!ne_list_cols = 5
 
 org $038B72
     JML NeHook
@@ -878,7 +881,8 @@ NeListHook:
     LDA.w #!ne_blank_glyph
     STA !ne_blank
     ; Draw uses $00-$02 as a long pointer; the caller has already consumed the name buffer.
-    JSR NeDrawCells
+    JSL NeListBand
+    JSR NeUpload
     PLY
     PHY
     TYA
@@ -892,7 +896,7 @@ NeListHook:
     CLC
     ADC #$02D0
     TAX
-    LDA #$0008
+    LDA.w #!ne_list_cols
     STA !ne_t0
     SEP #$20
     LDA #$7E
@@ -923,7 +927,7 @@ NeListHook:
     PLY
     TYA
     CLC
-    ADC #$0010
+    ADC.w #!ne_list_cols*2
     TAY
     PLX
     PLB
@@ -1259,6 +1263,125 @@ assert pc() <= $30A900   ; 30:A900~ 은 1장 레코드(dq4chapter1.py RECORDS_AT
 org $618000
 NeTables:
 incsrc "dq4nameentry-tables.asm"
+
+; 모험의 서 목록 이름: 글리프(16×16 칸, 글자는 왼쪽 위 10점 안)를 글자마다 10점 간격으로 겹쳐 !ne_list_cols 열에 그린다.
+; 열 c 는 글자 줄 타일 !ne_tiles + 16c, 아래 줄 + 128. 쓰지 않는 열은 빈칸으로 남는다. 뱅크 30 의 루틴 자리가 차서
+; 표 뱅크에 두고 JSL 로 부른다(DB = 7F 는 부르는 쪽이 둠).
+NeListBand:
+    REP #$30
+    LDX #$0000
+    LDA #$FF00              ; 첫째 평면 0(점 없음), 둘째 평면 FF(창 바탕)
+-
+    STA !ne_tiles,X
+    INX
+    INX
+    CPX #$0100
+    BCC -
+    STZ !ne_t2              ; 글자 k
+.glyph
+    LDA !ne_t2
+    CMP !ne_n
+    BCC +
+    RTL
++
+    ASL
+    TAX
+    LDA !ne_ch,X
+    STA !ne_t0              ; 글리프 n 은 뱅크 62 + n / 1024 의 $8000 + (n % 1024) × 32
+    AND #$03FF
+    ASL
+    ASL
+    ASL
+    ASL
+    ASL
+    ORA #$8000
+    STA.b $00
+    LDA !ne_t0
+    XBA
+    AND #$00FF
+    LSR
+    LSR
+    CLC
+    ADC.w #!ne_glyph_bank
+    SEP #$20
+    STA.b $02
+    REP #$20
+    LDA !ne_t2              ; 글자 자리 10k 점: 밀 점 수 10k % 8, 첫 열 10k / 8
+    ASL
+    STA !ne_t3
+    ASL
+    ASL
+    CLC
+    ADC !ne_t3
+    PHA
+    AND #$0007
+    STA !ne_t3
+    PLA
+    LSR
+    LSR
+    LSR
+    ASL
+    ASL
+    ASL
+    ASL
+    STA !ne_t4              ; 첫 열 × 16
+    LDY #$0000              ; 줄 r
+.row
+    SEP #$20
+    LDA [$00],Y             ; 왼쪽 8점
+    STA !ne_t0
+    REP #$20
+    TYA
+    CLC
+    ADC #$0010
+    TAY
+    SEP #$20
+    LDA [$00],Y             ; 오른쪽 8점
+    STA !ne_t0+1
+    STZ !ne_t1
+    REP #$20
+    TYA
+    SEC
+    SBC #$0010
+    TAY
+    LDX !ne_t3
+    BEQ +
+-
+    SEP #$20
+    LSR !ne_t0
+    ROR !ne_t0+1
+    ROR !ne_t1
+    REP #$20
+    DEX
+    BNE -
++
+    TYA                     ; 줄 r 의 바이트: 글자 줄은 2r, 아래 줄은 128 + 2(r - 8)
+    ASL
+    CPY #$0008
+    BCC +
+    CLC
+    ADC #$0070
++
+    CLC
+    ADC !ne_t4
+    TAX
+    SEP #$20
+    LDA !ne_tiles,X
+    ORA !ne_t0
+    STA !ne_tiles,X
+    LDA !ne_tiles+16,X
+    ORA !ne_t0+1
+    STA !ne_tiles+16,X
+    LDA !ne_tiles+32,X
+    ORA !ne_t1
+    STA !ne_tiles+32,X
+    REP #$20
+    INY
+    CPY #$0010
+    BCC .row
+    INC !ne_t2
+    JMP .glyph
+
 assert pc() <= $61FFFF
 
 org $628000
