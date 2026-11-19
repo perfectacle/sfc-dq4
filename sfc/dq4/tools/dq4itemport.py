@@ -34,10 +34,12 @@ WEAPON = 0
 # ported shop or chest uses. たけのやり: a spear like てつのやり. エンドール's shops: オリハルコンのキバ (a monster-only
 # fang) for せいぎのそろばん, てつのむねあて for てつのまえかけ, メタルキングよろい (the same defence, 95) for
 # はぐれメタルよろい. Chapter 2's monster drops: けがわのフード (the nearest defence, 11 for 12) for きんのかみかざり,
-# シルクハット for はねぼうし. Chapter 3's casino prizes: おおかなづち (a weapon DQ5 cannot use in battle, 27:819A, so
+# シルクハット for はねぼうし. Chapter 1's ラックのたね: まもりのたね, the seed FC lacks (dq4fcitems turns its use into
+# luck). Chapter 3's casino prizes: おおかなづち (a weapon DQ5 cannot use in battle, 27:819A, so
 # using it does nothing instead of a DQ5 effect) for ほほえみのつえ, メタルキングのたて for はぐれメタルのたて.
 BORROWED = {0x01: "てつのやり", 0x34: "せいぎのそろばん", 0x4E: "てつのまえかけ", 0x61: "はぐれメタルよろい",
-            0x89: "きんのかみかざり", 0x8C: "はねぼうし", 0x37: "ほほえみのつえ", 0x84: "はぐれメタルのたて"}
+            0x89: "きんのかみかざり", 0x8C: "はねぼうし", 0x37: "ほほえみのつえ", 0x84: "はぐれメタルのたて",
+            0xAE: "ラックのたね"}
 # DQ5 key item -> FC story item. ゴールドオーブ (C6) has おうごんのうでわ's name length (10 bytes with the dakuten
 # marks); あくまのおもちゃ (BE) is an empty DQ5 record of さえずりのみつ's length (8 bytes). Chapter 3's take DQ5 items
 # no FC item, chest substitute or talk condition names: モンスターほいほい (C3, empty record) and ルラムーンそう (CA,
@@ -191,7 +193,9 @@ def event_writes(rom, prg):
 def writes(rom, prg, prices):
     """Patch writes for the borrowed slots, the story items and prices {DQ5 item: FC price} of the shop items."""
     import dq5chest
+    import dq4fcitems
     out = [w for item, name in sorted(BORROWED.items()) for w in borrowed_writes(rom, prg, item, name)]
+    out += dq4fcitems.writes(rom)
     out += event_writes(rom, prg)
     for item, price in sorted(prices.items()):
         if item not in BORROWED:
@@ -204,4 +208,5 @@ def korean_names():
     are built from a ROM that still holds the DQ5 name)."""
     import dq4windowtext
     adopted = dq4windowtext.adopted(dq4windowtext.KINDS[ITEM_NAMES][0])
+    adopted.update({dq4windowtext.kana_key(k): v for k, v in dq4windowtext.EXTRA_NAMES.get(ITEM_NAMES, {}).items()})
     return {item: adopted[dq4windowtext.kana_key(name)] for item, name in {**BORROWED, **EVENT_ITEMS}.items()}

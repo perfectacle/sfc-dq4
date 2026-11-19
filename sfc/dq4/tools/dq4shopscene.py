@@ -223,7 +223,7 @@ SCENES = [
     # 사지 않고 남긴다(실측). DQ5 는 값 0 물건(물건 표 k1 bit3)을 「귀중한 물건은 받을 수 없다」 로 사지 않는다
     Scene('sell-flute', '불가사의의 피리 팔기: 사지 않고 남음(금화 그대로)', 'item',
           (('gold', '20'), ('items', items(FLUTE))),
-          SELL + (pick(CURSOR, 2), to('a', 0x00), to('a', W_SHOP)),
+          SELL + (pick(CURSOR, 2), to('a', 0x00), stays(200), to('a', W_SHOP)),
           gold=20, items=BASE_ITEMS + (FLUTE,), equip=0x0003,
           windows=(W_COMMAND, W_SHOP, W_SELL, W_SHOP)),
     Scene('sell-back', '팔기 목록에서 B 로 가게 창', 'item', (('gold', '20'), ('items', items(HERB))),

@@ -76,6 +76,7 @@ GROWTH_FIELDS = ((MAX_HP, 2), (MAX_MP, 2), (STR, 1), (AGI, 1), (WIS, 1), (LUCK, 
 SPELLS = 0x23                     # 일행 기록 +23~+25: 배운 주문 비트
 GOLD = 0x7E2019
 HERB = 0xA1                       # DQ5 やくそう
+LUCK_SEED = 0xAE                  # ラックのたね(dq4fcitems.LUCK_SEED)
 HOIMI = 0x27                      # 행동 ホイミ(やくそう 도 이 처리 루틴, dq5-data-format 「물건」)
 HYADO = 0x0A                      # 행동 ヒャド
 CAST_WINDOW = 120                 # 주문을 건 사람의 MP 가 준 뒤 그 효과(몬스터 HP 가 줆)를 찾는 프레임
@@ -106,6 +107,7 @@ TURNS = {
     'flee3': ((20, 'down'), (50, 'down'), (80, 'a')),
     # 도구 → 셋째 물건(물건 창은 두 칸씩, 앞 둘은 밑판의 ぬののふく·ひのきのぼう라 아래 한 번) → 대상 주인공
     'herb': ((20, 'a'), (50, 'down'), (75, 'down'), (100, 'a'), (140, 'down'), (170, 'a'), (210, 'a')),
+    'luck': ((20, 'a'), (50, 'down'), (75, 'down'), (100, 'a'), (140, 'down'), (170, 'a'), (210, 'a')),
     # 2장 셋(작전 めいれいさせろ 라 동료도 명령을 받음). 동료 창은 공격·주문·방어·도구 네 줄
     'attack3': ((20, 'a'), (50, 'a'), (80, 'a'), (110, 'a'), (140, 'a'), (170, 'a'), (200, 'a')),
     # 아리나 방어, 크리프트 주문 → 첫 주문(ホイミ) → 우리 편 첫째(주인공), 브라이 주문 → 첫 주문(ヒャド) → 몬스터 무리
@@ -352,6 +354,20 @@ def judge_monflee(s, expect):
     return problems
 
 
+def judge_luck(s, expect):
+    """luck: 이기고, 운(일행 기록 +0A)이 1~3 오르고, 셋째 칸(운의 씨앗)이 빔."""
+    problems = judge_win(s, expect)
+    if s.get('end') is None:
+        return problems
+    k = [f for f, _ in GROWTH_FIELDS].index(LUCK)
+    was, now = s['before']['hero']['stats'][k], s['after']['hero']['stats'][k]
+    if not 1 <= now - was <= 3:
+        problems.append(f"운 {was} → {now}, 1~3 올라야 함")
+    if s['after']['items'][2] != NO_ITEM:
+        problems.append(f"셋째 칸이 남음: {s['after']['items']}")
+    return problems
+
+
 def judge_heal(s, expect):
     """herb·spell: 회복 한 번이 원작 롬의 ホイミ 범위 안, (spell) 호이민 MP 가 ホイミ 값만큼 줆, (herb) 셋째 칸이 빔."""
     problems = judge_common(s, expect)
@@ -532,7 +548,7 @@ def judge_nosong(s, expect):
 
 
 JUDGES = {'attack': judge_attack, 'armor': judge_attack, 'flee': judge_flee, 'noflee': judge_noflee,
-          'herb': judge_heal, 'spell': judge_heal, 'levelup': judge_levelup, 'levelup2': judge_levelup,
+          'herb': judge_heal, 'spell': judge_heal, 'luck': judge_luck, 'levelup': judge_levelup, 'levelup2': judge_levelup,
           'lose': judge_lose, 'boss': judge_boss, 'monflee': judge_monflee, 'nosong': judge_nosong,
           'growth': judge_growth, 'growth2': judge_growth, 'party2': judge_party, 'party2spell': judge_party_spells,
           'party2piorimu': judge_brey_spell, 'party2hyadain': judge_brey_spell}
@@ -621,6 +637,9 @@ SCENES = {
               'monsters': {0x00: {'hp': 60, 'defense': 50, 'attack': 0}}, 'hero': {'level': 10}, 'turn': 'attack'},
     'flee': {'what': '도망(성공할 때까지 거듭)', 'group': [(0x00, 2)], 'monsters': {0x00: {'hp': 2000, 'attack': 0}},
              'zone': 99, 'turn': 'flee'},
+    'luck': {'what': '운의 씨앗을 써 운이 1~3 오른 뒤 공격(dq4fcitems)', 'group': [(0x00, 1)],
+             'monsters': {0x00: {'hp': 1, 'defense': 0, 'attack': 0}}, 'hero': {'luck': 10},
+             'items': [0x42, 0x00, LUCK_SEED], 'turn': 'luck', 'then': ('attack', 1)},
     'herb': {'what': '약초로 회복한 뒤 공격', 'group': [(0x00, 1)], 'monsters': {0x00: {'hp': 1, 'defense': 0, 'attack': 0}},
              'hero': {'max_hp': 100, 'hp': 20}, 'items': [0x42, 0x00, HERB], 'turn': 'herb', 'then': ('attack', 1)},
     'spell': {'what': '호이민이 ホイミ 로 주인공을 고친 뒤 도망', 'group': [(0x00, 1)],
@@ -742,6 +761,8 @@ def scene_slot(rom_path, rom, scene):
         slot._put(HERO + MAX_HP, hero['max_hp'], 2)
     if 'hp' in hero:
         slot._put(HERO + HP, hero['hp'], 2)
+    if 'luck' in hero:
+        slot._put(HERO + LUCK, hero['luck'])
     if 'items' in scene:
         slot.set_hero(items=scene['items'])
     return slot

@@ -31,12 +31,11 @@ from dq4itemport import FLUTE, IRON_SAFE, STATUE  # noqa: E402
 from dq4shopport import _fold, dq5_items  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
-# DQ5 has no luck stat, so ラックのたね becomes the seed that raises the stat DQ5 has instead. Items DQ5 lacks
+# Items DQ5 lacks
 # take a DQ5 item of the same kind: a dancer's outfit for ピンクのレオタード (DQ5's てんしのレオタード is a far stronger armour), and the commonest herb for the joke
-# うまのふん. はねぼうし has a borrowed slot (dq4itemport.BORROWED), and chapter 2's story items slots of their own
+# うまのふん. はねぼうし and ラックのたね have a borrowed slot (dq4itemport.BORROWED), and chapter 2's story items slots of their own
 # (dq4itemport.EVENT_ITEMS), あやかしのふえ among them (EVENT_CHEST_ITEMS).
-SUBSTITUTE = {"ラックのたね": "ふしぎなきのみ",
-              "ピンクのレオタード": "おどりこのふく", "せいじゃくのたま": "まふうじのつえ", "うまのふん": "やくそう"}
+SUBSTITUTE = {"ピンクのレオタード": "おどりこのふく", "せいじゃくのたま": "まふうじのつえ", "うまのふん": "やくそう"}
 # せいじゃくのたま 와 まふうじのつえ 는 둘 다 쓰면 マホトーン 이 걸린다. じょうせんけん(ハバリア 의 배를 타는 표)은 DQ5 에
 # 같은 것이 없고 쓸 곳(배 이벤트)도 아직 없어, 그 이벤트를 옮길 때까지 빈 상자로 둔다.
 LATER = {"じょうせんけん"}

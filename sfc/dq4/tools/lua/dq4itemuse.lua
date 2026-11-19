@@ -1,5 +1,6 @@
 -- STATE 에서 SET 으로 WRAM 을 고치고 INPUT 열("a:6,wait:60,..." 꼴)을 누른 뒤, WATCH(16진 주소 쉼표 목록)의 코드가
 -- 몇 번 돌았는지와 끝 화면을 남긴다. 결과: SHOT_DIR/use.txt("addr 횟수" 줄), 창이 바뀔 때마다 shot-NNNN.png.
+-- READ(16진 WRAM 칸 쉼표 목록)가 있으면 SET 직후와 끝의 값을 read.txt("칸 앞 뒤" 줄)에 남긴다.
 -- "open:N" 은 창 번호(7E:0A00)가 바뀔 때까지 A 를 8프레임 누르고 8프레임 떼기를 되풀이한다(N 프레임까지). 필드는 8프레임에
 -- 한 번 패드를 읽고 그 사이의 누름·뗌을 보지 못해, 정해진 길이로 한 번 누르면 맵에 들어온 프레임 위상에 따라 창이 열리지 않는다.
 package.path = os.getenv("LIBDIR") .. "/?.lua;" .. package.path
@@ -21,6 +22,8 @@ for a in string.gmatch(os.getenv("WATCH") or "", "%x+") do
   hits[addr] = 0
   emu.addMemoryCallback(function() hits[addr] = hits[addr] + 1 end, emu.callbackType.exec, addr, addr)
 end
+local reads, before = {}, {}
+for a in string.gmatch(os.getenv("READ") or "", "%x+") do reads[#reads + 1] = tonumber(a, 16) end
 local n, si, left, window = 0, 1, nil, -1
 local opened, held = nil, 0
 emu.addEventCallback(function()
@@ -32,6 +35,7 @@ emu.addEventCallback(function()
       if op == "=" then cur = val elseif op == "|" then cur = cur | val else cur = cur & val end
       emu.write(addr, cur, m)
     end
+    for i, a in ipairs(reads) do before[i] = emu.read(0x7E0000 + a, m) end
   end
   if n >= 3 and si <= #seq then
     if left == nil then left = seq[si][2] end
@@ -59,6 +63,11 @@ emu.addEventCallback(function()
     for _, a in ipairs(order) do out[#out + 1] = string.format("%06X %d", a, hits[a]) end
     L.shot("end.png")
     L.write("use.txt", table.concat(out, "\n") .. "\n")
+    if #reads > 0 then
+      local r = {}
+      for i, a in ipairs(reads) do r[#r + 1] = string.format("%04X %02X %02X", a, before[i], emu.read(0x7E0000 + a, m)) end
+      L.write("read.txt", table.concat(r, "\n") .. "\n")
+    end
     emu.stop(0)
   end
 end, emu.eventType.endFrame)
