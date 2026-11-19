@@ -7,6 +7,7 @@
 - 문서 안 상대 링크가 가리키는 파일이 있다.
 - 추적 대상 텍스트 파일에 개인 경로가 없다.
 - 추적 대상 텍스트 파일에 rebase·merge 충돌 표시가 남아 있지 않다.
+- 항목별 조각(todo.d·docs/remaining.d, tools/docfrag.py)의 이름·형식·짝 문서·제목 중복.
 
 사용:
   python tools/check_docs.py
@@ -15,6 +16,9 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import docfrag  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 JOURNAL = ROOT / 'docs' / 'journal'
@@ -127,6 +131,8 @@ def main():
     check_links(paths, errors)
     check_personal(paths, errors)
     check_conflicts(paths, errors)
+    for p, msg in docfrag.check():
+        errors.append(f'{p.relative_to(ROOT)}: {msg}')
     for e in errors:
         print(e)
     print(f'{len(errors)} errors')

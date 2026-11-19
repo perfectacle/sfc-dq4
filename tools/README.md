@@ -80,7 +80,8 @@ STATE=$PWD/work/state/ship.mss PRE="b:4,wait:40" WAYPOINTS="3,11;3,24;7,24;7,22"
 | `mesence_settings.py` | MesenCE 사용자 설정 파일(`settings.json`)의 자리와 해시. 읽은 롬 바이트 캐시와 `guards.py` 검사 캐시가 같은 것을 키에 넣는다(콜백 시간 제한처럼 명령줄로 고정하지 않은 설정도 결과에 닿는다) |
 | `release_check.py [--rehearse] [--stages 단계,…] [--seeds-n N] [--ci-report DIR]` | 배포 관문: 출하 롬 빌드, 단위 테스트 전부, 실행 검사 전부(캐시 없이), 트랙 `release.toml` 시드 스윕, 커버리지를 돌려 `work/release/<롬 SHA-1>/report.json`·`report.md` 를 낸다. 사람이 부를 때만 돈다. `--ci-report` 는 CI 조각 결과(실행 검사·시드 스윕)를 받아 로컬 몫만 돈다(로컬은 build·unit·coverage). [배포 관문](../sfc/dq4/docs/dq4-release-check-format.md) |
 | `ship.py --title 제목 --body 본문파일 [--dry-run] [--no-watch] …` | 워크트리 안에서 PR 마무리 한 줄: rebase → 일지 순번 → 로컬 검사 → 실행 검사 나누기(CI 몫·로컬 몫) → 본문 가드 절 → push → draft PR → CI 초록이면 CI 결과 줄·ready·auto-merge → 정리. 아래 [ship.py](#shippy-pr-마무리-한-줄) |
-| `check_docs.py` | 일지 이름·제목·순번 중복, README 일지 목록, 상대 링크, 개인 경로, 충돌 표시 검사(CI `docs` 잡과 같음) |
+| `check_docs.py` | 일지 이름·제목·순번 중복, README 일지 목록, 상대 링크, 개인 경로, 충돌 표시, 항목별 조각(`todo.d`·`docs/remaining.d`) 형식 검사(CI `docs` 잡과 같음) |
+| `docfrag.py todo <트랙폴더>`·`docfrag.py remaining <형식 문서>` | todo 와 형식 문서의 「남은 것」 을 큰 파일과 항목별 조각 파일을 이어 보여 줌. 조각 형식은 이 파일의 docstring |
 | `unitshard.py 폴더 k n` | 폴더의 단위 테스트 파일을 `unitshard-times.json` 의 시간으로 고르게 n 조각으로 나눠 k 번째 조각의 모듈 이름을 찍는다(CI `test` 잡 조각). `--record 폴더` 는 파일마다 돌려 시간을 고친다 |
 | `headless_slots.py` | 머신 전체의 헤드리스 에뮬레이터 프로세스 수 제한. 아래 [HEADLESS_SLOTS](#headless_slots-헤드리스-에뮬레이터-자리) |
 
