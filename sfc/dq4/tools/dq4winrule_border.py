@@ -24,9 +24,9 @@ SAVES = tuple((f'*/{run}/{name}', SAVE, (((9, 29), 137),)) for run in ('ch1save'
               for name in ('boss', 'hoimin', 'night', 'prologue', 'report'))
 SAVES += tuple((f'*/{run}/swamp-hoimin', SWAMP, SWAMP_CELLS) for run in ('ch1save', 'save-high'))
 KNOWN = tuple(ww.Known(scene, frozenset({cell}), frames, why) for scene, why, cells in (
-    ('*/wc/out/equip-ch3', EQUIP, (((4, 3), 7), ((4, 29), 7), ((5, 29), 334))),
-    ('*/wc/out/give-full', GIVE, (((17, 17), 12),)),
-    ('*/wc/out/give-shop-ch1', GIVE, tuple(((17, c), 15) for c in range(11, 18))),
+    ('*/equip-ch3', EQUIP, (((4, 3), 7), ((4, 29), 7), ((5, 29), 334))),
+    ('*/give-full', GIVE, (((17, 17), 12),)),
+    ('*/give-shop-ch1', GIVE, tuple(((17, c), 15) for c in range(11, 18))),
     ('*/screens/status-mesence', STATUS1, (((19, 23), 10), ((19, 24), 10))),
 ) + SAVES for cell, frames in cells)
 

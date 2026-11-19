@@ -769,11 +769,18 @@ def report(folder, rom, label=None):
     scene = label or str(folder)
     known = [(rule.NAME, k) for rule in rules() for k in getattr(rule, 'KNOWN', ()) if fnmatch.fnmatch(scene, k.scene)]
     met = {}            # (규칙 이름, Known) → 눈금 칸이 보인 가장 긴 프레임 수
+    # 장면·칸이 아니라 걸림 설명으로 알려진 깨짐을 가르는 규칙(known(설명) → 까닭 또는 None): 변 어긋남의 창 짝
+    by_desc = {rule.NAME: rule.known for rule in rules() if hasattr(rule, 'known')}
+    pairs = {}          # (규칙 이름, 까닭) → 가장 긴 프레임 수
     for shot, first, n, bad in found:
         rules_ = sorted({b[2] for b in bad})
         failed = [b for b in bad if force == 'fail' or (force == 'rules' and b[4] == 'fail')]
         left = []
         for b in failed:
+            why = by_desc[b[2]](b[3]) if b[2] in by_desc else None
+            if why:
+                pairs[(b[2], why)] = max(pairs.get((b[2], why), 0), b[5])
+                continue
             k = next(((name, g) for name, g in known if name == b[2] and (b[0], b[1]) in g.cells), None)
             if k is None:
                 left.append(b)
@@ -795,6 +802,7 @@ def report(folder, rom, label=None):
         failing += 1
         hint = '눈금보다 오래 보임' if got > k.frames else '눈금을 잰 값으로 내리거나, 걸리지 않으면 지울 것'
         lines.append(f'알려진 깨짐 눈금 {name} {sorted(k.cells)} {k.frames}프레임과 잰 값 {got}프레임이 다름({hint}) 실패')
+    lines += [f'알려진 깨짐 {name} 최대 {frames}프레임: {why}' for (name, why), frames in sorted(pairs.items())]
     (Path(folder) / LOG).write_text('\n'.join(lines) + ('\n' if lines else ''), encoding='utf-8')
     if hits:
         print(f'[winwatch] {label or folder}: 장면 규칙 {len(hits)}건(첫 프레임 {hits[0][0]} {hits[0][1]}) — '
