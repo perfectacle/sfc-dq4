@@ -72,6 +72,9 @@ GOLD = 1000
 # 교회)이고, 호이민은 일행 기록이 없어 독늪 피해를 받지 않는다(실측)
 SWAMP_START = (0x7E, 0x41)
 SWAMP_SHOTS = ','.join(str(f) for f in range(600, 1200, 30))     # 쓰러짐 메시지가 뜨는 동안
+# 마지막 입력 뒤 쉴 프레임. 걷기 입력이 연 창을 엔진이 아래 줄부터 한 줄씩 지우는 동안(약 10프레임) 장면이 끝나면, 반쯤
+# 지워진 창이 마지막 화면으로 남아 UI 깨짐 판정이 그 창의 아래 변이 지워진 것으로 본다
+SWAMP_TAIL = 120
 SWAMP_SCENES = {'swamp-alone': ('night_child', (2,), (), True, (0x586,)),
                 'swamp-hoimin': ('hoimin', (0x30, 2), (), False, ()),
                 'swamp-both': ('hoimin', (2, 2), (), True, (0x585,))}
@@ -238,7 +241,8 @@ def swamp_scene(mesence, rom, states, out, name):
     hp = ';'.join(f'{0x2042 + 42 * n:04X}={v:02X};{0x2043 + 42 * n:04X}=00' for n, v in enumerate(hps))
     got = dq4groupcheck.scene(mesence, rom, states / state / 'end.mss', out, name, FIELD='{},{}'.format(*cell),
                               ROMPATCH=f'{dq4fieldport.warp_patch(rom.read_bytes(), *cell)};{walk.NO_ENCOUNTERS}',
-                              TEST='idle:16,' + ','.join(['right:40,wait:40,a:8'] * 40), MAXF='4500',
+                              TEST='idle:16,' + ','.join(['right:40,wait:40,a:8'] * 40) + f',wait:{SWAMP_TAIL}',
+                              MAXF='4500',
                               SET=f'{gold};{hp}', POKE=WIPE_RNG, SHOTS=SWAMP_SHOTS, TRACE=f'{MESSAGE},0188EF', LOG='7E201D')
     rows = list(enc.lines(out / name / 'trace.txt')) if (out / name / 'trace.txt').exists() else []
     ram = (out / name / 'final.wram').read_bytes() if (out / name / 'final.wram').exists() else bytes(0x20000)
