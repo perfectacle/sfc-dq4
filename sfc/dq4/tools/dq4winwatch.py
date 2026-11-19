@@ -514,7 +514,13 @@ class Screen:
                         return v
             return w
         engine = [snap(w) for w in self.engine]
-        self.numbers = {**self.numbers, **{snap(w): n for w, n in self.numbers.items()}}
+        # numbers 는 장면 처음부터 그린 모든 사각형의 번호라, 지금 떠 있지 않은 옛 사각형까지 바꿔 끼우면 그 번호가 지금 창의
+        # 번호를 덮는다. 지금 엔진 창만, 그 창 자신의 사각형 번호를 먼저 두고 바꿔 끼운 사각형은 비어 있을 때만 준다
+        mine = {w: self.numbers[w] for w in self.engine if w in self.numbers}
+        snapped = {}
+        for w, n in mine.items():
+            snapped.setdefault(snap(w), n)
+        self.numbers = {**self.numbers, **{v: n for v, n in snapped.items() if v not in mine}, **mine}
         for i, w in enumerate(engine):
             if not (0 <= w[0] <= w[2] < 32 and 0 <= w[1] <= w[3] < 32) or w[2] - w[0] < 1 or w[3] - w[1] < 1:
                 continue

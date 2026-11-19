@@ -65,27 +65,27 @@ class KnownTest(unittest.TestCase):
         self.assertEqual(self.judge([cell(5, 19, 7), cell(4, 29, 7, '테두리', 'report')])[0], 0)
 
 
-PAIR = '창 (6, 5, 12, 14) 과 (4, 2, 12, 13) 의 오른쪽 변이 한 칸 어긋남'
+PAIR = '창 (4, 3, 10, 12) 과 (4, 2, 12, 13) 의 왼쪽 변이 한 칸 어긋남'
 
 
 class PairTest(unittest.TestCase):
     """변 어긋남은 장면·칸이 아니라 어긋난 창 짝으로 알려진 깨짐을 가른다."""
 
     def judge(self, why, scene='any-scene'):
-        hit = (6, 14, align.NAME, why, 'fail', 123)
+        hit = (4, 3, align.NAME, why, 'fail', 123)
         return KnownTest.judge(self, [hit], scene=scene, rules=(align,))
 
     def test_known_pair_in_any_scene_and_either_order(self):
-        for why in (PAIR, '창 (4, 2, 12, 13) 과 (6, 5, 12, 14) 의 오른쪽 변이 한 칸 어긋남'):
+        for why in (PAIR, '창 (4, 2, 12, 13) 과 (4, 3, 10, 12) 의 왼쪽 변이 한 칸 어긋남'):
             failing, log = self.judge(why)
             self.assertEqual(failing, 0)
             self.assertIn('알려진 깨짐 변 어긋남 최대 123프레임: E:', log)
 
     def test_unknown_pair_fails(self):
-        self.assertEqual(self.judge('창 (6, 5, 12, 15) 과 (4, 2, 12, 13) 의 오른쪽 변이 한 칸 어긋남')[0], 1)
+        self.assertEqual(self.judge('창 (4, 3, 10, 11) 과 (4, 2, 12, 13) 의 왼쪽 변이 한 칸 어긋남')[0], 1)
 
     def test_known_pair_on_the_other_side_fails(self):
-        self.assertEqual(self.judge(PAIR.replace('오른쪽', '왼쪽'))[0], 1)
+        self.assertEqual(self.judge(PAIR.replace('왼쪽', '오른쪽'))[0], 1)
 
 
 if __name__ == '__main__':
