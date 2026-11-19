@@ -4820,6 +4820,25 @@ WhNmi:
     REP #$20
     RTS
 
+; 등급(A: 0·1·2) → 한 줄(글자 줄 또는 위 줄)의 평면 1 바이트 수(열 4·7·10 × 8)
+WqRunBytes:
+    CMP #$0001
+    BNE +
+    LDA #$0038
+    RTS
++
+    CMP #$0002
+    BNE +
+    LDA #$0050
+    RTS
++
+    LDA #$0020
+    RTS
+
+; 창 이름 코드 첫 구역(!wn_code ~ !wn_code_end)은 여기까지다. 아래부터 묶음 버퍼 보조 코드 앞까지는 둘째 구역(전투 메시지 코드
+; 뒤, !wn_code2 ~ !wn_code2_end)에 둔다. 같은 뱅크라 JSR 로 부른다. 첫 구역에 넣을 자리가 모자라면 둘째 구역 쪽에 더한다
+assert pc() <= !wn_code_end
+org !wn_code2
 ; 00:8E9E(NMI 작업 안, 게임이 메시지 캔버스를 보내기 직전, M = 8, X = 16). 캔버스 안에 그림을 올린 슬롯의 평면 1 을
 ; 원래 글자 칸처럼 FF 로 되돌리고 슬롯을 비운다. 게임은 캔버스의 평면 0 만 보내므로, 위 줄 합성(테두리 무늬가 든 평면 1)이
 ; 남아 메시지 창 빈 줄에 선으로 보였다. NMI 작업 안이라 큐용 NMI 변수(!wq_head·!wq_len·!wq_left)를 쓴다.
@@ -4975,25 +4994,6 @@ WqCleanRoom:
     SEC
     RTS
 
-; 등급(A: 0·1·2) → 한 줄(글자 줄 또는 위 줄)의 평면 1 바이트 수(열 4·7·10 × 8)
-WqRunBytes:
-    CMP #$0001
-    BNE +
-    LDA #$0038
-    RTS
-+
-    CMP #$0002
-    BNE +
-    LDA #$0050
-    RTS
-+
-    LDA #$0020
-    RTS
-
-; 창 이름 코드 첫 구역(!wn_code ~ !wn_code_end)은 여기까지다. 아래부터 묶음 버퍼 보조 코드 앞까지는 둘째 구역(전투 메시지 코드
-; 뒤, !wn_code2 ~ !wn_code2_end)에 둔다. 같은 뱅크라 JSR 로 부른다. 첫 구역에 넣을 자리가 모자라면 둘째 구역 쪽에 더한다
-assert pc() <= !wn_code_end
-org !wn_code2
 ; 지금 그리는 창($0A00)이 물건 이름을 아홉 칸 그림으로 그리는 창(WtNineWins)이면 C = 1. M·X 는 그대로
 WtNineWin:
     PHP
