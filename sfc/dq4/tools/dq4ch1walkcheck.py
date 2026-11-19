@@ -619,6 +619,41 @@ def warp_messages(msg_text):
     return out
 
 
+# 걷기 드라이버(tools/lua/walk.lua·lua/dq4walk.lua)는 경유점 앞에서 90프레임 막히거나 기다리는 토큰(until·done·ask 등)이
+# 한도에 닿으면 walk.txt 에 적기만 하고 다음 경유점으로 넘어간다. 끝 맵·깃발이 맞으면 통과라, 경로가 우연히 되살아난
+# 실행도 통과한다. 그래서 지금 경로가 늘 내는 막힘만 (구간 이름, walk.txt 줄) 로 여기 두고, 그 밖의 막힘·timeout 은 구간
+# 실패다. 목록의 막힘이 나오지 않는 것은 실패가 아니다(경로를 고쳐 없앴으면 목록에서 뺀다)
+KNOWN_STUCK = {
+    # 다리 위에서 개구리가 뛰어올라 말을 거는 사건이 35,9 에서 조작을 가져간다. 사건이 끝나면 다음 경유점으로 간다
+    ('prologue', 'stuck at 35,9 heading 34,9'): '개구리 사건',
+    # 병사가 갈라서고 주인공이 왕 앞까지 저절로 걸어가는 사건이 30,53 에서 조작을 가져간다
+    ('king', 'stuck at 30,53 heading 30,51'): '왕 앞 사건',
+    # 2장 사당: 왕이 낫기 전 병사가 위 방으로 가는 틈을 막는 것이 이 구간이 보는 것이다(끝 칸 8,15 판정)
+    ('closed', 'stuck at 8,15 heading 8,11'): '사당 병사가 막음',
+    # 2장 탑 꼭대기: 꿀을 찾는 사건이 16,20 에서 조작을 가져간다
+    ('honey', 'stuck at 16,20 heading 16,18'): '꿀 찾기 사건',
+    # 2장 엔돌 무술 대회: 28,25 에서 링에 드는 사건이 조작을 가져간다
+    **{(f'endor_{k}', 'stuck at 28,25 heading 28,24'): '링에 드는 사건'
+       for k in ('lose', 'bout0', 'bout1', 'bout2', 'bout3', 'held', 'final')},
+    # 3장 레이크나바 무기점 첫 출근: 문 밖 17,53 에서 꾸지람 사건이 조작을 가져가 카운터 안으로 걸려 들어간다
+    ('shop_first', 'stuck at 17,53 heading 16,53'): '꾸지람 사건',
+    # 3장 본몰로 숲 어귀: 내린 뒤 걷기가 입구 칸 쪽으로 이어 걸어 나무에 막힌 4,31 에서 멈추는 것이 이 구간의 끝이다
+    ('bm_forest_in', 'stuck at 4,31 heading 248,104'): '나무에 막힘',
+    # 아래 셋은 까닭을 실측하지 못했다(끝 맵·깃발은 맞음). 경로를 고쳐 없애야 할 몫
+    ('safe_cave_button', 'stuck at 17,29 heading 16,31'): '17,29 에서 왼쪽이 막힘',
+    ('safe_cave_button', 'stuck at 17,29 heading 16,29'): '17,29 에서 왼쪽이 막힘',
+    ('raft_button', 'stuck at 34,6 heading 34,5'): '배가 34,6 에서 멈춤',
+    ('tunnel_below', 'stuck at 62,8 heading 62,7'): '계단 아래 62,8 에서 위가 막힘',
+}
+WALK_SLIP = re.compile(r'^f\d+ (stuck at .*|\S+ timeout.*)$', re.M)
+
+
+def stuck_problems(name, text, known=None):
+    """walk.txt 의 막힘·timeout 줄 가운데 known(기본 KNOWN_STUCK)에 없는 것의 문제 줄."""
+    known = KNOWN_STUCK if known is None else known
+    return [f'걷기가 막혀 넘어감: {e}' for e in WALK_SLIP.findall(text) if (name, e) not in known]
+
+
 def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, readset=False, flags=None):
     """한 구간을 걷는다. extra 는 시작에 더 둘 SET(묶음 첫 구간의 깃발·물건), party 는 dq5warp.lua PARTY.
     readset 은 run 과 같다. flags 는 setup 과 같다."""
@@ -687,6 +722,8 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
     for k in opt.get('off', []):
         if flags[k]:
             problems.append(f'깃발 {k} 켜짐')
+    if how != 'warp':
+        problems += stuck_problems(name, text)
     if 'field' in opt and bool(seen.get('BE', 0x80) & 0x80) == opt['field']:
         problems.append('필드가 아님' if opt['field'] else '필드에 있음')
     for want in opt.get('items', []):
