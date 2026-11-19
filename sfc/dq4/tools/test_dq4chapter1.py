@@ -275,7 +275,8 @@ class ReturnPlacesTests(unittest.TestCase):
         with unittest.mock.patch('kr_patch.fc.ines.prg', lambda raw: bytes(prg)), \
                 unittest.mock.patch.object(dq4groupbuild, 'placement', lambda prg: place), \
                 unittest.mock.patch.object(dq4groupbuild, 'cell', lambda x, y: (2 * x + 1, 2 * y + 1)), \
-                unittest.mock.patch.object(dq4fieldtravel, 'extras', lambda prg, links, place: list(extra)):
+                unittest.mock.patch.object(dq4fieldtravel, 'extras', lambda prg, links, place: list(extra)), \
+                unittest.mock.patch.object(dq4fieldtravel, 'chapter_start_rows', lambda: []):
             return ch.return_places(out, original, b'dq4')
 
     def test_a_new_group_takes_a_free_row_with_its_first_fc_return_place(self):

@@ -130,6 +130,11 @@ def _pages(*lines):
 
 
 # 메시지 차례가 곧 번호 차례다(옮긴 메시지 뒤 k 번째). 이미 옮긴 줄은 dq4ch1talk 의 한글을 그대로 쓴다
+def _save_messages(chapter):
+    import dq4ch2event
+    return dq4ch2event.save_messages(chapter)
+
+
 MESSAGES = {
     'child': dq4ch1talk.TEXTS[(0x528,)],
     'alex_night': dq4ch1talk.TEXTS[(0x52E,)],
@@ -214,6 +219,8 @@ MESSAGES = {
     # 1장에서 끝내는 배포판의 끝맺음(원작에 없음): 검은 화면에서 1장을 닫고, 다음 장의 주인공을 이름 없이 비춘다
     'ending_leave': ch1.narrate('@{은}/홀로 성을 나섰다./세상을 구할 용사를/찾아서.'),
     'ending_far': ch1.narrate('같은 무렵,/멀리 산트하임 성.', '성벽 너머 세상을 꿈꾸는/한 공주가 있었다.'),
+    # 장 끝 기록 물음(FC 03BE·03BF, dq4ch2event.save_messages)
+    **_save_messages(1),
 }
 
 
@@ -232,7 +239,7 @@ def texts(first):
 
 
 TALKS = ('child', 'alex_night', 'flare_day', 'flare_night', 'hoimin', 'boss', 'soldier', 'king', 'guard',
-         'cave_soldier', 'king_room', 'tower_soldier', 'old_man', 'braggart')
+         'cave_soldier', 'king_room', 'tower_soldier', 'old_man', 'braggart', 'chapter_save')
 SKY_SHOES = 0xCD                # DQ5 ソラトブクツ(FC そらとぶくつ 6C 자리)
 
 
@@ -315,7 +322,14 @@ def talk_scripts(first_message):
                                       "else": _msg(m['old_man_no'])}])],
         [_msg(m['brag_ask']), {"op": "if", "cond": {"code": "05"}, "then": _msg(m['brag_joke']),
                                "else": _msg(m['brag_joke'])}],
+        # 1장 끝 기록 물음: 끝내는 인물의 흐름(dq4ch2event.chapter_flow)이 이 인물과의 대화로 건다
+        _chapter_save_talk(m),
     ]
+
+
+def _chapter_save_talk(m):
+    import dq4ch2event
+    return dq4ch2event.save_talk(m['save_ask'], m['save_skip'])
 
 
 # 인물 스크립트를 빌리는 DQ5 인물: 이 해킹에서 가지 않는 DQ5 03/03 의, 스크립트가 있는 한 벌(낮·밤 따로) 인물.
@@ -1115,7 +1129,7 @@ def _cmd(op, *args):
 
 
 def scripts(first_message, chapter2_at=None, ending_at=None):
-    """chapter2_at: 1장 끝 서술 뒤 2장으로 옮기는 네이티브(dq4ch2event 의 transfer).
+    """chapter2_at: 1장 끝 서술 뒤 기록 물음과 2장 넘김을 하는 네이티브(dq4ch2event 의 chapter_flow, 명령 05 로 부름).
     ending_at: 1장에서 끝내는 배포판의 끝 상자(dq4chapterbox.ENDING). 주면 2장으로 옮기지 않는다."""
     m = message_ids(first_message)
     _, at = native()
@@ -1218,10 +1232,11 @@ def scripts(first_message, chapter2_at=None, ending_at=None):
             _cmd('21', lo(m['ending_leave']), hi(m['ending_leave'])), _cmd('37', *_long(at['ending_pause'])),
             _cmd('21', lo(m['ending_far']), hi(m['ending_far'])), _cmd('37', *_long(ending_at)), _cmd('16')]},
     ] if ending_at is not None else [
-        # 1장 끝: 서술 → 검은 화면 → 2장으로 옮김(일행을 바꾸고 산트하임 왕좌의 방을 검게 불러옴)
+        # 1장 끝: 성 앞은 dq4chapterbox.DARK_LOADS 로 검게 불러와 FC 처럼 검은 화면에 서술(맵 곡은 그대로, 「완」 상자가
+        # 엔딩 곡으로 바꿈) → 「완」 상자·2장 상태 → 기록 물음 → 산트하임 왕좌의 방(dq4ch2event.chapter_flow, 명령 05)
         {"address": ENDER_SCRIPT, "commands": [
             _cmd('28'), _cmd('52'), _cmd('3F'), _cmd('21', lo(m['chapter_end']), hi(m['chapter_end'])),
-            _cmd('37', *_long(at['darken'])), _cmd('37', *_long(chapter2_at)), _cmd('16')]},
+            _cmd('05', *_long(chapter2_at)), _cmd('16')]},
     ] if chapter2_at is not None else [])
 
 
@@ -1450,7 +1465,8 @@ def npc_lists(ported, report, first_talk):
     alts[imuru] = kids + _invisible(KIDS_HOME_SRC, t['soldier'])
     new_lists += [{"name": name, "entries": entries} for name, entries in alts.items()]
     new_lists.append({"name": "soldier_gone", "entries": gone})
-    ender = {"from": ENDER_SRC, "fields": {"x": 0, "y": 1, "facing": "down", "talk": t['king'], "gfx": 0x01, "layer": 0}}
+    ender = {"from": ENDER_SRC, "fields": {"x": 0, "y": 1, "facing": "down", "talk": t['chapter_save'], "gfx": 0x01,
+                                           "layer": 0}}
     new_lists.append({"name": "chapter_end", "entries": alts[alt_name(AFTER_BOSS, END_MAP)] +
                       [{**ender, "time": "day"}, {**ender, "time": "night"}]})
     over = lambda m, flag, name: {"map": m, "flag": flag[0], "when": "on", "mask": flag[1], "list": f"new:{name}"}  # noqa: E731

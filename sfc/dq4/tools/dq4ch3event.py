@@ -154,11 +154,16 @@ def _transfer(record_at, name_at, event_at):
     body += _flag_off(ch2.CHAPTER2) + _flag_or(CHAPTER3) + _flag_or(OPENING)
     # MVN 이 DB 를 7E 로 두었다. 곡 멈춤·이벤트 걸기는 DB 0 에서
     body += DB0 + bytes((0x22,)) + _al(SONG_STOP)
-    start_event = dq4prologue._event_start(event_at)[len(ENTER):-len(LEAVE)]
     # FC 처럼 장 끝 서술 뒤 「제2장 … / 완」 상자(dq4chapterbox.DONE2)를 먼저 띄운다. 상자 주소는 빌드와 상관없다
     import dq4chapterbox
     done = dq4chapterbox.entry_points(dq4chapterbox.GAME_SCENES)['done2']
-    return ENTER + bytes((0x22,)) + _al(done) + bytes(body) + start_event + LEAVE
+    return ENTER + bytes((0x22,)) + _al(done) + bytes(body) + LEAVE
+
+
+def _transfer_go(event_at):
+    """기록 물음 뒤: 3E/01 로 옮기는 이벤트를 건다."""
+    import dq4prologue
+    return dq4prologue._event_start(event_at)
 
 
 def _pad():
@@ -190,6 +195,13 @@ def native(data=None, dq4=None):
     put('dispatch', _dispatch())
     for name, make in COMMON_ROUTINES.items():
         put(name, make(at))
+    # 장 끝 기록 물음과 넘김(2장 끝 인물 스크립트의 명령 05 가 chapter_flow 를 부름, dq4ch2event.chapter_flow)
+    import dq4fieldtravel
+    base = ch2.native()[1]
+    put('transfer_go', _transfer_go(at['event']))
+    put('chapter_save', ch2.chapter_save(dq4fieldtravel.slot_of_fc(CHURCH_FC)))
+    put('chapter_flow', ch2.chapter_flow(CHAPTER3, at['transfer'], at['transfer_go'], base['talk_here'],
+                                         at['chapter_save']))
     if CODE_AT + len(out) > TABLE_AT:
         raise SystemExit(f'3장 네이티브 {len(out)}바이트가 대화 호출 표 {TABLE_AT:06X} 를 넘음')
     return bytes(out), at

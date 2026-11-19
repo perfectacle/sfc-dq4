@@ -341,7 +341,7 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=(),
         import dq4ch2event
         first = dq4npcport.FIRST_MESSAGE + len(ported_messages)
         if chapter2:
-            scripts += dq4ch1event.scripts(first, dq4ch2event.native()[1]['transfer'])
+            scripts += dq4ch1event.scripts(first, dq4ch2event.native()[1]['chapter_flow'])
         else:
             scripts += dq4ch1event.scripts(first, ending_at=dq4chapterbox.entry_points(scenes(prologue))['end'])
         ported, ch2_new, ch2_overrides = dq4ch2event.npc_lists(ported, chapter2_talk())
@@ -444,7 +444,7 @@ def npc_scripts(first_message):
     ch2_to_ch3 = [s for s in dq4ch2event.scripts(chapter2_message(first_message), points, chapter3=True)
                   if s['address'] == ender]
     return ([throne_script(native), walk_out(WALK_OUT_LEFT, EXIT_LEFT), walk_out(WALK_OUT_RIGHT, EXIT_RIGHT)] +
-            dq4prologue.npc_lists()[3] + dq4ch1event.scripts(first_message, dq4ch2event.native()[1]['transfer']) +
+            dq4prologue.npc_lists()[3] + dq4ch1event.scripts(first_message, dq4ch2event.native()[1]['chapter_flow']) +
             ending + dq4ch2event.scripts(chapter2_message(first_message), points) + ch2_to_ch3 +
             dq4ch3event.scripts(chapter3_message(first_message), points))
 
@@ -689,7 +689,9 @@ def return_places(out, original, dq4):
     need = [bytes((g, *first[g], 1, 0x80)) for g in sorted(now - have) if g in first]
     # 한 그룹에 교회가 여럿인 칸(dq4fieldtravel.EXTRA)은 맵까지 같은 항목을 따로 둔다. 훅이 칸으로 이 항목을 찾는다.
     import dq4fieldtravel
-    for row in dq4fieldtravel.restart_rows(dq4fieldtravel.extras(prg, dq4groupbuild.LINKS, place)):
+    # 장 끝 기록 물음의 장 시작 칸도 맵까지 같은 항목을 따로 둔다(이어 하면 그 장 첫머리 맵의 시작 칸)
+    for row in (dq4fieldtravel.restart_rows(dq4fieldtravel.extras(prg, dq4groupbuild.LINKS, place)) +
+                dq4fieldtravel.chapter_start_rows()):
         if all(row[:2] != r[:2] for r in need) and all(out[r:r + 2] != row[:2] for r in rows):
             need.append(row)
     if len(need) > len(free):

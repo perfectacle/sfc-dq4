@@ -31,6 +31,10 @@ TALKED_KIRYL = (0x06, 0x08)    # 7E:2196 bit3
 READY = (0x07, 0x04)           # 7E:2197 bit2  셋 다 이야기함
 # 맵을 옮길 때 지워지는 칸(7E:21A3). 벽 앞의 물음에 대답했음: 인물 스크립트가 대화가 끝나기를 기다린다
 ANSWERED = (0x13, 0x01)
+# 장 끝 기록 물음(FC 1A:$B943 의 03BE·03BF)의 대답. 같은 맵 안 임시 칸이라 맵을 옮기면 지워진다. 대화가 켜고 장 넘김 흐름
+# (chapter_flow)이 본다: 「예」 로 기록함(SAVE_YES), 넘어가기로 정함(DECIDED: 03BE 예, 또는 03BF 예). 둘 다 아니면 다시 묻는다
+SAVE_YES = (0x13, 0x08)
+DECIDED = (0x13, 0x40)
 # 텐페 제물 사건. DQ5 롬에서 켜는 곳도 끄는 곳도 보는 곳도 없는 비트(dq5flags.py)
 TEMPE_HEARD = (0x78, 0x01)     # 7E:2208 bit0  촌장의 부탁에 「예」(FC $6281&10)
 TEMPE_GONE = (0x78, 0x02)      # 7E:2208 bit1  신부에게 제물 대신 가겠다고 함(FC $6281&08)
@@ -193,12 +197,92 @@ def _transfer(record_at, name_at, event_at):
         body += bytes((0xA9, 0x00, 0x8F)) + _al(a)
     body += bytes((0xAF,)) + _al(0x7E201C) + bytes((0x29, 0x7F, 0x8F)) + _al(0x7E201C)
     body += _flag_or(CHAPTER2) + _flag_or(OPENING)
-    body += DB0                                         # MVN 이 DB 를 7E 로 두었다. 이벤트 걸기는 DB 0 의 절대 주소
-    start = dq4prologue._event_start(event_at)[len(ENTER):-len(LEAVE)]
     # FC 처럼 장 끝 서술 뒤 「제1장 … / 완」 상자(dq4chapterbox.DONE1)를 먼저 띄운다. 상자 주소는 빌드와 상관없다
     import dq4chapterbox
     done = dq4chapterbox.entry_points(dq4chapterbox.GAME_SCENES)['done1']
-    return ENTER + bytes((0x22,)) + _al(done) + bytes(body) + start + LEAVE
+    return ENTER + bytes((0x22,)) + _al(done) + bytes(body) + LEAVE
+
+
+def _transfer_go(event_at):
+    """기록 물음 뒤: 3D/01 로 옮기는 이벤트를 건다(DB 0 의 절대 주소)."""
+    import dq4prologue
+    return dq4prologue._event_start(event_at)
+
+
+def _flag_test(flag):
+    """LDA flag / AND #m(M 8): Z 가 꺼져 있으면 켜짐."""
+    return bytes((0xAF,)) + _al(0x7E2190 + flag[0]) + bytes((0x29, flag[1]))
+
+
+def _flag_clear(*flags):
+    out = b''
+    for flag in flags:
+        a = 0x7E2190 + flag[0]
+        out += bytes((0xAF,)) + _al(a) + bytes((0x29, ~flag[1] & 0xFF, 0x8F)) + _al(a)
+    return out
+
+
+def chapter_flow(started, state_at, go_at, talk_here_at, save_at):
+    """장 끝 인물 스크립트의 명령 05(A 가 0 이 될 때까지 프레임마다 부름)로 부르는 장 넘김 흐름. FC 1A:$B8FF~$B974 의 차례:
+    「완」 상자와 다음 장 상태(state_at, started flag 를 켬) → 기록 물음(이 인물의 대화, talk_here) → 「예」 면 기록(save_at)
+    → 다음 장 맵으로(go_at). 대화가 ANSWERED 를 켜면 대답을 본다. 넘어가기로 정하지 않았으면(03BF 에서 아니요) 처음
+    물음부터 다시 묻는다. 맵이 바뀌기 전까지 같은 인물 스크립트가 부르므로 넘김 앞뒤를 started 로 가른다."""
+    body = bytearray(_flag_test(started) + bytes((0xD0, 0x00)))            # BNE poll
+    first = len(body)
+    body += bytes((0x22,)) + _al(state_at) + bytes((0x22,)) + _al(talk_here_at) + bytes((0x80, 0x00))  # BRA again
+    wait_at = len(body)
+    body[first - 1] = (len(body) - first) & 0xFF
+    # poll: 대화가 끝나기 전이면 다시
+    body += _flag_test(ANSWERED) + bytes((0xF0, 0x00))                       # BEQ again
+    beq_wait = len(body)
+    body += _flag_clear(ANSWERED) + _flag_test(DECIDED) + bytes((0xD0, 0x06))  # BNE decided
+    body += bytes((0x22,)) + _al(talk_here_at) + bytes((0x80, 0x00))          # 다시 묻기 / BRA again
+    bra_again2 = len(body)
+    # decided
+    body += _flag_test(SAVE_YES) + bytes((0xF0, 0x04)) + bytes((0x22,)) + _al(save_at)
+    body += _flag_clear(SAVE_YES, DECIDED) + bytes((0x22,)) + _al(go_at)
+    done = bytes((0xC2, 0x30, 0xA9, 0x00, 0x00, 0x28, 0x6B))                 # REP / LDA #0 / PLP / RTL
+    again = bytes((0xC2, 0x30, 0xA9, 0x01, 0x00, 0x28, 0x6B))
+    body += done
+    again_at = len(body)
+    body += again
+    body[wait_at - 1] = (again_at - wait_at) & 0xFF
+    body[beq_wait - 1] = (again_at - beq_wait) & 0xFF
+    body[bra_again2 - 1] = (again_at - bra_again2) & 0xFF
+    return bytes((0x08, 0xE2, 0x30)) + bytes(body)
+
+
+def save_messages(chapter):
+    """기록 물음 두 글(FC 03BE·03BF, 일본어 원문에서 옮김). 서술이 아니라 물음이라 교회 기록 물음(「모험의 서에 기록해도
+    될까요?」)처럼 존댓말이고, 03BF 의 장 번호는 끝난 장(장 제목 상자와 같은 「제N장」)."""
+    return {'save_ask': ch1.narrate('지금까지의 이야기를/모험의 서에 기록합니다./괜찮습니까?'),
+            'save_skip': ch1.narrate(f'기록하지 않으면 제{chapter}장의/지난번 기록한 곳부터/다시 시작하게 됩니다./괜찮습니까?')}
+
+
+def save_talk(ask, skip):
+    """기록 물음 대화(ask·skip 은 메시지 번호). FC 1A:$B943: 03BE 예 → 기록하고 넘어감, 아니요 → 03BF 예 → 기록 없이
+    넘어감, 아니요 → 03BE 부터 다시(chapter_flow 가 DECIDED 없는 대답이면 이 대화를 다시 건다)."""
+    def msg(m):
+        return {"op": "msg", "id": f"{m:03X}"}
+
+    def on(flag):
+        return {"op": "flag-on", "index": flag[0], "mask": flag[1]}
+    yes = {"code": "05"}
+    return [msg(ask), {"op": "if", "cond": yes, "then": [on(SAVE_YES), on(DECIDED), on(ANSWERED)],
+                       "else": [msg(skip), {"op": "if", "cond": yes, "then": [on(DECIDED), on(ANSWERED)],
+                                            "else": [on(ANSWERED)]}]}]
+
+
+def chapter_save(return_slot):
+    """기록 물음에 「예」: 7E:2033 을 다음 장 FC 귀환 자리(return_slot, 밤 비트는 그대로)로 두고, 지금 모험의 서 칸(SRAM
+    70:000F~11 의 bit7 칸, 교회 기록 목록의 처음 커서)에 교회와 같은 25:8026 으로 기록한다. 저장 훅(dq4fieldtravel save)은
+    SAVE_YES 를 보고 그 7E:2033 을 그대로 둔다. 이어 하면 첫머리 대기 flag 로 다음 장 첫머리부터(dq4fieldtravel continue)."""
+    import dq4fieldtravel
+    place = dq4fieldtravel.PLACE_SAVED
+    loop = bytes((0xBF, 0x0F, 0x00, 0x70, 0x30, 0x07, 0xE8, 0xE0, 0x03, 0xD0, 0xF5, 0xA2, 0x00))  # LDA 70:000F,X / BMI
+    return (bytes((0x08, 0xE2, 0x30, 0xAF)) + _al(place) + bytes((0x29, 0x80, 0x09, return_slot, 0x8F)) + _al(place) +
+            bytes((0xA2, 0x00)) + loop + bytes((0x8A, 0x22, 0x26, 0x80, 0x25)) +   # TXA / JSL 25:8026
+            bytes((0x28, 0x6B)))
 
 
 def _skip_song():
@@ -328,6 +412,11 @@ def native(data=None):
     # 걸음 수를 0 으로 두고 구멍 너머로 걸어 나가 필드로
     put('kick', _event_call(at['kick_walk'], bytes((0xA9, 0x00, 0x8F)) + _al(STEP_COUNT)))
     put('join', _join(at['recruits']))
+    # 장 끝 기록 물음과 넘김(1장 끝 인물 스크립트의 명령 05 가 chapter_flow 를 부름)
+    import dq4fieldtravel
+    put('transfer_go', _transfer_go(at['event']))
+    put('chapter_save', chapter_save(dq4fieldtravel.slot_of_fc(dq4fieldtravel.CHAPTER2_CHURCH_FC)))
+    put('chapter_flow', chapter_flow(CHAPTER2, at['transfer'], at['transfer_go'], at['talk_here'], at['chapter_save']))
     return bytes(out), at
 
 

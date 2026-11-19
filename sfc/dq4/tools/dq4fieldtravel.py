@@ -63,6 +63,16 @@ RESTART_SITE, RESTART_ORIG, PLACE_SAVED, UNSAVED = 0x01899F, "22 46 80 25", 0x7E
 FIRST_CHURCH_FC = 0x02
 # 2장 시작의 FC 귀환 자리(1E:$A75E[1] = 10, サラン 교회). 1장 끝에서 2장으로 넘길 때 7E:2033 에 둔다(chapter_slot).
 CHAPTER2_CHURCH_FC = 0x13
+# 장 끝 기록 물음(dq4ch2event.chapter_flow)에 「예」 로 쓴 기록. FC 는 그 기록을 이어 하면 다음 장 첫머리(제목 상자·서두)부터
+# 다시 돈다(1A:$B96B 의 기록 뒤 리셋·이어 하기 실측). 그 기록은 다음 장 상태(첫머리 대기 flag 가 켜짐)이고 이어 할 칸
+# 7E:2033 은 그 장 FC 귀환 자리 칸이다(타이틀의 기록 목록이 칸 번호로 이름 표 0B 를 읽으므로 ルーラ 칸 밖의 번호를 두면
+# 목록 창이 멈춘다). 이어 하기 훅은 첫머리 대기 flag 를 보고 그 장 첫머리 맵의 시작 칸 줄로 보낸다. 저장 훅은 맵을 옮기는
+# 7E:21A3 의 「예」 대답(dq4ch2event.SAVE_YES)이 켜져 있으면 맵의 칸 대신 7E:2033 을 그대로 둔다(장 끝 맵은 칸이 다름).
+# (훅 안 번호, 그룹, 맵, 셀, 귀환 FC 그룹, 첫머리 대기 flag): 번호는 시작 자리 표를 찾는 starts 표의 열쇠로만 쓰고 저장하지
+# 않는다(ルーラ 칸·새 게임 칸과 겹치지 않게 그 뒤). 셀·flag 는 dq4ch2event·dq4ch3event 의 것(test_dq4chaptersave 가 견줌)
+CHAPTER_STARTS = ((0x17, 0x3D, 0x01, (0x12, 0x11), 0x13, (0x7E2208, 0x40)),
+                  (0x18, 0x3E, 0x01, (0x36, 0x0B), 0x16, (0x7E2208, 0x20)))
+SAVE_YES_FLAG = (0x7E21A3, 0x08)
 # 7E:2193 is the last town entered, read only by キメラのつばさ (11:8CBB). An extra slot's town stores 80 | slot there,
 # as no group number has bit7.
 LAST_TOWN, VISITED, SLOT_MARK = 0x7E2193, 0x7E2030, 0x80
@@ -282,6 +292,11 @@ def restart_rows(extra):
     return [bytes((e["group"], e["restart"][0], *e["restart"][1], 1, 0x80)) for e in extra if e["restart"]]
 
 
+def chapter_start_rows():
+    """Start table rows of the chapter starts (CHAPTER_STARTS): the opening map's start cell, [BC][BD][X][Y][층 1][80]."""
+    return [bytes((group, number, *cell, 1, 0x80)) for _, group, number, cell, *_ in CHAPTER_STARTS]
+
+
 def hook_code(at, extra, maps):
     """(bytes, labels) of the extra-slot routines and their tables at `at`.
 
@@ -300,6 +315,7 @@ def hook_code(at, extra, maps):
     asm = dq4environmentrom._Asm(at)
     # The slot → church table leads, so a built ROM tells its rows at `at` (rom_restarts).
     starts = b"".join(bytes((e["slot"], e["group"], e["restart"][0])) for e in extra if e["restart"])
+    starts += b"".join(bytes((key, group, number)) for key, group, number, *_ in CHAPTER_STARTS)
     asm.label("starts").b(*starts, 0xFF)
 
     def jml(target):
@@ -360,8 +376,10 @@ def hook_code(at, extra, maps):
     asm.label("s_next").b(0xE8, 0xE8, 0xE8, 0xE8, 0xE8, 0xE8).rel(0x80, "s_loop")
     asm.label("s_no").b(0x68, 0xA2, 0x00, *jml(SLOT_OF))
 
-    # save: M8 X8 (25:8352).
-    asm.label("save").word(0x20, "maplook").rel(0x90, "sv_engine").long(0xBF, "maps", 3).b(0xC9, 0xFF)
+    # save: M8 X8 (25:8352). 장 끝 기록 물음의 「예」 면 7E:2033(dq4ch2event.chapter_save 가 둔 귀환 자리 칸) 그대로
+    asm.label("save").b(0xAF, *SAVE_YES_FLAG[0].to_bytes(3, "little"), 0x29, SAVE_YES_FLAG[1]).rel(0xF0, "sv_map")
+    asm.b(0xAF, *PLACE_SAVED.to_bytes(3, "little"), 0x29, 0x7F, 0xAA, 0xA5, 0xBC, *jml(SAVE_DONE))
+    asm.label("sv_map").word(0x20, "maplook").rel(0x90, "sv_engine").long(0xBF, "maps", 3).b(0xC9, 0xFF)
     asm.rel(0xF0, "sv_engine").b(0xAA, 0xA5, 0xBC, *jml(SAVE_DONE))
     asm.label("sv_engine").b(0xA5, 0xBC, 0xA2, 0x00, *jml(SAVE_BACK))
 
@@ -374,8 +392,13 @@ def hook_code(at, extra, maps):
     asm.label("wipe").b(0x29, 0x7F, 0xAA).word(0x20, "restart").rel(0x90, "w_engine").b(*jml(WIPE_DONE))
     asm.label("w_engine").b(0xBF, *RULER_LIST.to_bytes(3, "little"), *jml(WIPE_BACK))
 
-    # continue: A = slot, M8 X8.
-    asm.label("continue").b(0xAA).word(0x20, "restart").rel(0x90, "k_engine")
+    # continue: A = slot, M8 X8, 기록을 WRAM 에 불러온 뒤. 다음 장 첫머리 대기 flag 가 켜진 기록(장 끝 기록 물음의 「예」)이면
+    # 칸 대신 그 장 첫머리 줄(CHAPTER_STARTS). 뒤 장부터 본다
+    asm.label("continue").b(0xAA)
+    for k, (key, _, _, _, _, (addr, mask)) in reversed(list(enumerate(CHAPTER_STARTS))):
+        asm.b(0xAF, *addr.to_bytes(3, "little"), 0x29, mask).rel(0xF0, f"k_not{k}").b(0xA2, key).rel(0x80, "k_look")
+        asm.label(f"k_not{k}")
+    asm.label("k_look").word(0x20, "restart").rel(0x90, "k_engine")
     asm.b(0xBF, *START_TABLE.to_bytes(3, "little"), *jml(CONTINUE_DONE))
     asm.label("k_engine").b(0xAF, 0x01, 0x80, 0x01, *jml(CONTINUE_BACK))
 

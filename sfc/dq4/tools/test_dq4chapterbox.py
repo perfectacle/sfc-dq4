@@ -62,6 +62,16 @@ class CodeTests(unittest.TestCase):
         self.assertEqual(code[-4:-2], bytes((0xC9, 16)))
         self.assertEqual(box.fade(14, 0, 1)[-4:-2], bytes((0xC9, 0xFF)))
 
+    def test_title_box_waits_for_a_like_fc(self):
+        # FC 장 첫머리 상자는 그대로 두면 약 180프레임, A 로 일찍 넘어간다: 밝히기·어둡게 15씩 + HOLD_MAX 가 그 길이
+        self.assertEqual(15 + box.HOLD_MAX + 15, 180)
+        code = box.hold_or_a(box.HOLD_MIN, box.HOLD_MAX)
+        self.assertEqual(code[:3], box.wait(box.HOLD_MIN))
+        self.assertEqual(code[3:7], bytes((0xE2, 0x10, 0xA2, box.HOLD_MAX - box.HOLD_MIN)))
+        self.assertEqual(branch_target(code, len(code) - 2), code.index(0xDA))
+        a_test = code.index(bytes((0xAD, 0x18, 0x42, 0x29, 0x80, 0xD0)))
+        self.assertEqual(branch_target(code, a_test + 5), len(code))
+
     def test_entry_points_do_not_depend_on_data(self):
         blank = bytes(box.BOX_W * box.BOX_H * 2)
         for scenes in ((box.CHAPTER1,), (box.PROLOGUE, box.CHAPTER1)):
@@ -148,34 +158,48 @@ class TitleMaskTests(unittest.TestCase):
 class BoxPixelTests(unittest.TestCase):
     def setUp(self):
         self.nes = synthetic_nes()
-        self.img, self.pal = box.box_pixels(self.nes, DotFont(), 'A')
+        self.img, self.pal, self.outside = box.box_pixels(self.nes, DotFont(), 'A')
 
     def test_size_and_palette_lines(self):
+        # 상자 자리는 BOX_W 열 그대로, 상자는 제목 폭에 맞춘 열(box_span)이고 그 밖 칸은 outside
+        first, cols = box.box_span(DotFont(), 'A')
+        self.assertEqual((first, cols), ((box.BOX_W - 5 + 1) // 2, 5))     # 점 폭 3 → 8점 한 칸 + 4
         self.assertEqual((len(self.img), len(self.img[0])), (box.BOX_H * 8, box.BOX_W * 8))
         self.assertEqual((len(self.pal), len(self.pal[0])), (box.BOX_H, box.BOX_W))
         for ty in range(box.BOX_H):
-            for tx in range(box.BOX_W):
-                edge = ty in (0, box.BOX_H - 1) or tx in (0, box.BOX_W - 1)
+            for tx in range(first, first + cols):
+                edge = ty in (0, box.BOX_H - 1) or tx in (first, first + cols - 1)
                 self.assertEqual(self.pal[ty][tx], box.PAL_BORDER if edge else box.PAL_TEXT)
+        self.assertEqual(self.outside, {(tx, ty) for ty in range(box.BOX_H) for tx in range(box.BOX_W)
+                                        if not first <= tx < first + cols})
+        self.assertTrue(all(v == 0 for row in self.img for v in row[:first * 8]))
 
     def test_border_and_fill_tiles_come_from_the_fc_tiles(self):
+        first, cols = box.box_span(DotFont(), 'A')
+        x0, x1 = first * 8, (first + cols) * 8
         corner = box.fc_tile(self.nes, box.FC_BORDER['tl'])
-        self.assertEqual([row[:8] for row in self.img[:8]], corner)
+        self.assertEqual([row[x0:x0 + 8] for row in self.img[:8]], corner)
         right = box.fc_tile(self.nes, box.FC_BORDER['r'])
-        self.assertEqual([row[-8:] for row in self.img[8 * 3:8 * 4]], right)
+        self.assertEqual([row[x1 - 8:x1] for row in self.img[8 * 3:8 * 4]], right)
         bottom_right = box.fc_tile(self.nes, box.FC_BORDER['br'])
-        self.assertEqual([row[-8:] for row in self.img[-8:]], bottom_right)
+        self.assertEqual([row[x1 - 8:x1] for row in self.img[-8:]], bottom_right)
         fill = box.fc_tile(self.nes, box.FC_FILL)
-        self.assertEqual([row[8 * 5:8 * 6] for row in self.img[8 * 4:8 * 5]], fill)
+        self.assertEqual([row[x0 + 8 * 2:x0 + 8 * 3] for row in self.img[8 * 4:8 * 5]], fill)
 
     def test_title_dot_is_white_with_a_black_shadow_below(self):
-        # 마스크 폭 192, 점 폭 3 → 왼쪽 여백 94, 점은 95·96. 상자 안 글자 띠는 TEXT_ROW 행, 왼쪽 테두리 한 타일 뒤
-        row, col = box.TEXT_ROW * 8, 8 + 95
+        # 상자 안 폭 (5 - 2) × 8 = 24, 점 폭 3 → 왼쪽 여백 10, 점은 11·12. 왼쪽 테두리 한 타일 뒤
+        first, _ = box.box_span(DotFont(), 'A')
+        row, col = box.TEXT_ROW * 8, (first + 1) * 8 + 11
         self.assertEqual(self.img[row][col:col + 3], [3, 3, 2])
         self.assertEqual(self.img[row + 1][col:col + 3], [0, 0, 2])
 
+    def test_box_wider_than_its_room_is_rejected(self):
+        with mock.patch.object(box, 'title_width', lambda font, text: (box.BOX_W - 4) * 8 + 1):
+            with self.assertRaisesRegex(ValueError, '상자 자리'):
+                box.box_span(DotFont(), 'A')
+
     def test_subtitle_adds_a_white_dot_band_below_the_box(self):
-        img, pal = box.box_pixels(self.nes, DotFont(), 'A', 'B')
+        img, pal, _ = box.box_pixels(self.nes, DotFont(), 'A', 'B')
         self.assertEqual(len(img), box.rows('B') * 8)
         self.assertEqual(len(pal), box.rows('B'))
         band = (box.BOX_H + box.SUB_GAP) * 8
@@ -187,14 +211,18 @@ class BoxPixelTests(unittest.TestCase):
         tiles, maps = box.box_data(self.nes, DotFont(), ['A', ('A', 'B')])
         self.assertEqual([len(m) for m in maps], [box.BOX_W * box.BOX_H * 2, box.BOX_W * box.rows('B') * 2])
         words = [int.from_bytes(maps[0][i:i + 2], 'little') for i in range(0, len(maps[0]), 2)]
-        indices = {w & 0x3FF for w in words}
+        # 상자 밖 칸(BLANK, 타일 0)은 캔버스 타일이 아니다
+        indices = {w & 0x3FF for w in words if w != box.BLANK}
         self.assertEqual(min(indices), box.CANVAS)
         self.assertEqual(len(tiles), 16 * len({*(w & 0x3FF for m in maps for w in
-                                                 (int.from_bytes(m[i:i + 2], 'little') for i in range(0, len(m), 2)))}))
-        # 안쪽 바탕 타일은 모두 같은 번호, 테두리 팔레트 비트는 PAL_BORDER
-        self.assertEqual(words[0] >> 10 & 7, box.PAL_BORDER)
-        self.assertEqual(words[box.BOX_W * 4 + 5] >> 10 & 7, box.PAL_TEXT)
-        self.assertEqual(words[box.BOX_W * 4 + 5] & 0x3FF, words[box.BOX_W * 4 + 6] & 0x3FF)
+                                                 (int.from_bytes(m[i:i + 2], 'little') for i in range(0, len(m), 2))
+                                                 if w != box.BLANK)}))
+        # 상자 밖 칸은 창 밖 칸(BLANK), 안쪽 바탕 타일은 모두 같은 번호, 테두리 팔레트 비트는 PAL_BORDER
+        first, cols = box.box_span(DotFont(), 'A')
+        self.assertEqual(words[0], box.BLANK)
+        self.assertEqual(words[first] >> 10 & 7, box.PAL_BORDER)
+        self.assertEqual(words[box.BOX_W * 4 + first + 1] >> 10 & 7, box.PAL_TEXT)
+        self.assertEqual(words[box.BOX_W * 4 + first + 1] & 0x3FF, words[box.BOX_W * 4 + first + 2] & 0x3FF)
 
     def test_too_many_distinct_tiles_overflow_the_canvas(self):
         with mock.patch.object(box, 'CANVAS_END', box.CANVAS + 3):
@@ -259,9 +287,9 @@ class CodeBytesTests(unittest.TestCase):
         self.assertEqual(blank.count(bytes((0xA9, 0x00, 0x2C))), 2)
         first = box.MAP_BUFFER + (box.BOX_ROW * 32 + box.BOX_COL) * 2
         self.assertIn(bytes((0x8F, *box.le(first, 3))), blank)
-        copy = box.map_rows(lambda r: 0x5F8000 + r * 52, 2)
+        copy = box.map_rows(lambda r: 0x5F8000 + r * box.ROW, 2)
         self.assertEqual(copy.count(0x54.to_bytes(1, 'little') + bytes((0x7E, 0x5F))), 2)
-        self.assertIn(bytes((0xA9, 51, 0)), copy)
+        self.assertIn(bytes((0xA9, box.ROW - 1, 0)), copy)
 
     def test_wait_button_loops_back_on_itself(self):
         code = box.wait_button()
@@ -359,9 +387,9 @@ class LayoutTests(unittest.TestCase):
         for scene, m in zip(box.GAME_SCENES, maps):
             at = lay.box_at[scene.name]
             code = lay.blob[at - lay.base:ends[ends.index(at) + 1] - lay.base]
-            # map_rows 의 행 복사: LDX #src / LDY #dst / LDA #51 / MVN $7E,$5F
+            # map_rows 의 행 복사: LDX #src / LDY #dst / LDA #(ROW - 1) / MVN $7E,$5F
             srcs = [int.from_bytes(s, 'little') for s in
-                    re.findall(rb'\xA2(..)\xA0..\xA9\x33\x00\x54\x7E\x5F', code, re.S)]
+                    re.findall(rb'\xA2(..)\xA0..\xA9' + bytes((box.ROW - 1,)) + rb'\x00\x54\x7E\x5F', code, re.S)]
             got = b''.join(lay.blob[s - (lay.base & 0xFFFF):s - (lay.base & 0xFFFF) + box.ROW] for s in srcs)
             self.assertEqual(got, m, scene.name)
 
@@ -437,7 +465,7 @@ class PreviewTests(unittest.TestCase):
             box.preview(nes, DotFont(), out)
             image = Image.open(out).convert('RGB')
         self.assertEqual(image.size, (512, 448))
-        img, pal = box.box_pixels(nes, DotFont())
+        img, pal, _ = box.box_pixels(nes, DotFont())
         colors = {box.PAL_BORDER: [(0, 0, 0), box.GOLD, box.BLUE, box.BLUE],
                   box.PAL_TEXT: [(0, 0, 0), box.WHITE, box.BLUE, box.WHITE]}
         for y, x in ((0, 0), (0, 3), (7, 7), (20, 100)):

@@ -1,0 +1,24 @@
+# 장 끝 기록 물음(FC 1A:$B943)과 기록으로 이어 하는 다음 장 첫머리 검사. 형식은 tools/guards.py(트랙 sfc/dq4 의 조각),
+# 규칙은 guards 스킬
+
+[[check]]
+name = "dq4-chapter-save"
+why = "장 끝에 FC 처럼 「지금까지의 이야기를 모험의 서에 기록합니다」 를 묻는다(dq4ch2event.chapter_flow·save_talk). 1장 끝(바트랜드 성 앞)·2장 끝(산트하임 앞마당) 직전 기록을 libretro 코어(snes9x·bsnes)로 이어 해 돌린다. 예 → 지금 모험의 서 칸에 다음 장 상태로 기록(이어 할 칸은 다음 장 FC 귀환 자리 사란·레이크나바), 그 SRAM 으로 새로 켜 이어 하면 다음 장 첫머리 맵 시작 칸(제목 상자부터)에 FC 장 시작 소지품·장비·금화로 선다. 아니요·예 → 기록 칸이 그대로. 아니요·아니요 → 기록 물음이 다시 뜬다. 이어 할 칸에 ルーラ 칸 밖의 번호를 두면 타이틀 기록 목록 창(이름 표 0B)이 멈추고, 저장 훅이 「예」 대답을 보지 않으면 장 끝 맵(바트랜드) 칸이 기록된다. 입력·기록이 고정이라 결정적"
+paths = [
+  "sfc/dq4/tools/dq4chaptersavecheck.py",
+  "sfc/dq4/tools/dq4ch2event.py",
+  "sfc/dq4/tools/dq4ch1event.py",
+  "sfc/dq4/tools/dq4ch2ending.py",
+  "sfc/dq4/tools/dq4ch3event.py",
+  "sfc/dq4/tools/dq4fieldtravel.py",
+  "sfc/dq4/tools/dq4chapterbox.py",
+  "sfc/dq4/tools/dq4chapter1.py",
+  "sfc/dq4/tools/dq4savefixture.py",
+  "sfc/dq4/tools/dq4compatcheck.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq5/tools/dq5sram.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/chaptersave && uv run --locked python sfc/dq4/tools/dq4chaptersavecheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/chaptersave"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]
+groups = ["ch1-build"]
