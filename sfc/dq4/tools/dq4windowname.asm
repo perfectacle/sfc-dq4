@@ -4083,11 +4083,13 @@ WtVisTail:
 ; A 는 바꾸고 X·Y 는 지킨다. 게임 NMI 작업은 들어올 때의 X·Y 를 이어 쓴다.
 WqNmiEntry:
     ; WhWith 는 캔버스 전송과 겹치면 스스로 게임 요청을 한 NMI 붙잡으므로 아래 건너뛰기와 상관없이 부른다(건너뛰면 창
-    ; 타일맵만 먼저 가 목록 줄이 빈다). 할 일(!wq_defer bit5)이 없으면 부르지도 않는다
+    ; 타일맵만 먼저 가 목록 줄이 빈다). 할 일(!wq_defer bit5)이 없으면 부르지도 않는다.
+    ; 할 일이 있으면 WhWith 의 같은 검사를 건너뛰어 들어간다. WhWith 는 NMI 첫머리에서 주사선이 !wh_with_line 앞일 때만
+    ; 보내는데 실측 진입이 244~245 줄 경계라, 여기서 몇 사이클만 늘어도 245 로 밀려 두 번 붙잡은 뒤 타일맵만 보낸다
     LDA.l $7E0000|!wq_defer
     BIT #$20
     BEQ +
-    JSR WhWith
+    JSR WhWith_body
 +
     ; 게임이 이 NMI 에 메시지 캔버스를 보내거나(작업 8E98, $0F59 ≠ 0) 전송 목록(작업 8CEF)에 큰 항목(256워드 넘게,
     ; 메시지를 시작하며 캔버스 칸을 두 평면째 지우는 24:8029·24:807B)이 있으면 대기열 일(게이트)은 다음 NMI 로 미룬다.
@@ -5897,9 +5899,9 @@ org !wh_extra
 WhWith:
     LDA.l $7E0000|!wq_defer
     BIT #$20
-    BNE +
+    BNE .body
     RTS
-+
+.body
     PHP
     PHB
     PHD
