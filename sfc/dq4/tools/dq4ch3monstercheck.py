@@ -104,7 +104,9 @@ SHOP_PC, INN_PC = '06E01F', '06E384'         # 특수 기능 도구점·여관(0
 BATTLE_PC = '01860D'                         # 걸음 전투가 걸림(dq4battlecheck)                      # 고정 무리 6바이트씩(dq5encounterwrite fixed_groups)
 # 한 걸음에 전투가 하나 걸리고(조우를 덮음) A 로 이기고 메시지를 넘긴 뒤, B 로 필드에서 열린 명령 창을 닫고 다음 걸음
 FIGHT = ','.join(['a:2,wait:14'] * 26 + ['b:2,wait:10'] * 6)
-DROP_WALK = 'idle:16,' + ','.join(f'{d}:12,{FIGHT}' for d in ('right', 'left') * 4)
+# 마지막 걸음의 전투에서 물건을 얻으면 그 메시지가 FIGHT 의 A 보다 길 수 있어, 걸음이 끝난 뒤 A 를 더 눌러 끝까지 넘긴다.
+# 넘기기 전에 입력이 끝나면 떨어뜨림(2589B3)은 지났는데 가진 물건에는 아직 없다
+DROP_WALK = 'idle:16,' + ','.join(f'{d}:12,{FIGHT}' for d in ('right', 'left') * 4) + ',' + FIGHT
 
 
 def lorom(a):
