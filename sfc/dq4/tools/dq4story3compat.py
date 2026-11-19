@@ -27,6 +27,21 @@ import dq4storytokens as tokens  # noqa: E402
 WATCH_EXTRA = {'GOLD': (0x7E2019, 3), 'TIME': (0x7E075E, 2)}
 
 
+# 이 검사가 건너뛰는 구간 전부와 까닭. 표 밖의 구간이 건너뛰어지면(새 곁가지·훅 토막) 실패한다(분모가 몰래 줄지 않게).
+# 곁가지는 MesenCE 판도 줄기를 앞 상태에서 이어 가므로 대 줄 것이 없다. 줄기 구간은 뒤 구간의 출발을 어떻게 맞추는지 적는다
+SKIPPED = {
+    'early_quit': '곁가지',
+    'merchant': '떠돌이 상인 조우는 실행 주소 훅. 산 약초는 뒤 구간이 쓰지 않고, 금화는 엔돌 가게 구간이 다시 둔 뒤에만 '
+                '확인하므로 대 줄 것 없음(test_dq4story3compat 가 지킴)',
+    'drop_armor': '곁가지',
+    'drop_sword': '곁가지',
+    'bm_bridge_fight': '걸음 전투는 실행 주소 훅. 전투를 뺀 걸음(STAND_IN)을 걸어 끝 칸을 맞춘 뒤 이어 감',
+    'tunnel_song': '곁가지',
+}
+# 건너뛴 줄기 구간 대신 걷는 토막: 훅 토막만 뺀 걸음. 구간의 끝 칸·flag 판정은 그대로 본다
+STAND_IN = {'bm_bridge_fight': 'right:16;right:30;wait:30'}
+
+
 def skip_reason(seg):
     """이 구간을 코어에서 건너뛰는 까닭(없으면 None)."""
     name, toks, opt = seg
@@ -60,9 +75,11 @@ def walk_story(w, seed):
     for seg in story.SEGMENTS:
         name, toks, opt = seg
         why = skip_reason(seg)
-        if why:
+        if why and name not in STAND_IN:
             results.append({'name': name, 'status': 'skipped', 'why': why})
             continue
+        if why:
+            toks, opt = STAND_IN[name], {k: v for k, v in opt.items() if k != 'fight'}
         if toks.startswith('ending:'):
             r = {**w.ending(), 'name': name}
             results.append(r)
@@ -82,6 +99,7 @@ def walk_story(w, seed):
         w.pokes = []
         found, _ = check.problems_of(text_of(w, runner, problems), opt, story.FLAGS)
         r = {'name': name, 'status': 'failed' if found else 'passed', 'problems': found, 'frames': runner.n,
+             **({'stand_in': toks} if why else {}),
              'seconds': round(time.monotonic() - t0, 1), 'log': runner.log[-12:] if found else []}
         w.c.shot(w.out / f'{name}.png')
         (w.out / f'{name}.txt').write_text('\n'.join(runner.log) + '\n', encoding='utf-8')
@@ -110,11 +128,21 @@ def one_core(name, rom, out, seed, cache):
     w.c.load((data[8:], int.from_bytes(data[:8], 'little')))
     w.seed = seed
     results = walk_story(w, seed)
+    return {'core': name, 'seed': seed, 'seconds': round(time.time() - t0), **tally(results), 'segments': results}
+
+
+def tally(results):
+    """분모는 구간 표 전체. 건너뛴 구간이 SKIPPED 와 다르거나 걸은 구간이 모자라면 실패."""
     walked = [r for r in results if r['status'] != 'skipped']
-    want = sum(1 for s in story.SEGMENTS if not skip_reason(s))
-    ok = len(walked) == want and all(r['status'] == 'passed' for r in walked)
-    return {'core': name, 'status': 'passed' if ok else 'failed', 'seed': seed, 'seconds': round(time.time() - t0),
-            'walked': len(walked), 'expected': want, 'segments': results}
+    skipped = {r['name'] for r in results if r['status'] == 'skipped'}
+    problems = []
+    if skipped != set(SKIPPED) - set(STAND_IN):
+        problems.append(f'건너뛴 구간이 표와 다름: {sorted(skipped ^ (set(SKIPPED) - set(STAND_IN)))}')
+    if len(results) != len(story.SEGMENTS):
+        problems.append(f'걸은·건너뛴 구간 {len(results)}, 구간 표 {len(story.SEGMENTS)}')
+    ok = not problems and all(r['status'] == 'passed' for r in walked)
+    return {'status': 'passed' if ok else 'failed', 'walked': len(walked), 'skipped': len(skipped),
+            'expected': len(story.SEGMENTS), 'problems': problems}
 
 
 def main():
@@ -137,9 +165,9 @@ def main():
     ok = all(r['status'] == 'passed' for r in reports)
     (out / 'results.json').write_text(json.dumps({'status': 'passed' if ok else 'failed', 'cores': reports},
                                                  ensure_ascii=False, indent=1) + '\n')
-    print(json.dumps({'status': 'passed' if ok else 'failed',
-                      'cores': {r['core']: f"{r['status']} {r.get('walked')}/{r.get('expected')} {r.get('seconds')}초"
-                                for r in reports}}, ensure_ascii=False))
+    lines = {r['core']: f"{r['status']} {r.get('walked')}/{r.get('expected')}(건너뜀 {r.get('skipped')}) "
+                        f"{r.get('seconds')}초" for r in reports}
+    print(json.dumps({'status': 'passed' if ok else 'failed', 'cores': lines}, ensure_ascii=False))
     return 0 if ok else 1
 
 
