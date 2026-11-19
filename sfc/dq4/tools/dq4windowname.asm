@@ -861,6 +861,9 @@ org $24A5E9
 !wh_slot  = $7FA32A         ; 이번 요청의 장 k × 4
 !wh_dst   = $7FA32C         ; WhSame 안에서만: 이번 요청의 보낼 곳 값
 !wh_line  = $7FA32E         ; WhWith 안에서만: 들어올 때 잰 주사선
+; 7F 자리 표: 이 칸들은 7F:A320~A32F 와 7F:C000~CF7F 안에만 둔다. 창 이름 그림자(!wt_shadow 7F:A400~B29F)는 그 사이다
+assert !wh_lastok >= $7FA320 && !wh_line+2 <= $7FA330
+assert !wh_last >= $7FC000 && !wh_last+$800+1920 <= $7FCF80
 !wt_stc   = $7F8310         ; 후보 둘 × [버퍼 칸 주소, 타일, 버퍼 칸 주소, 타일] 워드. 찾기가 적고 게이트가 비교만 함
 !wh_buf   = $7F8320
 !wh_size  = $1EF0
