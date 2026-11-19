@@ -1,6 +1,6 @@
 """장 제목 상자 게임 장면 판정(보고만): 맵이 있는 장 첫머리 상자를 MesenCE 헤드리스로 띄워 dq4boxjudge.judge 에 돌린다.
 
-  MESENCE=… LIBDIR=… uv run --locked python sfc/dq4/tools/dq4boxplay.py --rom work/ch3/dq4-ch1.sfc --out work/boxplay
+  MESENCE=… LIBDIR=… uv run --locked python sfc/dq4/tools/dq4boxplay.py --rom work/ch3/dq4-ch1.sfc --out work/boxplay.noindex
 형식은 sfc/dq4/docs/dq4-chapter1-format.md 「장 제목 상자 판정」.
 """
 import argparse
@@ -49,34 +49,53 @@ def play_cases():
     return out
 
 
+def frames(path):
+    """box.rgb → [(프레임, PIL 화면 256x224)]. 화면이 넓으면(하이레스) 가로 두 점에 하나만 둔다."""
+    import struct
+    from PIL import Image
+    data = path.read_bytes() if path.is_file() else b''
+    out, at = [], 0
+    while at + 12 <= len(data):
+        n, w, h = struct.unpack_from('<III', data, at)
+        at += 12
+        im = Image.frombytes('RGB', (w, h), data[at:at + w * h * 3])
+        at += w * h * 3
+        if w >= 2 * bj.SCREEN_W:
+            im = im.resize((w // 2, h), Image.NEAREST)
+        out.append((n, im.crop((0, 0, bj.SCREEN_W, bj.SCREEN_H))))
+    return out
+
+
 def play(mesence, rom, out):
-    """장면마다 그 맵으로 워프해 상자가 뜨는 동안 화면을 찍고 판정한다. {장면: [(종류, 설명)] 또는 오류}."""
+    """장면마다 그 맵으로 워프해 상자(금색)가 보이는 화면을 메모리에서 판정한다. 파일로는 걸린 화면과 장면마다 대표 한
+    장(rep.png)만 남기고 원시 화면(box.rgb)은 지운다."""
+    import dq4chapterbox as cb
     import dq4groupcheck
     import dq4readset
     import dq4windowcheck as wc
-    from PIL import Image
     data = Path(rom).read_bytes()
     states = wc.make_states(mesence, Path(rom), data, out / 'states')
+    gold = '%02X%02X%02X' % cb.GOLD
     results = {}
     for name, where, sets in play_cases():
         dest = out / name
         env = dq4groupcheck.environment(os.environ['LIBDIR'], states['shop'], dest)
         dest.mkdir(parents=True)
-        frames = range(SHOT_EVERY, MAX_FRAMES, SHOT_EVERY)
         env.update(TO=where, SET=sets, ANYWHERE='1', SETTLE=str(PLAY_FRAMES), MAXF=str(MAX_FRAMES),
-                   WARPLUA=str(dq4groupcheck.WARP),
-                   SHOTS=','.join(map(str, frames)), WARPEXIT=f'{dq4groupcheck.warp_exit(Path(rom)):X}',
-                   DP86OK=dq4groupcheck.dp86_allowed(Path(rom)))
+                   WARPLUA=str(dq4groupcheck.WARP), EVERY=str(SHOT_EVERY), GOLD=gold,
+                   WARPEXIT=f'{dq4groupcheck.warp_exit(Path(rom)):X}', DP86OK=dq4groupcheck.dp86_allowed(Path(rom)))
         dq4readset.run(mesence, Path(rom), SHOT_LUA, dest, env, timeout=300)
-        shots = sorted(dest.glob('*.png'))
-        seen, found = 0, []
-        for shot in shots:
-            problems = bj.judge(Image.open(shot).convert('RGB').crop((0, 0, bj.SCREEN_W, bj.SCREEN_H)))
-            if problems and problems[0][0] == '상자 없음':
-                continue
-            seen += 1
-            found += [(shot.name, kind, text) for kind, text in problems]
-        results[name] = {'shots': len(shots), 'box': seen, 'found': found}
+        raw = dest / 'box.rgb'
+        seen, found = frames(raw), []
+        for n, im in seen:
+            problems = bj.judge(im)
+            if problems:
+                im.save(dest / f'f{n:05d}.png')
+            found += [(f'f{n:05d}', kind, text) for kind, text in problems]
+        if seen:
+            seen[len(seen) // 2][1].save(dest / 'rep.png')
+        raw.unlink(missing_ok=True)
+        results[name] = {'box': len(seen), 'found': found}
     return results
 
 
@@ -85,9 +104,11 @@ def main():
     ap.add_argument('--rom', required=True, type=Path)
     ap.add_argument('--out', required=True, type=Path)
     args = ap.parse_args()
+    if not args.out.name.endswith('.noindex'):
+        ap.error('--out 은 .noindex 로 끝나는 폴더(macOS 색인이 건너뜀)')
     results = play(os.environ['MESENCE'], args.rom, args.out)
     for name, r in results.items():
-        print(f'{name}: 화면 {r["shots"]}장, 상자 {r["box"]}장, 걸림 {len(r["found"])}건'
+        print(f'{name}: 상자 화면 {r["box"]}장, 걸림 {len(r["found"])}건'
               + ('' if r['box'] else ' — 상자가 뜨지 않음'))
         for shot, kind, text in r['found']:
             print(f'  {shot} {kind}: {text}')
