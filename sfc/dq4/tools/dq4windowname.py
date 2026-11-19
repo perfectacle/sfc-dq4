@@ -93,7 +93,7 @@ NENE_VIEW_MORE = 7
 from dq4ch3slots import NENE_VIEW_MARK as NENE_MARK, NENE_VIEW_LINES as NENE_LINES, NENE_VIEW_SPLIT as NENE_SPLIT  # noqa: E402,E501  쪽 줄 수(1~8)는 창 높이를 고른다
 # 타일맵 버퍼 줄 y 가 화면에서는 한 줄 위(y − 1)에 보인다(BG3 세로 스크롤). FC 창 66 의 위 테두리가 화면 타일 2줄이라 y = 3
 NENE_VIEW_XY = (18, 3)
-# 네네 보기 표지(7E:2824 등)는 3장 변수 칸이라 다른 장에서는 다른 값이 남을 수 있어, 3장 flag 가 설 때만 표지로 본다
+# 네네 보기 표지(NENE_MARK 등)는 3장 변수 칸이라 다른 장에서는 다른 값이 남을 수 있어, 3장 flag 가 설 때만 표지로 본다
 CHAPTER3 = (0x7E2208, 0x08)     # dq4growth.CHAPTER3·dq4ch3event.CHAPTER3
 # 그 레코드와 별칭 갈래 자리. 창 제목 목록(04:AD78~, 제목 43개)을 dq4windowtext.fixed_records 가 한국어로 줄이고 뒤 코드
 # (04:AE7C) 앞까지 FF 로 채운 곳이라 제목 번호로는 닿지 않는다. 제목을 쓴 뒤 FF 인지 본다
