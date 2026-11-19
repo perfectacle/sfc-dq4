@@ -155,21 +155,46 @@ class BridgeTest(unittest.TestCase):
             self.assertNotIn(bytes((0x00, 0x95)), shut, key)
 
     def test_jail_out_goes_dark_right_after_closing(self):
-        # FC: 창이 사라진 2프레임 뒤부터 3프레임마다 한 단계, 네 번째에 검음. 병사 스크립트의 다음 차례에 이벤트로 어둡게
-        # 하면 창이 닫힌 뒤 20프레임 늦었다
+        # FC: 창이 사라진 2프레임 뒤부터 3프레임마다 한 단계, 네 번째에 검음(밝기 45%·거의 0·0·0). 병사 스크립트의 다음 차례에
+        # 이벤트로 어둡게 하면 창이 닫힌 뒤 20프레임 늦었고, $1D 만 쓰면 화면에 2프레임 늦게 나왔다
         native, at = bm.native(_ctx())
         from dq4ch3slots import BONMALMO_STUBS
         code = native[at['shut_jail_out'] - _ctx().code_at:]
         close = bytes((0x22, *bm._al(BONMALMO_STUBS[0])))
-        fade = bm._fade_down(bm.JAIL_FADE_STEP, bm.JAIL_FADE_HOLD)
+        fade = bm._fade_levels(bm.JAIL_DARK, bm.JAIL_FADE_HOLD, now=True)
         go = bytes((0xA9, at['jail_event'] & 0xFF, 0x8D, 0xB3, 0x19))
         self.assertEqual(code.index(fade), code.index(close) + len(close))     # 닫은 곧바로
         self.assertLess(code.index(fade), code.index(go))
-        self.assertEqual((bm.JAIL_FADE_STEP, bm.JAIL_FADE_HOLD), (4, 3))
-        self.assertEqual(-(-15 // bm.JAIL_FADE_STEP), 4)                       # 15 → 11 → 7 → 3 → 0
+        self.assertEqual(fade.count(bytes((0x8D, 0x00, 0x21))), len(bm.JAIL_DARK))   # $2100 에도 바로
+        self.assertEqual((bm.JAIL_DARK, bm.JAIL_FADE_HOLD), ((6, 0, 0, 0), 3))
+        flag = 0x7E2190 + bm.JAIL_SENT[0]
+        self.assertIn(bytes((0xAF, *bm._al(flag), 0x09, bm.JAIL_SENT[1], 0x8F, *bm._al(flag))), code)
         guard = next(s for s in bm.scripts(_ctx()) if s['address'] == bm.SCRIPTS['guard'][2])['commands']
         self.assertEqual(guard[-1]['op'], '16')
         self.assertEqual(guard[-2]['args'], list(bm._al(at['shut_jail_out'])))
+
+    def test_arrival_after_the_jail_lights_up_like_fc(self):
+        # FC: 창이 사라진 78프레임 뒤부터 3프레임마다 밝기 0.1·0.2·43%·100%. 워프의 밝히기는 1프레임마다 16단계였다
+        from dq4chapterbox import wait
+        code = bm._fade_in_hook()
+        flag = 0x7E2190 + bm.JAIL_SENT[0]
+        self.assertTrue(code.startswith(bytes((0x08, 0xE2, 0x20, 0xAF, *bm._al(flag), 0x29, bm.JAIL_SENT[1]))))
+        self.assertIn(bytes((0x29, ~bm.JAIL_SENT[1] & 0xFF, 0x8F, *bm._al(flag))), code)     # 한 번만
+        # 7E:2204 는 3장 밖에서 DQ5 바이트 변수 자리라 도착 맵 3F/01 까지 본다
+        self.assertIn(bytes((0xAF, 0xBC, 0x00, 0x7E, 0xC9, 0x3F)), code)
+        self.assertIn(bytes((0xAF, 0xBD, 0x00, 0x7E, 0xC9, 0x01)), code)
+        self.assertIn(wait(bm.JAIL_LIGHT_WAIT), code)
+        for v in bm.JAIL_LIGHT:
+            self.assertIn(bytes((0xA5, 0x1D, 0x29, 0x80, 0x09, v, 0x85, 0x1D)), code)
+        self.assertEqual(bm.JAIL_LIGHT, (0, 0, 6, 15))
+        self.assertIn(bytes((0x28, 0x5C, *bm._al(bm.FADE_IN_RTS))), code)
+        self.assertTrue(code.endswith(bytes((0x28, *bm.FADE_IN_ORIG, 0x5C, *bm._al(bm.FADE_IN_SITE + len(bm.FADE_IN_ORIG))))))
+
+    @unittest.skipUnless((ROOT / 'rom' / 'dq5.sfc').exists(), 'DQ5 롬 없음')
+    def test_fade_in_rts_is_the_routine_end(self):
+        d = (ROOT / 'rom' / 'dq5.sfc').read_bytes()
+        self.assertEqual(d[lorom(bm.FADE_IN_SITE):lorom(bm.FADE_IN_SITE) + 4], bm.FADE_IN_ORIG)
+        self.assertEqual(d[lorom(bm.FADE_IN_RTS) - 1:lorom(bm.FADE_IN_RTS) + 1], bytes((0x28, 0x60)))   # PLP / RTS
 
     def test_fox_scene_flashes_grey_then_goes_dark(self):
         # 회색 번쩍임은 지금 색을 목표 색 칸에 옮겨 두고(MVN) 회색과 원래 색을 FLASHES 번 올리고, 밝기를 0 까지 내린다

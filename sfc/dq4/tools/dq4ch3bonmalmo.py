@@ -43,7 +43,8 @@ LETTER2 = (0x73, 0x20)         # 왕의 편지를 본몰 왕에게 전함(FC $62
 FOX_SCENE = (0x74, 0x01)       # 촌장이 개에 놀라 숲으로 바뀜: 숲의 여우가 빌기를 기다림
 FOX_LET = (0x74, 0x02)         # 여우를 놓아줌(갑옷을 받음)
 FOX_GONE = (0x74, 0x04)        # 여우가 사라짐: 돈 가아데가 말을 건다
-FLAGS = (FOXED, PRINCE_MET, SON_FREED, BRIDGE, LETTER1, LETTER2, FOX_SCENE, FOX_LET, FOX_GONE)
+JAIL_SENT = (0x74, 0x08)       # 감옥에서 내보냄: 도착한 맵의 밝히기를 FC 박자로(fade_in_hook 이 끔)
+FLAGS = (FOXED, PRINCE_MET, SON_FREED, BRIDGE, LETTER1, LETTER2, FOX_SCENE, FOX_LET, FOX_GONE, JAIL_SENT)
 ANSWERED = ch2.ANSWERED        # 7E:21A3 bit0 대화가 끝남(talk_here 를 되풀이하는 인물 스크립트가 기다림)
 # 7E:21A3 bit4(맵을 옮기면 지워짐): 이번 방문에 유모에게 꾸지람을 들음(FC $6289&40, FC 는 필드로 나갈 때 지움). 마을 사람
 # 모듈의 유모(대화 05F)가 보고 03B1 을 고른다. 3F/01 에서 이 비트를 쓰는 도구는 없다
@@ -314,10 +315,17 @@ FLASHES, FLASH_FRAMES = 6, 3                 # FC 084C 뒤 회색 3프레임·�
 # 페이드 아웃 뒤 검은 채 기다림. 워프의 맵 불러오기(43프레임쯤)와 합쳐 FC 의 182프레임(실측 894~1075)
 DARK_FRAMES = 139
 FADE_STEP = 2                 # 15 에서 한 프레임에 두 단계씩: FC 페이드 아웃 9프레임(885~893)
-# 감옥에서 내보낼 때: FC 는 034A 창이 화면에서 사라진 2프레임 뒤부터 3프레임마다 한 단계씩 어두워져 네 번째에 검다(실측
-# 스크린샷 966 사라짐, 968·971·974, 977 검음). 15 → 11 → 7 → 3 → 0 을 3프레임씩. 창을 닫는 BRK 가 화면에서 창이 사라진
-# 2프레임 뒤에 돌아오고 $1D 는 2프레임 뒤 화면에 나와(실측) 닫은 곧바로 내린다
-JAIL_FADE_STEP, JAIL_FADE_HOLD = 4, 3
+# 감옥에서 내보낼 때(FC 실측, 1장 상태에서 05/00 으로 워프해 스크린샷 평균 밝기): 034A 창이 사라진 2프레임 뒤부터 3프레임마다
+# 팔레트가 한 단계씩 내려 966 → 968·971·974 → 977 이다. 밝기로는 71 → 32(45%)·0.5·0.3 → 0. 단계마다 그 비율에 가까운 $1D
+# (밝기 b 는 화면이 (b + 1)/16, 0 은 검음, 실측)를 JAIL_FADE_HOLD 프레임씩 쓴다. 창을 닫는 BRK 가 화면에서 창이 사라진
+# 2프레임 뒤에 돌아와(실측) 닫은 곧바로 쓰고, NMI 가 $1D 를 옮기기를 기다리지 않게 $2100 에도 바로 쓴다
+JAIL_DARK = (6, 0, 0, 0)
+JAIL_FADE_HOLD = 3
+# 3F/01 에 도착해 밝힐 때: FC 는 창이 사라진 78프레임 뒤부터 3프레임마다 1044·1047·1050·1053 이고 밝기 0.1·0.2·6.6(43%)·
+# 15.4. 밝히기 루틴이 불린 뒤 JAIL_LIGHT_WAIT 프레임 쉬고 JAIL_LIGHT 를 JAIL_FADE_HOLD 프레임씩
+JAIL_LIGHT = (0, 0, 6, 15)
+JAIL_LIGHT_WAIT = 5
+FADE_IN_RTS = 0x00CEF9         # 밝히기 루틴 끝의 RTS
 
 
 # 맵 밝히기 루틴(00:CEC3, X 프레임마다 $1D 아래 넷 비트를 0F 까지 1씩, 16번)의 들머리. 워프 뒤 숲을 밝힐 때 여우 장면이면
@@ -328,8 +336,22 @@ FOREST_FADE_FROM = 0x0B
 
 
 def _fade_in_hook():
+    """밝히기 루틴 들머리. JAIL_SENT 이고 3F/01 이면 끄고 그 루틴 대신 FC 박자로 밝힌 뒤 루틴의 RTS 로, 여우 장면의 숲이면 밝기를
+    FOREST_FADE_FROM 에서 시작하게 하고 루틴으로, 아니면 그대로 루틴으로."""
+    from dq4chapterbox import wait
     g, n = (int(v, 16) for v in FOREST.split('/'))
-    a = Asm()(0x08, 0xE2, 0x20, lda(0x7E2190 + FOX_SCENE[0]), 0x29, FOX_SCENE[1]).br(BEQ, 'off')
+    sent = 0x7E2190 + JAIL_SENT[0]
+    jg, jn = (int(v, 16) for v in JAIL_OUT[0].split('/'))
+    # 이 훅은 모든 장의 롬에 들고 7E:2204 는 3장 밖에서는 DQ5 바이트 변수 자리라(dq5-flags 21C2~2206) 도착 맵까지 본다
+    a = Asm()(0x08, 0xE2, 0x20, lda(sent), 0x29, JAIL_SENT[1]).br(BEQ, 'fox')
+    a(0xAF, 0xBC, 0x00, 0x7E, 0xC9, jg).br(BNE, 'fox')(0xAF, 0xBD, 0x00, 0x7E, 0xC9, jn).br(BNE, 'fox')
+    a(lda(sent), 0x29, ~JAIL_SENT[1] & 0xFF, sta(sent), ENTER, wait(JAIL_LIGHT_WAIT))
+    for k, v in enumerate(JAIL_LIGHT):
+        a(0xA5, 0x1D, 0x29, 0x80, 0x09, v, 0x85, 0x1D)
+        if k + 1 < len(JAIL_LIGHT):
+            a(wait(JAIL_FADE_HOLD))
+    a(LEAVE[:-1], 0x28, 0x5C, *_al(FADE_IN_RTS))                     # LEAVE 의 RTL 대신 훅의 PLP 뒤 루틴의 RTS
+    a.label('fox')(lda(0x7E2190 + FOX_SCENE[0]), 0x29, FOX_SCENE[1]).br(BEQ, 'off')
     a(0xAF, 0xBC, 0x00, 0x7E, 0xC9, g).br(BNE, 'off')(0xAF, 0xBD, 0x00, 0x7E, 0xC9, n).br(BNE, 'off')
     a(0xAF, 0x1D, 0x00, 0x7E, 0x29, 0x80, 0x09, FOREST_FADE_FROM, 0x8F, 0x1D, 0x00, 0x7E)
     a.label('off')(0x28, FADE_IN_ORIG, 0x5C, *_al(FADE_IN_SITE + len(FADE_IN_ORIG)))
@@ -566,11 +588,22 @@ def _grey_flash():
     return grey.bytes()
 
 
-def _fade_down(step, hold=1):
-    """M8·DB 0: 밝기 $1D 를 15 에서 hold 프레임마다 step 씩 0 까지. 뒤의 워프는 이미 어두운 화면을 다시 밝히지 않는다(실측)."""
+def _fade_down(step):
+    """M8·DB 0: 밝기 $1D 를 15 에서 프레임마다 step 씩 0 까지. 뒤의 워프는 이미 어두운 화면을 다시 밝히지 않는다(실측)."""
     from dq4chapterbox import wait
-    body = bytes((0x38, 0xE9, step, 0x10, 0x02, 0xA9, 0x00, 0x8D, 0x1D, 0x00, 0x48)) + wait(hold) + bytes((0x68,))
+    body = bytes((0x38, 0xE9, step, 0x10, 0x02, 0xA9, 0x00, 0x8D, 0x1D, 0x00, 0x48)) + wait(1) + bytes((0x68,))
     return bytes((0xA9, 0x0F)) + body + bytes((0xD0, -(len(body) + 2) & 0xFF))     # LDA #15 … BNE 고리
+
+
+def _fade_levels(levels, hold, now=False):
+    """M8·DB 0: 밝기 $1D 를 levels 차례로 hold 프레임씩(마지막 뒤는 쉬지 않음). now 면 $2100 에도 바로 쓴다."""
+    from dq4chapterbox import wait
+    out = b''
+    for k, v in enumerate(levels):
+        out += bytes((0xA9, v, 0x8D, 0x1D, 0x00)) + (bytes((0x8D, 0x00, 0x21)) if now else b'')
+        if k + 1 < len(levels):
+            out += wait(hold)
+    return out
 
 
 def _fox_dark():
@@ -652,7 +685,9 @@ def native(ctx):
     # 034A 를 닫는 그 네이티브에서 FC 처럼 곧 어두워지고 내보내기 이벤트를 건다(병사 스크립트의 다음 차례를 기다리면
     # 닫힌 뒤 16프레임, 이벤트가 돌기까지 4프레임 더 늦었다, 실측)
     go = dq4prologue._event_start(at['jail_event'])[len(ENTER):-len(LEAVE)]
-    put('shut_jail_out', _shut(SHUT['jail_out'])[:-len(LEAVE)] + _fade_down(JAIL_FADE_STEP, JAIL_FADE_HOLD) + go + LEAVE)
+    flag = 0x7E2190 + JAIL_SENT[0]
+    put('shut_jail_out', _shut(SHUT['jail_out'])[:-len(LEAVE)] + _fade_levels(JAIL_DARK, JAIL_FADE_HOLD, now=True) +
+        lda(flag) + bytes((0x09, JAIL_SENT[1])) + sta(flag) + go + LEAVE)
     put('inn', dq4prologue._event_start(at['inn_event']))
     put('jingle', ENTER + _fanfare(ITEM_SONG) + LEAVE)
     put('bridge_hook', _bridge_hook(SEA_FRAMES, BRIDGE_CELLS))
