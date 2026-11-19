@@ -40,6 +40,7 @@ import os
 from pathlib import Path
 import random
 import re
+import struct
 import subprocess
 
 import dq4readset
@@ -284,13 +285,13 @@ def dumps(folder):
     return out
 
 
-def check(folder, rom, slots):
+def check(folder, rom, slots, off=frozenset()):
     """[(프레임, [(줄, 열, 규칙, 타일)])] 걸린 프레임만."""
     kana = {t: bytes(x for b in rom[KANA_ROM + (t - 1) * 8:KANA_ROM + t * 8] for x in (b, 0xFF)) for t in KANA}
     out, seen, before = [], {}, {}
     for frame, d in sorted(dumps(folder).items()):
         vram_path = folder / f'v{frame:05d}.bin'
-        if not vram_path.exists() or len(d) < 5 or dark(folder / f's{frame:05d}.png'):
+        if not vram_path.exists() or len(d) < 5 or frame in off:
             continue
         vram = vram_path.read_bytes()
         keys, ages = d[KEYS], d[AGES]
@@ -376,12 +377,27 @@ def check(folder, rom, slots):
     return out
 
 
-def dark(shot):
-    """화면이 온통 검으면(전투로 넘어가는 페이드 등) 무엇이 비쳐도 보이지 않는다. 그 프레임의 칸은 재지 않는다."""
-    if not shot.exists():
-        return False
-    from PIL import Image
-    return Image.open(shot).convert('L').getextrema()[1] == 0
+def screen_off(folder, frames):
+    """frames 가운데 그 프레임 끝에 화면이 꺼진(INIDISP 강제 끔·밝기 0, 또는 주 화면에 BG3 없음) 프레임. UI 깨짐 검사
+    (dq4winwatch.lua 가 emu.getState 의 ppu.forcedBlank·screenBrightness·mainScreenLayers 로 적은 winwatch.bin 의 모습 -1)와
+    같은 기준이다. 밝기가 1 이상이면(어두워지는 중) 잰다. 기록이 없거나 깨졌으면 ValueError — 「뺀 것 0」 으로 넘어가면 꺼진
+    화면을 못 가려 낸 장면이 조용히 통과하거나 실패한다."""
+    import dq4winwatch
+    path = folder / dq4winwatch.DATA
+    if not path.exists():
+        raise ValueError(f'화면 기록 {path} 없음')
+    try:
+        events = dq4winwatch.parse(path.read_bytes()).events
+    except struct.error as e:
+        raise ValueError(f'화면 기록 {path} 이 중간에 끊김: {e}') from e
+    out, i, shot = set(), 0, None
+    for f in sorted(frames):
+        while i < len(events) and events[i][0] <= f:
+            shot = events[i][1]
+            i += 1
+        if shot == -1:
+            out.add(f)
+    return frozenset(out)
 
 
 def shared_names(vram, tilemap):
@@ -510,23 +526,35 @@ def main():
     flagged = 0
     for s in todo:
         folder = out / s[0]
-        hits = check(folder, rom, slots)
-        frames = len(list(folder.glob('v*.bin')))
+        seen = sorted(int(v.stem[1:]) for v in folder.glob('v*.bin'))
+        frames = len(seen)
+        try:
+            off = screen_off(folder, seen)
+        except ValueError as e:
+            flagged += 1
+            print(f'FAIL {s[0]} 꺼진 화면을 가려 낼 수 없음: {e}')
+            continue
+        dim = f', 꺼진 화면 {len(off)} 프레임 뺌'
+        if frames and len(off) * 2 > frames:
+            flagged += 1
+            print(f'FAIL {s[0]} 본 {frames} 프레임 가운데 {len(off)} 프레임이 꺼진 화면(장면이 화면을 거의 못 봄)')
+            continue
+        hits = check(folder, rom, slots, off)
         if hits:
             sheet(folder, hits, out / f'sheet-{s[0]}.png')
             first = ', '.join(f'{f}:{len(b)}칸({b[0][2]} {b[0][3]:03X})' for f, b in hits[:4])
             known = KNOWN.get(s[0])
             if known is not None and len(hits) <= known:
                 note = f' — 알려진 {known} 보다 줄었다, KNOWN 을 {len(hits)} 로' if len(hits) < known else ''
-                print(f'KNOWN {s[0]} {len(hits)}/{frames} 프레임(상한 {known})  {first}{note}')
+                print(f'KNOWN {s[0]} {len(hits)}/{frames} 프레임(상한 {known}{dim})  {first}{note}')
                 continue
             flagged += 1
-            print(f'FAIL {s[0]} {len(hits)}/{frames} 프레임  {first}')
+            print(f'FAIL {s[0]} {len(hits)}/{frames} 프레임{dim}  {first}')
         else:
             if s[0] in KNOWN:
-                print(f'PASS {s[0]} {frames} 프레임 — 알려진 깨짐이 사라졌다, KNOWN 에서 지운다')
+                print(f'PASS {s[0]} {frames} 프레임{dim} — 알려진 깨짐이 사라졌다, KNOWN 에서 지운다')
                 continue
-            print(f'PASS {s[0]} {frames} 프레임')
+            print(f'PASS {s[0]} {frames} 프레임{dim}')
     if not todo:
         raise SystemExit('돌 장면이 하나도 없음')
     if flagged or unfinished:
