@@ -66,7 +66,7 @@ def frames(path):
     return out
 
 
-def play(mesence, rom, out):
+def play(mesence, rom, out, only=None):
     """장면마다 그 맵으로 워프해 상자(금색)가 보이는 화면을 메모리에서 판정한다. 파일로는 걸린 화면과 장면마다 대표 한
     장(rep.png)만 남기고 원시 화면(box.rgb)은 지운다."""
     import dq4chapterbox as cb
@@ -78,6 +78,8 @@ def play(mesence, rom, out):
     gold = '%02X%02X%02X' % cb.GOLD
     results = {}
     for name, where, sets in play_cases():
+        if only and name != only:
+            continue
         dest = out / name
         env = dq4groupcheck.environment(os.environ['LIBDIR'], states['shop'], dest)
         dest.mkdir(parents=True)
@@ -103,16 +105,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--rom', required=True, type=Path)
     ap.add_argument('--out', required=True, type=Path)
+    ap.add_argument('--only', help='이 장면(box0·box·box2·box3)만')
     args = ap.parse_args()
     if not args.out.name.endswith('.noindex'):
         ap.error('--out 은 .noindex 로 끝나는 폴더(macOS 색인이 건너뜀)')
-    results = play(os.environ['MESENCE'], args.rom, args.out)
+    results = play(os.environ['MESENCE'], args.rom, args.out, args.only)
     for name, r in results.items():
         print(f'{name}: 상자 화면 {r["box"]}장, 걸림 {len(r["found"])}건'
               + ('' if r['box'] else ' — 상자가 뜨지 않음'))
         for shot, kind, text in r['found']:
             print(f'  {shot} {kind}: {text}')
-    (args.out / 'results.json').write_text(json.dumps(results, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
+    (args.out / f'results{"-" + args.only if args.only else ""}.json').write_text(json.dumps(results, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
     print(f'게임 화면 판정: 장면 {len(results)}개, 걸림 {sum(len(r["found"]) for r in results.values())}건')
     return 0                    # 보고만
 
