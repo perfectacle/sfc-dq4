@@ -53,6 +53,9 @@ PRESS = 18
 # takes to load shifts that phase, and from another phase 18 frames reach one cell into the poison swamp, not two.
 ALIGN = "idle:16"
 TOWARDS = {(1, 0): "right", (-1, 0): "left", (0, -1): "up", (0, 1): "down"}
+# 주인공 방향 7E:31E0(인물 표 슬롯 0). 실측: 필드에 도착한 뒤 44, 그 쪽을 누르면 이 값이 된다. 막힌 지형은 「제자리」 가
+# 정답이라 누름이 빗나간 실행도 통과하므로, 끝 방향이 누른 쪽인지 본다
+FACE = {"right": 0x10, "left": 0x20, "down": 0x40, "up": 0x80}
 MAP_SCENE_CELL = (2 * 0xA4, 2 * 0x2F + 1)
 # 독늪(여신상 동굴 입구 둘레, FC 줄 41 의 80~82): (선 블록, 지나는 독늪 블록 수, 멈추는 블록). FC 는 블록 걸음마다 HP 1
 # (1장 필드 6걸음에 1B → 15), DQ5 는 셀마다 1 이라 고치기 전에는 HP 6 이 줄었다
@@ -212,7 +215,11 @@ def main():
                               f"{ALIGN},{d}:{PRESS},wait:60", **extra)
             want = list(target if conf["kinds"][kind] else start)
             block = [v // 2 for v in got.get("field", ())]
-            return name, {"got": got, "block": block, "want_block": want, "target": list(target), "ok": block == want}
+            final = out / name / "final.wram"
+            face = final.read_bytes()[0x31E0] if final.is_file() else None
+            return name, {"got": got, "block": block, "want_block": want, "target": list(target),
+                          "face": None if face is None else f"{face:02X}",
+                          "ok": block == want and face == FACE[d]}
 
         def run_swamp():
             """SWAMP_ROW 의 독늪 블록 셋을 왼쪽 언덕에서 오른쪽 언덕(그 너머 산에 막힘)까지 걷는다. 조우 계수를 0 으로 둬

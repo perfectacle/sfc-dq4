@@ -160,10 +160,13 @@ def run_foot(mesence, rom, state, out, preset, name, to, facing, rewards, bit):
     # 12B 는 조사하면 늘 뜨고(없으면 12C 가 이어짐), 보상이 있을 때만 그 뒤 물건·금화 메시지가 나온다
     message = f"value={FOOT_MESSAGE:04X}" in trace
     if not rewards:
-        # 옆 칸에는 다른 조사 칸(가구 등)이 있을 수 있어, 이 줄의 비트가 켜지지 않았는지만 본다
+        # 옆 칸에는 다른 조사 칸(가구 등)이 있을 수 있어, 이 줄의 비트가 켜지지 않았는지만 본다. 다만 조사가 실제로 돌아
+        # 메시지가 하나라도 떠야 한다: 명령 입력이 빗나가 조사하지 않은 실행도 비트는 켜지지 않기 때문이다
         mine = name.rsplit("-beside", 1)[0]
         own = next((j[4] for j in feet_jobs(Path(rom).read_bytes()) if j[0] == mine), None)
-        return {"passed": own not in bits, "rewards": [f"{v:X}" for v in got], "opened": [f"7E:{a:04X}&{m:02X}" for a, m in bits]}
+        searched = re.findall(r"^message f=\d+ value=([0-9A-F]+)", trace, re.M)
+        return {"passed": own not in bits and bool(searched), "rewards": [f"{v:X}" for v in got], "messages": searched,
+                "opened": [f"7E:{a:04X}&{m:02X}" for a, m in bits]}
     passed = got == rewards and bits == [bit] and added == want_gold and message
     return {"passed": passed, "rewards": [f"{v:X}" for v in got], "gold": added, "message": message,
             "opened": [f"7E:{a:04X}&{m:02X}" for a, m in bits]}
@@ -212,6 +215,9 @@ def main():
                            pool.map(lambda j: run_entry(mesence, rom, state, out, args.set, *j), jobs)))
         results.update(zip((j[0] for j in feet), pool.map(lambda j: run_foot(mesence, rom, state, out, args.set, *j), feet)))
     failed = {k: v for k, v in results.items() if not v["passed"]}
+    if not results:
+        # 상자·발밑 목록은 빌드 결과에서 뽑으므로, 비면 아무것도 조사하지 않고 통과하게 된다
+        failed["empty"] = {"passed": False, "error": "조사할 장면이 하나도 없음"}
     report = {"status": "failed" if failed else "passed", "entries": len(results), "failed": failed, "skipped": skipped}
     (out / "results.json").write_text(json.dumps(results, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False))
