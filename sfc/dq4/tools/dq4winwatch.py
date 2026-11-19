@@ -585,6 +585,18 @@ class Allow:
         return fnmatch.fnmatch(scene, self.scene) and (self.cells is None or (r, c) in self.cells)
 
 
+@dataclass(frozen=True)
+class Known:
+    """fail 규칙의 알려진 깨짐 눈금 하나(규칙 파일의 KNOWN). scene(fnmatch) 장면에서 cells 칸의 걸림이 꼭 frames 프레임
+    보이면 실패로 치지 않고 winwatch.log 에 「알려진 깨짐」 으로 적는다. Allow 와 달리 걸림을 건너뛰지 않는다: 더 오래
+    보이거나, 다른 칸이 걸리면 그대로 실패이고, 덜 보이거나 그 장면에서 걸리지 않으면 눈금을 내리라고 실패한다.
+    why 는 무엇이 깨졌고 무엇을 고치면 없어지는지."""
+    scene: str
+    cells: frozenset
+    frames: int
+    why: str
+
+
 def rules():
     """[규칙 모듈] dq4winrule_*.py, 이름 차례."""
     if str(HERE) not in sys.path:
@@ -601,6 +613,8 @@ def rules():
             raise ValueError(f'{p.name}: MODE 는 report·fail')
         if any(not a.why.strip() for a in m.ALLOW):
             raise ValueError(f'{p.name}: 까닭 없는 예외')
+        if any(not k.why.strip() or not k.cells or k.frames < 1 for k in getattr(m, 'KNOWN', ())):
+            raise ValueError(f'{p.name}: 알려진 깨짐 눈금은 칸·프레임 수·까닭이 있어야 함')
         out.append(m)
     return out
 
@@ -629,7 +643,8 @@ def structure(shot):
 
 
 def analyze(folder, rom, scene=None):
-    """[(모습, 처음 프레임, 걸린 칸이 보인 프레임 수, 걸린 칸)] winwatch.bin 이 없으면 None.
+    """[(모습, 처음 프레임, 걸린 칸이 보인 프레임 수, 걸린 칸)] winwatch.bin 이 없으면 None. 걸린 칸은 check 의 다섯 값
+    뒤에 그 칸이 보인 프레임 수를 붙인 것.
 
     창 틀 꼴(structure)이 PERSIST 프레임 넘게 그대로인 동안의 모습만 판정하고, 그 동안 PERSIST 프레임 넘게 걸린 칸만 남긴다.
     DQ5 는 창을 열고 닫을 때 여러 프레임에 걸쳐 창을 키우거나 줄이며 지워(원본 DQ5 무작위 입력에서 닫기 한 번이 12프레임
@@ -687,7 +702,7 @@ def analyze(folder, rom, scene=None):
         for c, (first, n, i, cell) in seen.items():
             if n >= PERSIST:
                 f0, m, got = out.get(i, (first, 0, {}))
-                got[c] = cell
+                got[c] = (*cell, n)
                 out[i] = (min(f0, first), max(m, n), got)
     return [(shots[i], first, n, list(got.values())) for i, (first, n, got) in sorted(out.items())]
 
@@ -742,14 +757,35 @@ def report(folder, rom, label=None):
         fail = force == 'fail' or (force == 'rules' and rmode == 'fail')
         failing += fail
         lines.append(f'프레임 {frame} {rule}: {why}{" 실패" if fail else ""}')
+    scene = label or str(folder)
+    known = [(rule.NAME, k) for rule in rules() for k in getattr(rule, 'KNOWN', ()) if fnmatch.fnmatch(scene, k.scene)]
+    met = {}            # (규칙 이름, Known) → 눈금 칸이 보인 가장 긴 프레임 수
     for shot, first, n, bad in found:
         rules_ = sorted({b[2] for b in bad})
-        fail = force == 'fail' or (force == 'rules' and any(b[4] == 'fail' for b in bad))
-        failing += fail
+        failed = [b for b in bad if force == 'fail' or (force == 'rules' and b[4] == 'fail')]
+        left = []
+        for b in failed:
+            k = next(((name, g) for name, g in known if name == b[2] and (b[0], b[1]) in g.cells), None)
+            if k is None:
+                left.append(b)
+                continue
+            met[k] = max(met.get(k, 0), b[5])
+            if b[5] != k[1].frames:
+                left.append(b)
+        failing += bool(left)
+        tag = ' 실패' if left else ' 알려진 깨짐' if failed else ''
         lines.append(f'모습 {shot.id} 프레임 {first}부터 {n}프레임 스크롤 {shot.hs},{shot.vs}: {len(bad)}칸 '
-                     f'({", ".join(rules_)}){" 실패" if fail else ""}')
-        lines += [f'  {r},{c} {rule}: {why}' for r, c, rule, why, _ in bad[:40]]
+                     f'({", ".join(rules_)}){tag}')
+        lines += [f'  {r},{c} {rule}: {why} ({frames}프레임)' for r, c, rule, why, _, frames in bad[:40]]
         lines += picture(shot, bad)
+    for name, k in known:
+        got = met.get((name, k), 0)
+        if got == k.frames:
+            lines.append(f'알려진 깨짐 {name} {sorted(k.cells)} {k.frames}프레임: {k.why}')
+            continue
+        failing += 1
+        hint = '눈금보다 오래 보임' if got > k.frames else '눈금을 잰 값으로 내리거나, 걸리지 않으면 지울 것'
+        lines.append(f'알려진 깨짐 눈금 {name} {sorted(k.cells)} {k.frames}프레임과 잰 값 {got}프레임이 다름({hint}) 실패')
     (Path(folder) / LOG).write_text('\n'.join(lines) + ('\n' if lines else ''), encoding='utf-8')
     if hits:
         print(f'[winwatch] {label or folder}: 장면 규칙 {len(hits)}건(첫 프레임 {hits[0][0]} {hits[0][1]}) — '

@@ -30,6 +30,7 @@ paths = [
   "sfc/dq4/tools/dq4groupbuild.py",
   "sfc/dq4/tools/dq4winwatch.py",
   "sfc/dq4/tools/dq4winrule_*.py",
+  "sfc/dq4/tools/dq4wintext.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3safe && uv run --locked python sfc/dq4/tools/dq4ch3safecheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3safe"
@@ -57,6 +58,7 @@ paths = [
   "sfc/dq4/tools/dq4groupbuild.py",
   "sfc/dq4/tools/dq4winwatch.py",
   "sfc/dq4/tools/dq4winrule_*.py",
+  "sfc/dq4/tools/dq4wintext.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3raft && uv run --locked python sfc/dq4/tools/dq4raftcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3raft"
@@ -97,6 +99,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4winwatch.py",
   "sfc/dq4/tools/dq4winrule_*.py",
+  "sfc/dq4/tools/dq4wintext.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/swampdeath && uv run --locked python sfc/dq4/tools/dq4swampdeathcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/swampdeath"

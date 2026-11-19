@@ -27,6 +27,7 @@ paths = [
   "sfc/dq4/tools/dq4groupbuild.py",
   "sfc/dq4/tools/dq4winwatch.py",
   "sfc/dq4/tools/dq4winrule_*.py",
+  "sfc/dq4/tools/dq4wintext.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3open && uv run --locked python sfc/dq4/tools/dq4ch3opencheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3open --repeat 2"
@@ -64,6 +65,7 @@ paths = [
   "sfc/dq4/tools/dq4fcpoker.asm",
   "sfc/dq4/tools/dq4winwatch.py",
   "sfc/dq4/tools/dq4winrule_*.py",
+  "sfc/dq4/tools/dq4wintext.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/people-pin.toml",
@@ -96,6 +98,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4winwatch.py",
   "sfc/dq4/tools/dq4winrule_*.py",
+  "sfc/dq4/tools/dq4wintext.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4chapter1.py build --rom work/ch3/menu.sfc --keep work/ch3/keep --chapter3 --out work/ch3/npc.sfc && rm -rf work/ch3npc && uv run --locked python sfc/dq4/tools/dq4npccheck.py --chapter3 --rom work/ch3/npc.sfc --build work/ch3/keep/groups --layout work/ch3/keep/npc-layout.json --texts work/ch3/messages.json --out work/ch3npc --jobs 4"
@@ -125,6 +128,7 @@ paths = [
   "sfc/dq4/tools/dq4groupbuild.py",
   "sfc/dq4/tools/dq4winwatch.py",
   "sfc/dq4/tools/dq4winrule_*.py",
+  "sfc/dq4/tools/dq4wintext.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3heroblock && uv run --locked python sfc/dq4/tools/dq4heroblockcheck.py --chapter3 --rom work/ch3/dq4-ch1-full.sfc --out work/ch3heroblock --jobs 6"
@@ -163,6 +167,7 @@ paths = [
   "sfc/dq4/tools/dq4fcpoker.py",
   "sfc/dq4/tools/dq4winwatch.py",
   "sfc/dq4/tools/dq4winrule_*.py",
+  "sfc/dq4/tools/dq4wintext.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/people-pin.toml",
