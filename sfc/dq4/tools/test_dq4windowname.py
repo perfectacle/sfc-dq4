@@ -591,3 +591,36 @@ class VisibleTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CenteredNameTest(unittest.TestCase):
+    """04:C0DD 가 가운데 맞추려 앞에 빈칸을 넣은 이름(상태 보기·대열 정보 창의 몬스터 동료 종족 줄, 코드 D2)도 그림으로.
+    빈칸으로 시작한다고 빈 자리로 보면 원래 가나 타일로 찍혀, 필드에서 가나 칸을 돌려 쓰는 동안 다른 그림 조각이 보였다."""
+
+    def setUp(self):
+        self.asm = ASM.read_text(encoding='utf-8')
+
+    def body(self, name):
+        start = self.asm.index(f'\n{name}:')
+        return self.asm[start:self.asm.index('\n; ', start + 1)]
+
+    def test_leading_blanks_are_not_an_empty_slot(self):
+        text = self.asm[self.asm.index('\nWnText:'):self.asm.index('\nWtAlloc:')]
+        self.assertIn('CMP #$0001\n    BNE +\n    JSR WtLeadBlanks\n    BCC +\n    JMP .original', text)
+        self.assertIn('LDA.w !wt_lead\n    BEQ +\n    JSR WtCenter', text)
+        lead = self.body('WtLeadBlanks')
+        self.assertIn('LDA.l $7E0000|!wt_mode', lead)      # 길이 $00 고리(방식 0)만
+        self.assertIn('CMP.b $00\n    BCS .empty', lead)    # 끝까지 빈칸이면 빈 자리
+
+    def test_center_keeps_the_end_column(self):
+        """그림을 (글자 칸 − 열 수) / 2 칸 뒤에서 그리고, 그만큼 남은 칸 수를 줄여 끝 Y 는 그대로."""
+        def center(length, cols):
+            off = max(0, length - cols) // 2
+            return off, length - off
+        for length, cols in ((7, 3), (7, 4), (7, 7), (9, 10), (8, 5)):
+            off, rest = center(length, cols)
+            self.assertEqual(off + rest, length)
+            self.assertLessEqual(off + cols, max(length, cols))
+        body = self.body('WtCenter')
+        self.assertIn('SBC.w !wt_cols\n    BCC .none', body)
+        self.assertIn('DEC.w !wt_len', body)
