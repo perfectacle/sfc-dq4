@@ -12,7 +12,8 @@
 
 docstring 과 빈칸이 든 글(도움말)은 보지 않는다.
 
-  등록 장치  REGISTRIES 의 모듈(importlib 로 사건 모듈 옆 표를 들이는 dq4ch3checks·dq4ch2checks)은 그 glob 에 맞는 파일에 닿는다
+  등록 장치  REGISTRIES 의 모듈(importlib 로 사건 모듈 옆 표를 들이는 dq4ch3checks·dq4ch2checks, 폴더의 규칙 파일을
+             모두 들이는 dq4winwatch)은 그 glob 에 맞는 파일에 닿는다
 
 못 보는 길(이런 길로 닿는 파일은 paths 에 손으로 적는다):
   - REGISTRIES 밖에서 importlib·__import__ 로 불러오는 모듈
@@ -63,6 +64,7 @@ LISTED_GROUPS = ('ch3-modules',)
 REGISTRIES = {
     'sfc/dq4/tools/dq4ch3checks.py': ('sfc/dq4/tools/dq4ch3*_checks.py',),
     'sfc/dq4/tools/dq4ch2checks.py': ('sfc/dq4/tools/dq4ch2*_checks.py',),
+    'sfc/dq4/tools/dq4winwatch.py': ('sfc/dq4/tools/dq4winrule_*.py',),
 }
 # 3장 모듈이 기본 인물 목록·대화 번호·메시지 번호·그림 배치·공용 훅을 바꿔 깨뜨릴 수 있는 1·2장 검사(dq4-ch3-* 와
 # CH3_CONTENT_CHECKS 밖). 3장 모듈 PR 이 이것들을 돌리지 않아 머지 뒤에야 1·2장이 깨진 일이 있어 paths 에

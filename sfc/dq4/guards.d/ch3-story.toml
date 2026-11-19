@@ -33,6 +33,7 @@ paths = [
   "sfc/dq4/tools/dq4shopport.py",
   "sfc/dq4/tools/dq4winwatch.py",
   "sfc/dq4/tools/dq4winrule_*.py",
+  "sfc/dq4/tools/dq4wintext.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3story && uv run --locked python sfc/dq4/tools/dq4story3check.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3story --seeds 0,5,9 --repeat 2"
@@ -72,6 +73,7 @@ paths = [
   "sfc/dq4/tools/lua/dq4storywalk.lua",
   "sfc/dq4/tools/dq4winwatch.py",
   "sfc/dq4/tools/dq4winrule_*.py",
+  "sfc/dq4/tools/dq4wintext.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/people-pin.toml",

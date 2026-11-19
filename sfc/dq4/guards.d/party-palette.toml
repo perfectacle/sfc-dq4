@@ -17,6 +17,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4winwatch.py",
   "sfc/dq4/tools/dq4winrule_*.py",
+  "sfc/dq4/tools/dq4wintext.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/partypal && uv run --locked python sfc/dq4/tools/dq4partypalcheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/partypal"
