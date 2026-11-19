@@ -8,7 +8,9 @@
   보임     $2109 에 든 자리(7E:1ABC ^ 1C)가 $0725 와 같음
   창       끝 기록에서 그 자리 VRAM 타일맵이 0 아닌 바이트를 갖고 게임의 타일맵 버퍼 7E:5000 과 한 바이트도
            다르지 않음. 기록은 버퍼가 잠시 멈춘 프레임에만 뜬다(dq4bg3slotwarp.lua 의 STILL): 게임이 버퍼를 고친
-           프레임은 NMI 가 아직 보내지 않아 다르기 때문
+           프레임은 NMI 가 아직 보내지 않아 다르기 때문. 그리고 끝 기록의 창 번호(7E:0A00)가 실내 맵이면 명령 창
+           (COMMAND_WINDOW), 필드꼴 맵이면 창 없음(NO_WINDOW)이 아님: 명령 창이 안 열려도 다른 창이 그 자리 타일맵을
+           채워, 이것 없이는 A 가 빗나간 실행도 통과한다
   VRAM     --old 를 주면 마지막 30프레임째 VRAM·OAM·PPU 상태를 그 롬과 견주어, 화면에 쓰이는 BG1·BG2 타일맵·그 칸의
            타일과 화면 안 OBJ 타일(screen_bytes)이 한 바이트도 다르지 않음. menu 패치는 BG3 글자 칸·타일맵만
            바꾸므로 그 밖의 차이(전투 배경 BG1 타일이 0 으로 남는 것 등)는 손상이다. 화면에 쓰이지 않는 VRAM 은
@@ -47,7 +49,11 @@ import dq4freshstate  # noqa: E402
 import dq4mesen as mesen  # noqa: E402
 import dq4readset  # noqa: E402
 
-TEST = 'wait:90,a:4,wait:90'
+# 필드는 8프레임에 한 번만 입력을 읽어 4프레임 A 는 그 창을 비켜 갈 수 있다. idle 로 입력을 읽기 앞 프레임에 맞춘다
+TEST = 'wait:90,idle:16,a:4,wait:90'
+# 마지막으로 그린 창 번호 7E:0A00. 실측(1장 menu.sfc): 도착 뒤 FF, 곧 「명령을 내려줘」 창 02 가 뜨고, A 로 명령 창을
+# 열면 01. 필드꼴 맵 04/0B 는 도착 뒤 조우로 전투 창(25 → 1B)이 떠 A 와 상관없다
+NO_WINDOW, COMMAND_WINDOW = 0xFF, 0x01
 START_MAP = {'ship': '17/00'}
 # 출발 맵으로 가기 전에 들르는 맵과 칸. 자리가 INTERIOR 가 아니라 돌아올 때 자리를 다시 골라야 하고, 「어디서나」 가
 # 발밑 트리거를 밟도록 아래 칸이 트여 있어야 한다.
@@ -68,11 +74,12 @@ def expected_slot(mp):
 
 
 def parse_bg3(line):
-    """dq4bg3slotwarp.lua 의 한 줄 → {'map', '0725', 'shown', 'nz', 'vsbuf', 'old'}(숫자는 int)."""
+    """dq4bg3slotwarp.lua 의 한 줄 → {'map', '0725', 'shown', 'nz', 'vsbuf', 'old', 'win'}(숫자는 int, 창 번호가 없는
+    옛 줄은 win None)."""
     f = line.split()
     kv = dict(x.split('=') for x in f if '=' in x)
     return {'map': f[2], '0725': int(kv['0725'], 16), 'shown': int(kv['shown'], 16), 'nz': int(kv['nz']),
-            'vsbuf': int(kv['vsbuf']), 'old': int(kv['old'])}
+            'vsbuf': int(kv['vsbuf']), 'old': int(kv['old']), 'win': int(kv['win'], 16) if 'win' in kv else None}
 
 
 def judge(mp, arrival, records):
@@ -96,6 +103,13 @@ def judge(mp, arrival, records):
         bad.append('타일맵이 비어 있음')
     if last['vsbuf']:
         bad.append(f'타일맵이 버퍼와 {last["vsbuf"]}바이트 다름')
+    # 명령 창이 안 열려도 다른 창이 그 자리 타일맵을 채워 위 판정을 모두 지나므로, 끝에 그린 창을 따로 본다
+    if last['win'] is None:
+        bad.append('끝에 그린 창을 모름(기록에 창 번호 없음)')
+    elif kind == 'cell' and last['win'] != COMMAND_WINDOW:
+        bad.append(f'명령 창이 열리지 않음(끝 창 번호 {last["win"]:02X}, 바라는 {COMMAND_WINDOW:02X})')
+    elif last['win'] == NO_WINDOW:
+        bad.append(f'창이 하나도 없음(창 번호 {NO_WINDOW:02X})')
     return bad
 
 

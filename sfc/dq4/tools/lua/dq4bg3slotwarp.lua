@@ -62,8 +62,8 @@ emu.addEventCallback(function()
   else
     for i = 0x3800, 0x3FFF do if emu.read(i, vram) ~= snap[i] then old = old + 1 end end
   end
-  log[#log + 1] = string.format("f%05d map %02X/%02X 0725=%02X shown=%02X nz=%d vsbuf=%d old=%d still=%d", n,
-    emu.read(0x7E00BC, m), emu.read(0x7E00BD, m), sc, shown, nz, diff, old, still)
+  log[#log + 1] = string.format("f%05d map %02X/%02X 0725=%02X shown=%02X nz=%d vsbuf=%d old=%d still=%d win=%02X", n,
+    emu.read(0x7E00BC, m), emu.read(0x7E00BD, m), sc, shown, nz, diff, old, still, emu.read(0x7E0A00, m))
   if #log > 400 then table.remove(log, 1) end
   local f = io.open(os.getenv("SHOT_DIR") .. "/bg3.txt", "w"); f:write(table.concat(log, "\n"), "\n"); f:close()
 end, emu.eventType.endFrame)

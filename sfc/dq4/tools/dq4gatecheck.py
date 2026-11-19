@@ -86,6 +86,15 @@ def past(case, end, map_):
     return {"up": y < ey, "down": y > ey + 3, "right": x > ex + 3, "left": x < ex}[case["press"]]
 
 
+def verdict(case, opened, beyond, shown):
+    """열려야 하는 사례는 열리고 지나가며 잠긴 문 메시지(01:D8FC)가 돌지 않아야 한다. 잠긴 사례는 열리지도 지나가지도
+    않고 그 메시지가 한 번 이상 돌아야 한다: 「안 열림·안 지나감」 만으로는 주인공이 문에 닿지 못한 실행(순간이동
+    자리·누름이 빗나감)도 통과하기 때문이다."""
+    if case["open"]:
+        return opened and beyond and shown == 0
+    return not opened and not beyond and shown >= 1
+
+
 def one(mesence, rom, state, out, k, case):
     dest = out / f"{k:02d}-{case['map'].replace('/', '')}-{case['from']}-key{case['key']}"
     x, y = case["cell"]
@@ -98,14 +107,15 @@ def one(mesence, rom, state, out, k, case):
     run(mesence, rom, WALK, dest, {"STATE": str(start), "INPUT": f"wait:20,{press}", "SET": KEYS[case["key"]]})
     text = (dest / "door.txt").read_text() if (dest / "door.txt").exists() else ""
     rows = dict(line.split(" ", 1) for line in text.splitlines())
-    if not {"start", "end", "seen", "map"} <= rows.keys():
+    if not {"start", "end", "seen", "shown", "map"} <= rows.keys():
         return {**case, "ok": False, "problem": "결과 없음"}
     begin, flags0 = rows["start"].split()
     end = rows["end"].split()[0]
     opened = int(rows["seen"], 16) & ~int(flags0, 16) != 0
     beyond = past(case, [int(v) for v in end.split(",")], rows["map"])
+    shown = int(rows["shown"])
     result = {**case, "start": begin, "end": end, "end_map": rows["map"], "opened": opened, "past": beyond,
-              "ok": opened == case["open"] and beyond == case["open"]}
+              "shown_got": shown, "ok": verdict(case, opened, beyond, shown)}
     if begin != f"{x},{y}":
         result.update(ok=False, problem=f"시작 칸이 {begin}")
     return result
@@ -135,7 +145,7 @@ def main():
     for r in results:
         print(f"{'ok  ' if r['ok'] else 'FAIL'} {r['name']} {r['map']} {r['prop']} 잠금{r['lock']} {r['from']} "
               f"열쇠{r['key']}: {r.get('start')} -> {r.get('end')} {r.get('end_map', '')} 열림={r.get('opened')} "
-              f"지나감={r.get('past')} {r.get('problem', '')}")
+              f"지나감={r.get('past')} 메시지={r.get('shown_got')} {r.get('problem', '')}")
     print(report["status"])
     return 0 if report["status"] == "passed" else 1
 
