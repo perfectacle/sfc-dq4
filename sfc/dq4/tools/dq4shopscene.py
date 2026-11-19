@@ -86,6 +86,7 @@ BASE_ITEMS = (0x42, 0x00)
 START_ITEMS = (0x06, 0x48)
 HERB, ANTIDOTE, CHAIN_MAIL, WOOD_HAT = 0xA1, 0xA2, 0x4D, 0x87
 STEEL_SWORD, LEATHER_SHIELD, MOON_HERB = 0x0C, 0x75, 0xA7
+FLUTE = 0xCB            # dq4itemport.FLUTE
 # 텐페의 괴물을 이긴 flag(dq4ch2tempe.WON). 그 뒤의 목록에만 도구점 판매자가 선다(dq4shopport.EVENT_LISTS)
 def _tempe_won():
     import dq4ch2tempe
@@ -218,6 +219,13 @@ SCENES = [
                   to('b', 0x00), to('a', W_SELL)),
           gold=20, items=BASE_ITEMS + (HERB, HERB), equip=0x0003, wram={QTY_MAX: 0},
           windows=(W_COMMAND, W_SHOP, W_SELL, W_QTY, W_YESNO, W_SELL)),
+    # 불가사의의 피리(dq4itemport.FLUTE, 값 0): FC 는 「…ねだんが つけられないなあ。…うったり すてたり しないほうが…」 로
+    # 사지 않고 남긴다(실측). DQ5 는 값 0 물건(물건 표 k1 bit3)을 「귀중한 물건은 받을 수 없다」 로 사지 않는다
+    Scene('sell-flute', '불가사의의 피리 팔기: 사지 않고 남음(금화 그대로)', 'item',
+          (('gold', '20'), ('items', items(FLUTE))),
+          SELL + (pick(CURSOR, 2), to('a', 0x00), to('a', W_SHOP)),
+          gold=20, items=BASE_ITEMS + (FLUTE,), equip=0x0003,
+          windows=(W_COMMAND, W_SHOP, W_SELL, W_SHOP)),
     Scene('sell-back', '팔기 목록에서 B 로 가게 창', 'item', (('gold', '20'), ('items', items(HERB))),
           SELL + (to('b', W_SHOP),),
           gold=20, items=BASE_ITEMS + (HERB,), equip=0x0003,

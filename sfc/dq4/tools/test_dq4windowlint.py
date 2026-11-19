@@ -171,10 +171,11 @@ class ReachableItemTest(unittest.TestCase):
         excluded = {n for n in range(0xD8) if widths.excludable(n)}
         self.assertEqual(sorted(excluded & reach), [])
         self.assertIn(0x97, excluded)               # メタルキングヘルム: FC 어느 장에도 없는 DQ5 물건
-        self.assertNotIn(0xC7, excluded)            # はるかぜのフルート: あやかしのふえ 의 상자 대체
+        self.assertIn(0xCB, reach)                  # 불가사의의 피리(dq4itemport.FLUTE): あやかしのふえ 의 자리
+        self.assertNotIn(0xCB, excluded)
 
     def test_chest_substitutes_count_as_given(self):
-        # あやかしのふえ 는 상자 이식에서 はるかぜのフルート 로 바뀐다(dq4chestport.SUBSTITUTE). 이름 대조만으로는 빠졌다
+        # 상자 이식이 FC 물건을 DQ5 물건으로 바꿔 넣는 것(dq4chestport.SUBSTITUTE)은 이름 대조만으로는 빠진다
         import dq4chestport
         import dq4shopport
         from dq5map import Rom

@@ -44,9 +44,14 @@ BORROWED = {0x01: "てつのやり", 0x34: "せいぎのそろばん", 0x4E: "�
 # ゴールドオーブ's record) fit their letters' lengths. No free slot is 11 bytes long for ぎんのめがみぞう, so the three
 # neighbours まもののエサ·ばくだんいし·ファイトいっぱつ (6 + 8 + 9) are rewritten as one run (NAME_RUNS).
 BENTO, IRON_SAFE, STATUE, PRINCE_LETTER, KING_LETTER = 0xBB, 0xBC, 0xBD, 0xC3, 0xCA
+# 2장 산트하임 상자의 あやかしのふえ: 이름 길이가 같은(7바이트) DQ5 열쇠 물건 おうけのあかし 자리. 이 해킹은 그 물건을 쓰지 않는다
+FLUTE = 0xCB
 EVENT_ITEMS = {0xC6: "おうごんのうでわ", 0xBE: "さえずりのみつ",
                BENTO: "おべんとう", IRON_SAFE: "てつのきんこ", STATUE: "ぎんのめがみぞう",
-               PRINCE_LETTER: "おうじのてがみ", KING_LETTER: "おうのてがみ"}
+               PRINCE_LETTER: "おうじのてがみ", KING_LETTER: "おうのてがみ", FLUTE: "あやかしのふえ"}
+# 기록(k1~k4)과 필드 쓰기를 ゴールドオーブ 대신 빌릴 물건: あやかしのふえ 는 DQ5 피리 はるかぜのフルート(C7). FC 는 쓰면
+# 「…は あやかしのふえを ふいた。」 만 뜨고 남는다(실측)
+EVENT_TEMPLATES = {FLUTE: 0xC7}
 # Neighbouring items whose names are written together: the string table is walked by length (21:955D), so the names may
 # change length as long as the run keeps its total.
 NAME_RUNS = ((BENTO, IRON_SAFE, STATUE),)
@@ -177,7 +182,7 @@ def event_writes(rom, prg):
                 raise ValueError(f"{fc_item}: {len(new)} name bytes in place of {len(old)}")
             out.append({"at": _cpu(at + 1), "hex": new.hex(" ").upper(), "orig": old.hex(" ").upper(),
                         "note": f"물건 {item:02X} 이름 {fc_item}"})
-        out += _record_writes(rom, item, EVENT_TEMPLATE, fc_item)
+        out += _record_writes(rom, item, EVENT_TEMPLATES.get(item, EVENT_TEMPLATE), fc_item)
     # B7 keeps its own handler (11:8E43, key level 1); まほうのカギ's would open lock-2 doors.
     out += _record_writes(rom, THIEF_KEY, KEY_TEMPLATE, "とうぞくのカギ", handler=False)
     return out

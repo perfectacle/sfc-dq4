@@ -148,12 +148,7 @@ SHOP_SPOT, SHOP_SPOT_END = 0x04FF40, 0x050000          # dq4windowname.SHOP_SPOT
 NENE_SPOT, NENE_RECORD, NENE_PAGES = 0x04AE21, 10, 8   # dq4windowname.NENE_SPOT: 쪽 줄 수 1~8 마다 레코드 하나
 NENE_KEYS = EXTRA + 0x10
 
-_SUBSTITUTE = ('C7 はるかぜのフルート: 상자 이식이 あやかしのふえ 를 바꿔 넣는 물건(dq4chestport.SUBSTITUTE)으로 2장 サントハイム '
-               '(3D/00) 상자에 든다(빌드 롬 상자 표, 1~3장 기준. 그 상자에 걸어 닿는지는 화면 미확인). 한글 이름이 없어 가나 열 칸 그림뿐(아홉 칸 그림 없음). DQ4 열쇠 물건 자리를 따로 두거나 '
-               '대체 물건 이름을 あやかしのふえ 의 한글로 하는 고침이 지운다')
 ALLOW = {
-    **{(n, kind): _SUBSTITUTE for n, kind in ((0x2E, '제목'), (0x44, '제목'),
-                                              *((NENE_KEYS + k, '창 밖') for k in range(NENE_PAGES)))},
     (0x7D, '제목'): '제목 사람 이름 5칸(자리 1, 너비 6). 롬에 BRK 95 7D 가 없고 LDA #7D 도 창 열기가 아님. 메뉴 표로 여는 길은 미확인',
     (0x73, '창 밖'): 'D9 를 ShopSellPrice 가 가로챔. 창 73 은 대화 07(몬스터 맡기기 06:E95A)·0A(ルイーダ 06:ED01)의 BRK 95 73 으로만 열리고, DQ4 가게 이식(dq4shopport.SERVICE)은 대화 번호 1~6 만 줘 DQ4 에서 열리지 않음',
     # 「누구」 고르기 창은 오른쪽에 이어 열리는 도구·주문 목록이 붙어 있어 한 칸 왼쪽으로 넓혔다(dq4windowname.NAME_LISTS).

@@ -27,22 +27,22 @@ import dq4shop  # noqa: E402
 import dq5item  # noqa: E402
 from dq4environmentrom import TARGETS  # noqa: E402
 from dq4groupbuild import placement  # noqa: E402
-from dq4itemport import IRON_SAFE, STATUE  # noqa: E402
+from dq4itemport import FLUTE, IRON_SAFE, STATUE  # noqa: E402
 from dq4shopport import _fold, dq5_items  # noqa: E402
 from kr_patch.fc import ines  # noqa: E402
 
 # DQ5 has no luck stat, so ラックのたね becomes the seed that raises the stat DQ5 has instead. Items DQ5 lacks
-# take a DQ5 item of the same kind: a flute for the key item あやかしのふえ until DQ4 key items exist, a dancer's
-# outfit for ピンクのレオタード (DQ5's てんしのレオタード is a far stronger armour), and the commonest herb for the joke
+# take a DQ5 item of the same kind: a dancer's outfit for ピンクのレオタード (DQ5's てんしのレオタード is a far stronger armour), and the commonest herb for the joke
 # うまのふん. はねぼうし has a borrowed slot (dq4itemport.BORROWED), and chapter 2's story items slots of their own
-# (dq4itemport.EVENT_ITEMS).
-SUBSTITUTE = {"ラックのたね": "ふしぎなきのみ", "あやかしのふえ": "はるかぜのフルート",
+# (dq4itemport.EVENT_ITEMS), あやかしのふえ among them (EVENT_CHEST_ITEMS).
+SUBSTITUTE = {"ラックのたね": "ふしぎなきのみ",
               "ピンクのレオタード": "おどりこのふく", "せいじゃくのたま": "まふうじのつえ", "うまのふん": "やくそう"}
 # せいじゃくのたま 와 まふうじのつえ 는 둘 다 쓰면 マホトーン 이 걸린다. じょうせんけん(ハバリア 의 배를 타는 표)은 DQ5 에
 # 같은 것이 없고 쓸 곳(배 이벤트)도 아직 없어, 그 이벤트를 옮길 때까지 빈 상자로 둔다.
 LATER = {"じょうせんけん"}
 # 3장 은의 여신상 동굴 40/05 (06,04)의 ぎんのめがみぞう 는 엔돌 수집가에게 파는 사건 물건(dq4ch3endor)이다
-EVENT_CHEST_ITEMS = {"ぎんのめがみぞう": STATUE}
+EVENT_CHEST_ITEMS = {"ぎんのめがみぞう": STATUE, "あやかしのふえ": FLUTE}
+# 2장 산트하임 01/00 상자의 あやかしのふえ 는 사건 물건 자리(dq4itemport.FLUTE)
 GOLD = 0x100
 # FC special chest contents with a DQ5 reward of the same kind: FF, the empty chest (message 0297), is DQ5 FFFF
 # 「からっぽだった」.
