@@ -22,6 +22,7 @@ paths = [
   # 모든 실행 앞에 붙는 창 모습 기록과 그 판정(실행마다 창 테두리·창 밖 글자를 봄)
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4libretro.py",
   "sfc/dq4/tools/dq4cores.py",
@@ -63,6 +64,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "tools/mesence_settings.py",
 ]
@@ -80,6 +82,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/lua/dq4readsetsynth.lua",
   "sfc/dq4/tools/lua/dq4readseterr.lua",
@@ -134,6 +137,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "rm -rf work/compat-probe && uv run --locked python sfc/dq4/tools/dq4compatcheck.py probe --rom work/ch1/dq4-ch1-full.sfc --out work/compat-probe"
@@ -192,6 +196,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
@@ -310,6 +315,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/people-pin.toml",
@@ -360,6 +366,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4prologuecheck.py",
   "sfc/dq5/tools/dq5exitcheck.py",
@@ -442,6 +449,7 @@ paths = [
   "sfc/dq4/tools/dq4chapterwalk.py",
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/npcwalk && uv run --locked python sfc/dq4/tools/dq4npcwalkcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/npcwalk --seeds 0,5,9"
@@ -493,6 +501,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/fieldsave && uv run --locked python sfc/dq4/tools/dq4fieldsavecheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/fieldsave"
@@ -532,6 +541,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/savefixture && uv run --locked python sfc/dq4/tools/dq4savefixture.py check --rom work/ch1/dq4-ch1-full.sfc --out work/savefixture"
@@ -572,6 +582,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4fieldencountercheck.py",
   "sfc/dq4/tools/dq4fieldport.py",
@@ -728,6 +739,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4outside.py",
   "sfc/dq4/tools/dq4prologue.py",
@@ -800,6 +812,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4ch1event.py",
   "sfc/dq4/tools/dq4ch2battle.py",
@@ -859,6 +872,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4balance.py",
   "sfc/dq4/tools/dq4ch1event.py",
@@ -1007,6 +1021,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
@@ -1122,6 +1137,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4battlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/partyspells --seeds 0,1,2 --scenes party2piorimu,party2hyadain && rm -rf work/fieldspell && uv run --locked python sfc/dq4/tools/dq4fieldspellcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fieldspell"
@@ -1238,6 +1254,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/sfxscene && uv run --locked python sfc/dq4/tools/dq4sfxscene.py --rom work/ch1/dq4-ch1-full.sfc --out work/sfxscene --jobs 4"
@@ -1286,6 +1303,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/titlescene && uv run --locked python sfc/dq4/tools/dq4titlescene.py --rom work/ch1/dq4-ch1-full.sfc --out work/titlescene"
@@ -1312,6 +1330,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4heroblockcheck.py",
   "sfc/dq4/tools/dq4chapterwalk.py",
@@ -1440,6 +1459,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/doorstand && uv run --locked python sfc/dq4/tools/dq4doorstandcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/doorstand"
@@ -1473,6 +1493,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5warptrace.lua",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/doorcheck && uv run --locked python sfc/dq4/tools/dq4doorcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/doorcheck"
@@ -1501,6 +1522,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq5/tools/lua/dq5warptrace.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/storyitem && uv run --locked python sfc/dq4/tools/dq4storyitemcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/storyitem"
@@ -1583,6 +1605,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5warptrace.lua",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && rm -rf work/signcheck && uv run --locked python sfc/dq4/tools/dq4signcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/signcheck --jobs 4"
@@ -1622,6 +1645,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5warptrace.lua",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-groups && uv run --locked python sfc/dq4/tools/dq4chestcheck.py --build work/dq4-groups --out work/fresh-groups/chest && uv run --locked python sfc/dq4/tools/dq4fieldcheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-groups/field && uv run --locked python sfc/dq4/tools/dq4fieldencountercheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-groups/encounter && uv run --locked python sfc/dq4/tools/dq4fieldtravelcheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-groups/travel"
@@ -1653,6 +1677,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5textgrowcheck.lua",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4battlemsgcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-battlemsg"
@@ -1689,6 +1714,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4msgbankcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-msgbank"
@@ -1721,6 +1747,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-wellreset && uv run --locked python sfc/dq4/tools/dq4wellresetcheck.py --rom work/ch1/dq4-ch1-full.sfc --load-rom work/dq4-groups/groups.sfc --out work/fresh-wellreset"
@@ -1743,6 +1770,7 @@ paths = [
   "sfc/dq4/tools/lua/dq4readset.lua",
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-namegame && uv run --locked python sfc/dq4/tools/dq4namegamecheck.py --rom work/ch1/menu.sfc --out work/fresh-namegame"
@@ -1772,6 +1800,7 @@ paths = [
   "sfc/dq4/tools/lua/dq4shipstate.lua",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4environment.py -k CounterTests 2>&1 | tee work/environment-collision.log | tail -1 | grep -qx OK"
@@ -1794,6 +1823,7 @@ paths = [
   "sfc/dq4/tools/lua/dq4environmentdump.lua",
   "sfc/dq4/tools/lua/dq4shipstate.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4environment.py -k LayeredTests 2>&1 | tee work/stairs-layer.log | tail -1 | grep -qx OK"
@@ -1837,6 +1867,7 @@ paths = [
   "sfc/dq4/tools/lua/dq4shipstate.lua",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4environment.py -k UnportedGateTests 2>&1 | tee work/unported-gates.log | tail -1 | grep -qx OK"
@@ -1920,6 +1951,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "test $( (uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4npcport.py -k HiddenPeopleTest -k SleeperTalkTest -k StandingTalkTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4shopscene.py -k ShopPlaceTest -v; uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4sleepertalk.py -v) 2>&1 | tee work/map-people-rom-tests.log | grep -c ' \\.\\.\\. ok$') -eq 25"
@@ -1949,6 +1981,7 @@ paths = [
   "sfc/dq5/tools/dq5npcrecordcheck.py",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-npc-talk && uv run --locked python sfc/dq4/tools/dq4npccheck.py --build work/dq4-groups --out work/guard-npc-talk"
@@ -1978,6 +2011,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5warptrace.lua",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/guard-group-links && uv run --locked python sfc/dq4/tools/dq4groupcheck.py --rom work/dq4-groups/groups.sfc --out work/guard-group-links"
@@ -2007,6 +2041,7 @@ paths = [
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-envrom && uv run --locked python sfc/dq4/tools/dq4environmentromcheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-envrom"
@@ -2039,6 +2074,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5warptrace.lua",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/fresh-gates && uv run --locked python sfc/dq4/tools/dq4gatecheck.py --rom work/dq4-groups/groups.sfc --out work/fresh-gates"
@@ -2071,6 +2107,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-dungeon && uv run --locked python sfc/dq4/tools/dq4dungeonencountercheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-dungeon --jobs 2"
@@ -2114,6 +2151,7 @@ paths = [
   "sfc/dq5/tools/dq5progresscheck.py",
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/mapsong && uv run --locked python sfc/dq4/tools/dq4mapsongcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/mapsong --jobs 4"
@@ -2167,6 +2205,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
@@ -2231,6 +2270,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4build.py",
   "sfc/dq5/tools/lua/dq5warp.lua",
@@ -2333,6 +2373,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq4/tools/dq4shards.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4groupbuild.py --out work/dq4-groups && rm -rf work/sleepercheck-ch1 work/sleepercheck-groups && uv run --locked python sfc/dq4/tools/dq4sleepercheck.py --rom work/ch1/dq4-ch1-full.sfc --build work/dq4-groups --chapter1 --out work/sleepercheck-ch1 && uv run --locked python sfc/dq4/tools/dq4sleepercheck.py --rom work/dq4-groups/groups.sfc --build work/dq4-groups --out work/sleepercheck-groups"
@@ -2358,6 +2399,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq5/tools/dq5exitcheck.py",
   "sfc/dq5/tools/dq5sram.py",
@@ -2496,6 +2538,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
@@ -2622,6 +2665,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
@@ -2810,6 +2854,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
@@ -3037,6 +3082,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3bonmalmo.py",
   "sfc/dq4/tools/dq4ch3tunnel.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/lrreadset && uv run --locked python sfc/dq4/tools/dq4libretroreadsetcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/lrreadset"
@@ -3080,6 +3126,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4msgwait.py",
@@ -3174,6 +3221,7 @@ paths = [
   "sfc/dq4/tools/dq4titlelayerpatch.py",
   "sfc/dq4/tools/dq4art/**",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/screens && uv run --locked python sfc/dq4/tools/dq4screencheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/screens"
@@ -3189,6 +3237,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/lua/dq4menucursorcheck.lua",
   "sfc/dq4/tools/lua/dq4openbus.lua",
@@ -3206,6 +3255,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/lua/dq4namecursorcheck.lua",
   "sfc/dq4/tools/lua/dq4openbus.lua",
@@ -3223,6 +3273,7 @@ paths = [
   "sfc/dq4/tools/lua/dq4msgcount.lua",
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/msgcount-walk work/fresh-msgcount && uv run --locked python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1.sfc --out work/msgcount-walk --units && uv run --locked python sfc/dq4/tools/dq4msgcountcheck.py --rom work/ch1/dq4-ch1.sfc --messages work/ch1/messages.json --states work/msgcount-walk --out work/fresh-msgcount"
@@ -3237,6 +3288,7 @@ paths = [
   "sfc/dq4/tools/lua/dq4peopledump.lua",
   "tools/mesence_settings.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/people-walk work/fresh-people && uv run --locked python sfc/dq4/tools/dq4ch1walkcheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/people-walk --units && uv run --locked python sfc/dq4/tools/dq4peoplecheck.py --rom work/ch1/dq4-ch1-full.sfc --states work/people-walk --out work/fresh-people"
@@ -3260,6 +3312,7 @@ paths = [
   "sfc/dq4/tools/dq4ch3*.py",
   "sfc/dq4/tools/dq4eventchecks.py",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/peopleevent1 work/peopleevent2 work/peopleevent3 && uv run --locked python sfc/dq4/tools/dq4peopleeventcheck.py --chapter 1 --rom work/ch1/dq4-ch1-full.sfc --out work/peopleevent1 --json work/peopleevent/ch1.json && uv run --locked python sfc/dq4/tools/dq4peopleeventcheck.py --chapter 2 --rom work/ch2/dq4-ch1-full.sfc --out work/peopleevent2 --json work/peopleevent/ch2.json && uv run --locked python sfc/dq4/tools/dq4peopleeventcheck.py --chapter 3 --rom work/ch3/dq4-ch1-full.sfc --out work/peopleevent3 --json work/peopleevent/ch3.json"
@@ -3275,6 +3328,7 @@ paths = [
   "sfc/dq4/tools/dq4mesen.py",
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/lua/dq4nameentrycheck.lua",
   "sfc/dq4/tools/lua/dq4openbus.lua",
@@ -3554,6 +3608,7 @@ ch1-walk = [
   "sfc/dq4/tools/lua/dq4bigenv.lua",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/dq4msgnames.py",
   "sfc/dq4/tools/dq4slottext.py",
   "sfc/dq4/tools/dq4fcslot.py",
@@ -3680,6 +3735,7 @@ paths = [
   "sfc/dq5/tools/lua/dq5progresscheck.lua",
   "sfc/dq5/tools/lua/dq5warptrace.lua",
   "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/dq4winrule_*.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/guard-night-rom --chapter2 && rm -rf work/guard-night && uv run --locked python sfc/dq4/tools/dq4environmentnightcheck.py --rom work/guard-night-rom/dq4-ch1-full.sfc --out work/guard-night"

@@ -57,7 +57,9 @@ ERR = OUT + '.err'
 OUT_TMP = OUT + '.tmp'
 # 키를 만든 롬 바이트 그대로의 사본. 그 사이 롬 파일이 바뀌어도 키와 실제로 돌린 롬이 같다
 ROM_COPY = '.readset-rom.sfc'
-SKIP = (ENTRY, OUT, HDMA, ERR, OUT_TMP, ROM_COPY)
+# winwatch.log 는 기록(winwatch.bin)을 지금 규칙 파일로 판정한 글이라 출력으로 두지 않는다. 캐시를 펼칠 때 다시 판정해
+# 쓰고(_run), 규칙을 바꾼 뒤의 재검증이 옛 판정 글과 견주어 「키에 빠진 입력」 으로 잘못 걸지 않게 한다
+SKIP = (ENTRY, OUT, HDMA, ERR, OUT_TMP, ROM_COPY, mesen.winwatch.LOG)
 # 머리말이 읽은 집합 끝줄에 쓰는 표시. 장면 Lua 가 오류를 냈으면 LUAERROR
 DONE = 'OK'
 # 결과에 닿는 MesenCE 설정을 명령줄로 고정한다. 사용자 settings.json 의 값과 상관없이 같게 돈다
@@ -455,6 +457,8 @@ def key_parts(mesence, rom, script, dest, env, extra, cwd=None):
         'inputs': tree_hash(dest, skip=SKIP),
         'cwd': _cwd_key(cwd, dest),
         'rom': rom_shape(rom),
+        # dq4mesen 이 장면 env 에 더하는 WRAM 조각 목록(규칙 파일의 WRAM·OAM_WRAM 선언). 기록하는 바이트가 바뀐다
+        'winwatch': [mesen.winwatch.wram_env(), mesen.winwatch.wram_env(attr='OAM_WRAM')],
     }
 
 
