@@ -64,7 +64,7 @@ end, emu.callbackType.exec, 0x008958, 0x008958)
 -- 22:EA46 은 22:EA2A 가 무기($0DA7)·회심($0DA8)으로 고른 효과 하위 스크립트 번호를 $9E74 에 막 쓴 자리
 local subscript = os.getenv('SUBSCRIPT')
 local effect_stop = os.getenv('EFFECT_STOP') == '1'
-local sub_seen, stop_at = false, nil
+local sub_seen, stop_at, stopped = false, nil, false
 emu.addMemoryCallback(function()
   if subscript then emu.write(0x7E9E74, tonumber(subscript, 16), m) end
   log[#log + 1] = string.format('%d sub %02X', f, emu.read(0x7E9E74, m))
@@ -89,13 +89,15 @@ emu.addEventCallback(function()
       end
     end
   end
+  -- emu.stop 뒤에도 한 프레임이 더 돌 수 있어, 멈춘 뒤에는 다시 쓰지 않는다(쓰면 실행마다 끝 줄 수가 달라짐)
+  if stopped then return end
   local stopping = stop_at and f >= stop_at
   if f % flush == 0 or stopping then
     local h = io.open(out, 'w')
     h:write(table.concat(log, '\n') .. '\n')
     h:close()
   end
-  if stopping then emu.stop(0) end
+  if stopping then stopped = true; emu.stop(0) end
 end, emu.eventType.endFrame)
 
 dofile(os.getenv('NEXT'))
