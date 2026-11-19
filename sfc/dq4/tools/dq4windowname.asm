@@ -2765,6 +2765,49 @@ NeneArrow:
     LDA.w #$208D            ; 위 테두리 가로 칸. 옆 칸은 한글 줄의 윗부분이 테두리와 한 타일로 그려져 있어 베끼면 안 된다
 .put
     STA.l !nene_arrow
+    ; 마지막 쪽을 앞 쪽 위에 겹칠 때(!nene_split = 그 쪽 물건 수 n) FC 창 66 처럼 n 줄 창의 아래 테두리를 그린다. 줄 k 는
+    ; 버퍼 줄 2k + 1(글자 윗점)·2k + 2 라, n + 1 번째 줄(앞 쪽 물건)의 윗 줄 2n + 3 의 x 19~28 은 빈칸, 아랫 줄 2n + 4 의
+    ; x 18~29 는 아래 테두리(n 줄 창의 아래 끝, FC 와 같은 화면 줄)로 덮는다
+    SEP #$20
+    LDA.l !nene_split
+    BEQ .nosplit
+    REP #$30
+    PHX
+    PHY
+    AND #$00FF
+    XBA
+    LSR                     ; n × 128 = 2n 줄 × 32 칸 × 2바이트
+    PHA
+    CLC
+    ADC.w #$00E6            ; (3 × 32 + 19) × 2: 버퍼 줄 3·x 19
+    TAX
+    LDY.w #10
+-   LDA.w #$2001            ; 창 안 빈칸
+    STA.l $7E5000,X
+    INX
+    INX
+    DEY
+    BNE -
+    PLA
+    CLC
+    ADC.w #$0124            ; (4 × 32 + 18) × 2: 버퍼 줄 4·x 18
+    TAX
+    LDA.w #$A08B            ; 왼쪽 아래 모서리
+    STA.l $7E5000,X
+    LDY.w #10
+-   INX
+    INX
+    LDA.w #$A08D            ; 아래 테두리 가로
+    STA.l $7E5000,X
+    DEY
+    BNE -
+    INX
+    INX
+    LDA.w #$E08B            ; 오른쪽 아래 모서리
+    STA.l $7E5000,X
+    PLY
+    PLX
+.nosplit
     PLP
     RTS
 

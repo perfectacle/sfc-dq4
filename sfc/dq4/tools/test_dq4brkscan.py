@@ -15,6 +15,33 @@ class BrkScanTest(unittest.TestCase):
                 _, problems, _ = scan.scan(base, blob, entries, spans)
                 self.assertEqual(problems, [])
 
+    def test_chapter3_code_writes_reserved_cells_by_long_address(self):
+        # BRK 받침을 JSL 로 부르면 DB 가 받침 뱅크로 바뀐 채 돌아온다. 3장 모듈이 7E:2000 이상 예약 칸을 절대 주소로 쓰면
+        # WRAM 에 닿지 않는다(#1216 의 네네 보기 표지 7E:2824). 모든 3장 덩어리에서 그런 쓰기가 0 이어야 한다
+        cells = scan.reserved_cells()
+        self.assertIn(0x2824, cells)
+        self.assertIn(0x2190 + 0x79, cells)
+        blobs = [b for b in scan.blobs() if b[0].startswith('ch3')]
+        self.assertTrue(blobs)
+        for name, base, blob, entries in blobs:
+            with self.subTest(name):
+                _, problems, _ = scan.scan(base, blob, entries, (), cells)
+                self.assertEqual([p for p in problems if '절대 주소' in p], [])
+
+    def test_abs_write_after_stub_call_is_caught(self):
+        cells = {0x2824}
+        enter = bytes((0x08, 0xF4, 0x7E, 0x7E, 0xAB, 0xAB))               # PHP / PEA $7E7E / PLB / PLB
+        stub = bytes((0x22, 0x80, 0xFF, 0x29))                            # JSL 29:FF80(BRK 받침)
+        sta_abs, sta_long = bytes((0x8D, 0x24, 0x28)), bytes((0x8F, 0x24, 0x28, 0x7E))
+        tail = bytes((0x28, 0x6B))
+        for body, bad in ((sta_abs, False), (stub + sta_abs, True), (stub + sta_long, False),
+                          (stub + bytes((0xA9, 0x7E, 0x48, 0xAB)) + sta_abs, False),
+                          (stub + bytes((0xA9, 0x00, 0x8E, 0x24, 0x28)), True)):
+            with self.subTest(body.hex()):
+                blob = enter + body + tail
+                _, problems, _ = scan.scan(0x4E8000, blob, [0x4E8000], [(0x290000, 0x2A0000)], cells)
+                self.assertEqual(any('절대 주소' in p for p in problems), bad, problems)
+
     def test_unknown_non_php_label_is_reported(self):
         _, problems = scan.entries_of('t', 0x5E0000, bytes((0xA9, 0x00, 0x6B)), {'mystery': 0x5E0000})
         self.assertTrue(problems)
