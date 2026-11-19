@@ -2,7 +2,8 @@
 -- 바꾸지 않는다). 그 밖의 환경 변수·출력은 walk.lua 와 같다.
 --   until:N   창 번호(7E:0A00)가 이 토큰을 시작한 때와 달라질 때까지 기다린다(많아야 N 프레임). 물음 창이 뜨는 것을
 --             기다릴 때 쓴다. 다 기다려도 그대로면 walk.txt 에 「until timeout」 을 적고 넘어간다
---   cursor:K  고르기 창 커서(7E:0AD7)가 K 가 될 때까지 아래(K 가 크면)·위를 6프레임 누르고 6프레임 뗀다(많아야 120 프레임)
+--   cursor:K  고르기 창 커서(7E:0AD7)가 K 가 될 때까지 아래(K 가 크면)·위를 6프레임 누르고 6프레임 뗀다(많아야 120 프레임).
+--             K 에 3프레임 머물러야 끝난다(창이 뜨는 프레임에 한 프레임 거쳐 가는 값에 속아 답을 누르지 않게)
 --   ask:N     물음 창(창 번호 32, 예/아니요)이 뜰 때까지 A 를 8프레임 누르고 8프레임 떼며 글을 넘긴다(많아야 N 프레임).
 --             창이 뜬 프레임부터 누르지 않으므로 넘기는 A 가 물음에 답하지 않는다(누른 채로 뜬 A 는 새 입력이 아님)
 --   open:W    창 번호가 W(10진)가 될 때까지 ask 와 같이 A 로 글을 넘긴다(많아야 1200 프레임). 물음 창이 아닌 창(가게
@@ -67,7 +68,7 @@ local after = tonumber(os.getenv("AFTER") or "120")
 local changesWanted = tonumber(os.getenv("CHANGES") or "1")
 local hold = tonumber(os.getenv("HOLD") or "90")
 local n, pi, left, wi, stuck, last, press, since = 0, 1, nil, 1, 0, nil, nil, nil
-local tick, tickAge, held = nil, 0, nil
+local tick, tickAge, held, onFor = nil, 0, nil, 0
 local log, curMap, changes, lastChange = {}, nil, 0, nil
 emu.addEventCallback(function()
   n = n + 1
@@ -184,15 +185,17 @@ emu.addEventCallback(function()
       end
     elseif p.kind == "cursor" or p.kind == "pick" then
       local c = emu.read(p.kind == "pick" and 0x7E0F22 or 0x7E0AD7, m)
-      if press == nil then press = 120 end
+      if press == nil then press = 120; onFor = 0 end
       press = press - 1
-      if c == p.arg then
+      -- 창이 뜨는 프레임에 커서가 한 프레임 다른 값을 거쳤다 첫 칸에 놓이므로, 그 값에 끝나지 않게 머물기를 본다
+      if c == p.arg then onFor = onFor + 1 else onFor = 0 end
+      if onFor >= 3 then
         log[#log + 1] = string.format("f%05d %s %d", n, p.kind, c)
         press = nil; wi = wi + 1
       elseif press <= 0 then
         log[#log + 1] = string.format("f%05d %s timeout at %d want %d", n, p.kind, c, p.arg)
         press = nil; wi = wi + 1
-      elseif press % 12 >= 6 then
+      elseif c ~= p.arg and press % 12 >= 6 then
         L.press({[(p.kind == "pick" or c < p.arg) and "down" or "up"] = true})
       end
     elseif type(p[1]) == "string" then

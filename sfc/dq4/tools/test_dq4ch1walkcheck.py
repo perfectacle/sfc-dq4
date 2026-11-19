@@ -401,7 +401,7 @@ class WindowTokenParityTests(unittest.TestCase):
         for value in (f'0x{wc.WINDOW:06X}', f'0x{wc.CURSOR:06X}', f'0x{wc.ASK_WINDOW:02X}', f'0x{wc.PICK:06X}',
                       f'0x{wc.LOCK:06X}', f'0x{wc.FIELD_TICK:06X}', f'w == 0x{wc.NO_WINDOW:02X}',
                       f'w == 0x{wc.STATUS_WINDOW:02X}', f'w == 0x{wc.COMMAND_WINDOW:02X}',
-                      f'since >= {wc.DONE_CALM}', f'press = {wc.SETTLE_MAX}'):
+                      f'since >= {wc.DONE_CALM}', f'press = {wc.SETTLE_MAX}', f'onFor >= {wc.CURSOR_HOLD}'):
             self.assertIn(value, lua)
         walker = (wc.HERE / 'dq4compatcheck.py').read_text(encoding='utf-8')
         for name in re.findall(r'\w+', wc.WINDOW_TOKEN.pattern.split('(')[2].split(')')[0]):
