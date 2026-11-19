@@ -824,7 +824,9 @@ org $24A5E9
 !wt_late_line = 245         ; 게이트 일 뒤 이 주사선부터는 게임의 창 타일맵 2KB 를 미룬다(실측: 게임 NMI 진입이 한 줄쯤
                             ; 뒤, 2KB DMA 시작이 그 세 줄 뒤. 2KB 는 열두 줄이라 249 줄까지 시작해야 261 줄 안에 끝남)
 !wt_restore_line = 250      ; 게이트가 이 주사선 앞에서만 슬롯을 하나 더 되돌린다(하나에 다섯 줄까지)
-!wh_with_line = 245        ; WhWith 가 이 주사선 앞에서만 창 타일맵(1920바이트, 열한 줄 남짓)을 대신 보낸다
+!wh_with_line = 249        ; WhWith 가 이 주사선 앞에서만 창 타일맵(1920바이트)을 대신 보낸다. 실측 DMA 160바이트/줄이라 열두 줄,
+                            ; 248 줄에 시작해도 260 줄에 끝나 귀선(~261) 안이다. 묶음 그림은 남아도 다음 NMI 에 빠지지만(같은
+                            ; 타일맵을 거둔 NMI) 붙잡으면 창이 늦고 놓으면 목록 줄이 비므로, 문턱은 타일맵이 들어가는 데까지 둔다
 !wh_dma_line = 260          ; 묶음 그림 DMA 하나(160바이트까지, 한 줄 남짓)를 이 주사선 앞에서만 시작한다
 !wh_budget = 670           ; WhReq 가 짜는 한 NMI 몫(바이트). 그림 바이트에 DMA 하나마다 !wh_dma_cost 를 더해 센다.
                             ; 넘는 것은 다음 NMI 로(WhNmi). 실제 상한은 WhWith 의 주사선 확인
@@ -847,6 +849,18 @@ org $24A5E9
 !wh_tmpb = $7FA2E8
 !wh_tmpr = $7FA2FC          ; WhReq: DMA 표에 넣은 칸 수
 !wh_tmps = $7FA310          ; WhShown(본 흐름: WhStash·WhReq). 7E 의 우리 칸(!wn_*)은 이름을 그리는 동안만 비어 있다
+; 게임은 목록 창이 떠 있는 동안 같은 창 타일맵을 매 프레임 다시 요청한다. 다시 보내는 2KB(열두 줄)가 귀선 몫을 다 먹어
+; 묶음 그림이 NMI 마다 이름 하나씩만 나가, 목록 줄이 한 줄씩 늦게 찼다. 같은 버퍼면 보내지 않고 그 귀선을 묶음 그림에 쓴다
+!wh_skip_same = 1           ; 0 이면 같은 타일맵도 다시 보낸다(예전 동작)
+!wh_same_line = 80          ; WhReq 가 이 주사선 앞에서 불렸을 때만 견주고 뜬다(끝까지 견주고 다시 떠도 150줄 남짓이라 240 전에 끝남)
+; 창 타일맵은 VRAM 두 장을 번갈아 쓴다(보낼 곳 = $1ABC EOR $1C). 그래서 사본도 장마다 하나씩, 그 장의 보낼 곳 값과 함께 둔다
+!wh_last  = $7FC000         ; 장 k(0·1)의 사본: !wh_last + k × $800, 0~29줄 1920바이트
+!wh_lastok = $7FA320        ; 장 k: +k × 4 에 1 = 그 사본이 VRAM 의 그 장과 같음(WhWith 가 보낸 뒤 다른 길로 보내지 않음)
+!wh_lastd = $7FA322         ; 장 k: +k × 4 에 그 사본의 보낼 곳 값
+!wh_same  = $7FA328         ; 1 = 이번 요청의 버퍼가 보낼 장의 사본과 같음(WhReq 가 정하고 WhWith 가 읽음)
+!wh_slot  = $7FA32A         ; 이번 요청의 장 k × 4
+!wh_dst   = $7FA32C         ; WhSame 안에서만: 이번 요청의 보낼 곳 값
+!wh_line  = $7FA32E         ; WhWith 안에서만: 들어올 때 잰 주사선
 !wt_stc   = $7F8310         ; 후보 둘 × [버퍼 칸 주소, 타일, 버퍼 칸 주소, 타일] 워드. 찾기가 적고 게이트가 비교만 함
 !wh_buf   = $7F8320
 !wh_size  = $1EF0
@@ -3989,10 +4003,7 @@ WtLateDefer:
     RTS
 
 WtXfer:
-    LDA.l $000BEC
-    ORA.l $7E0000|!wt_xfer
-    STA.l $7E0000|!wt_xfer
-    RTS
+    JMP WhXfer
 
 ; 00:8885(NMI 끝, M = 8, DB = 00, D = 0). VRAM 을 건드리지 않는 WtVis 를 VBlank 일 뒤에서 돌린다. NMI 앞에서 돌리자 슬롯
 ; 26개를 재는 시간만큼 게임의 창 타일맵 DMA 가 밀려 메시지 창 아래쪽 줄이 화면으로 가지 않았다
@@ -4623,119 +4634,142 @@ WhRelease:
 
 
 ; 묶음 버퍼 항목을 !wh_go 개까지 차례로 보낸다(WqNmi 와 같은 방식, 원본 뱅크 7F). 주사선이 VBlank 밖이거나 끝 무렵이면 남긴다.
-; M = X = 16, DB = 7E
+; 같은 창 타일맵을 거둔 NMI 는 이 일이 귀선의 거의 전부다. 항목마다 DMA 설정을 다 쓰면 한 항목에 두 줄 남짓 들어 NMI 마다
+; 여섯 항목만 나갔다. 고정 설정(방식 1, B 버스 $18, 원본 뱅크 7F, VRAM 증가 $80)은 한 번만 쓰고 항목마다 VRAM 자리·원본·
+; 길이만 쓴다. M = X = 16, DB = 7E. Y 는 지킨다
 WhNmi:
+    LDA.l !wh_go
+    BNE +
+    RTS
++
+    PHY
+    PHD
+    PEA $4300
+    PLD
+    PHA                     ; 처음 보낼 수
+    TAY
     LDA.l !wh_rd
     TAX
+    JSR .fixed
 .entry
     JSR WtLine
     CMP #$00E1
-    BCS +
-    JMP .stop
-+
+    BCC .stop
     CMP #$0103
-    BCC +
-    JMP .stop
-+
+    BCS .stop
     LDA.l !wh_buf+2,X       ; 낮은 바이트 = 방식, 높은 바이트 = 칸 수
     STA.w !wq_head
     AND #$FF00
-    LSR
-    LSR
-    LSR
-    LSR
-    LSR                     ; 칸 × 8
+    XBA
+    ASL
+    ASL
+    ASL                     ; 칸 × 8
     STA.w !wq_len
     LDA.l !wh_buf,X
     CMP #$FFFF
-    BNE +
-    ; 넘침으로 죽인 항목(WhStash .no): 보내지 않고 넘어간다
-    LDA.w !wq_head
-    AND #$00FF
-    BNE ++
-    ASL.w !wq_len
-++
-    JMP .next
-+
+    BEQ .dead
     STA.l $002116
     TXA
     CLC
     ADC.w #(!wh_buf&$FFFF)+4
-    STA.l $004302
-    SEP #$20
-    LDA #$7F
-    STA.l $004304
-    LDA #$18
-    STA.l $004301
+    STA.b $02
     LDA.w !wq_head
+    AND #$00FF
     BNE .plane0
-    LDA #$80
-    STA.l $002115
-    LDA #$01
-    STA.l $004300
-    REP #$20
     LDA.w !wq_len
     ASL
     STA.w !wq_len
-    STA.l $004305
-    SEP #$20
-    LDA #$01
-    STA.l $00420B
-    BRA .next
-.plane0
-    LDA #$00
-    STA.l $002115
-    STA.l $004300
-    REP #$20
-    LDA.w !wq_len
-    STA.l $004305
+    STA.b $05
     SEP #$20
     LDA #$01
     STA.l $00420B
     REP #$20
-    LDA.l !wh_buf,X
-    STA.l $002116
-    LDA.w #WqFF
-    STA.l $004302
-    LDA.w !wq_len
-    STA.l $004305
-    SEP #$20
-    LDA #$80
-    STA.l $002115
-    LDA #$08                ; 고정 원본
-    STA.l $004300
-    LDA #$19
-    STA.l $004301
-    LDA.b #WqFF>>16
-    STA.l $004304
-    LDA #$01
-    STA.l $00420B
 .next
-    REP #$20
     TXA
     CLC
     ADC #$0004
     CLC
     ADC.w !wq_len
     TAX
-    LDA.l !wh_go
-    DEC
-    STA.l !wh_go
+    DEY
+    BNE .entry
+.stop
+    ; 보낸 수 = 처음 보낼 수 − 남은 Y
+    STY.w !wq_head
+    PLA
+    SEC
+    SBC.w !wq_head
+    STA.w !wq_len
     LDA.l !wh_count
-    DEC
+    SEC
+    SBC.w !wq_len
     STA.l !wh_count
-    BEQ +
+    BEQ .empty
     LDA.l !wh_go
-    BEQ .stop
-    JMP .entry
-+
+    SEC
+    SBC.w !wq_len
+    STA.l !wh_go
+    TXA
+    STA.l !wh_rd
+    PLD
+    PLY
+    RTS
+.empty
     STA.l !wh_off
     STA.l !wh_rd
     STA.l !wh_go
+    PLD
+    PLY
     RTS
-.stop
-    TXA
-    STA.l !wh_rd
+.dead
+    ; 넘침으로 죽인 항목(WhStash .no): 보내지 않고 넘어간다
+    LDA.w !wq_head
+    AND #$00FF
+    BNE .next
+    ASL.w !wq_len
+    BRA .next
+.plane0
+    ; 평면 0 만 든 항목(방식 1): 평면 0 을 보내고 평면 1 을 FF 로 채운 뒤 고정 설정을 되돌린다
+    LDA.w !wq_len
+    STA.b $05
+    SEP #$20
+    LDA #$00
+    STA.l $002115
+    STA.b $00
+    LDA #$01
+    STA.l $00420B
+    REP #$20
+    LDA.l !wh_buf,X
+    STA.l $002116
+    LDA.w #WqFF
+    STA.b $02
+    LDA.w !wq_len
+    STA.b $05
+    SEP #$20
+    LDA #$80
+    STA.l $002115
+    LDA #$08                ; 고정 원본
+    STA.b $00
+    LDA #$19
+    STA.b $01
+    LDA.b #WqFF>>16
+    STA.b $04
+    LDA #$01
+    STA.l $00420B
+    REP #$20
+    JSR .fixed
+    BRL .next
+.fixed
+    SEP #$20
+    LDA #$80
+    STA.l $002115
+    LDA #$01
+    STA.b $00
+    LDA #$18
+    STA.b $01
+    LDA #$7F
+    STA.b $04
+    REP #$20
     RTS
 
 ; 00:8E9E(NMI 작업 안, 게임이 메시지 캔버스를 보내기 직전, M = 8, X = 16). 캔버스 안에 그림을 올린 슬롯의 평면 1 을
@@ -5755,6 +5789,10 @@ WhWith:
     PHX
     PHY
     REP #$30
+    ; 주사선은 들어오자마자 잰다(진입이 244 줄 끝이라, 아래 검사 몇 명령 뒤에 재면 그만큼 문턱이 당겨진다)
+    JSR WtLine
+    STA.l !wh_line
+.meas
     PEA $7F7F
     PLB
     PLB
@@ -5776,11 +5814,19 @@ WhWith:
     LDA.w !wh_count&$FFFF
     CMP.w !wh_snapn&$FFFF
     BNE .give
+    ; VRAM 에 이미 같은 타일맵이 있으면 게임 요청을 거두고 보낸 것처럼 정리만 한다. 남은 귀선은 게이트의 WhNmi 가
+    ; 묶음 그림에 쓴다
+    LDA.w !wh_same&$FFFF
+    BEQ +
+    JSR WhDstOk
+    BCC +
+    BRL .done
++
     LDA.l $7E0000|!wq_count
     ORA.l $000F59
     AND #$00FF
     BNE .wait
-    JSR WtLine
+    LDA.w !wh_line&$FFFF
     CMP #$00E1
     BCC .wait
     CMP.w #!wh_with_line
@@ -5791,6 +5837,8 @@ WhWith:
     LDA.w !wh_pend&$FFFF
     BNE .give
     INC.w !wh_pend&$FFFF
+    STZ.w !wh_lastok&$FFFF
+    STZ.w (!wh_lastok&$FFFF)+4
     SEP #$20
     LDA #$00
     STA.l $000BEC
@@ -5805,6 +5853,8 @@ WhWith:
 .drop
     REP #$20
     STZ.w !wh_pend&$FFFF
+    STZ.w !wh_lastok&$FFFF
+    STZ.w (!wh_lastok&$FFFF)+4
     SEP #$20
     LDA.l $7E0000|!wq_defer
     AND #$DF
@@ -5889,10 +5939,161 @@ WhWith:
 ++
     STA.l $001946
     STZ.w !wh_pend&$FFFF
+if !wh_skip_same
+    ; 보낸 장의 VRAM = WhReq 가 떠 둔 그 장의 사본(방금 보냈거나, 같아서 거둠)
+    JSR WhDstOk
+    BCC +
+    LDX.w !wh_slot&$FFFF
+    LDA #$0001
+    STA.w !wh_lastok&$FFFF,X
++
+endif
     ; 남은 묶음 항목도 방금 보낸 타일맵의 것이므로 다음 NMI 부터 보내게 한다(게임 요청을 지워 WhRelease 가 정하지 못함)
     LDA.w !wh_count&$FFFF
     STA.w !wh_go&$FFFF
     BRL .out
+
+; 게이트 끝(WtXfer, M = 8). 이 NMI 에 게임이 보낼 창 타일맵 줄($0BEC)을 !wt_xfer 에 더한다. 게임이 직접 보내면
+; !wh_last 는 VRAM 과 같다고 볼 수 없다
+WhXfer:
+    LDA.l $000BEC
+    BEQ +
+    PHA
+    LDA #$00
+    STA.l !wh_lastok
+    STA.l !wh_lastok+1
+    STA.l !wh_lastok+4
+    STA.l !wh_lastok+5
+    PLA
++
+    ORA.l $7E0000|!wt_xfer
+    STA.l $7E0000|!wt_xfer
+    RTS
+
+; WhReq 안(M = X = 16, DB = 7F, 묶음이 있을 때). 이번 요청이 보낼 장의 사본이 버퍼 7E:5000 의 0~29줄과 같고 그 장이
+; 아직 그대로면(!wh_lastok) !wh_same = 1. 아니면 버퍼를 그 장의 사본에 떠 둔다. !wh_lastok 는 WhWith 가 보낸 뒤에야 켠다.
+; 견주기·뜨기는 느린 롬이라 각각 70줄 남짓 든다. 요청이 !wh_same_line 뒤에 오면 그사이 NMI 가 와 요청이 한 프레임 밀리므로
+; 하지 않는다(이번 요청은 예전처럼 보내고, 다음 요청에 뜸)
+WhSame:
+    JSR WtLine
+    CMP.w #!wh_same_line
+    BCC +
+    RTS
++
+    LDA.l $7E1ABC
+    EOR #$001C
+    AND #$00FC
+    STA.w !wh_dst&$FFFF
+    AND #$0010              ; 두 장은 EOR $1C 로 갈려 bit4 가 늘 다르다
+    LSR
+    LSR
+    STA.w !wh_slot&$FFFF
+    TAX
+    JSR WhLastBase
+    LDA.w !wh_lastok&$FFFF,X
+    BEQ .copy
+    LDA.w !wh_lastd&$FFFF,X
+    CMP.w !wh_dst&$FFFF
+    BNE .copy
+    LDX #$0000
+.cmp
+    LDA.l $7E5000+0,X
+    CMP.w 0,Y
+    BNE .differ
+    LDA.l $7E5000+2,X
+    CMP.w 2,Y
+    BNE .differ
+    LDA.l $7E5000+4,X
+    CMP.w 4,Y
+    BNE .differ
+    LDA.l $7E5000+6,X
+    CMP.w 6,Y
+    BNE .differ
+    LDA.l $7E5000+8,X
+    CMP.w 8,Y
+    BNE .differ
+    LDA.l $7E5000+10,X
+    CMP.w 10,Y
+    BNE .differ
+    LDA.l $7E5000+12,X
+    CMP.w 12,Y
+    BNE .differ
+    LDA.l $7E5000+14,X
+    CMP.w 14,Y
+    BNE .differ
+    TYA
+    CLC
+    ADC #$0010
+    TAY
+    TXA
+    CLC
+    ADC #$0010
+    TAX
+    CPX #$0780
+    BCS +
+    JMP .cmp
++
+    INC.w !wh_same&$FFFF
+    RTS
+.differ
+    LDX.w !wh_slot&$FFFF
+    JSR WhLastBase
+.copy
+    STZ.w !wh_lastok&$FFFF,X
+    LDA.w !wh_dst&$FFFF
+    STA.w !wh_lastd&$FFFF,X
+    LDX #$0000
+.cpy
+    LDA.l $7E5000+0,X
+    STA.w 0,Y
+    LDA.l $7E5000+2,X
+    STA.w 2,Y
+    LDA.l $7E5000+4,X
+    STA.w 4,Y
+    LDA.l $7E5000+6,X
+    STA.w 6,Y
+    LDA.l $7E5000+8,X
+    STA.w 8,Y
+    LDA.l $7E5000+10,X
+    STA.w 10,Y
+    LDA.l $7E5000+12,X
+    STA.w 12,Y
+    LDA.l $7E5000+14,X
+    STA.w 14,Y
+    TYA
+    CLC
+    ADC #$0010
+    TAY
+    TXA
+    CLC
+    ADC #$0010
+    TAX
+    CPX #$0780
+    BCC .cpy
+    RTS
+
+; WhWith 안(M = 16, DB = 7F). 지금 보낼 곳($1ABC EOR $1C)이 WhReq 가 고른 장의 사본 값과 같으면 C = 1
+WhDstOk:
+    LDX.w !wh_slot&$FFFF
+    LDA.l $7E1ABC
+    EOR #$001C
+    AND #$00FC
+    CMP.w !wh_lastd&$FFFF,X
+    CLC
+    BNE +
+    SEC
++
+    RTS
+
+; Y = 장 k 사본의 첫 자리(A = k × 4 → k × $800)
+WhLastBase:
+    LDA.w !wh_slot&$FFFF
+    XBA
+    ASL
+    CLC
+    ADC.w #!wh_last&$FFFF
+    TAY
+    RTS
 
 ; 04:9D39(게임이 창 타일맵 2KB 전송을 요청하는 LDA #$0080 / STA $0BEC(9D3C) 자리, M = X = 16, NMI 켜짐). 원래 두 명령을
 ; 하기 전에, 지금 버퍼로 다음 NMI 의 WhWith 가 할 일을 짠다. 요청 뒤 게임은 바로 NMI 를 기다리므로 버퍼가 그대로다. 표를 다
@@ -5944,10 +6145,15 @@ WhReq:
     LDA.w #!wh_budget
     STA.w !wh_tmpb&$FFFF    ; 남은 예산
     STZ.w !wh_tmpr&$FFFF
+    STZ.w !wh_same&$FFFF
     LDA.w !wh_count&$FFFF
     BNE +
     JMP .done
 +
+if !wh_skip_same
+    JSR WhSame
+endif
+    LDA.w !wh_count&$FFFF
     STA.w !wh_tmpn&$FFFF    ; 남은 항목
     LDY #$0000
     LDA.w !wh_rd&$FFFF
