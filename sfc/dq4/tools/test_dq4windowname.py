@@ -604,6 +604,37 @@ class VisibleTest(unittest.TestCase):
         found = [int(v, 16) for v in re.findall(r'LDA #\$([0-9A-F]{4})\n    RTS', cols)]
         self.assertEqual(found, [4, 7, 10, 0])
 
+
+class UpperFlipTest(unittest.TestCase):
+    """위 줄 합성(WnBaseRow)이 바탕 타일의 뒤집기를 지킨다: 세로면 줄을 7 − r 로, 좌우면 바이트마다 비트를 거꾸로."""
+
+    def setUp(self):
+        self.asm = ASM.read_text(encoding='utf-8')
+
+    def test_callers_keep_flip_bits(self):
+        self.assertEqual(self.asm.count('AND #$C3FF                  ; 타일 번호와 뒤집기(WnBaseRow)'), 2)
+
+    def test_base_row_reads_flipped_rows(self):
+        body = self.asm[self.asm.index('\nWnBaseRow:'):self.asm.index('\nWnMirror:')]
+        self.assertIn('BIT #$C000\n    BNE .flipped', body)
+        self.assertIn('BIT.w !wn_base\n    BPL +\n    EOR #$0007', body)
+        self.assertIn('BVC +\n    JSR WnMirror', body)
+
+    def test_mirror_reverses_each_byte(self):
+        """WnMirror 를 파이썬으로 따라 해 본다: LSR 로 낮은 비트를 꺼내 ROL 로 쌓기를 여덟 번, 두 바이트를 XBA 로 번갈아."""
+        def mirror(v):
+            s0, s1, a, b = v & 0xFF, v >> 8, 0, 0
+            for _ in range(8):
+                c = s0 & 1; s0 >>= 1; a = (a << 1 | c) & 0xFF
+                c = s1 & 1; s1 >>= 1; b = (b << 1 | c) & 0xFF
+            return a | b << 8
+        rev = lambda x: int(f'{x:08b}'[::-1], 2)
+        for v in (0x0001, 0x8000, 0x3C81, 0xF00F, 0x1234):
+            self.assertEqual(mirror(v), rev(v & 0xFF) | rev(v >> 8) << 8)
+        body = self.asm[self.asm.index('\nWnMirror:'):]
+        body = body[:body.index('RTS')]
+        self.assertIn('LSR.w !wn_s\n    ROL\n    XBA\n    LSR.w !wn_s+1\n    ROL\n    XBA', body)
+
 if __name__ == '__main__':
     unittest.main()
 
