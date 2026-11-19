@@ -8,9 +8,9 @@ sys.path[:0] = [str(TOOLS), str(TOOLS.parents[1] / "dq5" / "tools")]
 import dq4bg3slotcheck as check  # noqa: E402
 
 
-def line(mp, slot, shown=None, nz=342, vsbuf=0):
+def line(mp, slot, shown=None, nz=342, vsbuf=0, win="01"):
     return check.parse_bg3(f"f00630 map {mp} 0725={slot:02X} shown={slot if shown is None else shown:02X} "
-                           f"nz={nz} vsbuf={vsbuf} old=660")
+                           f"nz={nz} vsbuf={vsbuf} old=660" + (f" win={win}" if win else ""))
 
 
 class JudgeTest(unittest.TestCase):
@@ -44,6 +44,17 @@ class JudgeTest(unittest.TestCase):
         self.assertTrue(check.judge("02/00", here, [line("02/00", 0x1C)]))
         self.assertTrue(check.judge("02/00", here, [line("02/00", 0x3C, shown=0x1C)]))
         self.assertTrue(check.judge("02/00", here, [line("02/00", 0x3C, nz=0)]))
+
+    def test_command_window_must_have_opened(self):
+        # 창이 안 열린 실행도 자리·보임·타일맵·버퍼 판정은 지난다
+        here = ("02/00", "cell")
+        # 실측: A 를 빼면 끝 창은 「명령을 내려줘」 02
+        self.assertEqual(check.judge("02/00", here, [line("02/00", 0x3C, win="02")]),
+                         ["명령 창이 열리지 않음(끝 창 번호 02, 바라는 01)"])
+        self.assertTrue(check.judge("02/00", here, [line("02/00", 0x3C, win=None)]))
+        self.assertTrue(check.judge("02/00", here, [line("02/00", 0x3C), line("02/00", 0x3C, win="FF")]))
+        self.assertEqual(check.judge("04/0B", ("04/0B", "field"), [line("04/0B", 0x78, win="1B")]), [])
+        self.assertTrue(check.judge("04/0B", ("04/0B", "field"), [line("04/0B", 0x78, win="FF")]))
 
     def test_buffer_mismatch_in_last_record_fails(self):
         here = ("02/00", "cell")
