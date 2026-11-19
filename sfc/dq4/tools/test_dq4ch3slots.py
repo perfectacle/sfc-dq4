@@ -55,6 +55,23 @@ class SlotTest(unittest.TestCase):
         # 2장이 쓰던 예비 13바이트를 남김없이 넘겼다
         self.assertEqual(mine, {0x6F, *range(0x70, 0x78), 0x79, 0x7A, 0x7B, 0x7C})
 
+    def test_cross_chapter_flags_are_held_by_no_chapter_table(self):
+        import importlib
+        self.assertEqual(set(slots.CROSS_CHAPTER_FLAGS), set(slots.COMMON_FLAGS))
+        for path in sorted(HERE.glob('dq4ch*slots.py')):
+            mod = importlib.import_module(path.stem)
+            owned = {f for s in mod.SLOTS.values() for f in s.flags} | set(getattr(mod, 'SPARE', {}).get('flags', ()))
+            with self.subTest(table=path.stem):
+                self.assertFalse(owned & set(slots.CROSS_CHAPTER_FLAGS))
+
+    def test_borrowed_party_slots_are_the_ones_cleared_at_chapter_end(self):
+        lo, hi = slots.CHAPTER_END_CLEAR
+        self.assertEqual(slots.BORROWED_PARTY_SLOTS, tuple(range(43, 50)))
+        self.assertEqual((lo, hi), (ev.MONSTER_SLOTS + 43 * ev.MONSTER_SLOT, ev.MONSTER_SLOTS + 50 * ev.MONSTER_SLOT))
+        import dq4shopport
+        for a in (dq4shopport.ONE_SHOT_AT, slots.NENE_VIEW_MARK, slots.NENE_VIEW_LINES):
+            self.assertTrue(lo <= a < hi, f'{a:06X}')
+
     def test_common_flags_are_in_the_common_byte(self):
         for f in (ev.RESULT, ev.DOG, ev.SCOTT, ev.LAWRENCE):
             self.assertIn(f[0], slots.COMMON_FLAGS)

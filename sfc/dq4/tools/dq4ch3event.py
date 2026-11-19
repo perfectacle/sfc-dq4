@@ -23,6 +23,10 @@ from dq4ch3slots import SLOTS, VARS2_AT, VARS_AT  # noqa: E402
 
 # 7E:2208 은 DQ5 가 색인 쓰기로만 덮는 자리(dq4ch2slots 「flag 자리」). 2장 첫머리·텐페·사건 전투가 bit0·1·2·4·6·7 을 쓴다
 CHAPTER3 = (0x78, 0x08)        # 7E:2208 bit3  3장 진행 중(2장 끝에서 켬). 주인공 그림·성장·장비를 톨네코로
+# 3장 칸(dq4ch3slots)을 빌린 바이트가 3장 밖에서 다른 뜻인 모든 롬 공용 코드는 이 문으로 장을 가른다: 7E:2208 은 이
+# 해킹의 flag 바이트이고(dq4ch2slots 「flag 자리」), bit3 은 2장 끝 → 3장 넘김(transfer)만 켜고 3장 끝 넘김(dq4ch3tunnel
+# _handover)이 끈다. 1·2장 스크립트가 켜지 않는 것은 test_dq4chapterflag 가 본다
+CHAPTER3_GATE = (0x7E2190 + CHAPTER3[0], CHAPTER3[1])
 OPENING = (0x78, 0x20)         # 7E:2208 bit5  3장 첫머리(제목 상자·서두·네네)를 기다림. 옮길 때 켜고 첫머리 끝에 끔
 # 7E:21A3 bit5(맵을 옮기면 지워짐): 첫머리가 끝난 뒤 아직 집을 다시 불러오지 않음. FC 는 맵에 들 때마다 $628B 를 FF 로
 # 쓰고 네네(대화 057)가 bit6 이 꺼져 있으면 「집을 나서면 곧장 서쪽으로」(080A)라 하므로, 첫머리 직후에만 그 말이다

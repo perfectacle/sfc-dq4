@@ -75,6 +75,16 @@ MAP_TEMPS = {
 }
 # 공용 장치(dq4ch3event)의 몫: flag 바이트 6F(대화 호출 결과·동행 비트), 변수 칸 +0~+3(날수 둘·시계)
 COMMON_FLAGS = (0x6F,)
+# 장을 넘겨 쓰는 칸: 모든 장의 롬에 드는 코드가 읽고 써서 어느 장 예약표(dq4ch*slots)도 다시 잡지 못한다
+# (test_dq4ch3slots). {flag 바이트: 까닭}
+CROSS_CHAPTER_FLAGS = {
+    0x6F: '7E:21FF: 2장 동료 대화의 대화 시작 훅이 말을 걸 때마다 bit4 를 끄고(dq4ch2partytalk.TALK_ONCE), 1장 따라 걷는 '
+          '그림 루틴이 bit1(3장 개)을 본다',
+}
+# 3장이 변수·네네 가게 물건으로 빌린 DQ5 맡긴 동료 칸(CHAPTER_END_CLEAR 가 3장 끝에 비움). 5장에서 진짜 맡긴 동료 칸으로
+# 쓰면 3장 몫을 다른 자리로 옮겨야 한다. 3장 밖에서 이 칸을 읽는 공용 코드(가게 한 번 쓰는 키 등)는
+# dq4ch3event.CHAPTER3_GATE 로 장을 가른다
+BORROWED_PARTY_SLOTS = tuple(range(STOCK_SLOTS[0], VARS_SLOT + 1))
 COMMON_VARS = (0, 4)
 # 아직 아무에게도 주지 않은 몫. 쓰려면 이 표를 고친다. 이벤트 무리·DQ5 몬스터는 FC 3장에 사건 전투가 없어(fc/dq4/docs/
 # dq4-chapter3-format.md 「사건 차례」) 나누지 않고 2장 예비(dq4ch2slots.SPARE)에 둔다
