@@ -2,7 +2,8 @@
 들지 않는 ▶ 는 틀의 「창 밖」 이 잡는다), (2) 글자 위에 섰다 — 바로 오른쪽 칸이 그려 넣은 칸(롬 글자 칸 01~8A 밖)이고 왼쪽 첫 열에 잉크가 있다(한글은 앞 1점을
 비우고 그리므로, 첫 열 잉크는 ▶ 가 앞 글자를 덮어 잘린 것. 「▶ㅂㅂㅂ」 꼴), (3) 가리키는 줄이 비었다 — 오른쪽 칸들(같은 칸 줄과 위 한 줄)에 창 끝까지 잉크가
 없다(그 줄이 위 창에 일부라도 가려지면 보지 않는다), (4) 한 창 안쪽에 ▶ 가 둘 이상이다. dq4winwatch 의 규칙 파일.
-위 창에 가려진 칸은 보지 않는다.
+위 창에 가려진 칸은 보지 않는다. 숫자 사이의 07C(장비 비교 창의 능력치 「5▶ 10」, 엔진이 같은 칸을 화살표로 씀)는
+커서가 아니라 세지 않는다.
 
 잉크는 창 바탕색(창 안쪽 칸에서 가장 많은 색)과 투명(0)이 아닌 점이다.
 """
@@ -19,6 +20,8 @@ KNOWN = (
           '밀린 글자 잉크가 든다. 창 글자 칸 넘침(창 검사 equip-ch3 눈금)과 같은 때의 화면, 그 넘침을 고치면 이 눈금을 지운다'),
 )
 CURSOR = 0x7C
+DIGITS = range(0x02, 0x0C)      # 롬 1bpp 글자 칸 0~9
+BLANK = 0x01
 ROM_FONT = 0x04E528
 # 롬 1bpp 글자 칸. 원본 DQ5 가나는 첫 열부터 잉크가 있어 덮음 검사에서 뺀다
 ROM_TILES = range(0x01, 0x8B)
@@ -33,9 +36,26 @@ def lorom(addr):
     return ((addr >> 16) & 0x7F) * 0x8000 + (addr & 0x7FFF)
 
 
-def cursor_glyph(rom):
-    o = lorom(ROM_FONT) + (CURSOR - 1) * 8
+def rom_glyph(rom, t):
+    o = lorom(ROM_FONT) + (t - 1) * 8
     return [[(b >> (7 - x)) & 1 for x in range(8)] for b in rom[o:o + 8]]
+
+
+def cursor_glyph(rom):
+    return rom_glyph(rom, CURSOR)
+
+
+def shows_rom_tile(screen, r, c, tiles):
+    """(r, c) 칸이 tiles 가운데 하나이고 그 그림이 롬 1bpp 글자와 같은가."""
+    w = screen.word(r, c)
+    t = w & 0x3FF
+    if t not in tiles or w & 0xC000:
+        return False
+    px = screen.shown(r, c)
+    if px is None:
+        return False
+    bg = Counter(v for row in px for v in row).most_common(1)[0][0]
+    return [[int(v != bg and v != 0) for v in row] for row in px] == rom_glyph(screen.ref.rom, t)
 
 
 def is_cursor(screen, r, c, glyph):
@@ -47,6 +67,16 @@ def is_cursor(screen, r, c, glyph):
         return False
     bg = Counter(v for row in px for v in row).most_common(1)[0][0]
     return [[int(v != bg and v != 0) for v in row] for row in px] == glyph
+
+
+def stat_arrow(screen, r, c):
+    """숫자 사이의 07C 인가: 바로 왼쪽 칸이 롬 숫자이고, 오른쪽으로 빈칸(01)을 건너 처음 나오는 칸이 롬 숫자다."""
+    if c == 0 or not shows_rom_tile(screen, r, c - 1, DIGITS):
+        return False
+    k = c + 1
+    while k < 32 and screen.word(r, k) & 0x3FF == BLANK:
+        k += 1
+    return k < 32 and shows_rom_tile(screen, r, k, DIGITS)
 
 
 def background(screen, w):
@@ -70,7 +100,8 @@ def check(screen):
         return []
     glyph = cursor_glyph(rom)
     out = []
-    cursors = [(r, c) for r in range(32) for c in range(32) if screen.visible(r) and is_cursor(screen, r, c, glyph)]
+    cursors = [(r, c) for r in range(32) for c in range(32)
+               if screen.visible(r) and is_cursor(screen, r, c, glyph) and not stat_arrow(screen, r, c)]
     per_window = Counter()
     rects = list(dict.fromkeys(screen.rects))
     for r, c in cursors:
