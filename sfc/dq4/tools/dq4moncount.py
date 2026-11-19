@@ -20,12 +20,27 @@ sfc/dq4/docs/dq4-sprite-format.md 「2장 전투 몬스터 그림」 의 「FC �
 - 무리 값: 훅은 줄 번호 7E:1009~100B 를 0 으로 둔다(ch3_code 의 pick_slot). 그래서 무리 값은 모두 0 이고, 줄은 그림
   머리의 띄움으로만 정해진다(띄움이면 줄 2, 아니면 줄 0).
 - SFC 배치: dq5monlimits.Pictures(빌드 롬).place 그대로(줄 폭 22:9284, 조각 합 22:91DC, 줄마다 타일 22:A119).
-- FC 배치: fc_width·fc_shown(그림 자료는 fc/dq4/docs/dq4-fcsprite-format.md 「전투 몬스터 그림」). 폭은 롬에서 읽고, FC
-  전투 덤프 여섯의 $7385 와 같았다(スライム 2, 0D 3, 6D·6E 8). 놓인 마리 수($6E49)는 다섯이 fc_shown 과 같았고,
-  6D 3마리 무리만 1마리였다(OBJ 부품이 있는 그림이라 아래 한도로 보이나 재지 않음). FC 가 무리를 덜 놓는 한도 가운데 화면 폭만 센다. 14:$812F 는 무리마다 팔레트 칸(14:$9439·
-  $93F2)·CHR 칸(14:$9682·$9686)·OBJ 줄마다 수(14:$9ADD)도 보아 넘으면 그 무리를 뺀다(14:$81AE → $81F4). 이것들은 세지
-  않으므로 fc_shown 은 FC 가 실제로 놓는 수의 위 끝이고, 덜 놓이는 조합에는 FC 도 그 한도로 덜 놓는 조합이 섞일 수 있다.
-  결과의 fc_obj 는 OBJ 부품이 있는 FC 몬스터가 든 조합이다(OBJ 줄마다 수에 걸릴 수 있는 것).
+- FC 배치: FcBattle.place 가 14:$812F(전투 그림 올리기)의 무리 고르기를 그대로 옮긴 것이다(그림 자료는
+  fc/dq4/docs/dq4-fcsprite-format.md 「전투 몬스터 그림」). 차례와 한도:
+  1. 14:$926B: 무리 차례로 마릿수를 더해 합 8 을 넘는 만큼 깎는다. 0 이 된 무리는 비운다.
+  2. 14:$9292: 그림 0 을 미리 올리고(BG 패턴 $8D~) 첫 CHR 칸의 시작을 BG $91·OBJ 4 로 둔다.
+  3. 무리마다(14:$8141~$81BB) 아래를 차례로 보고, 어느 하나라도 0 마리가 되거나 넘으면 그 무리를 빼고 뒤 무리를 당긴다
+     (14:$81AE → $81F4). 그림 값은 14:$9320(폭 $D2, OBJ 배치 수 $D3 와 그 y + $4F → $0650, 마지막 배치가 OBJ 인 타일
+     수 $D4, BG 배치 수 $D5). 그림 0B·4B 와 첫 무리가 몬스터 BA 이면 $D3 = 0(14:$92F4).
+     - OBJ 줄(14:$9ADD): y 가 $48~$C7 인 8줄 창마다, 이미 놓은 OAM 과 이 무리 마리들의 OBJ 가 9 개째가 되는 마리부터
+       뺀다($9B1D CMP #$09). 지금까지의 OAM 수($C9) + 이 그림 OBJ 수가 65 이상이면 무리를 뺀다($9B38 CMP #$41).
+     - 폭(14:$9C4A → $9C54): 마리마다 폭 + 1 을 합($CA, 무리를 건너 이어짐)에 더해 32 에 닿는 마리부터 뺀다.
+     - OBJ 팔레트(14:$9439)·BG 팔레트(14:$93F2): 칸 넷($0609~·$05FD~) 가운데 같은 3색이 없는 팔레트 수가 빈 칸 수를
+       넘으면 뺀다. BG 칸 0 은 첫 색이 장소 색($0514)이라 비지 않고, 같은 3색이 없는 것이 하나이며 장소 색과 그림 BG 팔레트
+       0 의 첫 색이 모두 30 이면 칸 0 을 쓴다($940F). 놓은 무리의 팔레트는 14:$946E·$9496 이 칸에 넣는다.
+     - CHR(14:$9682·$9686): 같은 그림을 이미 올렸으면 보지 않고, BG 패턴 다음 자리($CC) + $D5, OBJ 패턴 다음
+       자리($CB) + $D4 가 $100 에 닿으면 뺀다. 올리기(14:$969C → $9783)는 타일마다 쓰는 반전 종류(OBJ 는 하나)마다
+       패턴 한 장을 차례로 쓴다.
+     놓은 무리는 마리마다 OBJ 를 OAM 에 더한다(14:$9B4E). デスピサロ(AE)·エスターク(BC)는 다른 길이라 셈하지 않는다.
+  장소 색은 30 으로 둔다. 1~3장의 서로 다른 무리 조합 783개 모두 30·26 의 결과가 같았다. 확인: 같은 조합 783개를 6502 해석기
+  (fc/dq4/tools/dq4cpu.py)로 14:$812F 를 $81BD 까지 돌린 $6E45·$6E49 와 place 가 모두 같았고(시험이 일부와 무작위
+  조합을 견줌), FC 전투 덤프(fc/dq4/tools/lua/spritebattle.lua) 23개의 $6E49 와도 같았다(시험의 BATTLE_DUMPS).
+  결과의 fc_width 는 폭 한도만 둔 수, fc_why 는 무리마다 FC 를 깎은 한도다.
 
   python sfc/dq4/tools/dq4moncount.py --rom work/ch1/dq4-ch1-full.sfc --out work/moncount
 결과: OUT/results.json(곳마다 수, 덜 놓이는 조합 목록).
@@ -58,8 +73,8 @@ KNOWN = {
     (2, 0x08, 'night'): 1,
     (2, 0x09, 'day'): 4, (2, 0x09, 'night'): 2,
     (2, 0x0B, 'day'): 7, (2, 0x0B, 'night'): 5,
-    (2, 0x0C, 'day'): 19, (2, 0x0C, 'night'): 15,
-    (2, 0x4C, 'dungeon'): 3, (2, 0x4D, 'dungeon'): 8, (2, 0x4E, 'dungeon'): 9, (2, 0x4F, 'dungeon'): 15,
+    (2, 0x0C, 'day'): 14, (2, 0x0C, 'night'): 15,
+    (2, 0x4C, 'dungeon'): 1, (2, 0x4D, 'dungeon'): 7, (2, 0x4E, 'dungeon'): 9, (2, 0x4F, 'dungeon'): 15,
 }
 
 FC_BANK = 0x14
@@ -99,17 +114,9 @@ def fc_width(prg, mid):
     return w + 1 + (p in wide_pictures(prg))
 
 
-def fc_has_obj(prg, mid):
-    """그림에 OBJ 배치(머리 bit6 = 0)가 있는지. OBJ 줄마다 수 한도(14:$9ADD)에 걸릴 수 있는 몬스터."""
-    import dq4fcsprite as S
-    p = S.mon_pic(prg, mid)
-    tiles, *_ = S.mon_stream(prg, p)
-    return any(not h & 0x40 for pls, _ in tiles for h, _ in pls)
-
-
 def fc_shown(widths, groups):
-    """14:$9C54: 무리 차례로 마리마다 폭 + 1 을 합에 더해 WIDTH_LIMIT 이상이 되면 그 무리는 거기까지, 다음 무리로.
-    합($CA)은 전투마다 0 에서 시작해 무리를 건너 이어진다. groups [(FC 몬스터, 마릿수)] → 무리마다 놓는 수."""
+    """폭 한도만(14:$9C54): 무리 차례로 마리마다 폭 + 1 을 합에 더해 WIDTH_LIMIT 이상이 되면 그 무리는 거기까지, 다음
+    무리로. 합($CA)은 전투마다 0 에서 시작해 무리를 건너 이어진다. groups [(FC 몬스터, 마릿수)] → 무리마다 놓는 수."""
     used, out = 0, []
     for m, n in groups:
         k = 0
@@ -118,6 +125,218 @@ def fc_shown(widths, groups):
             k += 1
         out.append(k)
     return out
+
+
+FF = 0xFF
+TOTAL_LIMIT = 8             # 14:$926D LDA #$08
+OBJ_LINE_FROM, OBJ_LINE_TO = 0x48, 0xC8   # 14:$9AE6 LDA #$48 … $9B45 CMP #$C8
+OBJ_PER_LINE = 8            # 14:$9B1D CMP #$09: 9 개째에서 뺌
+OAM_LIMIT = 0x40            # 14:$9B38 CMP #$41
+OBJ_Y = 0x4F                # 14:$9378 ADC #$4F
+NO_OBJ_PICTURES, NO_OBJ_LEAD = (0x0B, 0x4B), 0xBA   # 14:$92F6·$92FA(그림)·$9309(첫 무리 몬스터): $D3 = 0
+CHR_SLOTS = 14              # 14:$9E29 CPY #$0E
+BG_FIRST, OBJ_FIRST = 0x8D, 0x01          # 14:$922F·$9236
+BG_START, OBJ_START = 0x91, 0x04          # 14:$92A0·$92A5: 그림 0 을 올린 뒤 첫 칸의 시작
+SHARED_BG = 0x30            # 14:$9410·$9416: 장소 색과 팔레트 첫 색이 이 값이면 BG 칸 0 을 쓴다
+UNCOUNTED = (0xAE, 0xBC)    # 14:$815A·$815E
+
+
+class _FcPicture:
+    """14:$9320 이 그림마다 세는 값과 팔레트·올릴 패턴."""
+
+    def __init__(self, prg, p):
+        import dq4fcsprite as S
+        tiles, opal, bpal, *_ = S.mon_stream(prg, p)
+        self.ys, self.obj_tiles, self.bg_places, col = [], 0, 0, 0
+        self.kinds = []
+        for pls, _ in tiles:
+            kinds = []
+            for h, pos in pls:
+                if h & 0x40:
+                    col = max(col, pos[0] & 0x0F)
+                    self.bg_places += 1
+                    k = (h >> 1 & 3) + 1        # 14:$978F: 반전 종류마다 BG 패턴 한 장
+                else:
+                    self.ys.append((pos[1] + OBJ_Y) & 0xFF)
+                    k = 0
+                if k not in kinds:
+                    kinds.append(k)
+            self.kinds.append(kinds)
+            if not pls[-1][0] & 0x40:
+                self.obj_tiles += 1
+        self.width = col + 1 + (p in wide_pictures(prg))
+        self.opal, self.bpal = [list(t) for t in opal], [list(t) for t in bpal]
+        if not self.bpal:
+            raise ValueError(f'그림 {p:02X} 에 BG 팔레트가 없음(14:$93F2 는 하나 이상을 봄)')
+
+
+def _shared_bg(slot0, tri):
+    """14:$940F: BG 칸 0 을 이 팔레트에 쓸 수 있는지."""
+    return slot0[0] == SHARED_BG and tri[0] == SHARED_BG and (slot0[1] == FF or slot0[1:] == tri[1:])
+
+
+class FcBattle:
+    """FC 14:$812F 의 무리 고르기(모듈 docstring 의 차례). place(groups) → (무리마다 놓는 수, 무리마다 깎은 한도)."""
+
+    def __init__(self, prg, place_color=SHARED_BG):
+        self.prg, self.place_color = prg, place_color
+        self._pics = {}
+
+    def picture(self, p):
+        if p not in self._pics:
+            self._pics[p] = _FcPicture(self.prg, p)
+        return self._pics[p]
+
+    def place(self, groups):
+        import dq4fcsprite as S
+        ids = [m for m, _ in groups] + [FF] * (GROUPS - len(groups))
+        counts = [n for _, n in groups] + [0] * (GROUPS - len(groups))
+        origin = list(range(len(groups))) + [None] * (GROUPS - len(groups))
+        why = [None] * len(groups)
+        left = TOTAL_LIMIT
+        for i in range(GROUPS):
+            take = min(left, counts[i])
+            if take < counts[i] and i < len(groups):
+                why[i] = '합 8'
+            counts[i], left = take, left - take
+            if not take:
+                ids[i] = FF
+        chr_ = _FcChr(self)
+        if ids[0] != 0xAE:
+            chr_.upload(0)
+            chr_.start[0] = [OBJ_START, BG_START]
+            chr_.next[0] = OBJ_START
+        bg = [[self.place_color, FF, FF]] + [[FF] * 3 for _ in range(3)]
+        obj = [[FF] * 3 for _ in range(4)]
+        oam, used = [], 0
+        shown = [0] * len(groups)
+        c6 = 0
+        while c6 < GROUPS:
+            if ids[c6] == FF:
+                c6 += 1
+                continue
+            p = S.mon_pic(self.prg, ids[c6])
+            if p in UNCOUNTED:
+                raise ValueError(f'그림 {p:02X} 는 14:$8184 로 가는 다른 길이라 셈하지 않음')
+            pic, n, i = self.picture(p), counts[c6], origin[c6]
+            ys = [] if p in NO_OBJ_PICTURES or ids[0] == NO_OBJ_LEAD else pic.ys
+            n, cut = _obj_lines(oam, ys, n)
+            if cut:
+                why[i] = cut
+            if n:
+                k = _fit(used, pic.width, n)
+                if k < n:
+                    why[i] = '폭'
+                n = k
+            if n and not _palettes_fit(obj, pic.opal):
+                n, why[i] = 0, 'OBJ 팔레트'
+            if n and not _bg_fits(bg, pic.bpal):
+                n, why[i] = 0, 'BG 팔레트'
+            if n and p and p not in chr_.table:
+                if chr_.next[1] + pic.bg_places > 0xFF:
+                    n, why[i] = 0, 'BG CHR'
+                elif chr_.next[0] + pic.obj_tiles > 0xFF:
+                    n, why[i] = 0, 'OBJ CHR'
+            if not n:
+                ids[c6:] = ids[c6 + 1:] + [FF]
+                counts[c6:] = counts[c6 + 1:] + [0]
+                origin[c6:] = origin[c6 + 1:] + [None]
+                continue
+            used += n * (pic.width + 1)
+            _commit(bg, pic.bpal, True, self.place_color)
+            _commit(obj, pic.opal, False, self.place_color)
+            oam += ys * n
+            if p:
+                chr_.upload(p)
+            shown[i] = n
+            c6 += 1
+        return shown, why
+
+
+class _FcChr:
+    """CHR 칸 표($044C 그림, $045A·$0468 칸마다 OBJ·BG 시작)와 다음 자리($CB OBJ, $CC BG)."""
+
+    def __init__(self, battle):
+        self.battle = battle
+        self.table = [FF] * CHR_SLOTS
+        self.start = [[0, 0] for _ in range(CHR_SLOTS)]
+        self.start[0] = [OBJ_FIRST, BG_FIRST]
+        self.next = [OBJ_FIRST, BG_FIRST]
+
+    def upload(self, p):
+        """14:$969C: 이미 올린 그림이면 그대로, 빈 칸이 없으면 올리지 않음. 다음 자리가 $100 에 닿으면 멈추고 칸을
+        적지 않는다($97DD)."""
+        if p in self.table or FF not in self.table:
+            return
+        c8 = self.table.index(FF)
+        self.next = list(self.start[c8])
+        if p == 0:
+            self.next[1] = BG_FIRST
+        for kinds in self.battle.picture(p).kinds:
+            for k in kinds:
+                side = 0 if k == 0 else 1
+                self.next[side] = (self.next[side] + 1) & 0xFF
+                if not self.next[side]:
+                    return
+        if p:
+            self.table[c8] = p
+        if c8 + 1 < CHR_SLOTS:
+            self.start[c8 + 1] = list(self.next)
+
+
+def _obj_lines(oam, ys, n):
+    """14:$9ADD: (놓을 수, 깎은 한도 또는 None)."""
+    if not ys:
+        return n, None
+    cut = None
+    for line in range(OBJ_LINE_FROM, OBJ_LINE_TO):
+        inside = sum((y - line) & 0xFF < 8 for y in ys)
+        room = OBJ_PER_LINE - sum((y - line) & 0xFF < 8 for y in oam)
+        if inside and n * inside > room:
+            n, cut = max(room // inside, 0), 'OBJ 줄'
+            if not n:
+                return 0, cut
+        if len(oam) + len(ys) > OAM_LIMIT:
+            return 0, 'OBJ 합'
+    return n, cut
+
+
+def _fit(used, width, n):
+    k = 0
+    while k < n and used + width + 1 < WIDTH_LIMIT:
+        used += width + 1
+        k += 1
+    return k
+
+
+def _palettes_fit(slots, pals):
+    """14:$9439: 같은 3색이 없는 팔레트 수 ≤ 빈 칸(첫 바이트 FF) 수."""
+    need = sum(p not in slots for p in pals)
+    return sum(s[0] == FF for s in slots) >= need
+
+
+def _bg_fits(slots, pals):
+    """14:$93F2: _palettes_fit 이 아니어도 같은 3색이 없는 팔레트가 하나뿐이고($9409) 칸 0 을 쓸 수 있으면 놓는다. 보는
+    팔레트는 14:$93F5 가 마지막에 읽은 BG 팔레트 0 이다."""
+    if _palettes_fit(slots, pals):
+        return True
+    return sum(p not in slots for p in pals) == 1 and _shared_bg(slots[0], pals[0])
+
+
+def _commit(slots, pals, bg, place_color):
+    """14:$946E(BG)·$9496(OBJ): 팔레트 끝에서 앞으로, 같은 칸 → 빈 칸 → (BG 만) 칸 0 차례로 넣고, 넣을 곳이 없으면
+    거기서 그친다. BG 는 다 넣은 뒤 칸 0 첫 색을 장소 색으로 되돌린다($948E)."""
+    for tri in reversed(pals):
+        k = next((j for j, s in enumerate(slots) if s == tri), None)
+        if k is None:
+            k = next((j for j, s in enumerate(slots) if s[0] == FF), None)
+        if k is None and bg and _shared_bg(slots[0], tri):
+            k = 0
+        if k is None:
+            return
+        slots[k] = list(tri)
+    if bg:
+        slots[0][0] = place_color
 
 
 def sfc_placed(pictures, groups):
@@ -249,7 +468,8 @@ def count(build, prg, dq5):
     tables = FE.fc_tables(prg)
     pictures = dq5monlimits.Pictures(Rom(build))
     same = {i: i for i in range(256)}
-    widths, objs = {}, {}
+    battle = FcBattle(prg)
+    widths = {}
     places, short = {}, []
     for ch, zones in CHAPTER_ZONES.items():
         for z in zones:
@@ -263,17 +483,16 @@ def count(build, prg, dq5):
                 for groups, p in sorted(combos.items()):
                     for m, _ in groups:
                         if m not in widths:
-                            widths[m], objs[m] = fc_width(prg, m), fc_has_obj(prg, m)
-                    want = fc_shown(widths, groups)
+                            widths[m] = fc_width(prg, m)
+                    want, why = battle.place(groups)
                     dq5g = [(FE.MONSTERS[m], n) for m, n in groups]
                     got = sfc_placed(pictures, dq5g)
                     if any(g < w for g, w in zip(got, want)):
                         bad += 1
                         short.append({'chapter': ch, 'fc_zone': z, 'area': row[0], 'mode': mode,
                                       'fc': [list(g) for g in groups], 'dq5': [list(g) for g in dq5g],
-                                      'fc_shown': want, 'placed': got, 'p': p,
-                                      'fc_widths': [widths[m] for m, _ in groups],
-                                      'fc_obj': any(objs[m] for m, _ in groups)})
+                                      'fc_shown': want, 'fc_why': why, 'fc_width': fc_shown(widths, groups),
+                                      'placed': got, 'p': p, 'fc_widths': [widths[m] for m, _ in groups]})
                 places[ch, z, mode] = {'area': row[0], 'combos': len(combos), 'short': bad,
                                        'p_short': sum(s['p'] for s in short[len(short) - bad:])}
     return {'places': places, 'short': short}
