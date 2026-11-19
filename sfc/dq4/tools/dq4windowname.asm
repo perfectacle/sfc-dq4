@@ -808,6 +808,9 @@ org $24A5E9
 !wt_fix_scan = 6           ; WtVis: 전용 칸 문구 자리에서 1D0~ 을 찾는 칸 수(문구 첫 칸이 덮여도 뒤 칸이 보이면 보임)
 !wt_k     = $A974           ; 그리는 고정 문구 번호
 !wt_dirty = $A9F0           ; 2 워드: 슬롯마다 1비트, 메시지 캔버스 안에 그림을 올린 슬롯
+!wq_cleaned = $ABF0         ; WqClean: 이 NMI 에 비운(또는 비우다 멈춘) 슬롯 수. 0 이 아니면 캔버스 DMA 를 미룸
+!wq_cdefer = $ABF2          ; 1바이트: 앞 NMI 에 캔버스 DMA 를 미룸(이번에는 비우지 않고 보냄)
+!wq_qstart = $ABF4          ; WtQueue: 짜는 항목의 첫 자리
 !wt_age   = $A96C           ; 쓸 때마다 하나씩
 !wt_mode  = $A96E           ; 고정 글자 수: 0 = 04:B808(길이 $00), 5 = 04:B8F3(주문), 9 = 04:BC08(몬스터)
 !wt_lastx = $A970           ; 원래 루틴이 마지막으로 찍는 바이트의 DP 자리
@@ -824,6 +827,7 @@ org $24A5E9
 !wt_late_line = 245         ; 게이트 일 뒤 이 주사선부터는 게임의 창 타일맵 2KB 를 미룬다(실측: 게임 NMI 진입이 한 줄쯤
                             ; 뒤, 2KB DMA 시작이 그 세 줄 뒤. 2KB 는 열두 줄이라 249 줄까지 시작해야 261 줄 안에 끝남)
 !wt_restore_line = 250      ; 게이트가 이 주사선 앞에서만 슬롯을 하나 더 되돌린다(하나에 다섯 줄까지)
+!wq_clean_line = 256       ; WqClean 이 이 주사선 앞에서만 슬롯 하나를 더 비운다(한 슬롯에 두 줄 남짓)
 !wh_with_line = 249        ; WhWith 가 이 주사선 앞에서만 창 타일맵(1920바이트)을 대신 보낸다. 실측 DMA 160바이트/줄이라 열두 줄,
                             ; 248 줄에 시작해도 260 줄에 끝나 귀선(~261) 안이다. 묶음 그림은 남아도 다음 NMI 에 빠지지만(같은
                             ; 타일맵을 거둔 NMI) 붙잡으면 창이 늦고 놓으면 목록 줄이 비므로, 문턱은 타일맵이 들어가는 데까지 둔다
@@ -3616,17 +3620,15 @@ WtNameDraw:
     RTS
 
 ; 대기열에 두 항목: 글자 줄(방식 1, 평면 0 만 열 × 8바이트, NMI 가 평면 1 을 FF 로)과 위 줄(방식 0, 두 평면 열 × 16바이트).
-; 위 줄은 지금 그 자리의 타일 그림에 글자 맨 윗줄을 겹친다. 넣는 동안은 NMI 를 끈다.
+; 위 줄은 지금 그 자리의 타일 그림에 글자 맨 윗줄을 겹친다. 항목을 짜는 동안은 NMI 를 켜 두고(NMI 는 !wq_off 뒤를 읽지
+; 않는다), 항목 수를 늘리는 끝에서만 끈다. 짜는 내내 끄면 그 사이 수직 귀선이 오면 게임 NMI 가 늦게 시작해 캔버스 DMA 가
+; 화면 그리는 줄로 넘어가 버려졌다(건네기 화면 V 4 → 16)
 WtQueue:
     LDA.w !wt_shared
     BEQ +
     STZ.w !wt_shared
     RTS
 +
-    SEP #$20
-    LDA.b $1E
-    AND #$7F
-    STA.l $004200
     REP #$20
     LDA.w !wq_count
     AND #$00FF
@@ -3653,6 +3655,9 @@ WtQueue:
     ; 건너뛸 때($19 bit7) 비워지지 않을 수 있다. 이 프레임의 게임 NMI 는 $4210 을 읽어 건너뛴다(VBlank 가 끝난 뒤
     ; NMI 를 다시 켜면 화면을 그리는 도중에 NMI 가 돌기 때문).
     SEP #$20
+    LDA.b $1E
+    AND #$7F
+    STA.l $004200
 --
     LDA.l $004212
     BMI --
@@ -3670,6 +3675,7 @@ WtQueue:
 .room
     ; 글자 줄 항목 머리
     LDY.w !wq_off
+    STY.w !wq_qstart
     LDA.w !wt_base
     ASL
     ASL
@@ -3778,6 +3784,11 @@ WtQueue:
     LDA.w !wn_k
     CMP.w !wt_cols
     BCC .upper
+    SEP #$20
+    LDA.b $1E
+    AND #$7F
+    STA.l $004200
+    REP #$20
     STY.w !wq_off
     LDX.w !wt_slot2
     BMI +
@@ -3808,6 +3819,13 @@ WtQueue:
     STA.w !wt_keys,X
     LDA.w !wt_age
     STA.w !wt_ages,X
++
+    ; 짜는 사이 NMI 가 대기열을 다 보내 !wq_rd 를 0 으로 돌렸으면 이 항목 첫 자리부터 읽게 한다
+    LDA.w !wq_count
+    AND #$00FF
+    BNE +
+    LDA.w !wq_qstart
+    STA.w !wq_rd
 +
     SEP #$20
     LDA.w !wq_count
@@ -4062,7 +4080,32 @@ WtVisTail:
 ; 있으면 게이트를 부른다. 창 타일맵 요청만 있어도 부르는 것은 WtVis 가 그 전송 때의 버퍼를 재기 위해서다
 ; A 는 바꾸고 X·Y 는 지킨다. 게임 NMI 작업은 들어올 때의 X·Y 를 이어 쓴다.
 WqNmiEntry:
+    ; WhWith 는 캔버스 전송과 겹치면 스스로 게임 요청을 한 NMI 붙잡으므로 아래 건너뛰기와 상관없이 부른다(건너뛰면 창
+    ; 타일맵만 먼저 가 목록 줄이 빈다). 할 일(!wq_defer bit5)이 없으면 부르지도 않는다
+    LDA.l $7E0000|!wq_defer
+    BIT #$20
+    BEQ +
     JSR WhWith
++
+    ; 게임이 이 NMI 에 메시지 캔버스를 보내거나(작업 8E98, $0F59 ≠ 0) 전송 목록(작업 8CEF)에 큰 항목(256워드 넘게,
+    ; 메시지를 시작하며 캔버스 칸을 두 평면째 지우는 24:8029·24:807B)이 있으면 대기열 일(게이트)은 다음 NMI 로 미룬다.
+    ; 원본 DQ5 도 이 DMA 들이 수직 귀선을 0줄까지 채워(V 244 → 0) 앞에 더 쓸 틈이 없고, 넘치면 끝 몫이 화면 그리는 줄에
+    ; 가 버려진다. 작업 셋(8E98·8CEF·8DE9)은 높은 바이트가 달라 그것만 본다(앞일을 줄이려고)
+    LDA.l $001947
+    CMP #$8E
+    BNE +
+    LDA.l $000F59
+    BEQ .go
+    RTL
++
+    CMP #$8C
+    BNE .go
+    LDA.l $000758
+    BEQ .go
+    LDA.l $7E4004
+    BEQ .go
+    RTL
+.go
     LDA.l $7E0000|!wt_stale
     ORA.l $7E0000|!wt_stale2
     AND #$7F
@@ -4779,27 +4822,45 @@ WhNmi:
 ; 원래 글자 칸처럼 FF 로 되돌리고 슬롯을 비운다. 게임은 캔버스의 평면 0 만 보내므로, 위 줄 합성(테두리 무늬가 든 평면 1)이
 ; 남아 메시지 창 빈 줄에 선으로 보였다. NMI 작업 안이라 큐용 NMI 변수(!wq_head·!wq_len·!wq_left)를 쓴다.
 WqClean:
+    ; 비울 슬롯이 없으면 곧바로 원래 길로(이 NMI 의 캔버스 DMA 는 귀선을 0줄까지 채우므로 앞일을 줄인다)
+    LDA.l $7E0000|!wt_dirty
+    ORA.l $7E0000|(!wt_dirty+1)
+    ORA.l $7E0000|(!wt_dirty+2)
+    ORA.l $7E0000|(!wt_dirty+3)
+    BEQ .send
+    ; 앞 NMI 에 미뤘으면 이번에는 비우지 않고 보낸다. 게임이 매 프레임 이름을 새로 그리는 화면에서는 슬롯이 늘 새로 차
+    ; 미루기만 거듭하면 메시지가 끝내 가지 않는다
+    LDA.l $7E0000|!wq_cdefer
+    BEQ +
+    LDA #$00
+    STA.l $7E0000|!wq_cdefer
+.send
+    PHB
+    LDA #$00
+    PHA
+    PLB
+    LDA #$7E
+    JML $008EA3
++
     PHB
     PEA $7E7E
     PLB
     PLB
     REP #$30
+    STZ.w !wq_cleaned
     LDA.w !wt_dirty
     ORA.w !wt_dirty+2
     BNE +
     JMP .out
 +
-    LDA.w !wt_dirty
-    STA.w !wq_head
-    LDA.w !wt_dirty+2
-    STA.w !wq_len
-    STZ.w !wt_dirty
-    STZ.w !wt_dirty+2
     LDX #$0000
 .slot
-    LSR.w !wq_len
-    ROR.w !wq_head
-    BCS +
+    LDA.l WtBitLo,X
+    AND.w !wt_dirty
+    BNE +
+    LDA.l WtBitHi,X
+    AND.w !wt_dirty+2
+    BNE +
     JMP .next
 +
     LDA.w $1944
@@ -4809,7 +4870,12 @@ WqClean:
     LDA.l WtClassF,X
     AND #$0020
     BEQ +
+    JSR WqCleanBit
     JMP .next
++
+    JSR WqCleanRoom
+    BCC +
+    JMP .stop
 +
     STZ.w !wt_keys,X
     STZ.w !wt_ages,X
@@ -4833,7 +4899,12 @@ WqClean:
     LDA.l WtClass,X
     AND #$0020
     BEQ +
+    JSR WqCleanBit
     JMP .next
++
+    JSR WqCleanRoom
+    BCC +
+    JMP .stop
 +
     STZ.w !wt_keys,X
     STZ.w !wt_ages,X
@@ -4850,8 +4921,19 @@ WqClean:
     CPX.w #!wt_nslot*2
     BCS .out
     JMP .slot
+.stop
+    INC.w !wq_cleaned
 .out
+    ; 슬롯을 비웠으면(평면 1 을 되돌린 DMA) 이 NMI 의 캔버스 DMA 는 다음 NMI 로 미룬다($0F59 를 남기고 작업에서 돌아감).
+    ; 두 일을 한 귀선에 넣으면 캔버스 DMA 가 화면 그리는 줄로 넘어(V 5 → 16) 버려졌다
     SEP #$20
+    LDA.w !wq_cleaned
+    BEQ +
+    LDA #$01
+    STA.w !wq_cdefer
+    PLB
+    JML $008E9D
++
     PLB
     ; 원래 명령: PHB / PHK / PLB(DB = 00) / LDA #$7E
     PHB
@@ -4860,6 +4942,34 @@ WqClean:
     PLB
     LDA #$7E
     JML $008EA3
+
+; WqClean 안(M = X = 16, DB = 7E, X = 슬롯 × 2). 이 슬롯의 !wt_dirty 비트를 지운다
+WqCleanBit:
+    LDA.l WtBitLo,X
+    EOR #$FFFF
+    AND.w !wt_dirty
+    STA.w !wt_dirty
+    LDA.l WtBitHi,X
+    EOR #$FFFF
+    AND.w !wt_dirty+2
+    STA.w !wt_dirty+2
+    RTS
+
+; WqClean 안. 주사선이 !wq_clean_line 앞(귀선 안)이면 이 슬롯을 비울 자리로 셈해 비트를 지우고 C = 0. 아니면 C = 1(남은
+; 슬롯은 다음 NMI 에, 캔버스 DMA 도 그때)
+WqCleanRoom:
+    JSR WtLine
+    CMP #$00E1
+    BCC .no
+    CMP.w #!wq_clean_line
+    BCS .no
+    JSR WqCleanBit
+    INC.w !wq_cleaned
+    CLC
+    RTS
+.no
+    SEC
+    RTS
 
 ; 등급(A: 0·1·2) → 한 줄(글자 줄 또는 위 줄)의 평면 1 바이트 수(열 4·7·10 × 8)
 WqRunBytes:
