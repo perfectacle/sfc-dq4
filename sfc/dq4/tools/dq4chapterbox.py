@@ -252,8 +252,14 @@ def screen_off():
 
 
 def screen_on():
-    """NMI 를 되살린다. 다음 NMI 가 $2100 을 그림자 $1D 로 쓴다."""
-    return bytes((0xAD, 0x1E, 0x00, 0x8D, 0x00, 0x42))      # LDA $001E / STA $4200
+    """M 8. OAM 주소를 0 으로 두고 NMI 를 되살린다(M 16 이면 STZ $2103 이 $2104 까지 써 OAM 을 덮음). 다음 NMI 가
+    $2100 을 그림자 $1D 로 쓴다.
+
+    그 NMI 의 vblank 첫머리에는 $2100 이 아직 강제 끔(80)이라 PPU 가 OAM 주소를 다시 싣지 않는다. 그대로 두면 NMI 의 OAM
+    DMA(00:89DD)가 앞 DMA 가 끝난 544 에서 이어 써, 높은 표와 앞 16칸이 낮은 표 뒤쪽(숨긴 OBJ F7)으로 덮인 채 한 프레임
+    그려진다(16점 큰 OBJ 가 X -9·Y F7 에서 화면 위 0~6 줄로 넘어옴)."""
+    return bytes((0x9C, 0x02, 0x21, 0x9C, 0x03, 0x21,      # STZ $2102 / STZ $2103
+                  0xAD, 0x1E, 0x00, 0x8D, 0x00, 0x42))      # LDA $001E / STA $4200
 
 
 def fade(first, last, step):
