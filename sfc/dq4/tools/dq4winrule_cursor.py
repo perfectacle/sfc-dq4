@@ -9,7 +9,7 @@
 from collections import Counter
 
 NAME = '커서'
-MODE = 'fail'
+MODE = 'report'
 ALLOW = ()
 CURSOR = 0x7C
 ROM_FONT = 0x04E528
