@@ -113,8 +113,26 @@ class PrGuardsWorkflowTest(unittest.TestCase):
         self.assertEqual(len(plan), 1)
         self.assertLess(tests[0], plan[0])
         self.assertEqual(job_key(self.jobs['guard-plan'], 'if'), f"github.event_name == 'pull_request' || {MAIN_PUSH}")
-        # 권한은 읽기만
-        self.assertNotRegex(self.text, r':\s*write\b')
+        # 권한은 읽기만(쓰기는 main-guard-issues 의 issues: write 하나, 아래 시험이 지킴)
+        self.assertNotRegex(self.text.replace('      issues: write\n', ''), r':\s*write\b')
+
+    def test_only_the_issue_job_may_write_and_it_holds_no_secret(self):
+        self.assertEqual(self.text.count('issues: write'), 1)
+        job = self.jobs['main-guard-issues']
+        self.assertIn('issues: write', job)
+        self.assertNotIn('secrets.', job)
+        self.assertNotIn('guard-shards.yml', job)
+        self.assertEqual(job_key(job, 'needs'), '[guard-plan, pr-guards]')
+        self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/main'", job_key(job, 'if'))
+        self.assertIn("needs.pr-guards.result == 'failure'", job_key(job, 'if'))
+        # 실패해도 ci-ok(머지 관문)를 막는 잡이 아니다
+        self.assertNotIn('main-guard-issues', self.jobs['ci-ok'])
+
+    def test_main_push_adds_the_release_guards_and_a_pr_does_not(self):
+        plan = [s for s in self.steps['guard-plan'] if '--plan' in run_texts(s)][0]
+        self.assertIn('"${extra[@]}"', plan)
+        self.assertIn('if [ "$EVENT" = push ]; then extra=(--with-release); fi', plan)
+        self.assertIn('EVENT: ${{ github.event_name }}', plan)
 
     def test_verdict_job_gates_ci_ok(self):
         ok = self.jobs['ci-ok']

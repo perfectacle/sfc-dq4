@@ -9,7 +9,7 @@
     run = "uv run --locked python ..."  # 돌리는 명령
     needs = ["rom", "MESENCE"]          # 돌리는 데 필요한 것. 대문자 이름은 환경 변수로 보고 --base 때 설정됐는지 알린다
     groups = ["ch1-build"]              # (골라 씀) 같은 파일의 [groups] 에 이름 붙인 paths 묶음을 더한다
-    tier = "release"                    # (골라 씀) "pr"(기본) 또는 "release": 무거워 배포 관문에서만 돌리는 검사
+    tier = "release"                    # (골라 씀) "pr"(기본) 또는 "release": 길어서 PR 에서는 빠지고 main 머지 뒤·배포 관문이 돌리는 검사
     parts = 4                           # (골라 씀) CI 조각(--shard)에서 이 검사를 하위 조각 n 개로 나눠 러너마다 따로 돌린다
 
     [groups]
@@ -28,9 +28,11 @@
     paths = ["sfc/dq4/tools/dq4build.py", ...]   # (골라 씀) 바뀌면 이 트랙의 검사를 전체 모드로 고르는 파일
 
 PR 에서는 바뀐 파일이 그 검사의 paths 에 바로 맞을 때, 또는 검사 목록에서 그 검사의 run·needs 가 바뀌었을 때(새 검사
-포함. 트랙 전체로 견주므로 검사를 다른 조각으로 옮기기만 한 것은 바뀐 것이 아니다) 걸린다. 묶음으로만 맞는 검사와 tier = "release" 인 검사는 빠지고 배포 관문(tools/release_check.py)이 돌린다.
-바뀐 파일이 트랙의 [full] paths 에 맞으면 그 트랙은 전체 모드라 그 트랙의 검사가 등급과 상관없이 모두 걸린다(CI 와
-로컬이 같은 판정). PR 본문의 `가드: 전체` 줄이나 --full 은 모든 트랙을 전체 모드로 넓히기만 하고 좁히지는 못한다.
+포함. 트랙 전체로 견주므로 검사를 다른 조각으로 옮기기만 한 것은 바뀐 것이 아니다) 걸린다. 묶음으로만 맞는 검사와 tier = "release" 인 검사는 빠지고 main 에 머지된 뒤(ci.yml push 의 --with-release)와 배포 관문
+(tools/release_check.py)이 돌린다. 이름만 모아 등급을 바꾸는 [tier] release = ["검사 이름", …] 표를 guards.toml 이나 조각에 둘 수 있다
+(검사 항목을 건드리지 않고 등급만 옮길 때).
+바뀐 파일이 트랙의 [full] paths 에 맞으면 그 트랙은 전체 모드라 그 트랙의 PR 등급 검사가 모두 걸린다(CI 와
+로컬이 같은 판정. release 등급은 PR 에서 걸리지 않는다). PR 본문의 `가드: 전체` 줄이나 --full 은 모든 트랙을 전체 모드로 넓히기만 하고 좁히지는 못한다.
 본문의 `가드: 더함 이름, 이름` 줄은 그 검사들을 걸린 목록에 더한다(guards.py 를 바꾼 PR 의 대표 셋을 CI 에서 돌릴 때).
 
 사용:
@@ -45,6 +47,8 @@ PR 에서는 바뀐 파일이 그 검사의 paths 에 바로 맞을 때, 또는 
   python tools/guards.py --base SHA --head SHA --plan OUT
                                                  걸린 검사를 CI 몫과 로컬 몫(guard-shards.yml 의 LOCAL_NEEDS)으로 나눠
                                                  guards=·local=·shards= 줄을 OUT 에 더함(CI guard-plan 잡, $GITHUB_OUTPUT)
+  python tools/guards.py --base SHA --head SHA --plan OUT --with-release
+                                                 main push: 위에 release 등급 검사 전부를 더함(머지 뒤에 도는 긴 검사)
   python tools/guards.py --base SHA --pr-body FILE [--local-only]
                                                  걸린 검사마다 본문에 결과 줄이 있는지 봄(CI). --local-only 면 로컬 몫만
   python tools/guards.py --all --run --no-cache --shard 3/16 --exclude-needs macos --json OUT.json
@@ -130,6 +134,8 @@ SHARDS_WORKFLOW = ROOT / '.github' / 'workflows' / 'guard-shards.yml'
 # 나눠 쓰므로 그보다 작게 둔다(test_release_gate_workflow 가 지킴)
 PR_SHARD_SECONDS = 480
 PR_SHARDS_MAX = 8
+# main push 는 release 등급까지 돌려 무게가 크다. 머지 뒤라 PR 처럼 짧을 필요는 없지만 배포 관문 조각(18)보다 작게
+MAIN_SHARDS_MAX = 14
 
 
 def git(*args):
@@ -146,8 +152,8 @@ def matches(path, pattern):
 
 
 FRAGMENTS = 'guards.d'
-MAIN_KEYS = ('check', 'groups', 'cache', 'full')
-FRAGMENT_KEYS = ('check', 'groups')
+MAIN_KEYS = ('check', 'groups', 'cache', 'full', 'tier')
+FRAGMENT_KEYS = ('check', 'groups', 'tier')
 
 
 def fragment_owner(path):
@@ -293,6 +299,19 @@ def load(files, read=lambda f: (ROOT / f).read_text(encoding='utf-8')):
             claimed = sorted({p for c in mine for p in c['paths'] if not glob.has_magic(p)})
             for c in mine:
                 c['key_claimed'] = claimed
+        for part, pdata in parts:
+            for tname, names in (pdata.get('tier', {}) if isinstance(pdata.get('tier', {}), dict) else {}).items():
+                if tname != 'release' or not isinstance(names, list):
+                    problems.append(f'{part}: [tier] 는 release = [검사 이름, …] 만')
+                    continue
+                for n in names:
+                    hit = [c for c in mine if c['name'] == n]
+                    if not hit:
+                        problems.append(f'{part} tier.release: 검사 {n!r} 이 {toml} 트랙에 없음')
+                    for c in hit:
+                        c['tier'] = 'release'
+            if not isinstance(pdata.get('tier', {}), dict):
+                problems.append(f'{part}: tier 는 [tier] 표여야 함')
         for c in mine:
             c['full_paths'] = full_paths
         checks += mine
@@ -1408,7 +1427,9 @@ def triggered(checks, changed, edited=(), full=False):
     """걸린 검사. 전체 모드인 검사는 모두 걸린다: full 이거나 바뀐 파일이 그 트랙의 [full] paths 에 맞을 때. 그 밖에는
     바뀐 파일이 검사 자신의 paths(묶음 빼고)에 맞거나 이름이 edited 에 든 pr 등급 검사."""
     def whole(c):
-        return full or any(matches(f, p) for f in changed for p in c.get('full_paths', ()))
+        # [full] 이 켜는 전체 모드는 PR 등급만(release 등급은 main 머지 뒤와 배포 관문이 돈다). 본문 `가드: 전체`·--full 은 명시라 모두
+        return full or (c.get('tier', 'pr') != 'release'
+                        and any(matches(f, p) for f in changed for p in c.get('full_paths', ())))
 
     def hits(c):
         pats = c.get('own_paths', c.get('paths', []))
@@ -1554,6 +1575,8 @@ def main():
                     help='--unit-slots 에서 하위 조각 모두 같은 입력의 통과 기록이 있는 단위를 뺀다(돌 것만 되살림)')
     ap.add_argument('--plan', type=Path, metavar='OUT',
                     help='--base 에서 걸린 검사를 CI 몫·로컬 몫으로 나눠 guards=·local=·shards= 줄을 OUT 에 더한다')
+    ap.add_argument('--with-release', action='store_true',
+                    help='--plan 에서 바뀐 파일로 걸린 검사에 release 등급 검사 전부를 더한다(main push: 머지 뒤 긴 검사)')
     ap.add_argument('--local-only', action='store_true',
                     help='--pr-body 에서 로컬 몫(LOCAL_NEEDS)만 결과 줄을 요구한다(CI 몫은 CI 가드 잡이 판정)')
     ap.add_argument('--record-times', type=Path, nargs='+', metavar='보고서',
@@ -1564,6 +1587,8 @@ def main():
         return 0
     if not args.all and (args.shard or args.exclude_needs or args.json or args.sweeps):
         ap.error('--shard·--exclude-needs·--json·--sweeps 는 --all 과 함께')
+    if args.with_release and not args.plan:
+        ap.error('--with-release 는 --plan 과 함께')
     if not args.base and (args.plan or args.local_only):
         ap.error('--plan·--local-only 는 --base 와 함께')
     files = tracked()
@@ -1639,13 +1664,15 @@ def main():
             print('걸리는 실행 검사 없음')
         later = [c for c in pending(checks, changed, edited) if c not in hit]
         if later:
-            print('배포 관문에서(이 PR 에서는 돌리지 않음. 더 넓게 돌리려면 본문에 `가드: 전체` 를 쓰고 --full 로):')
+            print('main 머지 뒤·배포 관문에서(이 PR 에서는 돌리지 않음. 더 넓게 돌리려면 본문에 `가드: 전체` 를 쓰고 --full 로):')
             for c in later:
                 why = 'release 등급' if c.get('tier', 'pr') == 'release' else '묶음으로만 맞음'
                 print(f'- {c["name"]} ({why})')
+        if args.with_release:
+            hit += [c for c in checks if c.get('tier', 'pr') == 'release' and c not in hit]
         ci, local = split_local(hit, ci_local_needs())
         if args.plan:
-            n = pr_shards(ci, shard_weights(ci))
+            n = pr_shards(ci, shard_weights(ci), most=MAIN_SHARDS_MAX if args.with_release else PR_SHARDS_MAX)
             with args.plan.open('a', encoding='utf-8') as f:
                 f.write(f'guards={",".join(c["name"] for c in ci)}\nlocal={",".join(c["name"] for c in local)}\n'
                         f'shards={n}\n')
