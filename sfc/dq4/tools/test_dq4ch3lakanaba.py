@@ -367,5 +367,19 @@ class RealLooksTimingTest(unittest.TestCase):
         self.assertTrue(any('사라짐' in p for p in problems))
 
 
+class CustomerPaceTest(unittest.TestCase):
+    def test_work_scenes_pin_customer_arrival(self):
+        """일하는 장면은 손님이 오는 때를 난수에 맡기지 않는다: 순간이동 동안 PACE 를 붙들고 손님 구간에서 1 로 둔다."""
+        import dq4ch3lakanabacheck as K
+        hold = f'{L.PACE & 0xFFFF:04X}=FF'
+        go = f'{L.PACE & 0xFFFF:04X}=01'
+        work = [c for c in K.CASES.values() if c['steps'][0][0] == 'work' and len(c['steps']) > 1]
+        self.assertGreaterEqual(len(work), 10)
+        for case in work:
+            warp, customer = case['steps'][0][3], case['steps'][1][3]
+            self.assertIn(hold, warp.get('poke', ''))
+            self.assertIn(go, customer.get('set', ''))
+
+
 if __name__ == '__main__':
     unittest.main()

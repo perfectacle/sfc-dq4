@@ -39,7 +39,7 @@ def _a(addr):
 
 
 FLAGS = {
-    'L0': (0x7E2190 + 0x70, 0xFF), 'L1': (0x7E2190 + 0x71, 0xFF), 'T4': (L.TEMP, 0xFF),
+    'L0': (0x7E2190 + 0x70, 0xFF), 'PACE': (L.PACE, 0xFF), 'L1': (0x7E2190 + 0x71, 0xFF), 'T4': (L.TEMP, 0xFF),
     'COMMON': (0x7E2190 + ch3.DOG[0], 0xFF),
     'SCOTT_DAYS': (ch3.SCOTT_DAYS, 0xFF), 'LAWRENCE_DAYS': (ch3.LAWRENCE_DAYS, 0xFF),
     'STOCK0': (L.STOCK_AT, 0xFF), 'STOCK1': (L.STOCK_AT + 1, 0xFF), 'STOCK2': (L.STOCK_AT + 2, 0xFF),
@@ -96,9 +96,12 @@ RETALK = 'wait:30;b:8;wait:30;until:600'
 def work_case(variant, msgs, check, more=None, extra_set=None, maxf=3400, inputs=WAIT_CUSTOMER):
     """일하는 중(카운터 안)에서 손님 하나를 맞는다. check(seen) 는 끝 바이트로 본 문제 목록."""
     sets = {'L0': SEEN_SHIFT, **(extra_set or {})}
+    # 손님이 오는 때를 장면이 정한다. 손님 쉼(PACE)은 맵에 든 뒤 난수로 잡혀, 도착까지 굴린 난수 수가 바뀌면(앞 장면·다른
+    # PR 의 코드 사이클) 손님이 순간이동 도중에 들어와 말을 걸고 지나간다. 순간이동 동안은 붙들고, 손님 구간 시작에
+    # 1 로 두어 첫 차례에 들어오게 한다
     return {'variant': variant,
-            'steps': [('work', 'warp', WORK_AT, {'set': _set(**sets)}),
-                      ('customer', 'walk', f'{inputs};{CLOSE}', {'maxf': maxf, **(more or {})})],
+            'steps': [('work', 'warp', WORK_AT, {'set': _set(**sets), 'poke': L.CUSTOMER_HOLD}),
+                      ('customer', 'walk', f'{inputs};{CLOSE}', {'maxf': maxf, 'set': _set(PACE=1), **(more or {})})],
             'msgs': msgs, 'check': check}
 
 

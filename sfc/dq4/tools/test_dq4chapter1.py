@@ -373,11 +373,11 @@ class NpcDocPrologueTests(unittest.TestCase):
         self.assertGreater(len(with_prologue['lists']), len(plain['lists']))
         self.assertEqual(with_prologue['format'], 'dq5npcrelocate/1')
 
-    def test_scenes_drop_the_prologue_box_when_there_is_no_prologue(self):
+    def test_scenes_are_the_same_with_or_without_the_prologue(self):
+        """장 넘김 네이티브가 「완」 상자 주소를 빌드와 상관없이 부르므로 상자 차례는 서장이 없어도 같다."""
         import dq4chapterbox
-        self.assertIn(dq4chapterbox.PROLOGUE, ch.scenes(True))
-        self.assertNotIn(dq4chapterbox.PROLOGUE, ch.scenes(False))
-        self.assertEqual(len(ch.scenes(True)) - len(ch.scenes(False)), 1)
+        self.assertEqual(ch.scenes(True), dq4chapterbox.GAME_SCENES)
+        self.assertEqual(ch.scenes(False), dq4chapterbox.GAME_SCENES)
 
 
 class WrapperTests(unittest.TestCase):

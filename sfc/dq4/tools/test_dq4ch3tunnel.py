@@ -324,15 +324,14 @@ class RunTest(unittest.TestCase):
         self.assertIn(bytes((0xA9, tunnel.ENDING_SONG, 0x22, *tunnel._al(tunnel.SONG_PLAY))), song)
         self.assertIn(bytes((0x22, *tunnel._al(tunnel.SONG_STOP))), song)
         self.assertIn(bytes((0xAD, 0x8B, 0x1D, 0xC9, tunnel.ENDING_SONG)), song)
-        # 곡이 울기 시작한 뒤 FC 처럼 415프레임 더(BRK 09 n 을 이음)
-        import re
-        hold = song[song.rindex(bytes((0xCA,))) + 3:-len(tunnel.LEAVE)]
-        self.assertEqual(sum(n for n in re.findall(rb'\x00\x09(.)', hold, re.S) for n in n), tunnel.ENDING_HOLD)
+        # 곡이 울기 시작하면 곧 돌아온다. FC 징글 동안(415프레임)은 끝 상자가 먼저 부르는 「완」 상자가 뜬다
+        self.assertNotIn(bytes((0x00, 0x09)), song[song.rindex(bytes((0xCA,))):])
+        self.assertEqual((box.ENDING3.before, box.DONE3.hold, box.DONE3.subtitle), ('done3', 415, '완'))
 
 
 class SceneTest(unittest.TestCase):
     def test_ending3_is_the_last_scene_with_the_adopted_title(self):
-        self.assertIs(box.GAME_SCENES[-1], box.ENDING3)
+        self.assertIs(box.GAME_SCENES[box.GAME_SCENES.index(box.DONE1) - 1], box.ENDING3)
         self.assertEqual(box.ENDING3.name, tunnel.END_SCENE)
         self.assertEqual(box.ENDING3.subtitle, box.ENDING.subtitle)
         adopt = (ROOT / 'nds' / 'dq4' / 'tables' / 'adopt.tsv').read_text(encoding='utf-8')
