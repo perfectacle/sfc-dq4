@@ -73,6 +73,25 @@ def run(mesence, rom, script, dest, env, timeout):
                   check=False)
 
 
+def walk_env(state):
+    """서장 ROUTE 를 걷는 walk.lua 의 환경. 끝 판정(judge_walk)에 쓰는 깃발도 적게 한다."""
+    watch = ';'.join(f'{k}=7E{0x2190 + i:04X}:1' for k, (i, _) in FLAGS.items())
+    return {'STATE': str(state), 'WAYPOINTS': ';'.join(w for _, w in ROUTE), 'MAXF': '16000',
+            'CHANGES': str(len(MAPS) + 8), 'WATCH': watch}
+
+
+def judge_walk(dest):
+    """walk.lua 가 dest/walk.txt 에 남긴 맵 차례와 끝 깃발로 서장을 끝까지 걸었는지. walk.lua 는 막히거나 MAXF 에
+    닿아도 0 으로 끝나므로 이 판정을 거치지 않은 서장 기록은 끝까지 걸은 기록이라 볼 수 없다."""
+    path = dest / 'walk.txt'
+    text = path.read_text(encoding='utf-8') if path.exists() else ''
+    maps = re.findall(r'map \w\w/\w\w -> (\w\w/\w\w)', text)
+    seen = {k: int(v, 16) for k, v in re.findall(r'^(\w+)=([0-9A-F]+)$', text, re.M)}
+    flags = {k: bool(seen.get(k, 0) & m) for k, (_, m) in FLAGS.items()}
+    ok = maps == MAPS and all(flags.values())
+    return {'status': 'passed' if ok else 'failed', 'maps': maps, 'want_maps': MAPS, 'flags': flags}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--rom', required=True, type=Path)
@@ -91,15 +110,9 @@ def main():
     state = out / 'start' / 'start.mss'
     if not state.exists():
         raise SystemExit('세이브스테이트를 만들지 못함')
-    watch = ';'.join(f'{k}=7E{0x2190 + i:04X}:1' for k, (i, _) in FLAGS.items())
-    run(mesence, rom, WALK, out / 'walk', {'STATE': str(state), 'WAYPOINTS': ';'.join(w for _, w in ROUTE),
-                                           'MAXF': '16000', 'CHANGES': str(len(MAPS) + 8), 'WATCH': watch}, 600)
-    text = (out / 'walk' / 'walk.txt').read_text(encoding='utf-8') if (out / 'walk' / 'walk.txt').exists() else ''
-    maps = re.findall(r'map \w\w/\w\w -> (\w\w/\w\w)', text)
-    seen = {k: int(v, 16) for k, v in re.findall(r'^(\w+)=([0-9A-F]+)$', text, re.M)}
-    flags = {k: bool(seen.get(k, 0) & m) for k, (_, m) in FLAGS.items()}
-    ok = maps == MAPS and all(flags.values())
-    report = {'status': 'passed' if ok else 'failed', 'maps': maps, 'want_maps': MAPS, 'flags': flags}
+    run(mesence, rom, WALK, out / 'walk', walk_env(state), 600)
+    report = judge_walk(out / 'walk')
+    ok = report['status'] == 'passed'
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
     print(json.dumps(report, ensure_ascii=False))
     return 0 if ok else 1

@@ -51,9 +51,13 @@ def judge(seen, page_of):
     return [(m, a, page_of[m]) for m, a in seen if m in page_of and a > page_of[m]]
 
 
-def verdict(walk_rc, prologue, king, page_of):
-    """서장·왕 기록을 판정한 결과. 왕 구간 걷기가 실패하면 남은 기록이 있어도 실패다(끝까지 걷지 않은 기록이라)."""
+def verdict(walk_rc, prologue, king, page_of, prologue_walk):
+    """서장·왕 기록을 판정한 결과. 서장(prologue_walk, dq4prologuecheck.judge_walk 결과)이나 왕 구간 걷기가 끝까지 가지
+    못했으면 남은 기록이 있어도 실패다(끝까지 걷지 않은 기록이라)."""
     report = {'status': 'passed', 'scenes': {}}
+    if prologue_walk['status'] != 'passed':
+        report['status'] = 'failed'
+        report['prologue_walk'] = prologue_walk
     if walk_rc:
         report['status'] = 'failed'
         report['walk'] = f'왕 구간 걷기 종료 {walk_rc}'
@@ -91,16 +95,15 @@ def main():
     pc.run(mesence, rom, pc.MKSTATE, out / 'start', {'SAVEAT': str(pc.START_AT), 'STATE': 'start.mss',
                                                       'MAXF': str(pc.START_AT + 10), 'EVERY': '0', 'PERIOD': '40',
                                                       'TAP': 'a', 'TAPUNTIL': str(pc.TAP_UNTIL), 'SEQ': seq}, 200)
-    pc.run(mesence, rom, PROBE, out / 'prologue', {'STATE': str(out / 'start' / 'start.mss'), 'WALKLUA': str(pc.WALK),
-                                                    'WAYPOINTS': ';'.join(w for _, w in pc.ROUTE), 'MAXF': '16000',
-                                                    'CHANGES': str(len(pc.MAPS) + 8)}, 600)
+    pc.run(mesence, rom, PROBE, out / 'prologue', {**pc.walk_env(out / 'start' / 'start.mss'), 'WALKLUA': str(pc.WALK)},
+           600)
     # 왕 구간은 걷기 검사의 구간 실행을 그대로 쓰고 걷기 프로브만 감싼다
     os.environ['WALKLUA'] = str(walk.WALK_STATE)
     walk.WALK_STATE = PROBE
     sys.argv = ['dq4ch1walkcheck', '--rom', str(rom), '--out', str(out / 'king'), '--from', 'king', '--until', 'king',
                 '--states', str(args.states.resolve())]
     report = verdict(walk.main(), out / 'prologue' / 'msgcount.txt', next((out / 'king').rglob('msgcount.txt'), None),
-                     page_of)
+                     page_of, pc.judge_walk(out / 'prologue'))
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
     print(json.dumps(report, ensure_ascii=False))
     return 0 if report['status'] == 'passed' else 1

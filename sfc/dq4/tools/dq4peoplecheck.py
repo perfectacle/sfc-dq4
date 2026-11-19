@@ -277,6 +277,9 @@ def main():
     jobs = [(rom, n, m, None) for n in args.scenes if n != 'event' and n not in FAR for m in args.maps]
     far = far_maps(dq5npcrecord.dump(Rom(rom.read_bytes()))['entries']) if set(args.scenes) & set(FAR) else {}
     jobs += [(rom, n, m, far) for n in args.scenes if n in FAR for m in far]
+    if set(args.scenes) & set(FAR) and not far:
+        # 먼 맵 목록은 롬 인물 표에서 뽑으므로, 비면 그 장면들을 하나도 돌리지 않고 통과하게 된다
+        raise SystemExit('롬 인물 표에서 먼 맵(far_maps)을 하나도 찾지 못함')
     wanted = {}
     if 'event' in args.scenes:
         data, wanted = event_rom(rom.read_bytes())
@@ -300,7 +303,7 @@ def main():
               + ''.join(f"\n    슬롯 {s['slot']:02X} 그림 {s['picture']:02X} 세트 {s['set']:02X} "
                         f"타일 {s.get('tiles')} 칸 {s.get('cells')} 팔레트 {s.get('palette')} {s.get('note', '')}"
                         for s in bad))
-    ok = all(r['ok'] for r in results)
+    ok = bool(results) and all(r['ok'] for r in results)
     report = {'status': 'passed' if ok else 'failed', 'scenes': results}
     (out / 'results.json').write_text(json.dumps(report, ensure_ascii=False, indent=1) + '\n')
     print(json.dumps({'status': report['status'], 'scenes': len(results),

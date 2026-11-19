@@ -362,6 +362,9 @@ def summarize(results, person_results, skipped, part=None):
     failed = {k: [r for r in rs if r['status'] != 'passed'] for k, rs in results.items()
               if any(r['status'] != 'passed' for r in rs) or rs[-1].get('name') != 'talk'}
     failed.update({f'people {k}': [r] for k, r in person_results.items() if r['status'] != 'passed'})
+    if not results and not person_results:
+        # 몫에 돈 단위가 없으면 아무 대화도 보지 않고 통과하게 된다
+        failed['empty'] = [{'status': 'failed', 'problem': '돈 단위가 하나도 없음'}]
     shown = sum(1 for rs in results.values() if rs[-1].get('name') == 'talk'
                 for ids in rs[-1]['shown'].values() if ids and ids != [f'{pt.NOBODY:03X}'])
     report = {'status': 'failed' if failed else 'passed', 'part': part,

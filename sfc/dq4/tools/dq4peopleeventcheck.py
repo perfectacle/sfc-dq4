@@ -13,7 +13,8 @@ Lua(lua/dq4peoplesample.lua)를 얹는다. 표본은 구간 폴더의 lines.bin(
   OBJ   무거운 표본마다 인물 슬롯을 dq4peoplecheck.judge 로 판정하고, 화면 안 OAM 가운데 공용 줄을 쓰면서 판정한
         슬롯의 타일이 아닌 것을 센다
 
-「다름」 표본이나 인물 밖 OAM 이 있거나 표본이 하나도 없는 구간이 있으면 실패다. 「회색」·「어두움」·「밝음」 은 구간마다 세어 보고만 한다.
+걷기 검사가 실패하거나(못 간 구간은 표본이 없어 판정에서 빠지므로), 「다름」 표본이나 인물 밖 OAM 이 있거나 표본이 하나도
+없는 구간이 있으면 실패다. 「회색」·「어두움」·「밝음」 은 구간마다 세어 보고만 한다.
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4peopleeventcheck.py --chapter 2 --rom work/ch2/dq4-ch1-full.sfc \\
       --out work/peopleevent2 [--jobs 6] [--only 구간,…] [--json OUT]
@@ -171,11 +172,14 @@ def main():
             # 3장 검사는 2장 flag 표에 3장 것을 더하므로(dq4ch3opencheck) 3장일 때만 불러온다
             import dq4ch3walkcheck
             walk = dq4ch3walkcheck
+        # 걷기가 실패하면 못 간 구간의 lines.bin 이 없어 남은 구간만 판정되므로, 걷기 실패는 이 검사의 실패다
         try:
-            walk.main()
+            walk_rc = walk.main()
         except SystemExit as e:
-            if e.code:
-                raise
+            walk_rc = e.code
+        if walk_rc:
+            print(json.dumps({'status': 'failed', 'walk': f'걷기 종료 {walk_rc}'}, ensure_ascii=False))
+            sys.exit(1)
     rom = args.rom.read_bytes()
     results = [analyse(rom, p.parent) for p in sorted(args.out.rglob('lines.bin'))]
     for r in results:
