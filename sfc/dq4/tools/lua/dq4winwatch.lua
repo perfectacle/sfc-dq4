@@ -10,8 +10,9 @@
 -- 달라진 칸의 그림만 적는다. 같은 때의 OAM(544바이트)·CGRAM(512바이트)도 앞 모습과 달라진 낱말만 적는다(스프라이트·색
 -- 규칙용). 파일 첫머리는 판 기록 V(지금 5).
 --
--- 엔진이 창 하나의 틀을 버퍼에 그릴 때(04:A56C, 창 틀 그리기가 $0A46 높이를 읽는 첫 명령)마다 D 기록(프레임, 창 번호 $0A00,
--- x·y·너비·높이 $0A43~$0A46)을 적는다. 창을 닫으면 엔진이 남은 창을 아래부터 다시 그리므로 판정이 그 차례로 겹친 순서를 안다.
+-- 엔진이 창 하나의 틀을 버퍼에 그릴 때(04:A56C, 창 틀 그리기가 $0A46 높이를 읽는 첫 명령)마다 D 기록(프레임, 그리는 창의
+-- 번호, x·y·너비·높이 $0A43~$0A46)을 적는다. 번호는 창 쌓기 $0A00~ 의 지금 깊이 $0AD6 자리($09FF + $0AD6, 04:A45B 다시
+-- 그리기와 같은 읽기)다. $0A00 은 다시 그리는 동안에도 맨 위 창 번호라, 아래 창을 다시 그릴 때 그 번호가 붙는다. 창을 닫으면 엔진이 남은 창을 아래부터 다시 그리므로 판정이 그 차례로 겹친 순서를 안다.
 --
 -- 화면이 켜져 있으면(강제 블랭크·밝기 0 이 아님) BG3 과 상관없이 프레임마다 스프라이트·장면 표지도 적는다(판 4):
 --   O  OAM 이 바뀐 프레임과 바뀐 낱말, 이어서 P: 그 프레임의 WINWATCH_OWRAM 조각 가운데 달라진 바이트(인물 표 등)
@@ -42,7 +43,7 @@ if out then
   emu.addMemoryCallback(function()
     if stopped then return end
     drew = true
-    out:write(string.pack("<c1I4BBBBB", "D", n, emu.read(0x7E0A00, CPU), emu.read(0x7E0A43, CPU), emu.read(0x7E0A44, CPU),
+    out:write(string.pack("<c1I4BBBBB", "D", n, emu.read(0x7E09FF + emu.read(0x7E0AD6, CPU), CPU), emu.read(0x7E0A43, CPU), emu.read(0x7E0A44, CPU),
                           emu.read(0x7E0A45, CPU), emu.read(0x7E0A46, CPU)))
   end, emu.callbackType.exec, 0x04A56C, 0x04A56C)
   local function delta(store, memtype, words)

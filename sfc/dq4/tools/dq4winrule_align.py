@@ -19,20 +19,18 @@ CMD = (4, 2, 12, 13)                     # 명령 창
 PARTY = (19, 16, 27, 28)                 # 일행 상태 창
 ITEMS = (3, 15, 27, 27)                  # 물건 목록
 PAIRS = {
-    (frozenset({CMD, (6, 5, 12, 14)}), '오른쪽'): 'E: 명령 창 위 도구 「누구」 창',
     (frozenset({CMD, (4, 3, 10, 12)}), '왼쪽'): 'E: 명령 창 위 장비 「누구」 창',
-    (frozenset({CMD, (6, 1, 16, 10)}), '왼쪽'): 'E: 명령 창 위 상태 창',
-    (frozenset({CMD, (4, 5, 10, 14)}), '오른쪽'): 'E: 명령 창 위 주문 「누구」 창',
     (frozenset({PARTY, (4, 15, 20, 24)}), '왼쪽'): 'F: 일행 상태 창 위 주문 목록',
     (frozenset({PARTY, ITEMS}), '왼쪽'): 'F: 일행 상태 창 위 물건 목록',
     (frozenset({PARTY, ITEMS}), '오른쪽'): 'F: 일행 상태 창 위 물건 목록',
     (frozenset({PARTY, (21, 15, 25, 22)}), '왼쪽'): 'F: 일행 상태 창 위 소비 MP 창',
     (frozenset({PARTY, (2, 19, 28, 29)}), '오른쪽'): 'F: 일행 상태 창과 창 (2,19)-(28,29)',
+    (frozenset({PARTY, (11, 16, 19, 29)}), '오른쪽'): 'F: 일행 상태 창 위 대열 바꾸기 정보 창',
     (frozenset({(19, 22, 27, 28), ITEMS}), '오른쪽'): 'G: 1인 상태 창 위 물건 목록',
     (frozenset({(4, 22, 9, 28), (8, 5, 13, 29)}), '오른쪽'): 'H: 모험의 서 지우기 「예/아니오」 와 서 고르기 창',
     (frozenset({(2, 14, 6, 29), (5, 22, 9, 28)}), '오른쪽'): 'I: 은행 「예/아니오」 와 도구 창',
-    (frozenset({(6, 1, 16, 10), (7, 2, 17, 21)}), '왼쪽'): 'L: 상태 창 위 상태 보기 창',
     (frozenset({ITEMS, (5, 22, 9, 28)}), '오른쪽'): 'M: 물건 목록 위 「예/아니오」',
+    (frozenset({(6, 5, 12, 14), (2, 6, 8, 17)}), '왼쪽'): 'N: 도구 「누구」 창 위 물건 정보 창',
 }
 DESC = re.compile(r'창 (\(.*?\)) 과 (\(.*?\)) 의 (왼쪽|오른쪽) 변')
 
@@ -49,6 +47,18 @@ def overlap(a, b):
     return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
 
 
+def number(screen, rect):
+    """창 번호. 위 창에 가려 화면에서만 찾은 창(번호 없음)은 열 폭(왼쪽·오른쪽 변)이 같고 줄이 겹치는 엔진 창의 번호를
+    빌린다: 이 규칙은 옆 변 자리만 본다."""
+    n = screen.numbers.get(rect)
+    if n is not None:
+        return n
+    for w, m in screen.numbers.items():
+        if m is not None and (w[1], w[3]) == (rect[1], rect[3]) and w[0] <= rect[2] and rect[0] <= w[2]:
+            return m
+    return None
+
+
 def check(screen):
     out = []
     rects = screen.rects
@@ -57,7 +67,7 @@ def check(screen):
             if not overlap(a, b):
                 continue
             top, low = (a, b) if a in screen.tops[b] else (b, a)
-            na, nb = screen.numbers.get(a), screen.numbers.get(b)
+            na, nb = number(screen, a), number(screen, b)
             moved = screen.ref.moved
             for k, side in ((1, '왼쪽'), (3, '오른쪽')):
                 if (na is not None and nb is not None and moved is not None
