@@ -83,7 +83,11 @@ org $04B7D7
     LDA #$03
     STA $00
     db $82 : dw $B808-$B7DE     ; BRL $B808 (이 asar 는 BRL $주소 를 거리로 바꾸지 않음)
-    NOP #4
+; 위 고리가 남긴 네 바이트. 코드 D2(04:B7E2)의 JSR $C0DD 가 여기로 와 「가운데 맞춘 이름」 표시를 세우고 04:C0DD 로 간다.
+; 04:C0DD 의 RTS 는 D2 의 JSR 이 둔 자리(04:B808 앞)로 돌아간다
+    JML WnD2Center
+org $04B805
+    JSR $B7DE
 ; 장비 비교 창 제목의 물건 이름. PHB / LDA #$7E / PHA / PLB / LDX #$0000 / BRL $ABD6
 org $04AA79
     JML WnTitleName
@@ -790,6 +794,7 @@ org $24A5E9
 !wt_hash  = $1D0C           ; WtAlloc 안에서만: 그린 문구 표식. 이름 그리기(WnKorean)의 !wn_s 와 자리를 함께 씀(겹쳐 돌지 않음)
 !wt_slot2 = $A972           ; 이번에 쓴 슬롯 × 2, FFFF = 명령 창 전용 칸
 !wt_lead  = $AB50           ; WnText 안에서만: 이름 앞에 04:C0DD 가 넣은 빈칸 수(0 = 없음)
+!wt_centered = $AB52        ; 1바이트: 코드 D2 가 04:C0DD 로 가운데 맞춘 이름을 막 넘김. WnText 가 들어올 때마다 읽고 지운다
 !wt_fixkeys = $3EA0         ; 8 워드: 전용 칸에 그린 명령 창·가게 창 문구의 버퍼 자리, 0 = 빈 칸. WtVis 가 안 보이는 것을 지움
 !wt_fix_scan = 6           ; WtVis: 전용 칸 문구 자리에서 1D0~ 을 찾는 칸 수(문구 첫 칸이 덮여도 뒤 칸이 보이면 보임)
 !wt_k     = $A974           ; 그리는 고정 문구 번호
@@ -1795,12 +1800,22 @@ WnText:
     ; 가운데 맞추려고 앞에 빈칸을 넣은 이름(상태 보기의 몬스터 동료 종족 줄, 코드 D2)은 빈 자리가 아니다
     LDA #$0000
     STA.l $7E0000|!wt_lead
+    LDA.l $7E0000|!wt_centered
+    AND #$00FF
+    TAX
+    SEP #$20
+    LDA #$00
+    STA.l $7E0000|!wt_centered
+    REP #$20
     LDA.b $01
     AND #$00FF
     CMP #$0001
     BNE +
+    TXA
+    BEQ .blankslot
     JSR WtLeadBlanks
     BCC +
+.blankslot
     JMP .original
 +
     LDA.b $43
@@ -5150,15 +5165,11 @@ WnShift:
 WnOffset:
     dw 0, 1, 2, 3
 
-; WnText(길이 $00, 방식 0)의 문자열이 빈칸 01 로 시작할 때: 04:C0DD 가 가운데 맞춘 이름이면 C = 0, 앞 빈칸 수 k 를
-; !wt_lead 에. 아니면 C = 1(빈 자리, 원래 가나 길). 04:C0DD 는 탁점(83·84)을 뺀 글자 수 Y 가 7 이상이 될 때까지 앞에 빈칸을
-; 하나 넣고 Y 를 2 늘리므로, 그 결과는 2k + (나머지 글자 수) 가 7 또는 8 이다. 빈 주문 칸(「01 01 79」, 2k + 1 = 5)처럼
-; 빈칸으로 시작하는 다른 문자열을 이름으로 보면 $42·$43 에 남은 앞 이름(「모두 힘내자」 등)이 줄마다 찍힌다
+; 코드 D2 가 가운데 맞춘 이름(WnText, 길이 $00)의 앞 빈칸 수를 !wt_lead 에. 끝까지 빈칸이면 C = 1(빈 자리)
 WtLeadBlanks:
     LDA.l $7E0000|!wt_mode
     AND #$00FF
     BNE .empty16
-    PHY
     SEP #$20
     LDX #$0000
 -
@@ -5174,43 +5185,22 @@ WtLeadBlanks:
     REP #$20
     TXA
     STA.l $7E0000|!wt_lead
-    ASL
-    TAY
-    SEP #$20
-.count
-    TXA
-    CMP.b $00
-    BCS .counted
-    LDA.b $01,X
-    INX
-    CMP #$83
-    BEQ .count
-    CMP #$84
-    BEQ .count
-    INY
-    BRA .count
-.counted
-    REP #$20
-    TYA
-    CMP #$0007
-    BCC .reject
-    CMP #$0009
-    BCS .reject
-    PLY
     CLC
-    RTS
-.reject
-    LDA #$0000
-    STA.l $7E0000|!wt_lead
-    PLY
-    SEC
     RTS
 .empty
     REP #$20
-    PLY
 .empty16
     SEC
     RTS
+
+; 04:B7DE 에서(코드 D2 의 JSR $C0DD 대신, M = 8). 표시를 세우고 04:C0DD 로 간다
+WnD2Center:
+    PHP
+    SEP #$20
+    LDA #$01
+    STA.l $7E0000|!wt_centered
+    PLP
+    JML $04C0DD
 
 ; .counted 에서(DB = 7E): 앞 빈칸이 있던 이름은 그림을 원래 글자 칸(!wt_len) 가운데에 둔다. 앞 칸은 빈칸으로 쓰고
 ; 그만큼 Y 를 나아가고 남은 칸 수를 줄인다(창 해석이 보는 끝 Y 는 그대로)

@@ -652,7 +652,7 @@ class CenteredNameTest(unittest.TestCase):
 
     def test_leading_blanks_are_not_an_empty_slot(self):
         text = self.asm[self.asm.index('\nWnText:'):self.asm.index('\nWtAlloc:')]
-        self.assertIn('CMP #$0001\n    BNE +\n    JSR WtLeadBlanks\n    BCC +\n    JMP .original', text)
+        self.assertIn('CMP #$0001\n    BNE +\n    TXA\n    BEQ .blankslot\n    JSR WtLeadBlanks\n    BCC +\n.blankslot\n    JMP .original', text)
         self.assertIn('LDA.w !wt_lead\n    BEQ +\n    JSR WtCenter', text)
         lead = self.body('WtLeadBlanks')
         self.assertIn('LDA.l $7E0000|!wt_mode', lead)      # 길이 $00 고리(방식 0)만
@@ -672,42 +672,30 @@ class CenteredNameTest(unittest.TestCase):
         self.assertIn('DEC.w !wt_len', body)
 
 
-class LeadBlankNameTest(unittest.TestCase):
-    """WtLeadBlanks 는 04:C0DD 가 가운데 맞춘 이름만 그림으로 보낸다. 04:C0DD 는 탁점(83·84)을 뺀 글자 수가 7 이상이 될
-    때까지 앞에 빈칸을 넣고 셈을 2 늘리므로 2k + 나머지 글자 수가 7·8 이다. 빈 주문 칸 「01 01 79」 를 이름으로 보면
-    $42·$43 에 남은 앞 이름이 줄마다 찍혔다."""
 
-    @staticmethod
-    def centered(name):
-        """04:C0DD 를 파이썬으로 따라 함."""
-        s, y = list(name), sum(1 for b in name if b not in (0x83, 0x84))
-        while y < 7:
-            s.insert(0, 0x01)
-            y += 2
-        return s
+class CenteredMarkTest(unittest.TestCase):
+    """가운데 맞춘 이름은 꼴로 가르지 않고, 코드 D2 가 04:C0DD 를 부르는 자리에서 세운 표시로만 안다. 꼴로 가르면 빈 주문 칸
+    「01 01 79」 처럼 빈칸으로 시작하는 다른 문자열에 $42·$43 에 남은 앞 이름(「모두 힘내자」)이 줄마다 찍혔다."""
 
-    @staticmethod
-    def accepts(s):
-        k = next((i for i, b in enumerate(s) if b != 0x01), None)
-        if k is None:
-            return False
-        n = 2 * k + sum(1 for b in s[k:] if b not in (0x83, 0x84))
-        return 7 <= n <= 8
+    def setUp(self):
+        self.asm = ASM.read_text(encoding='utf-8')
 
-    def test_centered_names_pass_other_blank_strings_do_not(self):
-        for name in ([0x30], [0x30, 0x31], [0x30, 0x84, 0x31, 0x32], [0x30, 0x31, 0x32, 0x33, 0x34, 0x35]):
-            s = self.centered(name)
-            if s[0] == 0x01:
-                self.assertTrue(self.accepts(s), s)
-        self.assertFalse(self.accepts([0x01, 0x01, 0x79]))
-        self.assertFalse(self.accepts([0x01] * 7))
+    def test_d2_sets_the_mark_before_centering(self):
+        self.assertIn('org $04B805\n    JSR $B7DE', self.asm)
+        head = self.asm[self.asm.index('org $04B7D7'):self.asm.index('org $04B805')]
+        self.assertIn('    JML WnD2Center', head)
+        body = self.asm[self.asm.index('\nWnD2Center:'):]
+        body = body[:body.index('JML $04C0DD')]
+        self.assertIn('STA.l $7E0000|!wt_centered', body)
 
-    def test_asm_checks_the_count(self):
-        asm = ASM.read_text(encoding='utf-8')
-        body = asm[asm.index('\nWtLeadBlanks:'):asm.index('\nWtCenter:')]
-        self.assertIn('CMP #$83\n    BEQ .count\n    CMP #$84\n    BEQ .count', body)
-        self.assertIn('CMP #$0007\n    BCC .reject\n    CMP #$0009\n    BCS .reject', body)
-        self.assertIn('PHY', body)
+    def test_wntext_reads_and_clears_the_mark(self):
+        text = self.asm[self.asm.index('\nWnText:'):self.asm.index('\nWtAlloc:')]
+        read = text.index('LDA.l $7E0000|!wt_centered')
+        clear = text.index('STA.l $7E0000|!wt_centered')
+        lead = text.index('JSR WtLeadBlanks')
+        self.assertLess(read, clear)
+        self.assertLess(clear, lead)
+        self.assertIn('TXA\n    BEQ .blankslot\n    JSR WtLeadBlanks', text)
 
 
 class ShopEquippedTailTest(unittest.TestCase):

@@ -126,6 +126,15 @@ PARTY_ITEMS_PRE = ('wait:150,a:6,wait:60,right:4,wait:30,down:4,wait:30,a:6,wait
                    'b:6,wait:90,b:6,wait:90')
 
 
+# 빈 칸이 보이는 목록을 정해진 입력으로 연다. 주문: 주문 → 호이민 → 쓸 수 있는 주문 목록(빈 줄 여섯) → 고르기 → 이동 중에
+# 못 쓴다는 메시지 → 다시 목록. 작전: 작전 → 작전 짜기 → 호이민 → 작전 목록. 빈 줄을 이름으로 그리면 목록 줄마다 앞서
+# 받은 이름(「대화」·「모두 힘내자」)이 찍히고 메시지 동안 조각난다
+PARTY_SPELL_PRE = ('wait:150,a:6,wait:60,right:4,wait:30,a:6,wait:90,down:4,wait:30,a:6,wait:150,a:6,wait:150,a:6,'
+                   'wait:200,b:6,wait:90,b:6,wait:90,b:6,wait:90')
+PARTY_TACTIC_PRE = ('wait:150,a:6,wait:60,right:4,wait:30,down:4,wait:30,down:4,wait:30,a:6,wait:90,down:4,wait:30,a:6,'
+                    'wait:90,down:4,wait:30,a:6,wait:150,b:6,wait:90,b:6,wait:90,b:6,wait:90')
+
+
 def make_states(mesence, rom_path, data, out):
     """{이름: 세이브스테이트}. 검사 롬으로 서장 끝 상태(캐시)를 얻고 STATES 자리로 순간이동한다."""
     import dq4ch1walkcheck as walk
@@ -160,6 +169,8 @@ def scenes(ship, party, shop=None, battle=None):
     for seed in (1, 2, 3, 4):
         out.append((f'ship{seed}', ship, '', '', fuzz(seed), range(100, 8000, 50)))
     out.append(('partyitems', party, PARTY_ITEMS, '', PARTY_ITEMS_PRE, range(60, 900, 30)))
+    out.append(('partyspell', party, '', '', PARTY_SPELL_PRE, range(60, 1100, 5)))
+    out.append(('partytactic', party, '', '', PARTY_TACTIC_PRE, range(60, 1100, 10)))
     for seed in (21, 22):
         out.append((f'party{seed}', party, '', '', fuzz(seed), range(100, 8000, 50)))
     for seed in (11, 12):
