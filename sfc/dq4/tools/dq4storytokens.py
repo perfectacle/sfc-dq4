@@ -27,6 +27,7 @@ class Runner:
         self.w, self.tokmax = walker, tokmax
         self.win, self.since, self.tick, self.tick_since, self.free_for = None, 0, None, 0, 0
         self.log, self.n = [], 0
+        self.held = None
 
     def rd(self, a):
         return self.w.rd(a)
@@ -55,13 +56,14 @@ class Runner:
         return self.rd(0x7E00BC) << 8 | self.rd(0x7E00BD) | (self.rd(0x7E00BE) & 0x80) << 16
 
     def person_at(self, cx, cy):
+        """(cx, cy) 를 막고 선 인물 슬롯(없으면 None)."""
         hx, hy = self.rd(0x7E3020), self.rd(0x7E3080)
         # 걷는 줄(칸 0 ~ 7E:1967 - 1: 일행·따라 걷는 개)은 길을 막지 않는다(lua/dq4storywalk.lua personAt 과 같음)
         for k in range(max(1, self.rd(0x7E1967)), self.rd(0x7E1982)):
             px, py = self.rd(0x7E3020 + k), self.rd(0x7E3080 + k)
             if px == cx and abs(py - cy) <= 1 and (abs(px - hx) > 1 or abs(py - hy) > 1):
-                return True
-        return False
+                return k
+        return None
 
     def observe(self):
         w = self.rd(WINDOW)
@@ -142,6 +144,21 @@ class Runner:
         raise Failed(f'face {arg}: facing {self.rd(0x7E31E0):02X}')
 
     def cell(self, cx, cy, nxt, into=False):
+        """(cx, cy) 까지 걷는다. 길을 막은 인물을 기다리는 동안은 구간의 난수 묶기(walker.pokes)를 풀어 둔다. 묶인
+        난수로는 떠도는 인물이 같은 걸음만 골라 외길 칸에 끝없이 설 수 있다(레이크나바 소년, 코어마다 박자가 달라 선
+        자리가 갈림). 실제 게임은 난수가 돌아 비키므로, 풀어 둔 채 기다린 뒤 비키면 다시 묶는다."""
+        try:
+            yield from self._cell(cx, cy, nxt, into)
+        finally:
+            self.hold_rng(True)
+
+    def hold_rng(self, on):
+        if on and self.held is not None:
+            self.w.pokes, self.held = self.held, None
+        elif not on and self.held is None and getattr(self.w, 'pokes', None):
+            self.held, self.w.pokes = self.w.pokes, []
+
+    def _cell(self, cx, cy, nxt, into):
         best, since, stuck, last, side, tries, prefer, waited = None, 0, 0, None, 0, 0, None, 0
         start_map = self.here()
         t = 0
@@ -160,10 +177,13 @@ class Runner:
             dist = abs(cx - x) + abs(cy - y)
             if best is None or dist < best:
                 best, since = dist, t
-            occupied = not into and dist <= 2 and self.person_at(cx, cy)
+            blocker = None if into or dist > 2 else self.person_at(cx, cy)
+            occupied = blocker is not None
             if waited > 300 and occupied and nxt[:1].isdigit() and ',' in nxt:
-                self.note(f'skip {cx},{cy} (person) at {x},{y}')
+                self.note(f'skip {cx},{cy} (person {blocker:02X} at {self.rd(0x7E3020 + blocker)},'
+                          f'{self.rd(0x7E3080 + blocker)} pic {self.rd(0x7E3220 + blocker):02X}) at {x},{y}')
                 return
+            self.hold_rng(not occupied)
             if occupied:
                 waited, since, stuck = waited + 1, t, 0
             if waited > 3 * STUCK:
