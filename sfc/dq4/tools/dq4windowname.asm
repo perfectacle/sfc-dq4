@@ -809,7 +809,8 @@ org $24A5E9
 !wt_k     = $A974           ; 그리는 고정 문구 번호
 !wt_dirty = $A9F0           ; 2 워드: 슬롯마다 1비트, 메시지 캔버스 안에 그림을 올린 슬롯
 !wq_cleaned = $ABF0         ; WqClean: 이 NMI 에 비운(또는 비우다 멈춘) 슬롯 수. 0 이 아니면 캔버스 DMA 를 미룸
-!wq_cdefer = $ABF2          ; 1바이트: 앞 NMI 에 캔버스 DMA 를 미룸(이번에는 비우지 않고 보냄)
+!wq_cdefer = $ABF2          ; 1바이트: 캔버스 DMA 를 잇달아 미룬 횟수
+!wq_cdefer_max = 3
 !wq_qstart = $ABF4          ; WtQueue: 짜는 항목의 첫 자리
 !wt_age   = $A96C           ; 쓸 때마다 하나씩
 !wt_mode  = $A96E           ; 고정 글자 수: 0 = 04:B808(길이 $00), 5 = 04:B8F3(주문), 9 = 04:BC08(몬스터)
@@ -3790,6 +3791,14 @@ WtQueue:
     STA.l $004200
     REP #$20
     STY.w !wq_off
+    ; 짜는 사이 NMI 가 대기열을 다 보내 !wq_rd 를 0 으로 돌렸으면 이 항목 첫 자리부터 읽게 한다. WhStash 가 항목을
+    ; 묶음으로 빼며 !wq_count 를 줄이므로 반드시 그 앞에서 본다(뒤에서 보면 남은 앞 항목을 버리고 뺀 항목을 보낸다)
+    LDA.w !wq_count
+    AND #$00FF
+    BNE +
+    LDA.w !wq_qstart
+    STA.w !wq_rd
++
     LDX.w !wt_slot2
     BMI +
     CPX.w #!wt_nkana*2
@@ -3819,13 +3828,6 @@ WtQueue:
     STA.w !wt_keys,X
     LDA.w !wt_age
     STA.w !wt_ages,X
-+
-    ; 짜는 사이 NMI 가 대기열을 다 보내 !wq_rd 를 0 으로 돌렸으면 이 항목 첫 자리부터 읽게 한다
-    LDA.w !wq_count
-    AND #$00FF
-    BNE +
-    LDA.w !wq_qstart
-    STA.w !wq_rd
 +
     SEP #$20
     LDA.w !wq_count
@@ -4828,13 +4830,15 @@ WqClean:
     ORA.l $7E0000|(!wt_dirty+2)
     ORA.l $7E0000|(!wt_dirty+3)
     BEQ .send
-    ; 앞 NMI 에 미뤘으면 이번에는 비우지 않고 보낸다. 게임이 매 프레임 이름을 새로 그리는 화면에서는 슬롯이 늘 새로 차
-    ; 미루기만 거듭하면 메시지가 끝내 가지 않는다
+    ; 귀선 하나에 다 못 비우면 남은 슬롯은 다음 NMI 에 이어 비운다(미룬 채 보내면 그 슬롯은 키가 산 채 캔버스에 덮여
+    ; 목록이 이름을 다시 그리지 않았다). 다만 게임이 매 프레임 이름을 새로 그리는 화면에서는 슬롯이 늘 새로 차므로
+    ; !wq_cdefer_max 번 미룬 뒤에는 비우지 않고 보낸다
     LDA.l $7E0000|!wq_cdefer
-    BEQ +
+    CMP #!wq_cdefer_max
+    BCC +
+.send
     LDA #$00
     STA.l $7E0000|!wq_cdefer
-.send
     PHB
     LDA #$00
     PHA
@@ -4929,11 +4933,11 @@ WqClean:
     SEP #$20
     LDA.w !wq_cleaned
     BEQ +
-    LDA #$01
-    STA.w !wq_cdefer
+    INC.w !wq_cdefer
     PLB
     JML $008E9D
 +
+    STZ.w !wq_cdefer
     PLB
     ; 원래 명령: PHB / PHK / PLB(DB = 00) / LDA #$7E
     PHB

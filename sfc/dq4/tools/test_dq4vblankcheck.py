@@ -68,16 +68,30 @@ class NmiOrderTests(unittest.TestCase):
         self.assertLess(room, q.index('STA.l $004200', room))
         self.assertIn('STA.w !wq_rd', q)
 
+    def test_queue_commits_after_stash(self):
+        # NMI 는 !wq_rd 부터 !wq_count 개만 읽으므로 항목 수는 NMI 를 끈 끝에서만 늘린다. 비었으면 rd 를 이 항목 첫 자리로
+        # 맞추는 검사는 WhStash 앞에서 해야 한다 — WhStash 가 항목을 묶음으로 빼며 !wq_count 를 줄여, 뒤에서 보면 남은
+        # 앞 항목을 버리고 뺀 항목을 보냈다(팔기 목록이 뜨기 전 메시지 창에 이름이 비침)
+        q = self.body('WtQueue')
+        off = q.index('STA.l $004200', q.index('.room'))
+        rd, stash = q.index('STA.w !wq_rd', off), q.index('JSR WhStash', off)
+        self.assertLess(rd, stash)
+        self.assertLess(stash, q.index('ADC #$02', stash))
+        self.assertNotIn('STA.w !wq_count', q[q.index('.room'):off])
+
     def test_entry_skips_gate_when_game_sends_canvas_or_big_list(self):
         e = self.body('WqNmiEntry')
         self.assertLess(e.index('LDA.l $001947'), e.index('JSL WqNmiGate'))
         self.assertIn('LDA.l $000F59', e)
         self.assertIn('LDA.l $7E4004', e)
 
-    def test_clean_defers_canvas_dma_once(self):
+    def test_clean_defers_canvas_dma_until_slots_cleaned(self):
+        # 남은 슬롯을 비우지 않고 캔버스를 보내면 그 슬롯은 키가 산 채 덮여 장비 목록 이름이 한 줄씩 늦게 찼다
         c = self.body('WqClean')
         self.assertIn('JML $008E9D', c)          # 작업 RTS 로 돌아가 $0F59 를 남김
-        self.assertIn('!wq_cdefer', c)
+        self.assertIn('CMP #!wq_cdefer_max', c)
+        self.assertIn('INC.w !wq_cdefer', c)
+        self.assertIn('STZ.w !wq_cdefer', c)
 
 
 if __name__ == '__main__':
