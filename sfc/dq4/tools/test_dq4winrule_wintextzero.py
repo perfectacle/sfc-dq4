@@ -18,18 +18,22 @@ class ZeroRuleTest(unittest.TestCase):
         with mock.patch.object(status, 'read_lines', return_value=got):
             return zero.check_run(RUN), status.check_run(RUN)
 
-    def test_windows_without_any_read_line_fail(self):
-        fail, note = self.judge((3, 0))
+    def test_ink_lines_with_nothing_recognised_fail(self):
+        fail, note = self.judge((3, 5, 0))
         self.assertEqual(len(fail), 1)
-        self.assertIn('0줄', note[0][1])
+        self.assertIn('알아본 줄 0개', note[0][1])
 
     def test_read_lines_pass_and_are_logged(self):
-        fail, note = self.judge((3, 12))
+        fail, note = self.judge((3, 12, 11))
         self.assertEqual(fail, [])
-        self.assertIn('12줄', note[0][1])
+        self.assertIn('알아본 줄 11개', note[0][1])
+
+    def test_empty_windows_pass(self):
+        # 창 틀만 뜨고 잉크가 없는 모습(문 순간이동 뒤 빈 창)은 못 읽음이 아니다
+        self.assertEqual(self.judge((1, 0, 0))[0], [])
 
     def test_scene_without_windows_passes(self):
-        self.assertEqual(self.judge((0, 0))[0], [])
+        self.assertEqual(self.judge((0, 0, 0))[0], [])
 
     def test_fake_rom_is_silent(self):
         self.assertEqual(self.judge(status.FAKE_ROM), ([], []))
@@ -39,6 +43,12 @@ class ZeroRuleTest(unittest.TestCase):
         self.assertEqual(len(fail), 1)
         self.assertIn('DQ4_GALMURI', fail[0][1])
         self.assertIn('DQ4_GALMURI', note[0][1])
+
+
+class KnownLineTest(unittest.TestCase):
+    def test_only_unread_ink_is_not_known(self):
+        self.assertFalse(status.known(SimpleNamespace(text=f'{wt.UNREAD} {wt.UNREAD}')))
+        self.assertTrue(status.known(SimpleNamespace(text=f'{wt.UNREAD}가')))
 
 
 def titled(size):

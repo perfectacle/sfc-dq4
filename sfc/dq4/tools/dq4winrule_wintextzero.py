@@ -1,6 +1,7 @@
-"""화면 글자 읽기가 통째로 안 돎: 실제 롬인데 글꼴(DQ4_GALMURI)을 싣지 못했거나, 창이 뜬 장면에서 글자를 한 줄도 읽지
-못했다. 글자 규칙이 모두 「안 봐서 통과」 하는 것을 막는 실패다. 가짜 롬(단위 시험)이면 보지 않는다. CI 가드 조각은 해시가
-맞는 Galmuri 를 늘 받으므로(tools/ci_gate_setup.sh) 글꼴을 못 싣는 것은 설정이 깨진 것이다.
+"""화면 글자 읽기가 통째로 안 돎: 실제 롬인데 글꼴(DQ4_GALMURI)을 싣지 못했거나, 창 안에 잉크 줄이 있는데 글자를 하나도
+알아보지 못했다(모두 ⍰). 창이 비어 잉크 줄이 없는 장면(문 순간이동 뒤 막 뜬 빈 창 등)은 걸지 않는다. 글자 규칙이 모두
+「안 봐서 통과」 하는 것을 막는 실패다. 가짜 롬(단위 시험)이면 보지 않는다. CI 가드 조각은 해시가 맞는 Galmuri 를 늘
+받으므로(tools/ci_gate_setup.sh) 글꼴을 못 싣는 것은 설정이 깨진 것이다.
 """
 import dq4winrule_wintextstatus as status
 
@@ -13,6 +14,6 @@ def check_run(run):
     got = status.read_lines(run)
     if got == status.NO_FONT:
         return [(0, 'DQ4_GALMURI 의 Galmuri 를 싣지 못해 글자를 하나도 읽지 않음')]
-    if not isinstance(got, tuple) or got[0] == 0 or got[1] > 0:
+    if not isinstance(got, tuple) or got[1] == 0 or got[2] > 0:
         return []
-    return [(0, f'창이 뜬 모습 {got[0]}개에서 글자를 한 줄도 읽지 못함')]
+    return [(0, f'창이 뜬 모습 {got[0]}개의 잉크 줄 {got[1]}개에서 글자를 하나도 알아보지 못함')]
