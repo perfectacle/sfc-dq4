@@ -1,4 +1,4 @@
-"""UI 깨짐 규칙 U2a 잘림: 창 글자(Galmuri9)로 읽은 낱말이 이름 낱말(dq4wintext.vocabulary)의 앞부분뿐이다(「크리프ㅡ」,
+"""UI 깨짐 규칙 잘림: 창 글자(Galmuri9)로 읽은 낱말이 이름 낱말(dq4wintext.vocabulary)의 앞부분뿐이다(「크리프ㅡ」,
 「외톨이 메탈 갑」 꼴). dq4winwatch 의 규칙 파일. 글자는 dq4wintext 로 읽는다.
 
 창 글자(Galmuri9)로만 읽은 줄(메시지 글자가 섞이지 않은 줄)의 낱말만 본다. 낱말은 띄움으로 나눈 한글 줄기다. 두 글자 이상인 낱말이 이름 낱말·창 고정 낱말(dq4wintext.ui_words)이 아니고, 그 낱말로

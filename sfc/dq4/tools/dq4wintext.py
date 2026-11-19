@@ -1,4 +1,4 @@
-"""winwatch 기록의 창 안 글자를 읽는다(UI 깨짐 검사 U2). 형식은 sfc/dq4/docs/dq4-window-text-format.md 「화면 글자 읽기」.
+"""winwatch 기록의 창 안 글자를 읽는다(UI 깨짐 검사). 형식은 sfc/dq4/docs/dq4-window-text-format.md 「화면 글자 읽기」.
 
 창마다(dq4winwatch.Screen.rects) 사각형 전체(테두리 칸 포함, 테두리 흰 선 점은 지움)의 칸 그림을 이어 점 격자로 만들고,
 바탕색(가장 많은 색)이 아닌 점을 잉크로 본다. 9점 글꼴은 윗줄·구분선 칸까지 걸쳐 그리므로 테두리 칸도 넣는다.
