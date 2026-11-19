@@ -185,7 +185,8 @@ class ReadTests(unittest.TestCase):
                     if v:
                         grid[10 + y][16 + c * 8 + x] = 3
         s = FakeScreen(grid)
-        with mock.patch.object(wt, 'rom_table_for', return_value={}), mock.patch.object(wt, 'use_rom'):
+        with mock.patch.object(wt, 'rom_table_for', return_value={}), mock.patch.object(wt, 'use_rom'), \
+                mock.patch.object(wt, 'comparable', return_value=True):
             got = wt.lines(s)[W]
         self.assertEqual([ln.text for ln in got], ['천 옷'])
 

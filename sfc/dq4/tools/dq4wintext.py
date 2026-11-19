@@ -486,12 +486,20 @@ def read_screen(screen, rom_table):
     return {w: read_window(screen, w, rom_table) for w in screen.rects}
 
 
+def comparable(rom):
+    """원본 DQ5 보다 짧은 롬(단위 시험의 가짜 롬)에는 맞대 볼 롬 글자가 없다."""
+    return not DQ5_ROM.is_file() or len(rom) >= DQ5_ROM.stat().st_size
+
+
 def lines(screen):
-    """규칙 파일이 나눠 쓰는 읽기: {창 사각형: [Line]}. 모습마다 한 번만 읽는다. 글꼴(DQ4_GALMURI)이 없으면 None."""
+    """규칙 파일이 나눠 쓰는 읽기: {창 사각형: [Line]}. 모습마다 한 번만 읽는다. 글꼴(DQ4_GALMURI)이 없거나, 롬이 원본
+    DQ5 보다 짧아(단위 시험의 가짜 롬) 맞대 볼 롬 글자가 없으면 None."""
     got = getattr(screen, '_wintext', False)
     if got is False:
         try:
             rom = screen.ref.rom
+            if not comparable(rom):
+                raise SystemExit
             if ROM_FOR_MESSAGES != rom:
                 use_rom(rom)
             got = read_screen(screen, rom_table_for(rom))
