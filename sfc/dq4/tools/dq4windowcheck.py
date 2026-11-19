@@ -191,6 +191,25 @@ def make_states(mesence, rom_path, data, out):
     return states
 
 
+# 대화 번호를 바꾼 talkNN 장면에서 화면이 꺼지는 프레임 구간(64개를 10프레임 간격으로 실측, 끝 포함). 33 은 다시 켜지고,
+# 34(DQ5 원래 보스 대사 스크립트, 일본어 원문)는 맥락 밖에서 불려 화면을 끈 채 돌아오지 않는다. 그 구간은 볼 것이 없으니
+# 건너뛰고 켜진 구간을 촘촘히 봐 본 프레임이 기본(48) 아래로 줄지 않게 한다. 여기 없는 번호가 화면을 끄면 「절반 넘게 꺼진
+# 화면」 판정이 그대로 잡는다
+TALK_DARK = {0x33: ((290, 580),), 0x34: ((310, 320), (410, 1500))}
+TALK_FRAMES = range(60, 1500, 30)
+
+
+def talk_frames(n):
+    if n not in TALK_DARK:
+        return TALK_FRAMES
+    for step in (20, 10, 5, 2):
+        lit = [f for f in range(TALK_FRAMES.start, TALK_FRAMES.stop, step)
+               if not any(lo <= f <= hi for lo, hi in TALK_DARK[n])]
+        if len(lit) >= len(TALK_FRAMES):
+            return lit
+    raise ValueError(f'talk{n:02X}: 켜진 구간이 짧아 {len(TALK_FRAMES)} 프레임을 볼 수 없음')
+
+
 def scenes(ship, party, shop=None, battle=None):
     """(이름, 세이브스테이트, POKE, ROMPATCH, PRE, 프레임). ship 은 talk·무작위 입력 장면의 출발 상태(이름은 선실에서 하던
     때의 것)."""
@@ -201,7 +220,7 @@ def scenes(ship, party, shop=None, battle=None):
     talk = f'7E{0x36E0 + TALK_SLOT:04X}={{:02X}};7E{0x3700 + TALK_SLOT:04X}=00'
     for n in range(0x40):
         # 방어구점 주인의 대화 번호를 바꿔 가게·교회·여관 등을 연다
-        out.append((f'talk{n:02X}', ship, talk.format(n), '', TALK, range(60, 1500, 30)))
+        out.append((f'talk{n:02X}', ship, talk.format(n), '', TALK, talk_frames(n)))
     bag = ';'.join(f'7E{0x2056 + i:04X}={b:02X}' for i, b in enumerate(FULL_BAG))
     out.append(('talk02-full', ship, f'{talk.format(2)};{bag}', '', SELL, range(60, 700, 10)))
     for c, items in LONG_BAGS.items():
