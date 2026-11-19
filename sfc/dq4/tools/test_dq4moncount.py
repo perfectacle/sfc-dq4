@@ -100,6 +100,47 @@ class FitTests(unittest.TestCase):
             self.assertIn(mode, ('day', 'night', 'dungeon'))
 
 
+class VerifyPickTests(unittest.TestCase):
+    def test_all_short_and_a_few_per_place(self):
+        def e(z, groups, short):
+            return {'chapter': 2, 'fc_zone': z, 'mode': 'day', 'dq5': groups, 'placed': [n for _, n in groups],
+                    'short': short}
+        every = [e(9, [(1, 5)], True), e(9, [(2, 1)], False), e(9, [(2, 3)], False), e(9, [(3, 2)], False),
+                 e(11, [(1, 5)], True), e(11, [(4, 1)], False)]
+        got = C.pick_checks(every, 2)
+        keys = [tuple(map(tuple, x['dq5'])) for x in got]
+        self.assertEqual(len(keys), len(set(keys)))                   # 같은 무리는 한 번
+        self.assertIn(((1, 5),), keys)
+        self.assertIn(((2, 3),), keys)                                # 구역 9 에서 마릿수 많은 것부터 둘
+        self.assertIn(((3, 2),), keys)
+        self.assertNotIn(((2, 1),), keys)
+        self.assertIn(((4, 1),), keys)
+        self.assertEqual(len(C.pick_checks(every, None)), 5)
+
+    def test_placed_counts_by_line(self):
+        import dq4monartcheck as mc
+        wram = {}
+        for i, (state, line) in enumerate([(0x80, 0), (0x80, 0), (0x80, 1), (0, 1), (0x80, 2)]):
+            wram[mc.SHOWN_STATE + i], wram[mc.SHOWN_LINE + i] = state, line
+        self.assertEqual(mc.placed_counts(lambda a: wram.get(a, 0), 3), [2, 1, 1])
+
+
+class MovedPictureTests(unittest.TestCase):
+    def test_sfc_placed_reads_moved_heads(self):
+        # 빌드 롬은 커진 그림을 옮겨 24비트 머리 표로 찾는다. 배치는 head_of 를 따르는 머리로 세야 한다
+        import dq5mongfx
+        import dq5monwrite
+        seen = []
+
+        class Pictures:
+            def place(self, groups):
+                seen.append(dq5mongfx.head is dq5monwrite.head_of)
+                return [(m, n, None, 0, 0, n) for m, n, _ in groups], 0
+        self.assertEqual(C.sfc_placed(Pictures(), [(0x30, 2)]), [2])
+        self.assertEqual(seen, [True])
+        self.assertIsNot(dq5mongfx.head, dq5monwrite.head_of)
+
+
 @unittest.skipUnless(DQ4.exists(), 'rom/dq4.nes 가 없음')
 class RomWidthTests(unittest.TestCase):
     @classmethod

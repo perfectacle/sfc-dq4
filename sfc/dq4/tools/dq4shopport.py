@@ -85,9 +85,9 @@ FC_ARENA_BANK, FC_ARENA_TABLE, FC_ARENA_COUNTS, FC_ARENA_CHAPTER = 0x18, 0xADBA,
 ARENA_MATCHES, ARENA_LEVELS, ARENA_SIZE = 0x23DA97, 0x23DC27, 50
 # 옮기지 않는 FC 시합: 넷의 그림 가로 합이 전투 화면을 넘어 넷째가 놓이지 않는다(dq5monlimits.Pictures.place, 빌드 롬에서
 # dq4ch3townscheck --rom 이 옮긴 시합마다 본다). 놓이지 않은 몬스터에도 걸 수 있어 빼 둔다. 그림이 바뀌면 다시 재어
-# 놓이는 시합은 이 집합에서 뺀다(차례를 바꿔도 놓이지 않는 것만 남김). 6번(はえおとこ·リリパット·とさかへび·かまいたち)은
-# NDS 그림으로도 넷째가 놓이지 않는다
-ARENA_WIDE = {6}
+# 놓이는 시합은 이 집합에서 뺀다(차례를 바꿔도 놓이지 않는 것만 남김). 3장 20시합은 NDS 그림·띄움(dq4monport.FLOATING)으로
+# 모두 놓인다(6번은 はえおとこ 가 줄 2 로 떠 줄 0 이 23칸)
+ARENA_WIDE = set()
 ONE_SHOT_AT = _CH3_VARS2 + _CH3_SLOTS['L'].vars2[0]     # 한 번 쓰는 키 바이트(레이크나바 몫)
 # 그 바이트는 3장 밖에서 DQ5 맡긴 동료 칸 48 의 바이트라(dq4ch3slots), 3장 진행 중(dq4ch3event.CHAPTER3_GATE)일 때만
 # 한 번 쓰는 키로 본다. 우연히 F0~F7 인 동료 바이트로 엉뚱한 가게를 열고 그 바이트를 지우지 않게

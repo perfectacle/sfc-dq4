@@ -375,9 +375,20 @@ def line_colors(cgram, line, n):
     return cgram[p:p + n]
 
 
-def judge_group(oam, vram, cgram, order, pictures, placed=None):
+def only_lines(oam, lines):
+    """OAM 사본에서 팔레트 줄이 lines 밖인 OBJ 를 화면 밖(y F0)으로 뺀 것."""
+    out = bytearray(oam)
+    for i in range(128):
+        if (oam[i * 4 + 3] >> 1 & 7) not in lines:
+            out[i * 4 + 1] = 0xF0
+    return bytes(out)
+
+
+def judge_group(oam, vram, cgram, order, pictures, placed=None, floating=None):
     """무리 차례 order(무리마다 한 마리)의 덤프 판정. pictures 는 {번호: (격자, 색 목록)}. 줄 k 의 CGRAM 색이 order[k] 의 색이고,
     종마다 그 종의 무리 수만큼 그림을 찾아(찾은 자리는 지우고 다시 찾음) 픽셀이 맞고 OBJ 팔레트 줄들이 그 종의 줄들인지.
+    종마다 제 줄 OBJ 만 남긴 OAM(only_lines)으로 찾으므로 가린 픽셀도 그 종 OBJ 의 타일·팔레트로 다 맞아야 한다. 화면에서
+    겹친 두 종은 한쪽이 floating(머리 띄움 번호)일 때만 받는다.
     placed(무리마다 놓인 수, dq5monlimits.Pictures.place)가 0 인 무리는 화면 폭에 들지 않아 보지 않는다. 다른 무리의 줄은
     그대로 제 차례다(22:A0BE 가 무리 칸 번호를 줄로 씀). ({번호: [자리마다 요약]}, 문제 목록)."""
     problems, out = [], {}
@@ -386,14 +397,17 @@ def judge_group(oam, vram, cgram, order, pictures, placed=None):
         m = order[k]
         if line_colors(cgram, k, len(pictures[m][1])) != pictures[m][1]:
             problems.append(f'{m:02X} 줄 {k} CGRAM 색이 기대와 다름')
-    grid = M.oam_grid(oam, vram)
     for m in dict.fromkeys(order[k] for k in shown):
         want = pictures[m][0]
         lines = [k for k in shown if order[k] == m]
+        # 띄운 몬스터(줄 2)는 땅 몬스터와 화면에서 겹친다. 무리 칸 줄 = 팔레트 줄이라(22:A0BE) 제 줄 OBJ 만 남겨 찾는다.
+        # 다른 줄로 그려진 OBJ 는 남지 않아 픽셀이 모자라 걸린다
+        own = only_lines(oam, set(lines))
+        grid = M.oam_grid(own, vram)
         found = []
         for _ in lines:
             hit, total, x, y, extra = locate(grid, want)
-            pals = obj_palettes(oam, (x, y, len(want[0]), len(want)))
+            pals = obj_palettes(own, (x, y, len(want[0]), len(want)))
             found.append({'hit': hit, 'opaque': total, 'at': [x, y], 'extra': extra, 'palettes': sorted(pals)})
             if hit != total:
                 problems.append(f'{m:02X} OBJ 그림 {hit}/{total} 픽셀만 맞음 @({x},{y})')
@@ -409,6 +423,14 @@ def judge_group(oam, vram, cgram, order, pictures, placed=None):
         if got != lines:
             problems.append(f'{m:02X} 그림의 OBJ 팔레트 {got}, 무리 줄 {lines}')
         out[f'{m:02X}'] = found
+    # 화면에서 겹쳐도 되는 것은 한쪽이 띄운 몬스터(줄 2)일 때뿐이다. 땅 몬스터끼리는 가로로 늘어놓아 겹치지 않는다
+    floating = floating or set()
+    spots = [(m, {(f['at'][0] + xx, f['at'][1] + yy) for yy, row in enumerate(pictures[m][0])
+                  for xx, v in enumerate(row) if v}) for m, fs in ((int(k, 16), v) for k, v in out.items()) for f in fs]
+    for i, (a, pa) in enumerate(spots):
+        for b, pb in spots[i + 1:]:
+            if a not in floating and b not in floating and pa & pb:
+                problems.append(f'{a:02X}·{b:02X} 땅 몬스터끼리 화면에서 겹침 {len(pa & pb)}픽셀')
     return out, problems
 
 
@@ -429,14 +451,15 @@ class Battles:
         import dq4savefixture as fx
         fx.close(self.run.c)
 
-    def battle(self, numbers, shot=None, pokes=(), colors=None):
+    def battle(self, numbers, shot=None, pokes=(), colors=None, counts=None):
         """번호마다 한 마리인 무리를 numbers 차례로 붙여 차례 창 뒤 SETTLE 프레임의 (OAM, VRAM, CGRAM, 정보). pokes 는 전투를
         붙이기 전에 한 번 쓰는 WRAM 값. colors({번호: 색 목록})를 주면 전투가 걸린 뒤 차례 창까지 프레임마다, 보이는
-        몬스터 i(SHOWN_STATE bit7)의 보이는 줄(SHOWN_LINE) CGRAM 색이 numbers[i] 의 색인지 보고 정보의 'appear' 에 센다."""
+        몬스터 i(SHOWN_STATE bit7)의 보이는 줄(SHOWN_LINE) CGRAM 색이 numbers[i] 의 색인지 보고 정보의 'appear' 에 센다.
+        counts 를 주면 무리마다 그 마릿수로 붙이고, 정보의 'placed' 에 엔진이 놓은 마릿수(무리마다)를 둔다."""
         import dq4ch1walkcheck as wc
         import dq4compatcheck as cc
         B, c, w = self.B, self.run.c, self.run.w
-        group = [(m, 1) for m in numbers]
+        group = [(m, 1) for m in numbers] if counts is None else list(zip(numbers, counts))
         name = ' '.join(f'{m:02X}' for m in numbers)
         c.load(self.state)
         w.cheat_key, w.rom_cheats = None, {}
@@ -482,7 +505,23 @@ class Battles:
         info = {'turn_frame': turn, 'background': [c.rd(BG_VALUE), c.rd(BG_NIGHT)]}
         if colors is not None:
             info['appear'] = appear
+        if counts is not None:
+            info['placed'] = placed_counts(c.rd, len(numbers))
         return oam, vram, cgram, info
+
+
+MONSTER_SLOTS = 16              # 몬스터 한 마리마다 7E:0C60~ 표(dq5 그래픽 형식 「배치와 그림자」)
+
+
+def placed_counts(rd, groups):
+    """차례 창이 뜬 뒤 무리마다 놓인 마릿수: 보이는(SHOWN_STATE bit7) 몬스터 칸을 그 칸의 줄(SHOWN_LINE = 무리 차례,
+    22:A0BE)로 센다. rd 는 WRAM 바이트 읽기."""
+    out = [0] * groups
+    for i in range(MONSTER_SLOTS):
+        line = rd(SHOWN_LINE + i)
+        if rd(SHOWN_STATE + i) & SHOWN_BIT and line < groups:
+            out[line] += 1
+    return out
 
 
 def digest(oam, vram, cgram):
@@ -528,12 +567,16 @@ def screen_check(rom_path, rom, want, rows, out, orders, arena):
 
     @functools.cache
     def placed_of(order):
-        return [x[1] for x in layout.place(tuple((m, 1, 0) for m in order))[0]]
+        # 빌드 롬은 커진 그림을 옮겨 24비트 머리 표로 찾는다. 원래 머리 표로 읽으면 옮긴 그림의 크기·띄움을 원래 것으로 센다
+        with W.following_table():
+            return [x[1] for x in layout.place(tuple((m, 1, 0) for m in order))[0]]
     numbers = [m for _, _, m in targets()]
     plan, pairs = scenes(rom, orders, arena, numbers, placed_of)
     every = sorted({m for s in plan for m in s['order']})
     pictures = {m: want[m] if rows.get(f'{m:02X}', {}).get('status') == 'ported' else picture(rom, m) for m in every}
     colors = {m: c for m, (_, c) in pictures.items()}
+    # 빌드 롬 그림 머리 +0 bit7(띄움, dq5 그래픽 형식 「줄과 높이」)
+    floating = {m for m in every if rom.u8(W.head_of(rom, M.monster(rom, m)[0])) & 0x80}
     shots = out / 'battle'
     shots.mkdir(parents=True, exist_ok=True)
     run = Battles(rom_path, every, out / 'core')
@@ -551,7 +594,7 @@ def screen_check(rom_path, rom, want, rows, out, orders, arena):
             p = []
             if again != entry['digest']:
                 p.append(f'같은 전투를 다시 돌린 덤프가 다름 {entry["digest"]} / {again}')
-            entry['monsters'], q = judge_group(oam, vram, cgram, order, pictures, placed)
+            entry['monsters'], q = judge_group(oam, vram, cgram, order, pictures, placed, floating)
             p += q
             appear = info['appear']
             if not appear['frames']:

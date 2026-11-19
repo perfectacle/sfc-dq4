@@ -55,6 +55,9 @@ class ArenaTest(unittest.TestCase):
         self.assertEqual(tuple(m for m in row if m != 0xFF), c.ARENA_PICKED)
         self.assertEqual([prg[dq4shopport.FC_ARENA_BANK * 0x4000 + dq4shopport.FC_ARENA_TABLE + 8 * 5 + 4 + i - 0x8000]
                           for i in range(3)], [i + (d > 3) for i, d in c.ARENA_ODDS])
+        # 최근 기록 장면의 둘째 뽑기(기록 0A = 번호 9 + 1)는 FC 9번 줄
+        row9 = [prg[dq4shopport.FC_ARENA_BANK * 0x4000 + dq4shopport.FC_ARENA_TABLE + 8 * 9 + i - 0x8000] for i in range(4)]
+        self.assertEqual(tuple(m for m in row9 if m != 0xFF), c.ARENA_SECOND)
 
 
 class RegisterTest(unittest.TestCase):

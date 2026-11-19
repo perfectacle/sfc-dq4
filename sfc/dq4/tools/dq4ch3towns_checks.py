@@ -120,6 +120,8 @@ PRINCE_HOLD = '7E3308=00'
 ARENA_PICKED = (0x02, 0x07, 0x08)
 ARENA_ODDS = ((5, 3), (11, 3), (1, 1))
 ARENA_BET = 9
+# 최근 기록 장면의 둘째 뽑기: FC 9번 テベロ·メタルスライム·プテラノドン·とさかへび
+ARENA_SECOND = (0x24, 0x5C, 0x3E, 0x20)
 
 
 def arena_payout(bet, odds):
@@ -128,10 +130,14 @@ def arena_payout(bet, odds):
     return q + (r >= 5)
 
 
-def _arena_match_bytes():
+def _arena_monsters(picked):
     import dq4monport
     numbers = dq4monport.field_numbers()
-    out = {f'ARENA_MON{k}': numbers[fc] for k, fc in enumerate(ARENA_PICKED)}
+    return {f'ARENA_MON{k}': numbers[fc] for k, fc in enumerate(picked)}
+
+
+def _arena_match_bytes():
+    out = _arena_monsters(ARENA_PICKED)
     out.update({f'ARENA_INT{k}': i for k, (i, _) in enumerate(ARENA_ODDS)})
     out.update({f'ARENA_DEC{k}': d for k, (_, d) in enumerate(ARENA_ODDS)})
     return out
@@ -139,7 +145,7 @@ def _arena_match_bytes():
 SEGMENTS = [
     # 격투장(DQ5 대화 0E, 시합은 FC 3장 표). 게임 난수(7E:075B~075D)는 매 프레임 굴러(가만히 서 있어도 30프레임에
     # 4A, 31프레임에 4B) 코어마다 늦는 프레임 수가 달라 시합 고르기·승패가 갈린다. 말 거는 동안은 난수를 묶어 시합을
-    # FC 5번(いたずらもぐら·おおみみず·みみとびねずみ, 시합 19개에서 다섯째)으로 정하고, 시합 동안은 난수를 풀고
+    # FC 5번(いたずらもぐら·おおみみず·みみとびねずみ)으로 정하고, 시합 동안은 난수를 풀고
     # (내내 묶으면 전투가 같은 고리에서 멈춤) 셋째 HP 를 묶어(ARENA_STRONG) 셋째가 이기게 한다. 수 창에서 위 한 번에
     # 2장씩 늘어 위 넷이면 9장(ARENA_BET): 셋째(1.1)에 걸면 이겨 91 + arena_payout(9, 1.1) = 91 + 10 = 101, 첫째에 걸면
     # 져 91. 말 거는 구간 끝에 고른 시합의 무리 몬스터·倍率(ARENA_PICKED·ARENA_ODDS)을 보고, 코인은 그 倍率로 셈한다.
@@ -169,12 +175,13 @@ SEGMENTS = [
       'bytes': {f'ARENA_LINE{g}': g for g in range(3)}}),
     # 격투장 최근 8시합 막기(FC 18:$ABC3, 헤드리스 실측: FC 에서 열두 번 말을 걸어 고른 시합이 앞 여덟에 없음). 난수를
     # 매 프레임 묶어 두 번 말을 걸면(시합 목록에서 B 로 나옴) 첫 뽑기는 둘 다 같은 시합 4 지만, 둘째는 그 번호가 기록에
-    # 있어 다시 뽑는다. 시합 19개에서 첫 뽑기 5, 둘째 8, 기록은 번호 + 1 이라 09·06·00(18개일 때는 4·7 → 08·05·00)
+    # 있어 다시 뽑는다. 시합 20개(FC 3장 표 전부라 번호 = FC 시합 번호)에서 첫 뽑기 5, 둘째 9(FC 9번 テベロ·メタルスライム·
+    # プテラノドン·とさかへび), 기록은 번호 + 1 이라 0A·06·00
     ('towns_arena_recent_side', 'warp', f'{W.CASINO},{ARENA[0]},{ARENA[1] + 1}',
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD}', 'set': ';'.join((_resumed(), _coins(100)))}),
     ('towns_arena_recent', 'walk', f'{ARENA_TALK};{ARENA_TALK}',
      {'map': W.CASINO, 'poke': f'{wc.DAY};{HOLD};{ARENA_RNG}',
-      'bytes': {'ARENA_RECENT0': 0x09, 'ARENA_RECENT1': 0x06, 'ARENA_RECENT2': 0x00}}),
+      'bytes': {'ARENA_RECENT0': 0x0A, 'ARENA_RECENT1': 0x06, 'ARENA_RECENT2': 0x00, **_arena_monsters(ARENA_SECOND)}}),
     # 슬롯(FC 기계 칸 가운데, 아래에서 위를 보고 말 걸기 → DQ5 1코인 기계): 583·584 에 「예」, 위로 한 장 넣으면 슬롯 안
     # 코인이 99. 돌린 뒤 배당은 코어 난수에 따라 달라 코인은 넣은 뒤에만 본다
     ('towns_slot_side', 'warp', f'{W.CASINO},{SLOT[0]},{SLOT[1] + 1}',

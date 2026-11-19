@@ -304,7 +304,7 @@ groups = ["ch1-build", "ch1-walk", "ch3-modules"]
 
 [[check]]
 name = "dq4-ch2-monster-count"
-why = "1~3장 걸음 전투 무리 조합(조우 훅의 무리 짓기를 난수 상태 아래 24비트 모두로) 가운데 빌드 롬이 FC 원작(14:$812F 의 폭·OBJ·팔레트·CHR 한도)보다 몬스터를 덜 놓는 조합 수가 (장, FC 구역, 때)마다 dq4moncount.KNOWN 을 넘지 않는지. 지금 2장에 80 개 있고 모두 줄 폭(22:9284)에 걸린다. 그림·번호·조우 표를 바꿔 늘면 실패, 줄면 새 수를 알린다. 1·3장은 0"
+why = "1~3장 걸음 전투 무리 조합(조우 훅의 무리 짓기를 난수 상태 아래 24비트 모두로) 가운데 빌드 롬이 FC 원작(14:$812F 의 폭·OBJ·팔레트·CHR 한도)보다 몬스터를 덜 놓는 조합 수가 (장, FC 구역, 때)마다 dq4moncount.KNOWN 을 넘지 않는지. 지금 2장에 29 개(줄 폭 22:9284). 그림·번호·조우 표를 바꿔 늘면 실패, 줄면 새 수를 알린다. 1·3장은 0. SFC 쪽 셈(dq5monlimits.Pictures.place)은 덜 놓이는 조합 모두와 곳마다 3개를 빌드 롬 snes9x 헤드리스 전투로 붙여 엔진이 놓은 마릿수(7E:0C60·0CD7)와 견준다 — 옮긴 그림을 원래 머리 표로 읽어 80 으로 잘못 셌던 일이 다시 나지 않게"
 paths = [
   "@ch2-modules",
   "sfc/dq4/tools/dq4moncount.py",
@@ -319,10 +319,81 @@ paths = [
   "sfc/dq5/tools/dq5encounterwrite.py",
   "fc/dq4/tools/dq4fcsprite.py",
   "fc/dq4/tools/dq4encounter.py",
+  "sfc/dq4/tools/dq4shopport.py",
+  "sfc/dq4/tools/dq4ch1event.py",
+  "sfc/dq4/tools/dq4monspecial.py",
+  "sfc/dq4/tools/dq4monartcheck.py",
+  "sfc/dq4/tools/test_dq4monartcheck.py",
+  "sfc/dq4/tools/dq4battlescene.py",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
+  "sfc/dq4/tools/dq4brkscan.py",
+  "sfc/dq4/tools/dq4compatcheck.py",
+  "sfc/dq4/tools/dq4chapterwalk.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4savefixture.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq5/tools/dq5sram.py",
+  "sfc/dq4/tools/dq4ch3safe.py",
+  "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
+  "sfc/dq4/tools/dq4ch3endor.py",
+  "sfc/dq4/tools/dq4mercenary.py",
+  "sfc/dq4/tools/dq4ch3bonmalmo.py",
+  "sfc/dq4/tools/dq4ch3tunnel.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
 ]
-run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4moncount.py --rom work/ch1/dq4-ch1-full.sfc --out work/moncount"
-needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
-groups = ["ch1-build"]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4moncount.py --rom work/ch1/dq4-ch1-full.sfc --out work/moncount --verify some"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk", "ch3-modules"]
+
+[[check]]
+name = "dq4-ch2-monster-count-all"
+why = "dq4-ch2-monster-count 의 SFC 쪽 셈을 1~3장 서로 다른 DQ5 무리 모두(783가지)에서 빌드 롬 snes9x 헤드리스 전투로 붙여 엔진이 놓은 마릿수와 견준다. 무거워 배포 관문 몫"
+paths = [
+  "@ch2-modules",
+  "sfc/dq4/tools/dq4moncount.py",
+  "sfc/dq4/tools/test_dq4moncount.py",
+  "sfc/dq4/tools/dq4monport.py",
+  "sfc/dq4/tools/dq4monart.py",
+  "sfc/dq4/tools/dq4fieldencounter.py",
+  "sfc/dq4/tools/dq4groupbuild.py",
+  "sfc/dq5/tools/dq5monlimits.py",
+  "sfc/dq5/tools/dq5mongfx.py",
+  "sfc/dq5/tools/dq5monwrite.py",
+  "sfc/dq5/tools/dq5encounterwrite.py",
+  "fc/dq4/tools/dq4fcsprite.py",
+  "fc/dq4/tools/dq4encounter.py",
+  "sfc/dq4/tools/dq4shopport.py",
+  "sfc/dq4/tools/dq4ch1event.py",
+  "sfc/dq4/tools/dq4monspecial.py",
+  "sfc/dq4/tools/dq4monartcheck.py",
+  "sfc/dq4/tools/test_dq4monartcheck.py",
+  "sfc/dq4/tools/dq4battlescene.py",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
+  "sfc/dq4/tools/dq4brkscan.py",
+  "sfc/dq4/tools/dq4compatcheck.py",
+  "sfc/dq4/tools/dq4chapterwalk.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4savefixture.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq5/tools/dq5sram.py",
+  "sfc/dq4/tools/dq4ch3safe.py",
+  "sfc/dq4/tools/dq4boulder.py",
+  "sfc/dq4/tools/dq4raft.py",
+  "sfc/dq4/tools/dq4ch3endor.py",
+  "sfc/dq4/tools/dq4mercenary.py",
+  "sfc/dq4/tools/dq4ch3bonmalmo.py",
+  "sfc/dq4/tools/dq4ch3tunnel.py",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4moncount.py --rom work/ch1/dq4-ch1-full.sfc --out work/moncount-all --verify all"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_SNES9X), 밑판 캐시 DQ4_STATES_CACHE(없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk", "ch3-modules"]
+tier = "release"
 
 # 2장 사건 모듈과 모듈만 닿는 자료, 등록 장치(test_dq4guardpaths 가 dq4ch2event.EVENTS 와 견줌). 2장 모듈은 기본 인물
 # 목록·대화 번호·메시지 번호·그림 배치를 바꿀 수 있어 2장 검사와 1장 내용 검사(CH2_REQUIRED)가 paths 에
