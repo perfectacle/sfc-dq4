@@ -504,6 +504,10 @@ class Screen:
         whole = [w for w in self.found if all(corner_kind(word(self.shot, r, c)) for r, c in corners(w))]
 
         def snap(w):
+            # 엔진 창이 그대로 화면에 온전히 있으면 그 창이다. 모서리 하나를 함께 쓰는 다른 화면 창은 그 안에 겹친 창일 수
+            # 있다(네네 보기 창은 짧은 마지막 쪽을 앞 쪽 위에, 왼쪽 위 모서리를 함께 쓰며 엔진 창 그리기 없이 그림)
+            if w in whole:
+                return w
             for k in range(4):
                 for v in whole:
                     if corners(v)[k] == corners(w)[k]:
@@ -532,8 +536,12 @@ class Screen:
         if self.engine:
             eng = self.engine_rects
             corners = {p for w in eng for p in ((w[0], w[1]), (w[0], w[3]), (w[2], w[1]), (w[2], w[3]))}
-            extra = [w for w in self.found if not {(w[0], w[1]), (w[0], w[3]), (w[2], w[1]), (w[2], w[3])} & corners
-                     and w not in eng]
+
+            # 엔진 창과 위 변을 함께 쓰고 아래 변만 더 위인 화면 창: 앞 쪽 위에 겹친 짧은 쪽
+            def nested(w):
+                return any((e[0], e[1], e[3]) == (w[0], w[1], w[3]) and w[2] < e[2] for e in eng)
+            extra = [w for w in self.found if w not in eng and (
+                nested(w) or not {(w[0], w[1]), (w[0], w[3]), (w[2], w[1]), (w[2], w[3])} & corners)]
             return eng + extra
         return self.found
 
@@ -587,9 +595,10 @@ class Allow:
 
 @dataclass(frozen=True)
 class Known:
-    """fail 규칙의 알려진 깨짐 눈금 하나(규칙 파일의 KNOWN). scene(fnmatch) 장면에서 cells 칸의 걸림이 꼭 frames 프레임
-    보이면 실패로 치지 않고 winwatch.log 에 「알려진 깨짐」 으로 적는다. Allow 와 달리 걸림을 건너뛰지 않는다: 더 오래
-    보이거나, 다른 칸이 걸리면 그대로 실패이고, 덜 보이거나 그 장면에서 걸리지 않으면 눈금을 내리라고 실패한다.
+    """fail 규칙의 알려진 깨짐 눈금 하나(규칙 파일의 KNOWN). scene(fnmatch) 장면에서 cells 칸의 걸림이 frames 프레임
+    넘게 보이지 않고, 그 칸들이 가장 오래 보인 프레임 수가 꼭 frames 이면 실패로 치지 않고 winwatch.log 에 「알려진
+    깨짐」 으로 적는다(같은 칸이 여러 모습에서 걸리면 가장 긴 것으로 잰다). Allow 와 달리 걸림을 건너뛰지 않는다: 더 오래
+    보이거나, 다른 칸이 걸리면 그대로 실패이고, 가장 긴 것이 줄었거나 그 장면에서 걸리지 않으면 눈금을 내리라고 실패한다.
     why 는 무엇이 깨졌고 무엇을 고치면 없어지는지."""
     scene: str
     cells: frozenset
@@ -760,17 +769,24 @@ def report(folder, rom, label=None):
     scene = label or str(folder)
     known = [(rule.NAME, k) for rule in rules() for k in getattr(rule, 'KNOWN', ()) if fnmatch.fnmatch(scene, k.scene)]
     met = {}            # (규칙 이름, Known) → 눈금 칸이 보인 가장 긴 프레임 수
+    # 장면·칸이 아니라 걸림 설명으로 알려진 깨짐을 가르는 규칙(known(설명) → 까닭 또는 None): 변 어긋남의 창 짝
+    by_desc = {rule.NAME: rule.known for rule in rules() if hasattr(rule, 'known')}
+    pairs = {}          # (규칙 이름, 까닭) → 가장 긴 프레임 수
     for shot, first, n, bad in found:
         rules_ = sorted({b[2] for b in bad})
         failed = [b for b in bad if force == 'fail' or (force == 'rules' and b[4] == 'fail')]
         left = []
         for b in failed:
+            why = by_desc[b[2]](b[3]) if b[2] in by_desc else None
+            if why:
+                pairs[(b[2], why)] = max(pairs.get((b[2], why), 0), b[5])
+                continue
             k = next(((name, g) for name, g in known if name == b[2] and (b[0], b[1]) in g.cells), None)
             if k is None:
                 left.append(b)
                 continue
             met[k] = max(met.get(k, 0), b[5])
-            if b[5] != k[1].frames:
+            if b[5] > k[1].frames:
                 left.append(b)
         failing += bool(left)
         tag = ' 실패' if left else ' 알려진 깨짐' if failed else ''
@@ -786,6 +802,7 @@ def report(folder, rom, label=None):
         failing += 1
         hint = '눈금보다 오래 보임' if got > k.frames else '눈금을 잰 값으로 내리거나, 걸리지 않으면 지울 것'
         lines.append(f'알려진 깨짐 눈금 {name} {sorted(k.cells)} {k.frames}프레임과 잰 값 {got}프레임이 다름({hint}) 실패')
+    lines += [f'알려진 깨짐 {name} 최대 {frames}프레임: {why}' for (name, why), frames in sorted(pairs.items())]
     (Path(folder) / LOG).write_text('\n'.join(lines) + ('\n' if lines else ''), encoding='utf-8')
     if hits:
         print(f'[winwatch] {label or folder}: 장면 규칙 {len(hits)}건(첫 프레임 {hits[0][0]} {hits[0][1]}) — '

@@ -535,14 +535,27 @@ def main():
         todo = [s[:5] + (sorted(set(s[5]) | set(EVERY[s[0]])),) if s[0] in EVERY else s for s in todo]
     # 장면마다 출발 상태만 같이 쓰고 따로 돈다. 무게는 덤프하는 프레임 수
     todo = dq4shards.part_of(todo, a.part, key=lambda s: s[0], weight=lambda s: len(s[5]))
+    import dq4winwatch
+    broken = {}
+
+    # UI 깨짐 판정(winwatch)의 실패는 그 장면만 실패로 적고 나머지 장면을 끝까지 돈다: 한 장면의 깨짐이 다른 장면의
+    # 결과를 가리지 않게
+    def one(s):
+        try:
+            return run(mesence, libdir, a.rom, rom, out / s[0], s)
+        except dq4winwatch.WindowBroken as e:
+            broken[s[0]] = str(e)
+            return {'cached': False, 'returncode': 0, 'window_broken': str(e)}
     with ThreadPoolExecutor(a.jobs) as pool:
-        infos = list(pool.map(lambda s: run(mesence, libdir, a.rom, rom, out / s[0], s), todo))
+        infos = list(pool.map(one, todo))
     (out / 'readset.json').write_text(json.dumps({s[0]: i for s, i in zip(todo, infos)}, indent=1), encoding='utf-8')
     print(f'읽은 바이트 캐시: 장면 {sum(i["cached"] for i in infos)}/{len(infos)} 맞음')
     unfinished = unfinished_scenes(out, todo, infos)
     for line in unfinished:
         print(f'FAIL {line}')
-    flagged = 0
+    flagged = len(broken)
+    for name, why in sorted(broken.items()):
+        print(f'FAIL {name} {why}')
     for s in todo:
         folder = out / s[0]
         seen = sorted(int(v.stem[1:]) for v in folder.glob('v*.bin'))
