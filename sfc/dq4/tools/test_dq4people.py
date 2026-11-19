@@ -1324,6 +1324,50 @@ def synthetic_person(name, sheet, **kw):
     return P.Person((0x10 + len(name),), None, sheet, name, **kw)
 
 
+ASSETS = Path(os.environ.get('DQ4_ASSETS', ''))
+
+
+class WaitingTests(unittest.TestCase):
+    """아직 싣지 않는 일행의 모습: 장이 붙이는 인자만 더해 Person 이 되고, 검토를 거친 얼굴 칸이 그대로 나온다."""
+
+    def test_장이_정하는_인자를_붙여_일행_Person_이_된다(self):
+        p = P.waiting('피사로', (0x70,), palette=5, flag=(0x10, 0x01))
+        self.assertEqual((p.sheet, p.role, p.main, p.palette, p.flag), ('h127', '피사로', True, 5, (0x10, 0x01)))
+        self.assertEqual(p.whites, ('down', 'left', 'right'))
+        self.assertEqual(P.waiting('마냐', (0x70,)).touch, P.MANYA_FACE)
+
+    def test_손본_칸은_그림_안이고_아는_방향·무엇만_쓴다(self):
+        for role, (sheet, look) in P.WAITING.items():
+            self.assertLessEqual(set(look), {'touch', 'whites'}, role)   # 그림 번호·줄·깃발은 그 장이 붙인다
+            self.assertLessEqual(set(look.get('whites', ())), set(look.get('touch', {})), role)
+            for way, edits in look.get('touch', {}).items():
+                self.assertIn(way, ('down', 'left', 'right', 'up'), role)
+                for x, y, what in edits:
+                    spots = [(x, y)] + ([what] if isinstance(what, tuple) else [])
+                    self.assertTrue(isinstance(what, tuple) or what in ('ink', 'white'), (role, what))
+                    self.assertTrue(all(0 <= u < 16 and 0 <= v < P.TALL for u, v in spots), (role, way, x, y, what))
+
+    def test_실은_일행은_기다리는_목록에_남지_않는다(self):
+        carried = {p.role for p in P.PEOPLE if p.palette is not None}
+        self.assertEqual(carried & set(P.WAITING), set())
+
+    @unittest.skipUnless((ASSETS / P.FIELD).is_dir(), 'DQ4_ASSETS 필요')
+    def test_앞모습_눈_줄이_검토한_모양으로_나온다(self):
+        def rows(role, ys, xs):
+            f = P.rgb_frames(P.waiting(role, (0x70,), palette=7), ASSETS)['down'][0]
+            return [[f.getpixel((x, y))[:3] for x in xs] for y in ys]
+
+        skin = lambda c: c in P.SKIN                                    # noqa: E731
+        up, low = rows('피사로', (6, 7), range(5, 11))
+        self.assertEqual((up[1], up[4], low[0], low[5]), (P.INK, P.INK, P.WHITE, P.WHITE))
+        self.assertNotIn(P.WHITE, up)                                   # 윗줄까지 흰자면 동그란 눈이 된다
+        self.assertTrue(all(skin(c) for c in up[2:4] + low[2:4]))
+        self.assertTrue(low[1] == low[4] and low[1] != P.INK and not skin(low[1]))
+        (eyes,) = rows('여자 용사', (8,), range(4, 12))
+        self.assertEqual(eyes[1:3] + eyes[5:7], [P.WHITE, P.INK, P.INK, P.WHITE])
+        self.assertTrue(all(skin(c) for c in (eyes[0], eyes[3], eyes[4], eyes[7])))
+
+
 class PrepareTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
