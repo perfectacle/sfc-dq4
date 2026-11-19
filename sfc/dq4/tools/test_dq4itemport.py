@@ -31,7 +31,7 @@ class PriceTest(unittest.TestCase):
                                                   0x37: "미소의 지팡이", 0x84: "외톨이 메탈 방패",
                                                       0xC6: "황금의 팔찌", 0xBE: "지저귐의 꿀",
                                                       0xBB: "도시락", 0xBC: "철 금고", 0xBD: "은의 여신상",
-                                                      0xC3: "왕자의 편지", 0xCA: "왕의 편지"})
+                                                      0xC3: "왕자의 편지", 0xCA: "왕의 편지", 0xCB: "불가사의의 피리"})
 
 
 @unittest.skipUnless(DQ4.is_file() and DQ5.is_file(), "local source ROMs not present")
@@ -91,7 +91,13 @@ class RomTest(unittest.TestCase):
             self.assertEqual([rom.u8(t + item) for t in dq4itemport.RECORD], [0x1C, 0x04, 0x53, 0x07])
             self.assertEqual(rom.u16(dq4itemport.USE_HANDLERS + (item - 0xA1) * 2), 0x8BE4)
         original = dq5item.Rom(DQ5.read_bytes())
-        for item in (0xBA, 0xBF, 0xC2, 0xC4, 0xC9, 0xCB):
+        # あやかしのふえ(CB)는 DQ5 피리 C7 의 기록과 필드 쓰기를 빌린다(FC: 쓰면 「…ふいた。」, 남음)
+        self.assertEqual(dq5chest.item_name(rom, dq4itemport.FLUTE), "あやかしのふえ")
+        self.assertEqual([rom.u8(t + dq4itemport.FLUTE) for t in dq4itemport.RECORD],
+                         [original.u8(t + 0xC7) for t in dq4itemport.RECORD])
+        self.assertEqual(rom.u16(dq4itemport.USE_HANDLERS + (dq4itemport.FLUTE - 0xA1) * 2),
+                         original.u16(dq4itemport.USE_HANDLERS + (0xC7 - 0xA1) * 2))
+        for item in (0xBA, 0xBF, 0xC2, 0xC4, 0xC9):
             self.assertEqual(dq5chest.item_name(rom, item), dq5chest.item_name(original, item))
         self.assertEqual(dq4itemport.name_at(rom, 0xBE), dq4itemport.name_at(original, 0xBE))
 
