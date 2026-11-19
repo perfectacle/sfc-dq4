@@ -15,10 +15,14 @@ NEXT_PAGE = 0x7D
 EQUIP = ('3장 장비 화면 「무기」 창 (2,18)-(12,29) 의 줄 글자 칸이 한 칸 밀려 오른쪽 테두리를 덮고 첫 줄이 조각남'
          '(창 글자 칸 넘침과 같은 화면)')
 GIVE = '도구 → 건네기 때 「누구에게」 창 (17,10)-(25,18) 위 변을 글자 칸이 덮음(창 검사 give-full·give-shop 의 바뀜·비침과 같은 때)'
+JOINT = ('판정 남음: 메시지를 다 찍은 모습(프레임 858~)에서 명령 창 아래 변 칸 (12,5) 이 도구 「누구」 창 왼쪽 아래 이음 모서리'
+         '(AC8B)라 선이 다 보이지 않음. 원본 DQ5 겹침에서도 같은 꼴인지 가려 규칙을 고치거나 깨짐으로 넘긴다')
 STATUS1 = '1인 상태 창 (19,22)-(27,28) 위 변 이름 자리에 이름 대신 조각 글자가 보임'
 KNOWN = tuple(ww.Known(scene, frozenset({cell}), frames, why) for scene, why, cells in (
-    ('*/equip-ch3', EQUIP, (((4, 3), 7), ((4, 29), 7), ((5, 29), 334))),
-    ('*/give-full', GIVE, (((17, 17), 12),)),
+    ('*/equip-ch3', EQUIP, (((4, 3), 7), ((4, 29), 299), ((5, 29), 334))),
+    ('*/give-full', GIVE, (((17, 16), 6), ((17, 17), 18))),
+    ('*/give-full', JOINT, (((12, 5), 18),)),
+    ('*/give-shop-ch1', JOINT, (((12, 5), 27),)),
     ('*/give-shop-ch1', GIVE, tuple(((17, c), 15) for c in range(11, 18))),
     ('*/screens/status-mesence', STATUS1, (((19, 23), 10), ((19, 24), 10))),
 ) for cell, frames in cells)
