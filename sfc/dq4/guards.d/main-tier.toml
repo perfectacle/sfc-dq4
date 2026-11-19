@@ -1,11 +1,10 @@
 # main 에 머지된 뒤(ci.yml push)와 배포 관문이 돌리는 긴 검사의 이름표. 형식은 tools/guards.py 의 [tier].
 # 여기 적힌 검사는 PR 에서 걸리지 않는다(바뀐 파일로도, [full] 로도). 기준: 한 번에 5분(300초, guardshard-times.json)
-# 이상이거나 장을 처음부터 끝까지 걷는 검사. 검사를 지우거나 paths 를 줄인 것이 아니라 도는 때만 옮겼다.
+# 이상이거나 장을 처음부터 끝까지 걷는 검사(창 깨짐 검사 dq4-window-check 는 창 회귀를 PR 에서 거르려고 PR 에 남김). 검사를 지우거나 paths 를 줄인 것이 아니라 도는 때만 옮겼다.
 # 새 긴 검사는 이 목록을 고치지 말고 자기 [[check]] 에 tier = "release" 를 단다.
 [tier]
 release = [
   "dq4-ch2-partytalk",
-  "dq4-window-check",
   "dq4-groups-scenes",
   "dq4-people-event-lines",
   "dq4-ch2-walk",
