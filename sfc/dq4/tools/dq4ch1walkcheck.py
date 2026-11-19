@@ -70,6 +70,8 @@ WINDOW_TOKEN = re.compile(r'(^|;)((until|cursor|ask|pick|open|done|settle|gone):
 WINDOW, CURSOR, ASK_WINDOW, PICK = 0x7E0A00, 0x7E0AD7, 0x32, 0x7E0F22
 # open:W 가 창을 기다리는 상한(프레임)
 OPEN_MAX = 1200
+# cursor:K 가 끝나려면 커서가 K 에 머물러야 하는 프레임 수(창이 뜨는 프레임에 한 프레임 거쳐 가는 값에 끝나지 않게)
+CURSOR_HOLD = 3
 # done:N·settle:N 이 보는 칸과 상한: 창 없음·상태 창·명령 창 번호, 조작 막힘(bit0), 필드 루프 카운터, done 이 끝날
 # 조용한 프레임 수, settle 이 기다릴 상한(lua/dq4walk.lua 와 같은 값)
 NO_WINDOW, STATUS_WINDOW, COMMAND_WINDOW, LOCK, FIELD_TICK = 0xFF, 0x02, 0x01, 0x7E19AE, 0x7E007F

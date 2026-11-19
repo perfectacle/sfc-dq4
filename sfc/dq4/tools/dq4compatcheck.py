@@ -286,6 +286,7 @@ class Walker:
         want, after = opt.get('changes', 99), opt.get('after', 120)
         pi = wi = stuck = changes = n = 0
         left = press = cur = last = last_change = since = None
+        on_for = 0
         tick = held = None
         tick_age = 0
         maps, buttons = [], set()
@@ -329,13 +330,14 @@ class Walker:
                         press, wi = None, wi + 1
                 elif p[0] == 'cursor' or p[0] == 'pick':
                     c = self.rd(wc.PICK if p[0] == 'pick' else wc.CURSOR)
-                    press = 120 if press is None else press
+                    press, on_for = (120, 0) if press is None else (press, on_for)
                     press -= 1
-                    if c == p[1] or press <= 0:
-                        if c != p[1]:
+                    on_for = on_for + 1 if c == p[1] else 0
+                    if on_for >= wc.CURSOR_HOLD or press <= 0:
+                        if on_for < wc.CURSOR_HOLD:
                             self.slips.append((n, f'{p[0]} timeout at {c} want {p[1]}'))
                         press, wi = None, wi + 1
-                    elif press % 12 >= 6:
+                    elif c != p[1] and press % 12 >= 6:
                         buttons = {'down' if p[0] == 'pick' or c < p[1] else 'up'}
                 elif p[0] == 'done':
                     w, c, t = self.rd(wc.WINDOW), self.rd(wc.CURSOR), self.rd(wc.FIELD_TICK)
