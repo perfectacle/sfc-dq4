@@ -221,6 +221,9 @@ paths = [
   "sfc/dq5/tools/lua/dq5exitcheck.lua",
   "sfc/dq5/tools/lua/dq5msg.lua",
   "sfc/dq5/tools/lua/dq5spcdump.lua",
+  "sfc/dq4/tools/dq4fcitems.py",
+  "sfc/dq4/tools/dq4localprice.py",
+  "sfc/dq4/tools/dq4wintext.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/fresh-bigpic-sub && uv run --locked python sfc/dq4/tools/dq4bigpiccheck.py --rom work/ch1/dq4-ch1-full.sfc --out work/fresh-bigpic-sub --subscripts"
 needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
