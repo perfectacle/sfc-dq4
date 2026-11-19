@@ -40,6 +40,7 @@ import os
 from pathlib import Path
 import random
 import re
+import struct
 import subprocess
 
 import dq4readset
@@ -70,6 +71,8 @@ def asm_define(name):
 
 KEYS, AGES = asm_define('wt_keys'), asm_define('wt_ages')   # 슬롯마다 워드
 KANA_ENTRIES, KBASE = 12, asm_define('wt_kbase')            # !wt_nkana, 첫 칸 12바이트, 이어서 칸 수 12바이트
+LEND = 0x80                       # dq4windowname.asm !wt_lend
+KEY2, KEY3 = asm_define('wt_key2'), asm_define('wt_key3')   # 가나 항목마다 같은 그림을 함께 쓰는 둘째·셋째 버퍼 자리(워드, 0 = 없음)
 SHARED_JP = 0x60B400                # 맵을 불러올 때 7E:1AC0 으로 복사되는 원래 공용 창 레코드(dq4menupatch.SHARED_JP)
 # 위를 보고 명령 창을 연다. 필드는 몇 프레임에 한 번만 입력을 읽어 짧게 누르면 놓친다(놓치면 뒤 입력이 한 칸씩 밀림)
 OPEN = 'b:4,wait:40,up:10,wait:20,a:10,wait:30,'
@@ -79,6 +82,20 @@ TALK = OPEN + ','.join(['a:6,wait:40,down:4,wait:10,a:6,wait:40'] * 10)
 # 넘쳐 캔버스 슬롯으로 간다
 SELL = OPEN + 'a:6,wait:60,down:4,wait:20,a:6,wait:80,a:6,wait:80,down:4,wait:30,a:6,wait:80'
 FULL_BAG = (0x01, 0x50, 0x78, 0x8A, 0xA1, 0xA1, 0xA4, 0xCD, 0xA3, 0xA2, 0xB1, 0xAD)
+# 장마다 그 장 롬이 주는 물건(dq4itemreach.given_union) 가운데 이름 그림 열 수가 가장 큰 12개로 채운 팔기 가방. 가나 칸
+# 104칸을 넘친 이름이 캔버스 슬롯으로 가는 길을 그 장에서 가장 세게 민다. 3장은 네네 가게에 맡기려 가방을 채우기 쉽다
+LONG_BAGS = {1: (0xCD, 0xB2, 0xB1, 0xA4, 0x00, 0xC6, 0xC3, 0xBE, 0xBD, 0xAF, 0xA9, 0x89),
+             2: (0xCD, 0xC7, 0xB2, 0xB1, 0x2A, 0x0B, 0xA4, 0x26, 0x00, 0xC6, 0xC3, 0xBE),
+             3: (0xCD, 0xC7, 0xB2, 0xB1, 0x84, 0x61, 0x2A, 0x0B, 0xA4, 0x37, 0x26, 0x00)}
+# 보통 플레이로 드는 가방: 1장 가게·상자·떨어뜨림만으로 든 긴 이름, 3장 네네에게 맡기려고 3장 가게 무기·방어구로 채운 것
+SHOP_BAG_CH1 = (0xCD, 0xB2, 0xB1, 0xA4, 0x00, 0xAF, 0xA9, 0x89, 0xAD, 0x8C, 0x87, 0x86)
+EQUIP_BAG_CH3 = (0x61, 0x0B, 0x26, 0x4E, 0x43, 0x34, 0x87, 0x86, 0x76, 0x75, 0x64, 0x54)
+# 도구 → 크리프트 → 첫 물건 → 건네기 → 「누구에게」(받는 사람 목록과 그 사람 물건 목록이 「어떻게 할까」 위에 뜸)
+GIVE = ('wait:60,a:6,wait:60,right:4,wait:30,down:4,wait:30,a:6,wait:90,a:6,wait:150,a:6,wait:150,down:4,wait:30,a:6,'
+        'wait:200,' + 'b:6,wait:90,' * 4)
+# 장비 → 크리프트 → 무기 → 고르기(「장비할 수 없다」 메시지가 장비 창들 위에 뜸)
+EQUIP = ('wait:60,a:6,wait:60,down:4,wait:30,down:4,wait:30,a:6,wait:90,a:6,wait:150,a:6,wait:200,down:4,wait:60,down:4,'
+         'wait:60,' + 'b:6,wait:90,' * 4)
 # 주인공 이름 7E:2001 에 넣는 「크리프트」 한글 표시 바이트. 세이브스테이트의 가나 이름은 가나 칸 슬롯과 겹쳐 깨진다.
 # 09/00 의 몬스터 동료 이름(이름 표 0A, DQ5 데이터)은 가나라 필드 상태 창에서 「가나」 로 걸린다
 NAME = '97338C3799299827'
@@ -94,10 +111,19 @@ RULER_PRE = (OPEN + 'right:4,wait:30,a:6,wait:60,a:6,wait:80,' + 'down:4,wait:20
              + 'down:4,wait:30,' * 6 + 'b:6,wait:60')
 
 
+# 글자 칸(가나 104칸 + 캔버스 밖)이 모자라 아직 깨지는 장면과, --every 로 잰 걸린 프레임 수의 상한. 이보다 늘면 실패,
+# 줄면 통과하며 새 수를 알린다(숫자를 고쳐 못박는다). 메시지 캔버스 전송이 창 타일맵보다 먼저 가는 차례와 가린 캔버스
+# 칸 슬롯을 고치면 0 이 되어야 한다(형식 문서 「남은 것」)
+NAME_FIRST, NAME_POSITIONS = 0x180, 8     # 이름 렌더러 자리(dq4windowname WnSlot, 자리마다 이름 5칸 + 위 줄 5칸)
+KNOWN = {'give-full': 224, 'give-shop-ch1': 245, 'equip-ch3': 9, 'sell-shop-ch1': 8, 'sell-equip-ch3': 7,
+         'sell-long-ch1': 90, 'sell-long-ch2': 89, 'sell-long-ch3': 89}
 # --every 로 매 프레임 재는 장면과 구간(장면의 원래 프레임에 더함). 넘친 목록 이름을 묶음 버퍼로 보내는 장면들과, 메시지 창
 # 없이 상태 창에 이름이 넘치는 battle11·party21 의 구간
 EVERY = {'talk02-full': range(60, 700), 'shopwho': range(100, 1900), 'partyitems': range(60, 900),
-         'battle11': range(330, 430), 'party21': range(3380, 3420)}
+         'battle11': range(330, 430), 'party21': range(3380, 3420),
+         **{f'sell-long-ch{c}': range(60, 700) for c in LONG_BAGS},
+         'sell-shop-ch1': range(60, 700), 'sell-equip-ch3': range(60, 700),
+         'give-full': range(60, 1400), 'give-shop-ch1': range(60, 1400), 'equip-ch3': range(60, 1400)}
 
 
 # 무작위 입력 장면(talkNN 대화 번호 훑기·shipN·partyNN·battleNN 의 fuzz). 나머지는 고정 출발 상태와 정해진 입력의 결정적 장면이라
@@ -144,6 +170,8 @@ PARTY_SPELL_PRE = ('wait:150,a:6,wait:60,right:4,wait:30,a:6,wait:90,down:4,wait
                    'wait:200,b:6,wait:90,b:6,wait:90,b:6,wait:90')
 PARTY_TACTIC_PRE = ('wait:150,a:6,wait:60,right:4,wait:30,down:4,wait:30,down:4,wait:30,a:6,wait:90,down:4,wait:30,a:6,'
                     'wait:90,down:4,wait:30,a:6,wait:150,b:6,wait:90,b:6,wait:90,b:6,wait:90')
+# 상태 → 강함 보기 → 「누구의」(번호 줄). 상태 창 이름이 보이는 채로 목록 이름이 이름 렌더러 자리를 받는다
+STATUS_WHO_PRE = 'wait:150,a:6,wait:60,down:4,wait:30,a:6,wait:60,down:4,wait:20,down:4,wait:30,a:6,wait:150,b:6,wait:60,b:6,wait:60'
 
 
 def make_states(mesence, rom_path, data, out):
@@ -176,12 +204,24 @@ def scenes(ship, party, shop=None, battle=None):
         out.append((f'talk{n:02X}', ship, talk.format(n), '', TALK, range(60, 1500, 30)))
     bag = ';'.join(f'7E{0x2056 + i:04X}={b:02X}' for i, b in enumerate(FULL_BAG))
     out.append(('talk02-full', ship, f'{talk.format(2)};{bag}', '', SELL, range(60, 700, 10)))
+    for c, items in LONG_BAGS.items():
+        bag = ';'.join(f'7E{0x2056 + i:04X}={b:02X}' for i, b in enumerate(items))
+        out.append((f'sell-long-ch{c}', ship, f'{talk.format(2)};{bag}', '', SELL, range(60, 700, 10)))
+
+    def bag_of(items):
+        return ';'.join(f'7E{0x2056 + i:04X}={b:02X}' for i, b in enumerate(items))
+    out.append(('sell-shop-ch1', ship, f'{talk.format(2)};{bag_of(SHOP_BAG_CH1)}', '', SELL, range(60, 700, 10)))
+    out.append(('sell-equip-ch3', ship, f'{talk.format(2)};{bag_of(EQUIP_BAG_CH3)}', '', SELL, range(60, 700, 10)))
+    for name, items, pre in (('give-full', FULL_BAG, GIVE), ('give-shop-ch1', SHOP_BAG_CH1, GIVE),
+                             ('equip-ch3', EQUIP_BAG_CH3, EQUIP)):
+        out.append((name, shop or ship, bag_of(items), '', pre, range(60, 1400, 30)))
     out.append(('ruler', ship, RULER_POKE, '', RULER_PRE, range(60, 900, 10)))
     for seed in (1, 2, 3, 4):
         out.append((f'ship{seed}', ship, '', '', fuzz(seed), range(100, 8000, 50)))
     out.append(('partyitems', party, PARTY_ITEMS, '', PARTY_ITEMS_PRE, range(60, 900, 30)))
     out.append(('partyspell', party, '', '', PARTY_SPELL_PRE, range(60, 1100, 5)))
     out.append(('partytactic', party, '', '', PARTY_TACTIC_PRE, range(60, 1100, 10)))
+    out.append(('statuswho', party, '', '', STATUS_WHO_PRE, range(200, 700, 5)))
     for seed in (21, 22):
         out.append((f'party{seed}', party, '', '', fuzz(seed), range(100, 8000, 50)))
     for seed in (11, 12):
@@ -224,7 +264,7 @@ def run(mesence, libdir, rom_path, rom, folder, scene):
     sets = [f'{0x7E1AC0 + i:X}={b:02X}' for i, b in enumerate(rom[o:o + 48])]
     sets += [f'{0x7E2001 + i:X}={NAME[2 * i:2 * i + 2]}' for i in range(8)]
     fs = ','.join(map(str, frames))
-    dump = ','.join(f'{f}:7E{KEYS:04X}:60,{f}:7E{AGES:04X}:60,{f}:7E{KBASE:04X}:24,{f}:7E0725:1,{f}:7E1944:2,'
+    dump = ','.join(f'{f}:7E{KEYS:04X}:60,{f}:7E{AGES:04X}:60,{f}:7E{KBASE:04X}:24,{f}:7E{KEY2:04X}:24,{f}:7E{KEY3:04X}:24,{f}:7E0725:1,{f}:7E1944:2,'
                     f'{f}:7E{MSG_CANVAS:04X}:{len(CANVAS) * 8}' for f in frames)
     env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=str(folder), STATE=str(state), PRE=pre, SHOTS=fs, VRAMDUMP=fs,
                DUMP=dump, SET=','.join(sets), MAXF=str(frames[-1] + 10))
@@ -245,13 +285,13 @@ def dumps(folder):
     return out
 
 
-def check(folder, rom, slots):
+def check(folder, rom, slots, off=frozenset()):
     """[(프레임, [(줄, 열, 규칙, 타일)])] 걸린 프레임만."""
     kana = {t: bytes(x for b in rom[KANA_ROM + (t - 1) * 8:KANA_ROM + t * 8] for x in (b, 0xFF)) for t in KANA}
     out, seen, before = [], {}, {}
     for frame, d in sorted(dumps(folder).items()):
         vram_path = folder / f'v{frame:05d}.bin'
-        if not vram_path.exists() or len(d) < 5:
+        if not vram_path.exists() or len(d) < 5 or frame in off:
             continue
         vram = vram_path.read_bytes()
         keys, ages = d[KEYS], d[AGES]
@@ -263,7 +303,9 @@ def check(folder, rom, slots):
             canvas = [range(t, t + size) for t, size, field_only in battle_slots]
         else:
             canvas = [list(range(lo, lo + n)) + list(range(up, up + n)) for lo, up, n in field_slots]
-        cells = [range(kb[i], kb[i] + kb[KANA_ENTRIES + i]) for i in range(KANA_ENTRIES)] + canvas[KANA_ENTRIES:]
+        # 첫 칸이 LEND 이상이면 이름 렌더러 자리(180 + 자리 × 10)를 빌린 항목
+        cells = [range(t, t + kb[KANA_ENTRIES + i]) for i in range(KANA_ENTRIES)
+                 for t in [kb[i] if kb[i] < LEND else 0x180 + (kb[i] - LEND) * 10]] + canvas[KANA_ENTRIES:]
         for i, tiles in enumerate(cells):
             key = int.from_bytes(keys[2 * i:2 * i + 2], 'little')
             age = int.from_bytes(ages[2 * i:2 * i + 2], 'little')
@@ -271,6 +313,11 @@ def check(folder, rom, slots):
                 continue
             c = (key - BUFFER) // 2
             mine |= {c + j for j in range(10)} | {c - 32 + j for j in range(10)}
+            for extra in (KEY2, KEY3):
+                k2 = int.from_bytes(d[extra][2 * i:2 * i + 2], 'little') if extra in d and i < KANA_ENTRIES else 0
+                if k2:
+                    c2 = (k2 - BUFFER) // 2
+                    mine |= {c2 + j for j in range(10)} | {c2 - 32 + j for j in range(10)}
             if not (battle and (i < KANA_ENTRIES or battle_slots[i][2])):
                 live.update({t: i for t in tiles})
         tilemap = (d[0x0725][0] & 0xFC) << 8
@@ -321,11 +368,47 @@ def check(folder, rom, slots):
                 bad.append((cell // 32, cell % 32, '가나', t))
             elif not battle and t in CANVAS and t in live and not canvas_tile(vram, d.get(MSG_CANVAS), t):
                 bad.append((cell // 32, cell % 32, '비침', t))
+        if not battle:
+            bad += shared_names(vram, tilemap)
         if battle:
             bad += corners(vram, tilemap)
         if bad:
             out.append((frame, bad))
     return out
+
+
+def screen_off(folder, frames):
+    """frames 가운데 그 프레임 끝에 화면이 꺼진(INIDISP 강제 끔·밝기 0, 또는 주 화면에 BG3 없음) 프레임. UI 깨짐 검사
+    (dq4winwatch.lua 가 emu.getState 의 ppu.forcedBlank·screenBrightness·mainScreenLayers 로 적은 winwatch.bin 의 모습 -1)와
+    같은 기준이다. 밝기가 1 이상이면(어두워지는 중) 잰다. 기록이 없거나 깨졌으면 ValueError — 「뺀 것 0」 으로 넘어가면 꺼진
+    화면을 못 가려 낸 장면이 조용히 통과하거나 실패한다."""
+    import dq4winwatch
+    path = folder / dq4winwatch.DATA
+    if not path.exists():
+        raise ValueError(f'화면 기록 {path} 없음')
+    try:
+        events = dq4winwatch.parse(path.read_bytes()).events
+    except struct.error as e:
+        raise ValueError(f'화면 기록 {path} 이 중간에 끊김: {e}') from e
+    out, i, shot = set(), 0, None
+    for f in sorted(frames):
+        while i < len(events) and events[i][0] <= f:
+            shot = events[i][1]
+            i += 1
+        if shot == -1:
+            out.add(f)
+    return frozenset(out)
+
+
+def shared_names(vram, tilemap):
+    """이름 렌더러 자리(180 + 자리 × 10)의 첫 칸을 화면의 두 곳이 함께 가리키면 한쪽은 남의 이름이다(글자는 멀쩡해도
+    「누구의」 첫 줄이 둘째 사람 이름으로 보인 꼴). 이름 하나는 자리 하나에만 그린다."""
+    where = {}
+    for cell in range(32 * 28):
+        t = int.from_bytes(vram[(tilemap + cell) * 2:(tilemap + cell) * 2 + 2], 'little') & 0x3FF
+        if NAME_FIRST <= t < NAME_FIRST + NAME_POSITIONS * 10 and (t - NAME_FIRST) % 10 == 0:
+            where.setdefault(t, []).append(cell)
+    return [(c // 32, c % 32, '겹자리', t) for t, cells in where.items() if len(cells) > 1 for c in cells]
 
 
 def canvas_tile_bytes(art, canvas, t):
@@ -443,15 +526,35 @@ def main():
     flagged = 0
     for s in todo:
         folder = out / s[0]
-        hits = check(folder, rom, slots)
-        frames = len(list(folder.glob('v*.bin')))
-        if hits:
+        seen = sorted(int(v.stem[1:]) for v in folder.glob('v*.bin'))
+        frames = len(seen)
+        try:
+            off = screen_off(folder, seen)
+        except ValueError as e:
             flagged += 1
+            print(f'FAIL {s[0]} 꺼진 화면을 가려 낼 수 없음: {e}')
+            continue
+        dim = f', 꺼진 화면 {len(off)} 프레임 뺌'
+        if frames and len(off) * 2 > frames:
+            flagged += 1
+            print(f'FAIL {s[0]} 본 {frames} 프레임 가운데 {len(off)} 프레임이 꺼진 화면(장면이 화면을 거의 못 봄)')
+            continue
+        hits = check(folder, rom, slots, off)
+        if hits:
             sheet(folder, hits, out / f'sheet-{s[0]}.png')
             first = ', '.join(f'{f}:{len(b)}칸({b[0][2]} {b[0][3]:03X})' for f, b in hits[:4])
-            print(f'FAIL {s[0]} {len(hits)}/{frames} 프레임  {first}')
+            known = KNOWN.get(s[0])
+            if known is not None and len(hits) <= known:
+                note = f' — 알려진 {known} 보다 줄었다, KNOWN 을 {len(hits)} 로' if len(hits) < known else ''
+                print(f'KNOWN {s[0]} {len(hits)}/{frames} 프레임(상한 {known}{dim})  {first}{note}')
+                continue
+            flagged += 1
+            print(f'FAIL {s[0]} {len(hits)}/{frames} 프레임{dim}  {first}')
         else:
-            print(f'PASS {s[0]} {frames} 프레임')
+            if s[0] in KNOWN:
+                print(f'PASS {s[0]} {frames} 프레임{dim} — 알려진 깨짐이 사라졌다, KNOWN 에서 지운다')
+                continue
+            print(f'PASS {s[0]} {frames} 프레임{dim}')
     if not todo:
         raise SystemExit('돌 장면이 하나도 없음')
     if flagged or unfinished:

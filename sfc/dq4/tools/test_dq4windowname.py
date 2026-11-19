@@ -608,6 +608,10 @@ class VisibleTest(unittest.TestCase):
 class UpperFlipTest(unittest.TestCase):
     """위 줄 합성(WnBaseRow)이 바탕 타일의 뒤집기를 지킨다: 세로면 줄을 7 − r 로, 좌우면 바이트마다 비트를 거꾸로."""
 
+
+class SharePictureTest(unittest.TestCase):
+    """필드에서 같은 그림을 같은 위 줄 바탕에 그려 둔 보이는 가나 항목이 있으면 함께 쓴다(장비 화면의 같은 물건 이름)."""
+
     def setUp(self):
         self.asm = ASM.read_text(encoding='utf-8')
 
@@ -634,6 +638,86 @@ class UpperFlipTest(unittest.TestCase):
         body = self.asm[self.asm.index('\nWnMirror:'):]
         body = body[:body.index('RTS')]
         self.assertIn('LSR.w !wn_s\n    ROL\n    XBA\n    LSR.w !wn_s+1\n    ROL\n    XBA', body)
+
+
+    def body(self, name):
+        start = self.asm.index(f'\n{name}:')
+        return self.asm[start:self.asm.index('\n; ', start + 1)]
+
+    def define(self, name):
+        return int(re.search(rf'^!{name}\s*=\s*\$([0-9A-F]+)', self.asm, re.M).group(1), 16)
+
+    def test_new_variables_fit_the_unused_wram(self):
+        """7E:A921~ABFF 는 원래 코드가 쓰지 않는 자리이고 AA1C~AABB 는 !wn_stage 다."""
+        spans = [(self.define(n), w) for n, w in (('wt_kptr', 24), ('wt_ksig', 24), ('wt_key2', 24),
+                                                    ('wt_sig', 2), ('wt_shared', 2), ('wt_key3', 24))]
+        for a, w in spans:
+            self.assertGreaterEqual(a, 0xAABC)
+            self.assertLessEqual(a + w, 0xAC00)
+        spans.sort()
+        for (a, w), (b, _) in zip(spans, spans[1:]):
+            self.assertLessEqual(a + w, b)
+
+    def test_share_needs_same_picture_and_above_row(self):
+        share = self.body('WtShare')
+        for want in ('CMP.w !wt_ptr', 'CMP.w !wt_sig', 'AND #$0001', 'CPX.w #!wt_nkana*2'):
+            self.assertIn(want, share)
+        sig = self.body('WtAboveSig')
+        self.assertIn('SBC #$0040', sig)        # 위 줄
+        self.assertIn('AND #$C3FF', sig)        # 타일 번호·뒤집기
+        alloc = self.body('WtAlloc')
+        self.assertLess(alloc.index('JSR WtShare'), alloc.index('JSR WtKana'))
+        self.assertIn('STA.w !wt_key2,X', alloc)
+
+    def test_queue_skips_upload_for_a_shared_slot(self):
+        q = self.asm[self.asm.index('\nWtQueue:'):]
+        self.assertTrue(q.startswith('\nWtQueue:\n    LDA.w !wt_shared\n    BEQ +\n    STZ.w !wt_shared\n    RTS'))
+
+    def test_lend_name_positions_for_short_texts(self):
+        """다섯 열 이하 문구는 화면에 없는 이름 렌더러 자리(180 + 자리 × 10)를 빈 가나 항목으로 빌린다."""
+        self.assertEqual(self.define_value('wt_lend'), 0x80)
+        self.assertGreater(0x80, 0x77)                     # 가나 칸 첫 칸(010~077)과 겹치지 않는 표지
+        lend = self.body('WtLendName')
+        self.assertIn('CMP #$0006', lend)                   # 다섯 열 이하
+        self.assertIn('LDA.l $7E201D', lend)                # 일행 수만큼 자리를 남김
+        self.assertIn('STA.w !wn_keys,X', lend)             # WnSlot 이 쓰는 중으로 봄
+        base = self.body('WtBaseOf')
+        self.assertIn('CMP.w #!wt_lend', base)
+        self.assertIn('ADC #$0180', base)
+        self.assertIn('ADC #$0005', self.body('WtUpperOf'))   # 위 줄은 이름 5칸 뒤
+        self.assertIn('CMP.w #!wt_lend', self.body('WtOcc'))  # 가나 칸 점유에서 뺌
+        alloc = self.body('WtAlloc')
+        self.assertLess(alloc.index('JSR WtShare'), alloc.index('JSR WtLendName'))
+        self.assertLess(alloc.index('JSR WtLendName'), alloc.index('JSR WtKana'))
+        # 이름 렌더러는 빌린 항목이 살아 있는 자리를 건너뛰고, 가져가면 그 항목을 비운다
+        slot = self.asm[self.asm.index('\nWnSlot:'):]
+        slot = slot[:slot.index('\n.found')]
+        self.assertIn('JSR WnLentVis\n    BCS .pick', slot)
+        self.assertIn('.found\n    JSR WnUnlend', self.asm)
+
+    def test_third_key(self):
+        self.assertIn('STA.w !wt_key3,X', self.body('WtAlloc'))
+        self.assertIn('LDA.w !wt_key3,X', self.body('WtSeenKey2'))
+
+    def define_value(self, name):
+        return int(re.search(rf'^!{name}\s*=\s*\$([0-9A-F]+)', self.asm, re.M).group(1), 16)
+
+    def test_second_key_keeps_the_slot_visible(self):
+        self.assertIn('JSR WtSeenKey2', self.body('WtVis'))
+        self.assertIn('LDA.w !wt_key2,X', self.body('WtSeenKey2'))
+class NameSlotTest(unittest.TestCase):
+    """WnSlot: 이름 자리 여덟을 돌려 쓰되, 버퍼에서 아직 제 첫 이름 칸(180 + 자리 × 10)을 가리키는 자리는 건너뛴다.
+    뒤에 어둡게 남은 상태 창 이름 자리를 「누구」 창 이름이 덮어 이름이 바뀌고 위 테두리 합성이 사라졌다."""
+
+    def test_reuse_skips_positions_still_on_screen(self):
+        asm = ASM.read_text(encoding='utf-8')
+        body = asm[asm.index('\nWnSlot:'):]
+        body = body[:body.index('\n.found')]
+        self.assertIn('.pick', body)
+        self.assertIn('ADC #$0180', body)
+        self.assertIn('AND #$03FF', body)
+        self.assertIn('BEQ .pick', body)
+        self.assertIn('LDA #$0008\n    STA.w !wn_r', body)     # 모두 쓰이면 차례대로
 
 if __name__ == '__main__':
     unittest.main()

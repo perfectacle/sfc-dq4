@@ -93,6 +93,8 @@ NENE_VIEW_MORE = 7
 from dq4ch3slots import NENE_VIEW_MARK as NENE_MARK, NENE_VIEW_LINES as NENE_LINES, NENE_VIEW_SPLIT as NENE_SPLIT  # noqa: E402,E501  쪽 줄 수(1~8)는 창 높이를 고른다
 # 타일맵 버퍼 줄 y 가 화면에서는 한 줄 위(y − 1)에 보인다(BG3 세로 스크롤). FC 창 66 의 위 테두리가 화면 타일 2줄이라 y = 3
 NENE_VIEW_XY = (18, 3)
+# 네네 보기 표지(NENE_MARK 등)는 3장 변수 칸이라 다른 장에서는 다른 값이 남을 수 있어, 3장 flag 가 설 때만 표지로 본다
+CHAPTER3 = (0x7E2208, 0x08)     # dq4growth.CHAPTER3·dq4ch3event.CHAPTER3
 # 그 레코드와 별칭 갈래 자리. 창 제목 목록(04:AD78~, 제목 43개)을 dq4windowtext.fixed_records 가 한국어로 줄이고 뒤 코드
 # (04:AE7C) 앞까지 FF 로 채운 곳이라 제목 번호로는 닿지 않는다. 제목을 쓴 뒤 FF 인지 본다
 NENE_SPOT, NENE_SPOT_END = 0x04AE21, 0x04AE7C
@@ -193,6 +195,35 @@ def kana_glyphs(d, font, render):
         raise ValueError(f'{KANA_TABLE:06X} 가 비어 있지 않음')
     d[o:o + len(table)] = table
     return numbers
+
+
+# 가게 동료 창에서 이름이 다섯째 칸까지 차는 사람(장, 이름). 그 사람은 비교 값이 바꾸기 전·후 둘 다 세 자리면 값이 이름에
+# 붙는다(형식 문서 「가게 동료 창의 칸」 남은 것). 비교 값을 그림으로 그리는 고침이 들어가기 전까지, 이 밖의 사람이 생기면
+# 빌드가 멈춘다(4장부터 동료가 늘 때 바로 알게)
+SHOP_FULL_NAMES = {(1, '주인공 이름'), (2, '크리프트')}
+
+
+def shop_member_names():
+    """장 → (동료 창에 서는 이름, 이름 입력으로 정하는 주인공이 있는지)."""
+    import dq4ch2event
+    import dq4ch3event
+    import dq4groupbuild as g
+    person, companion = dict(g.PERSON_NAMES), dict(g.COMPANION_NAMES)
+    return {1: ([companion[0x05 * 4]], True),
+            2: ([dq4ch2event.ALENA_NAME] + [person[k] for k in sorted(person)], False),
+            3: ([dq4ch3event.TORNEKO_NAME, companion[0x28 * 4], companion[0x29 * 4]], False)}
+
+
+def shop_full_names(font):
+    """다섯째 칸까지 차는 (장, 이름). 이름 입력 주인공은 넉 자(dq4nameentry.MAX_CHARS)면 넉 자 한글 이름처럼 찬다."""
+    import dq4nameentry as ne
+    import dq4windowtext
+    out = set()
+    for chapter, (names, entered) in shop_member_names().items():
+        out |= {(chapter, n) for n in names if len(dq4windowtext.columns(font, n)) >= SHOP_NAME_CELLS}
+        if entered and ne.MAX_CHARS >= 4:
+            out.add((chapter, '주인공 이름'))
+    return out
 
 
 def shop_states():
@@ -321,6 +352,9 @@ def apply(data, font=None, asar=None):
     for key in shop_states():
         if len(dq4windowtext.columns(font, dq4windowtext.FIXED[key])) > SHOP_STATE_COLS:
             raise ValueError(f'가게 동료 창 상태 「{dq4windowtext.FIXED[key]}」 이 {SHOP_STATE_COLS}열을 넘음')
+    new_full = shop_full_names(font) - SHOP_FULL_NAMES
+    if new_full:
+        raise ValueError(f'가게 동료 창 이름이 다섯째 칸까지 차는 사람이 늘었음: {sorted(new_full)}')
     banks = {}
     text, _ = dq4windowtext.build(d, font, banks)
     for bank, blob in banks.items():
@@ -381,7 +415,8 @@ def apply(data, font=None, asar=None):
             f'!shop_sell_spot = ${SELL_SPOT:06X}\n!shop_sell_end = ${SELL_SPOT_END:06X}\n'
             f'!nene_view_more = {NENE_VIEW_MORE}\n!nene_view_last = {NENE_VIEW_MORE + 1}\n'
             f'!nene_view_x = {NENE_VIEW_XY[0]}\n!nene_view_y = {NENE_VIEW_XY[1]}\n'
-            f'!nene_arrow = $7E{qp_cell(NENE_VIEW_XY[0] + 1, NENE_VIEW_XY[1]):04X}\n!nene_spot = ${NENE_SPOT:06X}\n!nene_mark = ${NENE_MARK:06X}\n!nene_lines = ${NENE_LINES:06X}\n!nene_split = ${NENE_SPLIT:06X}\n')
+            f'!nene_arrow = $7E{qp_cell(NENE_VIEW_XY[0] + 1, NENE_VIEW_XY[1]):04X}\n!nene_spot = ${NENE_SPOT:06X}\n!nene_mark = ${NENE_MARK:06X}\n!nene_lines = ${NENE_LINES:06X}\n!nene_split = ${NENE_SPLIT:06X}\n'
+            f'!chapter3_flag = ${CHAPTER3[0]:06X}\n!chapter3_bit = ${CHAPTER3[1]:02X}\n')
     defs += dq4battlemsg.apply(d, font or dq4menupatch.Font('galmuri9'), dq4menupatch.render,
                                len(ne.GLYPHS) + len(kana))
     with tempfile.TemporaryDirectory() as tmp:

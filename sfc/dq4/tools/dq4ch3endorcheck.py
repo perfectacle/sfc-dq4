@@ -169,13 +169,15 @@ SEGMENTS = [
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(FULL_STOCK, sales_set(0)))}),
     ('nene_full_view', 'walk', FULL_VIEW_WALK,
      {'map': endor.TOWN, 'bytes': {'NENE_LINES': shop.VIEW_LINES, 'NENE_CELL_18_20': 0x8B, **MSG_CLEAR}}),
-    # 둘째 쪽(물건 3개)은 FC 창 66 처럼 앞 쪽 위에 겹친 3줄 창: 8줄 높이 창의 버퍼 줄 10 에 3줄 창의 아래 테두리(8B), 그
-    # 위 줄 9 는 가린 4번째 줄의 윗 타일 줄이라 빈칸, 창 아래 끝 줄 20 은 앞 쪽 창의 아래 테두리
+    # 둘째 쪽(물건 3개)은 FC 창 66 처럼 앞 쪽 위에 겹친 3줄 창: 8줄 높이 창의 버퍼 줄 9(4번째 줄의 윗 타일 줄)에 3줄 창의
+    # 아래 테두리(모서리 8B·가로 8D, 글자 칸은 테두리를 바탕으로 한 위 줄 합성), 줄 10 은 앞 쪽 4번째 줄이 그대로 보이고
+    # 왼쪽 끝은 8줄 창의 세로 테두리(8E), 창 아래 끝 줄 20 은 앞 쪽 창의 아래 테두리
     ('nene_page_two_side', 'warp', f'{endor.TOWN},{NENE_DAY[0]},{NENE_DAY[1] - 5}',
      {'map': endor.TOWN, 'set': sets(endor.SHOP, more=(_items(endor.STEEL_SWORD), PAGE_STOCK, sales_set(0)))}),
     ('nene_page_two', 'walk', PAGE_TWO_WALK,
      {'map': endor.TOWN, 'bytes': {'NENE_MARK': shop.VIEW_MORE + 1, 'NENE_LINES': shop.VIEW_LINES, 'NENE_SPLIT': 3,
-                                   'NENE_CELL_18_3': 0x8C, 'NENE_CELL_18_10': 0x8B, 'NENE_CELL_19_9': 0x01,
+                                   'NENE_CELL_18_3': 0x8C, 'NENE_CELL_18_9': 0x8B, 'NENE_CELL_19_9': 0x8D,
+                                   'NENE_CELL_29_9': 0x8B, 'NENE_CELL_18_10': 0x8E, 'NENE_CELL_19_10': 0x01,
                                    'NENE_CELL_18_20': 0x8B, **MSG_CLEAR}}),
     # 같은 열린 첫 쪽에서 창 오른쪽 테두리 열(화면 x 29)의 타일이 줄마다 테두리이고 바깥 열(x 30)은 창 밖인지(검사
     # NENE_RIGHT*). 열 칸 이름이 그대로 그려지면 테두리를 덮는다
