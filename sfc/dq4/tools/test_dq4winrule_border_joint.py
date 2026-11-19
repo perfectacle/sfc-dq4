@@ -29,6 +29,10 @@ class CornerCountTest(unittest.TestCase):
         # 원본 DQ5 꼴: 「누구」 창은 모서리 셋이 가리고 이음 모서리 하나만 보여 창으로 찾히지 않는다
         self.assertNotIn((12, 6), self.border_hits([CMD, WHO, INFO, TO]))
 
+    def test_joint_tile_where_no_window_corner_meets_fails(self):
+        # 그 칸에 모서리가 놓인 창이 엔진 기록에도 화면에도 없으면, 우연히 08B 인 조각이다
+        self.assertIn((12, 6), self.border_hits([CMD, INFO, TO]))
+
     def test_plain_edge_erased_next_to_the_joint_still_fails(self):
         self.m[12 * 32 + 4] = 0x2C00
         self.assertIn((12, 4), self.border_hits([CMD, WHO, INFO, TO]))

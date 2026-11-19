@@ -25,6 +25,15 @@ KNOWN = tuple(ww.Known(scene, frozenset({cell}), frames, why) for scene, why, ce
 ) for cell, frames in cells)
 
 
+def joint(screen, w, r, c):
+    """(r, c) 가 창 w 변 위의 이음 모서리인가: 칸이 08B 이고, 다른 창(엔진 그리기 기록의 창 또는 화면에서 찾은 창)
+    사각형의 모서리가 바로 그 칸이다. 글자·조각이 우연히 08B 인 칸은 통과하지 않는다."""
+    if screen.word(r, c) & 0x3FF != JOINT_TILE:
+        return False
+    others = set(screen.engine or ()) | set(screen.rects)
+    return any(v != w and (r, c) in ((v[0], v[1]), (v[0], v[3]), (v[2], v[1]), (v[2], v[3])) for v in others)
+
+
 def check(screen):
     out = []
     for w in screen.rects:
@@ -37,10 +46,9 @@ def check(screen):
             # 다음 쪽 표시 → 는 네네 보기 창이 위 변 둘째 칸에 테두리와 번갈아 깜박인다(dq4-window-text-format 네네 보기 창)
             if t == ww.EDGE and not v and c == w[1] + 1 and screen.word(r, c) & 0xC3FF == NEXT_PAGE:
                 continue
-            # 변 칸의 이음 모서리 08B: 다른 창의 모서리가 이 변 위에 놓여 엔진이 그린 이음 칸이다. 그 다른 창이 위 창들에
-            # 거의 가려 창으로 찾히지 않으면(원본 DQ5 도 도구 「누구」 창 0E 는 모서리 셋이 가리고 이 칸만 보임) 가린
-            # 창이 없다고 보아 걸렸다
-            if screen.word(r, c) & 0x3FF == JOINT_TILE:
+            # 다른 창 모서리가 이 변 위에 놓인 이음 칸은 선이 다 보이지 않는다. 그 창이 위 창들에 가려 창으로 찾히지
+            # 않아도 통과(원본 DQ5 도 도구 「누구」 창 0E 는 모서리 셋이 가리고 이 칸만 보임)
+            if joint(screen, w, r, c):
                 continue
             edge = ('위', '아래')[r == w[2]] if r in (w[0], w[2]) else ('왼쪽', '오른쪽')[c == w[3]]
             out.append((r, c, f'창 {w} 의 {edge} 변 칸이 {screen.word(r, c):04X}'))
