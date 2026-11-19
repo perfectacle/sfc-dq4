@@ -40,7 +40,6 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-ch3-story-compat"
-tier = "release"
 why = "3장 한 줄 걷기를 MesenCE 밖에서도: libretro bsnes·snes9x 에서 3장 출발 상태(3장 호환성 걷기와 같은 코어별 캐시)부터 장 끝 상자·리셋까지 같은 구간 표를 한 코어에서 끊지 않고 걷는다(배·구르는 바위·뚫린 굴 끝 포함). 걸음 전투·떠돌이 상인처럼 실행 주소 훅이 필요한 구간과 곁가지는 건너뛰고 결과에 남긴다. 토막 판정은 dq4storytokens 가 Lua 와 같게 한다"
 paths = [
   "sfc/dq4/tools/dq4story3compat.py",
@@ -72,6 +71,8 @@ paths = [
   "sfc/dq4/tools/lua/dq4storywalk.lua",
   "sfc/dq4/tools/dq4winwatch.py",
   "sfc/dq4/tools/lua/dq4winwatch.lua",
+  "sfc/dq4/tools/dq4people.py",
+  "sfc/dq4/people-pin.toml",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4cores.py && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/ch3storycompat && uv run --locked python sfc/dq4/tools/dq4story3compat.py --rom work/ch3/dq4-ch1-full.sfc --out work/ch3storycompat"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]

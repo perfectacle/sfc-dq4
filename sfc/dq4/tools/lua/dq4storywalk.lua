@@ -66,6 +66,7 @@ end
 local toks = {}
 for tok in string.gmatch(os.getenv("WAYPOINTS") or "", "[^;]+") do toks[#toks + 1] = tok end
 local pokes = {}
+local rngFree = false
 for a, v in string.gmatch(os.getenv("POKE") or "", "(%x+)=(%x+)") do pokes[#pokes + 1] = {tonumber(a, 16), tonumber(v, 16)} end
 local watches = {}
 for name, a, len in string.gmatch(os.getenv("WATCH") or "", "([%w_]+)=(%x+):?(%d*)") do
@@ -134,6 +135,7 @@ end
 -- 토막 하나를 한 프레임 한다. 끝났으면 true
 local function step(tok)
   st.t = st.t + 1
+  rngFree = false
   if st.t > TOKMAX then fail("timeout %s", tok); return true end
   local x, y = heroAt()
   local cx, cy, into = tok:match("^(%d+),(%d+)(!?)$")
@@ -153,6 +155,9 @@ local function step(tok)
     end
     -- 목표 셀(말을 걸 자리 등)에 사람이 서 있으면 비킬 때까지 그 옆에서 기다린다(옆걸음을 하지 않음)
     local waiting = into == "" and dist <= 2 and personAt(cx, cy)
+    -- 기다리는 동안은 POKE(구간의 난수 묶기)를 쓰지 않는다: 묶인 난수로는 떠도는 인물이 같은 걸음만 골라 외길 칸에
+    -- 끝없이 선다(레이크나바 소년). 실제 게임처럼 난수가 돌아 비키면 다음 프레임부터 다시 묶는다(dq4storytokens 와 같음)
+    rngFree = waiting
     if waiting then st.waited = (st.waited or 0) + 1; st.since = st.t; st.stuck = 0 end
     if (st.waited or 0) > 3 * STUCK then fail("person stays at %d,%d", cx, cy); return true end
     if st.t - st.since > STUCK and not locked() then fail("stuck at %d,%d heading %d,%d", x, y, cx, cy); return true end
@@ -432,7 +437,7 @@ emu.addEventCallback(function()
       end
     end
   end
-  for _, p in ipairs(pokes) do emu.write(p[1], p[2], m) end
+  if not rngFree then for _, p in ipairs(pokes) do emu.write(p[1], p[2], m) end end
   L.release()
   local w = rd(WINDOW)
   if w == win then winSince = winSince + 1 else win, winSince = w, 0 end
