@@ -109,7 +109,7 @@ def main():
     args = ap.parse_args()
     if not args.out.name.endswith('.noindex'):
         ap.error('--out 은 .noindex 로 끝나는 폴더(macOS 색인이 건너뜀)')
-    results = play(os.environ['MESENCE'], args.rom, args.out, args.only)
+    results = play(os.environ['MESENCE'], args.rom.resolve(), args.out.resolve(), args.only)
     for name, r in results.items():
         print(f'{name}: 상자 화면 {r["box"]}장, 걸림 {len(r["found"])}건'
               + ('' if r['box'] else ' — 상자가 뜨지 않음'))
