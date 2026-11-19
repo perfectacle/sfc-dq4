@@ -846,7 +846,7 @@ org $24A5E9
 !wt_csum  = $AB28           ; 캔버스 슬롯(12~29)마다 워드: 열 수 << 12 | WtMirror 가 5800 에 쓴 글자 줄 평면 0 바이트 합의 낮은
                             ; 12비트(창 검사가 VRAM 과 견줌)
 !wt_keep  = $AB54           ; 30바이트: WtCanvasClear 가 그림자에서 되살릴 캔버스 칸 096~17F 의 비트
-!wt_mshow = $AB72           ; WtMirror 안에서만: 1 = 메시지 창이 이 슬롯 칸을 보여 5800 에는 쓰지 않음(그림자만)
+!wt_mshow = $AB72           ; WtMirror 안: 1 = 메시지 창이 이 슬롯 칸을 보여 5800 에는 쓰지 않음(그림자만). WtQueueFill 안: 0 = 지킬 칸 없음
 !wt_mbusy = $AB74           ; 1바이트: WtMirror 가 5800·그림자·!wt_csum 을 쓰는 동안 1(창 검사가 그 프레임을 쓰는 중으로 봄)
 !wt_shadow = $7FA400        ; 1872바이트: WtMirror 가 캔버스 칸에 올린 그림의 평면 0(칸 096 부터 8바이트씩), 이어서
 !wt_shadow1 = $7FAB50       ; 1872바이트: 평면 1. 게임이 캔버스(5800·VRAM)를 지울 때 보이는 슬롯만 이것으로 채운다.
@@ -5730,6 +5730,8 @@ WtNoFit:
 ; 새 이름이 그 칸을 받아, 옛 목록 칸에 남의 그림이 보였다. 평면 0 은 WtMirror 가 5800 에도 써 두어 게임의 캔버스 전송이
 ; 같은 그림을 다시 보낸다
 WqKeepVis:
+    LDA.l !wh_msgwin
+    BNE .no
     PHX
     TXA
     LSR
@@ -6620,17 +6622,40 @@ WqRunBytes:
     RTS
 
 ; WtQueue 안(DB = 7E, M = X = 16): 필드에서 캔버스 096~17F 칸에 짠 글자 줄·위 줄 그림의 평면 0 을 메시지 캔버스 버퍼
-; 7E:5800(칸 096 부터 8바이트씩)의 같은 칸에도 쓴다. 게임은 캔버스의 평면 0 만 5800 에서 보내므로 캔버스 전송 뒤에도 이름이
-; 남는다. 위 줄의 평면 1(테두리 합성)은 게임이 보내지 않는다
+; 7E:5800(칸 096 부터 8바이트씩)의 같은 칸에, 평면 0·1 을 그림자(!wt_shadow·!wt_shadow1)에 쓰고 !wt_csum 을 둔다. 게임은
+; 캔버스의 평면 0 만 5800 에서 보내므로 캔버스 전송 뒤에도 이름이 남는다. 메시지 창이 이 슬롯 칸을 보이는 동안은 5800 이
+; 메시지 글자라 그림자에만 쓴다(다음 캔버스 전송에 메시지 창으로 비치지 않게). 목록 줄마다 불려 창이 뜨는 프레임을 늦추지
+; 않도록 글자 줄은 MVN, 위 줄은 바이트 하나에 명령 몇 개로 옮긴다
 WtMirror:
     LDA.w $1944
     CMP #$8952
-    BEQ .out
+    BNE +
+    RTS
++
+    ; 메시지 창이 떠 있는 동안(팔기 등)은 지키기를 하지 않으므로 그림자도 두지 않는다. 합을 지워 창 검사가 옛 규칙으로 본다
+    LDA.l !wh_msgwin
+    BEQ +
+    LDX.w !wt_slot2
+    BMI ++
+    CPX.w #!wt_nkana*2
+    BCC ++
+    STZ.w !wt_csum-(!wt_nkana*2),X
+++
+    RTS
++
+    LDA.w !wt_base
+    CMP #$0096
+    BCS +
+    RTS
++
+    CMP #$0180
+    BCC +
+    RTS
++
     SEP #$20
     LDA #$01
     STA.w !wt_mbusy
     REP #$20
-    ; 메시지 창이 이 슬롯 칸을 보이는 동안은 5800 이 메시지 글자다. 거기 이름을 쓰면 다음 캔버스 전송에 메시지 창으로 비친다
     STZ.w !wt_mshow
     LDX.w !wt_slot2
     BMI +
@@ -6638,131 +6663,138 @@ WtMirror:
     BCC +
     INC.w !wt_mshow
 +
+    LDA.w !wt_cols
+    ASL
+    ASL
+    ASL
+    STA.w !wn_r             ; 한 줄 바이트 수
+    ; 글자 줄: 대기열 그림(평면 0 만) → 5800·그림자 평면 0
+    LDA.w !wt_base
+    JSR .offset
+    STA.w !wn_k             ; 그림자 안 자리
+    LDA.w !wt_mshow
+    BNE +
+    LDA.w !wn_k
+    CLC
+    ADC #$5800
+    TAY
     LDA.w !wt_qoff
     CLC
     ADC.w #!wq_buf+4
     TAX
-    LDA #$0001
-    STA.w !wn_k
-    LDA.w !wt_base
-    JSR .row
-    BCS .out
-    JSR .csum
-    INX
-    INX
-    INX
-    INX
-    LDA #$0002
-    STA.w !wn_k
-    LDA.w !wt_ubase
-    JSR .row
-.out
-    SEP #$20
-    STZ.w !wt_mbusy
-    REP #$20
-    RTS
-; A = 첫 칸, X = 대기열의 그림 자리, !wn_k = 평면 0 바이트 사이(글자 줄은 평면 0 만이라 1, 위 줄은 평면 0·1 이 엇갈려 2).
-; 캔버스 밖이면 C = 1(X 는 그대로). 끝나면 X 는 그 항목 그림 뒤
-.row
-    CMP #$0096
-    BCC .outside
-    CMP #$0180
-    BCS .outside
-    SEC
-    SBC #$0096
-    ASL
-    ASL
-    ASL
-    CLC
-    ADC #$5800
-    TAY
-    LDA.w !wt_cols
-    ASL
-    ASL
-    ASL
-    STA.w !wn_r
--
-    LDA.w $0000,X
-    SEP #$20
-    PHA
-    LDA.w !wt_mshow
-    BNE +
-    LDA 1,S
-    STA.w $0000,Y
+    LDA.w !wn_r
+    DEC
+    PHB
+    db $54,$7E,$7E          ; MVN 7E → 7E
+    PLB
 +
-    PLA
-    PHX
-    TYX
-    STA.l !wt_shadow-$5800,X
-    LDA #$FF
-    PLX
-    PHA
     LDA.w !wn_k
-    CMP #$02
-    BNE +
-    LDA.w $0001,X
-    STA 1,S
-+
-    PHX
-    TYX
-    LDA 3,S
-    STA.l !wt_shadow1-$5800,X
-    PLX
-    PLA
-    REP #$20
-    TXA
     CLC
-    ADC.w !wn_k
-    TAX
-    INY
-    DEC.w !wn_r
-    BNE -
+    ADC.w #!wt_shadow&$FFFF
+    TAY
+    LDA.w !wt_qoff
     CLC
-    RTS
-.outside
-    SEC
-    RTS
-; 방금 그림자에 쓴 글자 줄 평면 0 의 합(낮은 12비트)과 열 수(높은 4비트)를 슬롯(!wt_slot2)의 !wt_csum 에. X 는 지킨다
-.csum
-    PHX
-    LDA.w !wt_base
-    SEC
-    SBC #$0096
-    ASL
-    ASL
-    ASL
+    ADC.w #!wq_buf+4
     TAX
-    LDA.w !wt_cols
-    ASL
-    ASL
-    ASL
-    STA.w !wn_r
+    LDA.w !wn_r
+    DEC
+    PHB
+    db $54,!wt_shadow>>16,$7E   ; MVN 7E → 그림자 뱅크
+    PLB
+    ; 그림자 평면 1(글자 줄은 FF)과 합
+    LDX.w !wn_k
+    LDY.w !wn_r
     LDA #$0000
--
     PHA
+-
+    LDA #$FFFF
+    STA.l !wt_shadow1,X
     LDA.l !wt_shadow,X
     AND #$00FF
     CLC
     ADC 1,S
     STA 1,S
-    PLA
+    LDA.l !wt_shadow+1,X
+    AND #$00FF
+    CLC
+    ADC 1,S
+    STA 1,S
     INX
-    DEC.w !wn_r
+    INX
+    DEY
+    DEY
     BNE -
+    PLA
     AND #$0FFF
-    STA.w !wn_r
+    STA.w !wn_c
     LDA.w !wt_cols
     XBA
     ASL
     ASL
     ASL
     ASL
-    ORA.w !wn_r
+    ORA.w !wn_c
     LDX.w !wt_slot2
     BMI +
     STA.w !wt_csum-(!wt_nkana*2),X
 +
-    PLX
+    ; 위 줄: 대기열 그림(평면 0·1 엇갈림) → 5800 평면 0·그림자 두 벌
+    LDA.w !wt_ubase
+    CMP #$0096
+    BCC .out
+    CMP #$0180
+    BCS .out
+    JSR .offset
+    TAX                     ; 목적 자리
+    LDA.w !wt_qoff
+    CLC
+    ADC.w #!wq_buf+8
+    CLC
+    ADC.w !wn_r
+    TAY                     ; 원본 자리(글자 줄 그림과 위 줄 항목 머리 뒤)
+    LDA.w !wn_r
+    STA.w !wn_c
+    LDA.w !wt_mshow
+    BNE .shadowonly
+-
+    LDA.w $0000,Y
+    SEP #$20
+    STA.l $7E5800,X
+    STA.l !wt_shadow,X
+    XBA
+    STA.l !wt_shadow1,X
+    REP #$20
+    INY
+    INY
+    INX
+    DEC.w !wn_c
+    BNE -
+    BRA .out
+.shadowonly
+-
+    LDA.w $0000,Y
+    SEP #$20
+    STA.l !wt_shadow,X
+    XBA
+    STA.l !wt_shadow1,X
+    REP #$20
+    INY
+    INY
+    INX
+    DEC.w !wn_c
+    BNE -
+.out
+    SEP #$20
+    STZ.w !wt_mbusy
+    REP #$20
+    RTS
+; A = 칸 → A = 그 칸의 5800·그림자 안 자리((칸 − 096) × 8)
+.offset
+    SEC
+    SBC #$0096
+    ASL
+    ASL
+    ASL
     RTS
 
 assert pc() <= !wn_kana_table
@@ -6786,9 +6818,55 @@ WtCanvasClear:
     PLB
     PLB
     JSR WtKeepBuild
+    BNE +
+    ; 지킬 슬롯이 없으면 원래처럼 0 으로만 채운다(창마다 불려 창이 뜨는 프레임을 늦추지 않게)
+    LDX #$0000
+-
+    STZ.w $5800,X
+    INX
+    INX
+    CPX #$0750
+    BCC -
+    JMP .end
++
     LDX #$0000              ; 5800·그림자 안 자리
     LDY #$0000              ; 칸 번호 − 096
--
+.tile
+    ; 여덟 칸 묶음의 비트가 모두 꺼졌으면 한 번에 0 으로
+    TYA
+    AND #$0007
+    BNE .one
+    CPY.w #$0180-$0096-7
+    BCS .one
+    PHY
+    TYA
+    LSR
+    LSR
+    LSR
+    TAY
+    LDA.w !wt_keep,Y
+    PLY
+    AND #$00FF
+    BNE .one
+    PHY
+    LDY #$0020
+--
+    STZ.w $5800,X
+    INX
+    INX
+    DEY
+    BNE --
+    PLY
+    TYA
+    CLC
+    ADC #$0008
+    TAY
+    BRA .tile
+.one
+    CPY.w #$0180-$0096
+    BCC +
+    JMP .end
++
     JSR WtKept
     SEP #$20
     BCC +
@@ -6826,8 +6904,8 @@ WtCanvasClear:
     ADC #$0008
     TAX
     INY
-    CPY.w #$0180-$0096
-    BCC -
+    JMP .tile
+.end
     PLY
     TDC
     PLB
@@ -6842,6 +6920,7 @@ WtQueueFill1:
     PHY
     PHX
     JSR WtKeepBuild
+    STA.w !wt_mshow
     PLX
     LDA #$010B
     JSR WtFillTiles
@@ -6867,6 +6946,7 @@ WtQueueFill2:
     PLB
     PLB
     JSR WtKeepBuild
+    STA.w !wt_mshow
     LDA 3,S
     TAX
     LDA #$0096
@@ -6878,8 +6958,22 @@ WtQueueFill2:
     RTL
 
 ; DB = 7E, M = X = 16. A = 첫 칸, X = 7E:4000 안 데이터 자리: 117칸 × 8줄의 VRAM 낱말을 짠다(보이는 슬롯 칸은 그림자,
-; 아니면 FF00). X·Y 와 빌려 쓰는 !wn_c·!wn_k·!wn_r 는 지킨다
+; 아니면 FF00). !wt_mshow 가 0 이면(지킬 칸 없음) 모두 FF00. X·Y 와 빌려 쓰는 !wn_c·!wn_k·!wn_r 는 지킨다
 WtFillTiles:
+    LDY.w !wt_mshow
+    BNE +
+    PHX
+    LDY #$03A8
+    LDA #$FF00
+-
+    STA.w $4000,X
+    INX
+    INX
+    DEY
+    BNE -
+    PLX
+    RTS
++
     PHX
     PHY
     PHA
@@ -6992,6 +7086,8 @@ WtKeepBuild:
     LDA.w $1944
     CMP #$8952
     BEQ .done
+    LDA.l !wh_msgwin
+    BNE .done
     LDX.w #!wt_nkana*2
 .slot
     LDA.w !wt_ages,X
@@ -7017,6 +7113,15 @@ WtKeepBuild:
     STA.w !wn_r
     PLA
     STA.w !wn_k
+    ; 켠 칸이 하나라도 있으면 A ≠ 0
+    LDX #$001C
+    LDA #$0000
+-
+    ORA.w !wt_keep,X
+    DEX
+    DEX
+    BPL -
+    CMP #$0000
     RTS
 ; 슬롯 X, A = !wt_csum: 그림자 글자 줄 합이 맞으면 글자 줄·위 줄 칸을 켠다. X 는 지킨다
 .mark
