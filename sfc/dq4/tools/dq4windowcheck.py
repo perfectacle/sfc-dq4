@@ -113,6 +113,7 @@ RULER_PRE = (OPEN + 'right:4,wait:30,a:6,wait:60,a:6,wait:80,' + 'down:4,wait:20
 # 글자 칸(가나 104칸 + 캔버스 밖)이 모자라 아직 깨지는 장면과, --every 로 잰 걸린 프레임 수의 상한. 이보다 늘면 실패,
 # 줄면 통과하며 새 수를 알린다(숫자를 고쳐 못박는다). 메시지 캔버스 전송이 창 타일맵보다 먼저 가는 차례와 가린 캔버스
 # 칸 슬롯을 고치면 0 이 되어야 한다(형식 문서 「남은 것」)
+NAME_FIRST, NAME_POSITIONS = 0x180, 8     # 이름 렌더러 자리(dq4windowname WnSlot, 자리마다 이름 5칸 + 위 줄 5칸)
 KNOWN = {'give-full': 5, 'give-shop-ch1': 245, 'equip-ch3': 6, 'sell-shop-ch1': 8, 'sell-equip-ch3': 7,
          'sell-long-ch1': 90, 'sell-long-ch2': 89, 'sell-long-ch3': 89}
 # --every 로 매 프레임 재는 장면과 구간(장면의 원래 프레임에 더함). 넘친 목록 이름을 묶음 버퍼로 보내는 장면들과, 메시지 창
@@ -168,6 +169,8 @@ PARTY_SPELL_PRE = ('wait:150,a:6,wait:60,right:4,wait:30,a:6,wait:90,down:4,wait
                    'wait:200,b:6,wait:90,b:6,wait:90,b:6,wait:90')
 PARTY_TACTIC_PRE = ('wait:150,a:6,wait:60,right:4,wait:30,down:4,wait:30,down:4,wait:30,a:6,wait:90,down:4,wait:30,a:6,'
                     'wait:90,down:4,wait:30,a:6,wait:150,b:6,wait:90,b:6,wait:90,b:6,wait:90')
+# 상태 → 강함 보기 → 「누구의」(번호 줄). 상태 창 이름이 보이는 채로 목록 이름이 이름 렌더러 자리를 받는다
+STATUS_WHO_PRE = 'wait:150,a:6,wait:60,down:4,wait:30,a:6,wait:60,down:4,wait:20,down:4,wait:30,a:6,wait:150,b:6,wait:60,b:6,wait:60'
 
 
 def make_states(mesence, rom_path, data, out):
@@ -217,6 +220,7 @@ def scenes(ship, party, shop=None, battle=None):
     out.append(('partyitems', party, PARTY_ITEMS, '', PARTY_ITEMS_PRE, range(60, 900, 30)))
     out.append(('partyspell', party, '', '', PARTY_SPELL_PRE, range(60, 1100, 5)))
     out.append(('partytactic', party, '', '', PARTY_TACTIC_PRE, range(60, 1100, 10)))
+    out.append(('statuswho', party, '', '', STATUS_WHO_PRE, range(200, 700, 5)))
     for seed in (21, 22):
         out.append((f'party{seed}', party, '', '', fuzz(seed), range(100, 8000, 50)))
     for seed in (11, 12):
@@ -363,11 +367,24 @@ def check(folder, rom, slots):
                 bad.append((cell // 32, cell % 32, '가나', t))
             elif not battle and t in CANVAS and t in live and not canvas_tile(vram, d.get(MSG_CANVAS), t):
                 bad.append((cell // 32, cell % 32, '비침', t))
+        if not battle:
+            bad += shared_names(vram, tilemap)
         if battle:
             bad += corners(vram, tilemap)
         if bad:
             out.append((frame, bad))
     return out
+
+
+def shared_names(vram, tilemap):
+    """이름 렌더러 자리(180 + 자리 × 10)의 첫 칸을 화면의 두 곳이 함께 가리키면 한쪽은 남의 이름이다(글자는 멀쩡해도
+    「누구의」 첫 줄이 둘째 사람 이름으로 보인 꼴). 이름 하나는 자리 하나에만 그린다."""
+    where = {}
+    for cell in range(32 * 28):
+        t = int.from_bytes(vram[(tilemap + cell) * 2:(tilemap + cell) * 2 + 2], 'little') & 0x3FF
+        if NAME_FIRST <= t < NAME_FIRST + NAME_POSITIONS * 10 and (t - NAME_FIRST) % 10 == 0:
+            where.setdefault(t, []).append(cell)
+    return [(c // 32, c % 32, '겹자리', t) for t, cells in where.items() if len(cells) > 1 for c in cells]
 
 
 def canvas_tile_bytes(art, canvas, t):
