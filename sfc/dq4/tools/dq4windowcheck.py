@@ -334,6 +334,20 @@ def corners(vram, tilemap):
     return bad
 
 
+def unfinished_scenes(out, todo, infos):
+    """끝까지 돌지 않은 장면의 문제 줄. check 는 덤프가 없는 프레임을 건너뛰므로, MesenCE 가 0 아닌 코드로 끝나거나
+    시간을 넘겨 덤프가 모자란 장면은 이 판정 없이는 깨진 칸 없이 통과한다. 장면마다 덤프한 프레임(v*.bin) 수가 그
+    장면이 덤프할 프레임 수와 같아야 한다."""
+    bad = []
+    for s, info in zip(todo, infos):
+        got, want = len(list((out / s[0]).glob('v*.bin'))), len(set(s[5]))
+        if info.get('timed_out') or info.get('returncode') not in (0, None):
+            bad.append(f'{s[0]}: 종료 {info.get("returncode")}, 시간 초과 {info.get("timed_out")}')
+        elif got != want:
+            bad.append(f'{s[0]}: 덤프한 프레임 {got}, 기대 {want}')
+    return bad
+
+
 def sheet(folder, hits, path):
     from PIL import Image, ImageDraw
     shots = []
@@ -397,6 +411,9 @@ def main():
         infos = list(pool.map(lambda s: run(mesence, libdir, a.rom, rom, out / s[0], s), todo))
     (out / 'readset.json').write_text(json.dumps({s[0]: i for s, i in zip(todo, infos)}, indent=1), encoding='utf-8')
     print(f'읽은 바이트 캐시: 장면 {sum(i["cached"] for i in infos)}/{len(infos)} 맞음')
+    unfinished = unfinished_scenes(out, todo, infos)
+    for line in unfinished:
+        print(f'FAIL {line}')
     flagged = 0
     for s in todo:
         folder = out / s[0]
@@ -409,8 +426,10 @@ def main():
             print(f'FAIL {s[0]} {len(hits)}/{frames} 프레임  {first}')
         else:
             print(f'PASS {s[0]} {frames} 프레임')
-    if flagged:
-        raise SystemExit(f'{flagged}개 장면에서 깨진 칸')
+    if not todo:
+        raise SystemExit('돌 장면이 하나도 없음')
+    if flagged or unfinished:
+        raise SystemExit(f'{flagged}개 장면에서 깨진 칸, {len(unfinished)}개 장면이 끝까지 돌지 않음')
 
 
 if __name__ == '__main__':

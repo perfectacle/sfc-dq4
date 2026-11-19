@@ -279,6 +279,12 @@ def part_jobs(jobs, part):
     return dq4shards.part_of(jobs, part, key=lambda job: job[1], weight=lambda job: 0 if job[0] in SKIPPED_KINDS else 1)
 
 
+def passed(results):
+    """모든 장면이 ok 이고, 에뮬레이터로 실제 판정한 장면(결과만 적은 skipped 밖)이 하나라도 있는가. 몫이 결과만 적는
+    장면뿐이거나 비면 아무것도 보지 않고 통과하게 되므로 실패로 친다."""
+    return any("skipped" not in r for r in results.values()) and all(r["ok"] for r in results.values())
+
+
 def part_label(part):
     return f"{part[0]}/{part[1]}" if part else None
 
@@ -537,7 +543,7 @@ def main():
                     ok = ok and got_price == price
                 results[name] = {"ok": ok, "want": f"{message:03X}", "got": [f"{v:03X}" for v in messages or []][:4],
                                  "timing": timing, **({"price": got_price, "want_price": price} if price is not None else {})}
-    ok = all(r["ok"] for r in results.values())
+    ok = passed(results)
     report = {"status": "passed" if ok else "failed", "part": part_label(args.part), "scenes": dict(sorted(results.items())),
               "later_states": later}
     (out / "results.json").write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")

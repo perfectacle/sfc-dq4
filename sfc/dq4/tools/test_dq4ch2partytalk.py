@@ -385,3 +385,8 @@ class PartTest(unittest.TestCase):
         self.assertEqual(report['status'], 'failed')
         stuck = {'0:3D/00': [{'name': 'warp', 'status': 'passed'}]}
         self.assertIn('0:3D/00', check.summarize(stuck, {}, [])[1])
+
+    def test_empty_part_fails(self):
+        report, failed = check.summarize({}, {}, [], '6/6')
+        self.assertEqual(report['status'], 'failed')
+        self.assertIn('empty', failed)

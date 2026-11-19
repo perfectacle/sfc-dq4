@@ -129,10 +129,12 @@ def main():
     with ThreadPoolExecutor(args.jobs) as pool:
         results = dict(zip((j[0] for j in todo), pool.map(lambda j: run_job(mesence, rom, state, out, *j), todo)))
     failed = {k: v for k, v in results.items() if not v["passed"]}
+    # 팻말 목록은 원작 롬에서 뽑으므로, 비면 아무것도 보지 않고 통과하게 된다
+    ok = bool(results) and not failed
     (out / "results.json").write_text(json.dumps(results, indent=1) + "\n", encoding="utf-8")
-    print(json.dumps({"status": "failed" if failed else "passed", "entries": len(results), "failed": failed},
+    print(json.dumps({"status": "passed" if ok else "failed", "entries": len(results), "failed": failed},
                      ensure_ascii=False))
-    raise SystemExit(1 if failed else 0)
+    raise SystemExit(0 if ok else 1)
 
 
 if __name__ == "__main__":

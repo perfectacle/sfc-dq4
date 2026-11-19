@@ -44,5 +44,14 @@ class PartTest(unittest.TestCase):
         self.assertEqual(npc.part_label((2, 5)), '2/5')
 
 
+class PassedTest(unittest.TestCase):
+    def test_needs_a_judged_scene(self):
+        skipped = {"talk-3701-1": {"ok": True, "skipped": "map with no exit, entered only by an event"}}
+        self.assertFalse(npc.passed({}))
+        self.assertFalse(npc.passed(skipped))
+        self.assertTrue(npc.passed({**skipped, "talk-3700-1": {"ok": True, "want": "123"}}))
+        self.assertFalse(npc.passed({**skipped, "talk-3700-1": {"ok": False, "want": "123"}}))
+
+
 if __name__ == '__main__':
     unittest.main()

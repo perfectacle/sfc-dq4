@@ -389,6 +389,11 @@ def main():
     failed = {k: [r for r in rs if r['status'] != 'passed'] for k, rs in results.items()
               if any(r['status'] != 'passed' for r in rs) or rs[-1].get('name') != 'talk'}
     failed.update({f'people {k}': [r] for k, r in person_results.items() if r['status'] != 'passed'})
+    # 말 걸 자리는 롬에서 뽑으므로, 비면 아무 대화도 보지 않고 통과하게 된다(--people 만 고른 실행은 자리를 돌지 않음)
+    if not results and not args.people:
+        failed['spots'] = [{'status': 'failed', 'problem': '말 걸 자리가 하나도 없음'}]
+    if not results and not person_results:
+        failed['empty'] = [{'status': 'failed', 'problem': '돈 단위가 하나도 없음'}]
     shown = sum(len(rs[-1].get('shown', {})) for rs in results.values() if rs[-1].get('name') == 'talk')
     talks = sum(rs[-1].get('steps', 0) for rs in results.values() if rs[-1].get('name') == 'talk')
     report = {'status': 'failed' if failed else 'passed', 'seconds': round(time.monotonic() - began),
