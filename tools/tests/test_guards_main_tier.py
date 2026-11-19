@@ -78,7 +78,7 @@ class WithReleasePlanTest(unittest.TestCase):
         release = {c['name'] for c in checks if c.get('tier') == 'release'}
         self.assertTrue(release)
         self.assertEqual(names, release)
-        self.assertGreater(int(plan['shards']), guards.PR_SHARDS_MAX - 1)
+        self.assertEqual(int(plan['shards']), guards.MAIN_SHARDS_MAX)
 
     def test_with_release_needs_plan(self):
         tool = str(guards.ROOT / 'tools' / 'guards.py')
@@ -91,6 +91,7 @@ class WithReleasePlanTest(unittest.TestCase):
         w = {c['name']: 600.0 for c in cs}
         self.assertEqual(guards.pr_shards(cs, w, most=guards.MAIN_SHARDS_MAX), guards.MAIN_SHARDS_MAX)
         self.assertEqual(guards.pr_shards(cs, w), guards.PR_SHARDS_MAX)
+        self.assertLessEqual(guards.MAIN_SHARDS_MAX, 2 * 4, 'main 은 조각 4개씩 두 차례(ci.yml max_parallel)')
 
 
 if __name__ == '__main__':

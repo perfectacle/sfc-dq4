@@ -134,8 +134,9 @@ SHARDS_WORKFLOW = ROOT / '.github' / 'workflows' / 'guard-shards.yml'
 # 나눠 쓰므로 그보다 작게 둔다(test_release_gate_workflow 가 지킴)
 PR_SHARD_SECONDS = 480
 PR_SHARDS_MAX = 8
-# main push 는 release 등급까지 돌려 무게가 크다. 머지 뒤라 PR 처럼 짧을 필요는 없지만 배포 관문 조각(18)보다 작게
-MAIN_SHARDS_MAX = 14
+# main push 는 release 등급까지 돌려 무게가 크다. 머지 뒤라 PR 처럼 짧을 필요는 없다. 조각 8개를 4개씩 두 차례(ci.yml max_parallel)
+# 돌려 PR 이 쓸 러너를 남긴다
+MAIN_SHARDS_MAX = 8
 
 
 def git(*args):

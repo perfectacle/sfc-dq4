@@ -13,11 +13,12 @@ permissions:
   contents: read
 
 concurrency:
-  # A newer push to the same PR or to main supersedes the older run, so piled-up merges do not each run the
-  # guard shards; the latest main run and the nightly cache-warm still warm the caches. A manual run gets its
-  # own group and always finishes, and a push never cancels it.
+  # A newer push to the same PR supersedes the older run. Main runs are long (the release-tier guards), so they are
+  # never cancelled: a run in progress finishes and only the newest later push waits behind it (GitHub drops the
+  # older pending ones), so a red main is always found by a run that ran to the end, and the runs never pile up. A
+  # manual run gets its own group and always finishes, and a push never cancels it.
   group: ${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || format('{0}-{1}', github.event_name, github.ref) }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Only pr-guards (through guard-shards.yml) gets the ROM bundle; every other job checks what needs none.
@@ -197,6 +198,8 @@ jobs:
       mode: pr
       guards: ${{ needs.guard-plan.outputs.guards }}
       shards: ${{ fromJSON(needs.guard-plan.outputs.shards) }}
+      # A main run holds at most 4 runners, so the 16 left serve PRs (the account runs 20 jobs at once)
+      max_parallel: ${{ github.event_name == 'push' && 4 || 0 }}
       cache: true
     secrets:
       CI_ROM_TOKEN: ${{ secrets.CI_ROM_TOKEN }}
