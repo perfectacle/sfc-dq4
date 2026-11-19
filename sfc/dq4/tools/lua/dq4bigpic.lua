@@ -6,8 +6,11 @@
 --   INJECT=N        큰 그림 길 NMI(00:8958 에서 $0DF3 ≠ 0)에 대기열이 비어 있으면 항목 하나(BG3 칸 1F0, VRAM 워드 0F80, 그림
 --                   한 칸 = 16바이트)를 넣는다. N 번까지, 앞 항목이 나간 뒤 다음. 그림은 넣을 때마다 바꾸고, 넣기 직전 VRAM 이
 --                   그 그림과 같은지 적는다. 뒤 NMI 입구에서 항목 수가 0 이 되면 그때 VRAM 이 그 그림과 같은지 보고
---                   「프레임 inj 넣은NMI 나간NMI before same|differs after same|differs」 를 남긴다(나간 NMI 는 항목 수가 0 이 된
---                   입구의 바로 앞 NMI)
+--                   「프레임 inj 넣은NMI 나간NMI before same|differs after same|differs at 넣은프레임」 을 남긴다(나간 NMI 는
+--                   항목 수가 0 이 된 입구의 바로 앞 NMI)
+--   (늘)            22:EA46 에 올 때마다 효과 하위 스크립트 번호($9E74)를 「프레임 sub 번호」 로 남긴다
+--   SUBSCRIPT=VV    22:EA46 에서 $9E74 를 이 값으로 바꾼다(그 하위 스크립트를 무기·회심과 상관없이 돌림)
+--   EFFECT_STOP=1   하위 스크립트를 고른 뒤 첫 전투 메시지에서 30프레임 뒤 기록을 쓰고 멈춘다(효과 하나만 잼)
 --   FINISH_AT=F     이 프레임부터 매 프레임, 있는 몬스터 칸(7E:07C0 + 칸×16, +A bit7)의 HP(+2)가 1 보다 크면 1 로 둔다.
 --                   회복 주문을 쓰는 무리와의 전투는 난수에 따라 끝없이 길어질 수 있어, 그 뒤 몇 턴 안에 끝나게 한다
 local wq = tonumber(os.getenv('WQCOUNT') or '7EA97E', 16)
@@ -34,8 +37,8 @@ emu.addMemoryCallback(function()
   task = emu.read(0x7E1944, m) | emu.read(0x7E1945, m) << 8
   count = emu.read(wq, m)
   if pending and count == 0 then
-    log[#log + 1] = string.format('%d inj %d %d before %s after %s', f, pending.nmi, nmi - 1, pending.before,
-      vram_same(pending.k))
+    log[#log + 1] = string.format('%d inj %d %d before %s after %s at %d', f, pending.nmi, nmi - 1, pending.before,
+      vram_same(pending.k), pending.f)
     pending = nil
   end
 end, emu.callbackType.exec, 0x00887C, 0x00887C)
@@ -54,12 +57,24 @@ emu.addMemoryCallback(function()
     emu.write(WQ_OFF, 20, m); emu.write(WQ_OFF + 1, 0, m)
     emu.write(WQ_RD, 0, m); emu.write(WQ_RD + 1, 0, m)
     emu.write(wq, 1, m)
-    injected, pending = k, {nmi = nmi, k = k, before = before}
+    injected, pending = k, {nmi = nmi, k = k, before = before, f = f}
   end
 end, emu.callbackType.exec, 0x008958, 0x008958)
 
+-- 22:EA46 은 22:EA2A 가 무기($0DA7)·회심($0DA8)으로 고른 효과 하위 스크립트 번호를 $9E74 에 막 쓴 자리
+local subscript = os.getenv('SUBSCRIPT')
+local effect_stop = os.getenv('EFFECT_STOP') == '1'
+local sub_seen, stop_at, stopped = false, nil, false
+emu.addMemoryCallback(function()
+  if subscript then emu.write(0x7E9E74, tonumber(subscript, 16), m) end
+  log[#log + 1] = string.format('%d sub %02X', f, emu.read(0x7E9E74, m))
+  sub_seen = true
+end, emu.callbackType.exec, 0x22EA46, 0x22EA46)
+
 emu.addMemoryCallback(function()
   log[#log + 1] = string.format('%d msg %03X', f, emu.getState()['cpu.a'] & 0xFFFF)
+  -- 효과의 마지막 길에 넣은 항목이 나가는 것까지 보도록 메시지 뒤로 조금 더 돈다
+  if effect_stop and sub_seen and not stop_at then stop_at = f + 30 end
 end, emu.callbackType.exec, 0x248C39, 0x248C39)
 
 local finish_at = tonumber(os.getenv('FINISH_AT') or '0')
@@ -74,11 +89,15 @@ emu.addEventCallback(function()
       end
     end
   end
-  if f % flush == 0 then
+  -- emu.stop 뒤에도 한 프레임이 더 돌 수 있어, 멈춘 뒤에는 다시 쓰지 않는다(쓰면 실행마다 끝 줄 수가 달라짐)
+  if stopped then return end
+  local stopping = stop_at and f >= stop_at
+  if f % flush == 0 or stopping then
     local h = io.open(out, 'w')
     h:write(table.concat(log, '\n') .. '\n')
     h:close()
   end
+  if stopping then stopped = true; emu.stop(0) end
 end, emu.eventType.endFrame)
 
 dofile(os.getenv('NEXT'))
