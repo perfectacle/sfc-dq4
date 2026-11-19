@@ -56,11 +56,14 @@ EVENT_ITEMS = {0xC6: "おうごんのうでわ", 0xBE: "さえずりのみつ",
                PRINCE_LETTER: "おうじのてがみ", KING_LETTER: "おうのてがみ", FLUTE: "あやかしのふえ",
                SILENCE_ORB: "せいじゃくのたま", SHIP_TICKET: "じょうせんけん", HORSE_DUNG: "うまのふん"}
 # 기록(k1~k4)과 필드 쓰기를 ゴールドオーブ 대신 빌릴 물건: あやかしのふえ 는 DQ5 피리 はるかぜのフルート(C7). FC 는 쓰면
-# 「…は あやかしのふえを ふいた。」 만 뜨고 남는다(실측)
-EVENT_TEMPLATES = {FLUTE: 0xC7, HORSE_DUNG: HORSE_DUNG}
-# 필드 쓰기만 다른 물건에서 빌리는 것: FC 에서 쓰면 「…をつかった！」 뒤 「しかし なにも おこらなかった。」(02C5)뿐인 물건은 같은
-# 뜻의 글(18E)을 띄우는 いのちのいし 처리기(11:8BB9, うまのふん 자리에 그대로 남음)
-USE_TEMPLATES = {SILENCE_ORB: HORSE_DUNG, SHIP_TICKET: HORSE_DUNG}
+# 「…は あやかしのふえを ふいた。」 만 뜨고 남는다(실측). おべんとう 는 FC 에서 やくそう 와 같은 물건(10G, 회복 30+rand(11),
+# 쓰면 없어짐, 전투 행동 94)이라 やくそう(A1) 기록·처리기
+HERB = 0xA1
+EVENT_TEMPLATES = {FLUTE: 0xC7, HORSE_DUNG: HORSE_DUNG, BENTO: HERB}
+# FC 필드 효과 비트($8D1B bit7)가 꺼진 사건 물건은 쓰면 「…をつかった！」 뒤 「しかし なにも おこらなかった。」(02C5)뿐이라,
+# 같은 뜻의 글(18E)을 띄우는 いのちのいし 처리기(11:8BB9, うまのふん 자리에 그대로 남음)를 필드 쓰기로 빌린다(use_template)
+NOTHING_USE = HORSE_DUNG
+FC_FIELD_USE = 0x80
 # Neighbouring items whose names are written together: the string table is walked by length (21:955D), so the names may
 # change length as long as the run keeps its total. No armour slot is 11 bytes long for ピンクのレオタード: it takes
 # プリンセスローブ (6E, 10 bytes) and its neighbour シルクのビスチェ (6D, 9 bytes, no FC item and no ported shop or chest)
@@ -131,14 +134,17 @@ FC_NO_SALE = 0x20
 
 # 가게에서 팔지 않아도 값을 두는 물건과, k1 bit5(쓰면 없어짐)를 끄는 물건: うまのふん 은 FC 2G 에 팔리고 쓰면 남는다
 # (いのちのいし 기록은 쓰면 없어짐)
-FIXED_PRICES = {HORSE_DUNG: 2}
+FIXED_PRICES = {HORSE_DUNG: 2, BENTO: 10}
 CONSUMED = 0x20
 KEEP_ON_USE = {HORSE_DUNG}
 
 
 def price_writes(rom, item, price, name, sellable=None):
+    """Price base and scale of item. The scale byte keeps the flags of the record the item ends up with (an event item's
+    template, EVENT_TEMPLATES)."""
     base, scale = encode_price(price)
-    flags = rom.u8(PRICE_SCALE + item) & ~3
+    record = EVENT_TEMPLATES.get(item, EVENT_TEMPLATE) if item in EVENT_ITEMS else item
+    flags = rom.u8(PRICE_SCALE + record) & ~3
     if item in KEEP_ON_USE:
         flags &= ~CONSUMED
     if sellable is not None:
@@ -174,12 +180,25 @@ def fc_name(rom, item):
     return BORROWED.get(item) or EVENT_ITEMS.get(item) or dq5item.item_name(rom, item)
 
 
-def _record_writes(rom, item, template, name, handler=True):
+def use_template(prg, item):
+    """The item whose DQ5 field-use handler an event item takes: NOTHING_USE when the FC item has no field effect, else
+    its record template."""
+    import dq4data
+    import dq4shop
+    fc = {n: i for i, n in dq4shop.item_names(prg)[0].items()}[EVENT_ITEMS[item]]
+    if not dq4data.rd(prg, dq4data.ITEM_BANK, dq4data.ITEM_FLAGS + fc) & FC_FIELD_USE:
+        return NOTHING_USE
+    return EVENT_TEMPLATES.get(item, EVENT_TEMPLATE)
+
+
+def _record_writes(rom, item, template, name, use=None):
+    """Record bytes of template on item (the price scale byte is left to price_writes when the item has a fixed price),
+    and the field-use handler of `use` (None: the handler stays)."""
     out = [_byte(rom, table + item, rom.u8(table + template), f"{name} 물건 표({_cpu(table)})")
-           for table in RECORD if rom.u8(table + item) != rom.u8(table + template)]
-    if not handler:
+           for table in RECORD if rom.u8(table + item) != rom.u8(table + template)
+           and not (table == PRICE_SCALE and item in FIXED_PRICES)]
+    if use is None:
         return out
-    use = USE_TEMPLATES.get(item, template)
     at, src = USE_HANDLERS + (item - FIRST_USE) * 2, USE_HANDLERS + (use - FIRST_USE) * 2
     if rom.u16(at) != rom.u16(src):
         out.append({"at": _cpu(at), "hex": f"{rom.u8(src):02X} {rom.u8(src + 1):02X}",
@@ -216,9 +235,9 @@ def event_writes(rom, prg):
                 raise ValueError(f"{fc_item}: {len(new)} name bytes in place of {len(old)}")
             out.append({"at": _cpu(at + 1), "hex": new.hex(" ").upper(), "orig": old.hex(" ").upper(),
                         "note": f"물건 {item:02X} 이름 {fc_item}"})
-        out += _record_writes(rom, item, EVENT_TEMPLATES.get(item, EVENT_TEMPLATE), fc_item)
+        out += _record_writes(rom, item, EVENT_TEMPLATES.get(item, EVENT_TEMPLATE), fc_item, use_template(prg, item))
     # B7 keeps its own handler (11:8E43, key level 1); まほうのカギ's would open lock-2 doors.
-    out += _record_writes(rom, THIEF_KEY, KEY_TEMPLATE, "とうぞくのカギ", handler=False)
+    out += _record_writes(rom, THIEF_KEY, KEY_TEMPLATE, "とうぞくのカギ")
     return out
 
 
@@ -227,7 +246,7 @@ def writes(rom, prg, prices):
     import dq5chest
     import dq4fcitems
     out = [w for item, name in sorted(BORROWED.items()) for w in borrowed_writes(rom, prg, item, name)]
-    out += dq4fcitems.writes(rom)
+    out += dq4fcitems.writes(rom, EVENT_ITEMS)
     out += event_writes(rom, prg)
     for item, price in sorted({**FIXED_PRICES, **prices}.items()):
         if item not in BORROWED:

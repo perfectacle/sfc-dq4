@@ -72,27 +72,37 @@ class RomTest(unittest.TestCase):
         return dq5item.Rom(bytes(data))
 
     def test_story_items(self):
-        """2장 사건 물건: 이름은 FC 것, 물건 표와 필드에서 쓰기는 ゴールドオーブ 것(쓰면 「何も おこらなかった」)."""
+        """2장 사건 물건: 이름은 FC 것, 물건 표는 ゴールドオーブ 것. 필드에서 쓰면 FC 필드 효과 비트가 꺼진 おうごんのうでわ 는
+        いのちのいし 처리기(「아무 일도」 18E), 켜진 さえずりのみつ 는 ゴールドオーブ 것(「여기서는」 1A8)."""
         import dq5chest
         rom = self._patched()
         self.assertEqual(dq5chest.item_name(rom, 0xC6), "おうごんのうでわ")
         self.assertEqual(dq5chest.item_name(rom, 0xBE), "さえずりのみつ")
-        for item in (0xC6, 0xBE):
+        for item, handler in ((0xC6, 0x8BB9), (0xBE, 0x8BE4)):
             self.assertEqual([rom.u8(t + item) for t in dq4itemport.RECORD], [0x1C, 0x04, 0x53, 0x07])
-            self.assertEqual(rom.u16(dq4itemport.USE_HANDLERS + (item - 0xA1) * 2), 0x8BE4)
+            self.assertEqual(rom.u16(dq4itemport.USE_HANDLERS + (item - 0xA1) * 2), handler)
 
     def test_chapter_three_story_items(self):
-        """3장 사건 물건: BB~BD 는 이름을 한 줄로 다시 써(합 26바이트 그대로) 뒤 물건 이름이 그대로이고, 다섯 모두 물건
-        표·필드에서 쓰기가 ゴールドオーブ 것."""
+        """3장 사건 물건: BB~BD 는 이름을 한 줄로 다시 써(합 26바이트 그대로) 뒤 물건 이름이 그대로. 금고·여신상·편지 둘은
+        물건 표가 ゴールドオーブ 것이고, 필드 쓰기는 FC 필드 효과 비트대로(금고·여신상은 いのちのいし 18E, 편지는
+        ゴールドオーブ 1A8). 도시락은 FC 에서 약초와 같은 물건이라 약초 기록·처리기에 10G."""
         import dq5chest
         import dq5item
         rom = self._patched()
-        names = {0xBB: "おべんとう", 0xBC: "てつのきんこ", 0xBD: "ぎんのめがみぞう", 0xC3: "おうじのてがみ", 0xCA: "おうのてがみ"}
-        for item, name in names.items():
+        original = dq5item.Rom(DQ5.read_bytes())
+        names = {0xBC: ("てつのきんこ", 0x8BB9), 0xBD: ("ぎんのめがみぞう", 0x8BB9), 0xC3: ("おうじのてがみ", 0x8BE4),
+                 0xCA: ("おうのてがみ", 0x8BE4)}
+        for item, (name, handler) in names.items():
             self.assertEqual(dq5chest.item_name(rom, item), name)
             self.assertEqual([rom.u8(t + item) for t in dq4itemport.RECORD], [0x1C, 0x04, 0x53, 0x07])
-            self.assertEqual(rom.u16(dq4itemport.USE_HANDLERS + (item - 0xA1) * 2), 0x8BE4)
-        original = dq5item.Rom(DQ5.read_bytes())
+            self.assertEqual(rom.u16(dq4itemport.USE_HANDLERS + (item - 0xA1) * 2), handler)
+        self.assertEqual(dq5chest.item_name(rom, dq4itemport.BENTO), "おべんとう")
+        self.assertEqual([rom.u8(t + dq4itemport.BENTO) for t in dq4itemport.RECORD[1:]],
+                         [original.u8(t + 0xA1) for t in dq4itemport.RECORD[1:]])
+        self.assertEqual(rom.u8(dq4itemport.PRICE_SCALE + dq4itemport.BENTO), original.u8(dq4itemport.PRICE_SCALE + 0xA1))
+        self.assertEqual(rom.u8(dq4itemport.PRICE_BASE + dq4itemport.BENTO), 10)
+        self.assertEqual(rom.u16(dq4itemport.USE_HANDLERS + (dq4itemport.BENTO - 0xA1) * 2),
+                         original.u16(dq4itemport.USE_HANDLERS))
         # あやかしのふえ(CB)는 DQ5 피리 C7 의 기록과 필드 쓰기를 빌린다(FC: 쓰면 「…ふいた。」, 남음)
         self.assertEqual(dq5chest.item_name(rom, dq4itemport.FLUTE), "あやかしのふえ")
         self.assertEqual([rom.u8(t + dq4itemport.FLUTE) for t in dq4itemport.RECORD],

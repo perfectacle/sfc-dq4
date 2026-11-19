@@ -77,6 +77,7 @@ SPELLS = 0x23                     # 일행 기록 +23~+25: 배운 주문 비트
 GOLD = 0x7E2019
 HERB = 0xA1                       # DQ5 やくそう
 LUCK_SEED = 0xAE                  # ラックのたね(dq4fcitems.LUCK_SEED)
+BENTO = 0xBB                      # おべんとう(dq4itemport.BENTO): FC 에서 やくそう 와 같은 행동, 약초 처리기를 빌림
 HOIMI = 0x27                      # 행동 ホイミ(やくそう 도 이 처리 루틴, dq5-data-format 「물건」)
 HYADO = 0x0A                      # 행동 ヒャド
 CAST_WINDOW = 120                 # 주문을 건 사람의 MP 가 준 뒤 그 효과(몬스터 HP 가 줆)를 찾는 프레임
@@ -548,7 +549,7 @@ def judge_nosong(s, expect):
 
 
 JUDGES = {'attack': judge_attack, 'armor': judge_attack, 'flee': judge_flee, 'noflee': judge_noflee,
-          'herb': judge_heal, 'spell': judge_heal, 'luck': judge_luck, 'levelup': judge_levelup, 'levelup2': judge_levelup,
+          'herb': judge_heal, 'bento': judge_heal, 'spell': judge_heal, 'luck': judge_luck, 'levelup': judge_levelup, 'levelup2': judge_levelup,
           'lose': judge_lose, 'boss': judge_boss, 'monflee': judge_monflee, 'nosong': judge_nosong,
           'growth': judge_growth, 'growth2': judge_growth, 'party2': judge_party, 'party2spell': judge_party_spells,
           'party2piorimu': judge_brey_spell, 'party2hyadain': judge_brey_spell}
@@ -642,6 +643,9 @@ SCENES = {
              'items': [0x42, 0x00, LUCK_SEED], 'turn': 'luck', 'then': ('attack', 1)},
     'herb': {'what': '약초로 회복한 뒤 공격', 'group': [(0x00, 1)], 'monsters': {0x00: {'hp': 1, 'defense': 0, 'attack': 0}},
              'hero': {'max_hp': 100, 'hp': 20}, 'items': [0x42, 0x00, HERB], 'turn': 'herb', 'then': ('attack', 1)},
+    'bento': {'what': '도시락으로 회복한 뒤 공격(dq4fcitems.BATTLE_AS)', 'group': [(0x00, 1)],
+              'monsters': {0x00: {'hp': 1, 'defense': 0, 'attack': 0}}, 'hero': {'max_hp': 100, 'hp': 20},
+              'items': [0x42, 0x00, BENTO], 'turn': 'herb', 'then': ('attack', 1)},
     'spell': {'what': '호이민이 ホイミ 로 주인공을 고친 뒤 도망', 'group': [(0x00, 1)],
               'monsters': {0x00: {'hp': 2000, 'defense': 255, 'attack': 0}}, 'party': 'hoimin',
               'hero': {'level': 5, 'max_hp': 100, 'hp': 40}, 'turn': 'defend', 'then': ('flee', 'heal')},
@@ -876,7 +880,7 @@ def expectations(rom, scene_name, slot):
         exp['hyado'] = (base, base + width - 1)
     if 'finish_limit' in scene:
         exp['finish_limit'] = scene['finish_limit']
-    if scene_name in ('herb', 'spell'):
+    if scene_name in ('herb', 'bento', 'spell'):
         exp['amount'], cost = original_hoimi()
         exp['max_hp'] = slot.hero(MAX_HP, 2)
         if scene_name == 'spell':
