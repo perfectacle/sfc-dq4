@@ -1,9 +1,12 @@
 """DQ5 에 없는 FC 물건의 동작: 빌린 자리(dq4itemport.BORROWED·EVENT_ITEMS)의 쓰기 처리기를 FC 효과로 바꾼다.
 
-ラックのたね 는 DQ5 まもりのたね 자리(AE)를 빌린다. DQ5 まもりのたね 는 みのまもり 를 4 올리는데(필드 11:89A4, 전투
-20:BCCA), FC ラックのたね 는 うんのよさ 를 1~3 올린다(필드 12:$B022 rand(3)+1, 전투 13:$B5E4). DQ5 의 다른 씨앗처럼
-1~3 을 고르는 몸통(필드 11:898D, 전투 20:BCF7)에 운 칸을 넘긴다. 운 칸 번호는 DQ5 필드 설명자(21:8D96)의 22(읽기)·
-23(더하기)이고, 전투는 다른 씨앗처럼 Y = 더하기, X = 읽기다. 메시지 1BC(필드)·C9(전투)는 まもりのたね 만 부른다.
+ラックのたね 는 DQ5 たいまつ 자리(C5)를 빌린다(DQ5 まもりのたね AE 는 NDS 물건이라 그대로 둔다). FC ラックのたね 는
+うんのよさ 를 1~3 올린다(필드 12:$B022 rand(3)+1, 전투 13:$B5E4). DQ5 의 다른 씨앗처럼 1~3 을 고르는 몸통(필드 11:898D,
+전투 20:BCF7)에 운 칸을 넘긴다. 운 칸 번호는 DQ5 필드 설명자(21:8D96)의 22(읽기)·23(더하기)이고, 전투는 다른 씨앗처럼
+Y = 더하기, X = 읽기다. 코드는 쓰이지 않게 된 DQ5 처리기 몸통에 둔다: 필드는 たいまつ 의 11:89FC(필드 처리기 표가 이미
+가리킴), 전투는 まもののエサ 의 20:BF65(おべんとう 가 やくそう 처리기로 바뀌어 아무도 가리키지 않음). 전투 도구 표에서
+じょうせんけん 이 비운 てんしのすず 칸을 C5 와 그 처리기로 쓴다. 글도 그 두 물건만 부르던 것을 쓴다: 필드 1CB(たいまつ),
+전투 FB(まもののエサ).
 
 열쇠 물건 자리(dq4itemport.EVENT_ITEMS): 필드 쓰기·기록은 dq4itemport 가 둔다(FC 필드 효과 비트가 꺼진 것은 「しかし
 なにも おこらなかった。」 와 같은 글 18E 를 띄우는 いのちのいし 처리기 11:8BB9). 여기서는 전투 도구 표(27:819A, 같은 차례의
@@ -16,18 +19,20 @@
 - うまのふん(C2, いのちのいし)·おうごんのうでわ 등 나머지 자리는 DQ5 에서도 표에 없다.
 """
 
-LUCK_SEED = 0xAE
+LUCK_SEED = 0xC5
 LUCK_READ, LUCK_ADD = 0x22, 0x23
+FIELD_MSG, BATTLE_MSG = 0x1CB, 0xFB
 
-# 필드: LDX #$0023 / JSR $898D(1~3 을 $F6 에, 칸 X 에 더함) / BRK 98 BC / RTS. 원래는 LDX #$001F / LDA #$04 / JSR $8994
-FIELD_AT = 0x1189A4
-FIELD_ORIG = bytes.fromhex("a2 1f 00 a9 04 20 94 89 00 98 bc 60")
-FIELD_NEW = bytes((0xA2, LUCK_ADD, 0x00, 0x20, 0x8D, 0x89, 0x00, 0x98, 0xBC, 0x60, 0xEA, 0xEA))
-# 전투: LDY #$23 / LDX #$22 / JSR $BCF7(1~3) / BRK A7 C9 / SEC / RTS. 원래는 LDY #$1F / LDX #$1E / LDA #$04 / JSR $BCFE
-BATTLE_AT = 0x20BCCA
-BATTLE_ORIG = bytes.fromhex("a0 1f a2 1e a9 04 20 fe bc 00 a7 c9 38 60")
-BATTLE_NEW = bytes((0xA0, LUCK_ADD, 0xA2, LUCK_READ, 0x20, 0xF7, 0xBC, 0x00, 0xA7, 0xC9, 0x38, 0x60, 0xEA, 0xEA))
-
+# 필드: LDX #$0023 / JSR $898D(1~3 을 $F6 에, 칸 X 에 더함) / BRK 98 CB / RTS. たいまつ 처리기 앞 10바이트 자리
+FIELD_AT = 0x1189FC
+FIELD_ORIG = bytes.fromhex("00 95 00 a5 bc c9 04 d0 38 a5")
+FIELD_NEW = bytes((0xA2, LUCK_ADD, 0x00, 0x20, 0x8D, 0x89, 0x00, 0x98, FIELD_MSG & 0xFF, 0x60))
+# 전투: LDY #$23 / LDX #$22 / JSR $BCF7(1~3) / BRK A7 FB / SEC / RTS. まもののエサ 처리기 앞 12바이트 자리
+BATTLE_AT = 0x20BF65
+BATTLE_ORIG = bytes.fromhex("a9 ff 85 71 22 f6 fe 20 85 42 09 80")
+BATTLE_NEW = bytes((0xA0, LUCK_ADD, 0xA2, LUCK_READ, 0x20, 0xF7, 0xBC, 0x00, 0xA7, BATTLE_MSG, 0x38, 0x60))
+# 운의 씨앗이 쓰는 전투 도구 표 칸(원래 てんしのすず, じょうせんけん 이 비움)
+LUCK_SLOT_FROM = 0xC1
 
 SILENCE_ORB, SHIP_TICKET, HORSE_DUNG, BENTO, HERB = 0xC4, 0xC1, 0xC2, 0xBB, 0xA1
 BATTLE_ITEMS, BATTLE_HANDLERS, BATTLE_COUNT = 0x27819A, 0x20C162, 53
@@ -69,13 +74,18 @@ def writes(rom, event_items):
     """event_items: dq4itemport.EVENT_ITEMS {DQ5 slot: FC name}."""
     out = [_patch(rom, FIELD_AT, FIELD_ORIG, FIELD_NEW, "ラックのたね 필드에서 쓰기: 운 1~3"),
            _patch(rom, BATTLE_AT, BATTLE_ORIG, BATTLE_NEW, "ラックのたね 전투에서 쓰기: 운 1~3")]
-    if battle_slot(rom, NEVER_HELD) is not None:
+    if battle_slot(rom, NEVER_HELD) is not None or battle_slot(rom, LUCK_SEED) is not None:
         raise ValueError("전투 도구 표가 DQ5 원래 것과 다름")
+    if rom.u16(BATTLE_HANDLERS + 2 * battle_slot(rom, BENTO)) != BATTLE_AT & 0xFFFF:
+        raise ValueError("まもののエサ 전투 처리기가 운의 씨앗 코드 자리가 아님")
     for item, name in sorted(event_items.items()):
         slot = battle_slot(rom, item)
         if slot is None:
             continue
-        if item in BATTLE_AS:
+        if item == LUCK_SLOT_FROM:
+            out.append(_byte(rom, BATTLE_ITEMS + slot, LUCK_SEED, f"ラックのたね: 전투 도구 표의 {name} 칸"))
+            out.append(_word(rom, BATTLE_HANDLERS + 2 * slot, BATTLE_AT & 0xFFFF, "ラックのたね 전투 처리기"))
+        elif item in BATTLE_AS:
             src = BATTLE_HANDLERS + 2 * battle_slot(rom, BATTLE_AS[item])
             out.append(_word(rom, BATTLE_HANDLERS + 2 * slot, rom.u16(src),
                              f"{name} 전투에서 쓰기: {BATTLE_AS[item]:02X} 처리기"))

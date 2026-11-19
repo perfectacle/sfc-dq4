@@ -28,7 +28,7 @@ class PriceTest(unittest.TestCase):
     def test_korean_name(self):
         self.assertEqual(dq4itemport.korean_names(), {0x01: "철 창", 0x34: "정의의 주판", 0x4E: "철의 앞치마",
                                                       0x61: "외톨이 메탈 갑옷", 0x89: "금 머리장식", 0x8C: "깃털 모자",
-                                                  0x37: "미소의 지팡이", 0x84: "외톨이 메탈 방패", 0xAE: "운의 씨앗",
+                                                  0x37: "미소의 지팡이", 0x84: "외톨이 메탈 방패", 0xC5: "운의 씨앗",
                                                       0x6E: "핑크 레오타드", 0xC4: "정적의 구슬", 0xC1: "승선권",
                                                       0xC2: "말똥",
                                                       0xC6: "황금의 팔찌", 0xBE: "지저귐의 꿀",
@@ -109,11 +109,17 @@ class RomTest(unittest.TestCase):
                          [original.u8(t + 0xC7) for t in dq4itemport.RECORD])
         self.assertEqual(rom.u16(dq4itemport.USE_HANDLERS + (dq4itemport.FLUTE - 0xA1) * 2),
                          original.u16(dq4itemport.USE_HANDLERS + (0xC7 - 0xA1) * 2))
-        for item in (0xBA, 0xBF, 0xC5, 0xC9):
+        for item in (0xBA, 0xBF, 0xC8, 0xC9, 0xAE):
             self.assertEqual(dq5chest.item_name(rom, item), dq5chest.item_name(original, item))
         # 4장 셋: 정적의 구슬은 ドラム 자리, 승선권·말똥은 C1·C2 를 한 줄로(7 + 6 = 8 + 5)
         self.assertEqual([dq5chest.item_name(rom, i) for i in (0xC4, 0xC1, 0xC2)],
                          ["せいじゃくのたま", "じょうせんけん", "うまのふん"])
+        # 운의 씨앗(C5, 6바이트)은 たいまつ(4) 자리, 늘어난 둘은 はるかぜのフルート(C7) 를 はるかぜのふえ 로 줄여 갚음
+        self.assertEqual([dq5chest.item_name(rom, i) for i in (0xC5, 0xC6, 0xC7, 0xC8)],
+                         ["ラックのたね", "おうごんのうでわ", "はるかぜのふえ", "パパスのてがみ"])
+        # 운의 씨앗 기록은 まもりのたね 것(쓰면 없어짐·팔 수 있음), まもりのたね(AE) 자리는 DQ5 그대로
+        self.assertEqual([rom.u8(t + 0xC5) for t in dq4itemport.RECORD[1:]], [original.u8(t + 0xAE) for t in dq4itemport.RECORD[1:]])
+        self.assertEqual([rom.u8(t + 0xAE) for t in dq4itemport.RECORD], [original.u8(t + 0xAE) for t in dq4itemport.RECORD])
         self.assertEqual(dq4itemport.name_at(rom, 0xBE), dq4itemport.name_at(original, 0xBE))
 
     def test_thief_key(self):

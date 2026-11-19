@@ -89,7 +89,7 @@ START_ITEMS = (0x06, 0x48)
 HERB, ANTIDOTE, CHAIN_MAIL, WOOD_HAT = 0xA1, 0xA2, 0x4D, 0x87
 STEEL_SWORD, LEATHER_SHIELD, MOON_HERB = 0x0C, 0x75, 0xA7
 FLUTE = 0xCB            # dq4itemport.FLUTE
-PINK, LUCK_SEED = 0x6E, 0xAE   # dq4itemport.BORROWED: ピンクのレオタード·ラックのたね
+PINK, LUCK_SEED = 0x6E, 0xC5   # dq4itemport.BORROWED: ピンクのレオタード·ラックのたね
 DUNG = 0xC2             # dq4itemport.HORSE_DUNG(2G)
 # 텐페의 괴물을 이긴 flag(dq4ch2tempe.WON). 그 뒤의 목록에만 도구점 판매자가 선다(dq4shopport.EVENT_LISTS)
 def _tempe_won():

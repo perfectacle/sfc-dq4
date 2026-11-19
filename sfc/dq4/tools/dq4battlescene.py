@@ -76,7 +76,7 @@ GROWTH_FIELDS = ((MAX_HP, 2), (MAX_MP, 2), (STR, 1), (AGI, 1), (WIS, 1), (LUCK, 
 SPELLS = 0x23                     # 일행 기록 +23~+25: 배운 주문 비트
 GOLD = 0x7E2019
 HERB = 0xA1                       # DQ5 やくそう
-LUCK_SEED = 0xAE                  # ラックのたね(dq4fcitems.LUCK_SEED)
+LUCK_SEED = 0xC5                  # ラックのたね(dq4fcitems.LUCK_SEED)
 BENTO = 0xBB                      # おべんとう(dq4itemport.BENTO): FC 에서 やくそう 와 같은 행동, 약초 처리기를 빌림
 HOIMI = 0x27                      # 행동 ホイミ(やくそう 도 이 처리 루틴, dq5-data-format 「물건」)
 HYADO = 0x0A                      # 행동 ヒャド
@@ -356,7 +356,8 @@ def judge_monflee(s, expect):
 
 
 def judge_luck(s, expect):
-    """luck: 이기고, 운(일행 기록 +0A)이 1~3 오르고, 셋째 칸(운의 씨앗)이 빔."""
+    """luck: 이기고, 운(일행 기록 +0A)이 1~3 오르고, 몬스터를 쓰러뜨렸을 때 셋째 칸(운의 씨앗)이 빔(전투 뒤에는 떨어뜨린
+    물건이 그 칸에 들 수 있다)."""
     problems = judge_win(s, expect)
     if s.get('end') is None:
         return problems
@@ -364,8 +365,8 @@ def judge_luck(s, expect):
     was, now = s['before']['hero']['stats'][k], s['after']['hero']['stats'][k]
     if not 1 <= now - was <= 3:
         problems.append(f"운 {was} → {now}, 1~3 올라야 함")
-    if s['after']['items'][2] != NO_ITEM:
-        problems.append(f"셋째 칸이 남음: {s['after']['items']}")
+    if (s.get('items_at_finish') or [None] * 12)[2] != NO_ITEM:
+        problems.append(f"몬스터를 쓰러뜨렸을 때 셋째 칸이 남음: {s.get('items_at_finish')}")
     return problems
 
 

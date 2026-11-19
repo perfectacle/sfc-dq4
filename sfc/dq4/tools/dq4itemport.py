@@ -34,12 +34,15 @@ WEAPON = 0
 # ported shop or chest uses. たけのやり: a spear like てつのやり. エンドール's shops: オリハルコンのキバ (a monster-only
 # fang) for せいぎのそろばん, てつのむねあて for てつのまえかけ, メタルキングよろい (the same defence, 95) for
 # はぐれメタルよろい. Chapter 2's monster drops: けがわのフード (the nearest defence, 11 for 12) for きんのかみかざり,
-# シルクハット for はねぼうし. Chapter 1's ラックのたね: まもりのたね, the seed FC lacks (dq4fcitems turns its use into
-# luck). Chapter 3's casino prizes: おおかなづち (a weapon DQ5 cannot use in battle, 27:819A, so
+# シルクハット for はねぼうし. Chapter 1's ラックのたね: たいまつ (C5), with まもりのたね's record (BORROWED_RECORDS;
+# dq4fcitems turns its use into luck). まもりのたね itself is an NDS item and keeps its slot. Chapter 3's casino prizes: おおかなづち (a weapon DQ5 cannot use in battle, 27:819A, so
 # using it does nothing instead of a DQ5 effect) for ほほえみのつえ, メタルキングのたて for はぐれメタルのたて.
 BORROWED = {0x01: "てつのやり", 0x34: "せいぎのそろばん", 0x4E: "てつのまえかけ", 0x61: "はぐれメタルよろい",
             0x89: "きんのかみかざり", 0x8C: "はねぼうし", 0x37: "ほほえみのつえ", 0x84: "はぐれメタルのたて",
-            0xAE: "ラックのたね", 0x6E: "ピンクのレオタード"}
+            0xC5: "ラックのたね", 0x6E: "ピンクのレオタード"}
+# Borrowed slots whose record (k1-k4) comes from another DQ5 item: たいまつ is a key item, まもりのたね a seed (used up,
+# sold, usable in battle)
+BORROWED_RECORDS = {0xC5: 0xAE}
 # DQ5 key item -> FC story item. ゴールドオーブ (C6) has おうごんのうでわ's name length (10 bytes with the dakuten
 # marks); あくまのおもちゃ (BE) is an empty DQ5 record of さえずりのみつ's length (8 bytes). Chapter 3's take DQ5 items
 # no FC item, chest substitute or talk condition names: モンスターほいほい (C3, empty record) and ルラムーンそう (CA,
@@ -67,9 +70,10 @@ FC_FIELD_USE = 0x80
 # Neighbouring items whose names are written together: the string table is walked by length (21:955D), so the names may
 # change length as long as the run keeps its total. No armour slot is 11 bytes long for ピンクのレオタード: it takes
 # プリンセスローブ (6E, 10 bytes) and its neighbour シルクのビスチェ (6D, 9 bytes, no FC item and no ported shop or chest)
-# gives up its の (RENAMED).
-RENAMED = {0x6D: "シルクビスチェ"}
-NAME_RUNS = ((BENTO, IRON_SAFE, STATUE), (0x6D, 0x6E), (SHIP_TICKET, HORSE_DUNG))
+# gives up its の (RENAMED). ラックのたね (6 bytes) on たいまつ (4) is paid by はるかぜのフルート (C7, 10 bytes, a DQ5 item no
+# FC or NDS item is named after, out of reach in this hack) going by はるかぜのふえ (8): C4-C7 keep 9 + 4 + 10 + 10.
+RENAMED = {0x6D: "シルクビスチェ", 0xC7: "はるかぜのふえ"}
+NAME_RUNS = ((BENTO, IRON_SAFE, STATUE), (0x6D, 0x6E), (SHIP_TICKET, HORSE_DUNG), (SILENCE_ORB, 0xC5, 0xC6, 0xC7))
 EVENT_TEMPLATE = 0xC6
 THIEF_KEY, KEY_TEMPLATE = 0xB7, 0xB8
 # Record bytes the story items copy: k1 (flags, price scale), k2 (slot), k3 and k4 (description and use message).
@@ -143,7 +147,7 @@ def price_writes(rom, item, price, name, sellable=None):
     """Price base and scale of item. The scale byte keeps the flags of the record the item ends up with (an event item's
     template, EVENT_TEMPLATES)."""
     base, scale = encode_price(price)
-    record = EVENT_TEMPLATES.get(item, EVENT_TEMPLATE) if item in EVENT_ITEMS else item
+    record = (EVENT_TEMPLATES.get(item, EVENT_TEMPLATE) if item in EVENT_ITEMS else BORROWED_RECORDS.get(item, item))
     flags = rom.u8(PRICE_SCALE + record) & ~3
     if item in KEEP_ON_USE:
         flags &= ~CONSUMED
@@ -168,7 +172,8 @@ def borrowed_writes(rom, prg, item, fc_name):
         raise ValueError(f"{fc_name}: {len(new)} name bytes in place of {len(old)}")
     name = [] if in_run else [{"at": _cpu(at + 1), "hex": new.hex(" ").upper(), "orig": old.hex(" ").upper(),
                                "note": f"물건 {item:02X} 이름 {fc_name}"}]
-    return [*name,
+    record = _record_writes(rom, item, BORROWED_RECORDS[item], fc_name, skip_price=True) if item in BORROWED_RECORDS else []
+    return [*name, *record,
             _byte(rom, POWER + item, fc[1], f"{fc_name} 공격력·수비력"),
             *price_writes(rom, item, fc[2], fc_name,
                           sellable=not dq4data.rd(prg, dq4data.ITEM_BANK, dq4data.ITEM_FLAGS + fc[0]) & FC_NO_SALE)]
@@ -191,12 +196,12 @@ def use_template(prg, item):
     return EVENT_TEMPLATES.get(item, EVENT_TEMPLATE)
 
 
-def _record_writes(rom, item, template, name, use=None):
-    """Record bytes of template on item (the price scale byte is left to price_writes when the item has a fixed price),
-    and the field-use handler of `use` (None: the handler stays)."""
+def _record_writes(rom, item, template, name, use=None, skip_price=False):
+    """Record bytes of template on item (the price scale byte is left to price_writes when the item has a price of its
+    own: a fixed price, or skip_price), and the field-use handler of `use` (None: the handler stays)."""
     out = [_byte(rom, table + item, rom.u8(table + template), f"{name} 물건 표({_cpu(table)})")
            for table in RECORD if rom.u8(table + item) != rom.u8(table + template)
-           and not (table == PRICE_SCALE and item in FIXED_PRICES)]
+           and not (table == PRICE_SCALE and (skip_price or item in FIXED_PRICES))]
     if use is None:
         return out
     at, src = USE_HANDLERS + (item - FIRST_USE) * 2, USE_HANDLERS + (use - FIRST_USE) * 2

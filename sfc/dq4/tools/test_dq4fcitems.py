@@ -29,8 +29,10 @@ class LuckSeedTest(unittest.TestCase):
     def test_messages_say_luck(self):
         import dq4battletexts
         import dq4sysmsg
-        self.assertIn('운이', dq4sysmsg.SOURCE[0x1BC])
-        self.assertIn('운이', dq4battletexts.SOURCE[0x0C9])
+        self.assertIn('운이', dq4sysmsg.SOURCE[F.FIELD_MSG])
+        self.assertIn('방어력', dq4sysmsg.SOURCE[0x1BC])
+        self.assertIn('운이', dq4battletexts.SOURCE[F.BATTLE_MSG])
+        self.assertIn('몸 지키기', dq4battletexts.SOURCE[0x0C9])
 
     @unittest.skipUnless(DQ5_ROM.is_file(), 'rom/dq5.sfc 가 필요')
     def test_writes_match_rom(self):
@@ -41,8 +43,14 @@ class LuckSeedTest(unittest.TestCase):
         bento = F.BATTLE_HANDLERS + 2 * F.battle_slot(rom, F.BENTO)
         herb = rom.u16(F.BATTLE_HANDLERS + 2 * F.battle_slot(rom, F.HERB))
         self.assertEqual(writes[F._cpu(bento)], f'{herb & 0xFF:02X} {herb >> 8:02X}')
-        for item in (dq4itemport.IRON_SAFE, dq4itemport.STATUE, F.SHIP_TICKET, F.SILENCE_ORB):
+        for item in (dq4itemport.IRON_SAFE, dq4itemport.STATUE, F.SILENCE_ORB):
             self.assertEqual(writes[F._cpu(F.BATTLE_ITEMS + F.battle_slot(rom, item))], f'{F.NEVER_HELD:02X}')
+        # 승선권이 비운 てんしのすず 칸은 운의 씨앗(C5)과 그 전투 코드(まもののエサ 처리기 자리)
+        ticket = F.battle_slot(rom, F.SHIP_TICKET)
+        self.assertEqual(writes[F._cpu(F.BATTLE_ITEMS + ticket)], f'{F.LUCK_SEED:02X}')
+        self.assertEqual(writes[F._cpu(F.BATTLE_HANDLERS + 2 * ticket)], f'{F.BATTLE_AT & 0xFF:02X} {F.BATTLE_AT >> 8 & 0xFF:02X}')
+        # 원래 まもりのたね(AE) 의 처리기는 건드리지 않는다
+        self.assertFalse([a for a in writes if a in ('11:89A4', '20:BCCA')])
         # 나머지 사건 물건 자리는 원래 표에 없다
         rest = set(dq4itemport.EVENT_ITEMS) - {F.BENTO, dq4itemport.IRON_SAFE, dq4itemport.STATUE, F.SHIP_TICKET,
                                                F.SILENCE_ORB}
