@@ -486,6 +486,10 @@ class Layout:
                 bytes((0xC2, 0x30)) + mvn(a['pal'], CGRAM_BUFFER + pal_off, len(self.pal)) + DB0 +
                 bytes((0xE2, 0x20, 0x60)))                                   # SEP #$20 / RTS
         call_load = bytes((0x20, *le(a['load'] & 0xFFFF, 2)))               # JSR load
+        # BG3 타일맵 버퍼를 모두 비우기(끝 상자·「완」 상자가 함께 씀): load 바로 뒤에 한 벌, JSR 로(M 8·X 16 으로 돌아감)
+        clear_sub = (bytes((0xC2, 0x30, 0xA9, *le(BLANK, 2), 0x8F, *le(MAP_BUFFER, 3))) +
+                     mvn(MAP_BUFFER, MAP_BUFFER + 2, 0x800 - 2) + DB0 + bytes((0xE2, 0x20, 0x60)))
+        call_clear = bytes((0x20, *le((a['load'] + len(load)) & 0xFFFF, 2)))  # JSR 비우기
         def box(row_at):
             return (ENTER + save + bytes((0x9C, 0x1D, 0x00)) + screen_off() + bytes((0xC2, 0x10)) +   # STZ $001D
                    call_load + map_rows(lambda r: row_at[r]) +
@@ -502,19 +506,15 @@ class Layout:
 
         def ending(row_at, n):
             # 메시지 창이 남지 않게 BG3 타일맵 버퍼를 모두 비운 뒤 상자·부제를 놓고 꼬리로
-            clear_all = (bytes((0xC2, 0x30, 0xA9, *le(BLANK, 2), 0x8F, *le(MAP_BUFFER, 3))) +
-                         mvn(MAP_BUFFER, MAP_BUFFER + 2, 0x800 - 2) + DB0 + bytes((0xE2, 0x20)))
             return (ENTER + bytes((0x9C, 0x1D, 0x00)) + screen_off() + bytes((0xC2, 0x10)) +
-                    call_load + clear_all + map_rows(lambda r: row_at[r], n) +
+                    call_load + call_clear + map_rows(lambda r: row_at[r], n) +
                     bytes((0x4C, *le((a['tail'] + len(tail)) & 0xFFFF, 2))))           # JMP 꼬리(done 꼬리 뒤)
-        clear_all = (bytes((0xC2, 0x30, 0xA9, *le(BLANK, 2), 0x8F, *le(MAP_BUFFER, 3))) +
-                     mvn(MAP_BUFFER, MAP_BUFFER + 2, 0x800 - 2) + DB0 + bytes((0xE2, 0x20)))
         # 「완」 상자의 공용 꼬리(JMP 로 옴, X = 띄울 프레임): 밝히고 X 프레임 둔 뒤 box 처럼 지우고 팔레트를 되돌린다.
         # 들어올 때 X 를 스택에 두었다가 기다리기 직전에 꺼낸다(되돌리기 전에 스택이 맞음)
         hold_loop = bytes((0xDA,)) + wait(1) + bytes((0xFA, 0xCA))          # PHX / BRK 09 01 / PLX / DEX
         tail = (bytes((0xDA,)) + dma_vram(BG3_MAP, MAP_BUFFER, 0x800) + screen_on() + fade(1, 15, FADE_STEP) +
                 bytes((0xC2, 0x10, 0xFA)) + hold_loop + bytes((0xD0, -(len(hold_loop) + 2) & 0xFF)) +   # REP #$10 / PLX
-                fade(14, 0, FADE_STEP) + screen_off() + bytes((0xC2, 0x10)) + clear_all +
+                fade(14, 0, FADE_STEP) + screen_off() + bytes((0xC2, 0x10)) + call_clear +
                 dma_vram(BG3_MAP, MAP_BUFFER, 0x800) +
                 fill_vram(BG3_CHR + CANVAS * 8, a['blank'], len(self.tiles) // 2) +
                 restore + dma_cgram(PAL_BORDER * 4, CGRAM_BUFFER + pal_off, n) +
@@ -529,14 +529,14 @@ class Layout:
                                0xE2, 0x20, 0xC2, 0x10, 0xA2, *le(SONG_WAIT_MAX, 2))) + loop +
                         bytes((0xD0, -(len(loop) + 2) & 0xFF)))                           # $1D8B 가 곡이 될 때까지
             return (ENTER + play + save + bytes((0x9C, 0x1D, 0x00)) + screen_off() + bytes((0xC2, 0x10)) +
-                    call_load + clear_all + map_rows(lambda r: row_at[r], rows_n) +
+                    call_load + call_clear + map_rows(lambda r: row_at[r], rows_n) +
                     bytes((0xC2, 0x10, 0xA2, *le(frames, 2), 0x4C, *le(a['tail'] & 0xFFFF, 2))))   # LDX / JMP 꼬리
         boxes = [(bytes((0x22, *le(a['boxes'].get(scene.before, 0), 3))) if scene.before else b'') +   # JSL 「완」 상자
                  (done(row_at, rows(scene.subtitle), scene.hold, scene.song) if scene.hold else
                   ending(row_at, rows(scene.subtitle)) if scene.subtitle else box(row_at))
                  for scene, row_at in zip(self.scenes, a['maps'])]
         reveal = reveal_code()
-        return start, hook, boxes, reveal, soft_boot(), load, tail + end_tail
+        return start, hook, boxes, reveal, soft_boot(), load + clear_sub, tail + end_tail
 
 
 def reveal_code(step=REVEAL_STEP, song_wait=True):
