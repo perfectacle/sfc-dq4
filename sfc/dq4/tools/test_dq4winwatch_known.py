@@ -19,8 +19,9 @@ def cell(r, c, frames, rule='커서', mode='fail'):
 
 
 class KnownTest(unittest.TestCase):
-    def judge(self, cells, scene='equip-ch3'):
-        found = [(SHOT, 789, max(c[5] for c in cells), cells)] if cells else []
+    def judge(self, cells, scene='equip-ch3', found=None):
+        if found is None:
+            found = [(SHOT, 789, max(c[5] for c in cells), cells)] if cells else []
         with tempfile.TemporaryDirectory() as d:
             folder = Path(d) / scene
             folder.mkdir()
@@ -54,6 +55,10 @@ class KnownTest(unittest.TestCase):
     def test_other_scene_ignores_gauge(self):
         self.assertEqual(self.judge([], scene='shopwho')[0], 0)
         self.assertEqual(self.judge([cell(5, 19, 7)], scene='shopwho')[0], 1)
+
+    def test_same_cell_in_shorter_shots_is_measured_by_the_longest(self):
+        found = [(SHOT, 100, 3, [cell(5, 19, 3)]), (SHOT, 789, 7, [cell(5, 19, 7)])]
+        self.assertEqual(self.judge(None, found=found)[0], 0)
 
     def test_report_cells_do_not_count(self):
         self.assertEqual(self.judge([cell(5, 19, 7), cell(4, 29, 7, '테두리', 'report')])[0], 0)
