@@ -176,11 +176,16 @@ def upper_zero(rom, table, m):
     return [0, 0, 0, 0] if table == BLOCK_UPPER else [(m * 4 + q) % 400 + 20 for q in range(4)]
 
 
+# 끊긴 다리 모양 대신(FC 롬 없이): 가운데 여섯 열이 물
+SYNTHETIC_BROKEN = tuple(tuple(not 5 <= x < 11 for x in range(16)) for _ in range(16))
+
+
 class GenerateSyntheticTest(unittest.TestCase):
     def setUp(self):
         for target, value in (("dq5fieldgfxwrite.original", lambda r: synthetic_original()),
                               ("dq5map.Rom", lambda raw: raw), ("dq5field.block_tiles", upper_zero),
-                              ("dq5field.terrain", fake_terrain)):
+                              ("dq5field.terrain", fake_terrain),
+                              ("dq4fieldgfx.broken_mask", lambda: SYNTHETIC_BROKEN)):
             patcher = mock.patch(target, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -201,7 +206,7 @@ class GenerateSyntheticTest(unittest.TestCase):
             ground = borrowed % 16
             want = 13 if kind >= 8 and ground in fight else ground
             self.assertEqual(block["terrain"], want, f"{kind:02X}")
-            if kind == gfx.REEF:
+            if kind in (gfx.REEF, port.BROKEN_BRIDGE):
                 self.assertEqual(block["lower"], list(gfx.SEA_TILES))
                 quarters_attr = [self.orig["tile_attributes"][t] for t in upper_zero(None, "lower", borrowed)]
                 got = [self.attrs[t] for t in block["upper"]]
@@ -210,6 +215,22 @@ class GenerateSyntheticTest(unittest.TestCase):
                 quarters_attr = [self.orig["tile_attributes"][t] for t in upper_zero(None, "lower", borrowed)]
                 got = [self.attrs[t] for t in block["lower"]]
             self.assertEqual(got, quarters_attr, f"{number} kind {kind:02X}")
+
+    def test_broken_bridge_keeps_the_bridge_only_where_fc_keeps_planks(self):
+        # 끊긴 석교는 아래층 바다 위에, 위층에는 FC 끊긴 다리 모양이 판자·기둥을 남긴 점에만 석교 그림을 둔다
+        with mock.patch("dq4fieldgfx.broken_mask", lambda: SYNTHETIC_BROKEN):
+            pieces = gfx.broken_bridge()
+        bridge = gfx._pixels(gfx.assets()["bridge"], "bridge")
+        for y in range(16):
+            for x in range(16):
+                self.assertEqual(pieces[y][x], bridge[y][x] if SYNTHETIC_BROKEN[y][x] else None, (x, y))
+
+    @unittest.skipUnless(gfx.FC_ROM.is_file(), 'FC 롬 없음')
+    def test_fc_broken_bridge_shape_opens_the_middle(self):
+        # FC 모양 17: 가운데가 물로 뚫리고 양쪽 끝에 판자·기둥이 남는다
+        mask = gfx.broken_mask()
+        self.assertTrue(any(mask[y][0] for y in range(16)) and any(mask[y][15] for y in range(16)))
+        self.assertFalse(all(mask[8][x] for x in range(16)))
 
     def test_only_free_slots_change(self):
         with mock.patch("dq5field.block_tiles", upper_zero):

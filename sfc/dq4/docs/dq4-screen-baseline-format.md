@@ -101,6 +101,7 @@
 | `start-room` | 서장 시작 상태(`dq4ch1walkcheck.prologue_start`) | 열린 명령 창을 B 로 닫음 | 80 |
 | `status` | 같음 | 명령 → 상태 → 상태 보기 | 330 |
 | `shop-list` | 서장 끝 상태(상태 캐시)에서 이무르 방어구점 카운터 앞(`37/00` 34,8)으로 순간이동. 순간이동 동안 인물 걸음 간격 `7E:3300 + 슬롯`(08~1F)을 0 으로 묶어 마을 사람이 목록 첫 자리에 선다(`SHOP_HOLD`) | 위를 보고 말을 걸어 「사기」 | 420 |
+| `bridge-broken`·`bridge-mended` | 3장 걷기 묶음 `bm_castle_gate`·`bm_castle_gate2` 의 끝(본몰 앞 다리 서쪽·동쪽 섬). 도구는 `dq4bridgescreencheck.py`(가드 `dq4-ch3-bridge-screen`) | 오른쪽으로 걸어 막힘 / 서쪽으로 되건넘 | 80 / 94 |
 
 - 서장 시작 상태는 명령 창이 열린 채 남는다. 그래서 `start-room` 은 B 로 닫은 뒤 찍는다.
 - 지금 장면에는 가림이 없다. 장면이 결정적이어서 깜박이는 커서·움직이는 인물도 프레임마다 같다.

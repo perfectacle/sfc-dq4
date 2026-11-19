@@ -16,3 +16,28 @@ paths = [
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && DQ4_CH3_ROM=work/ch3/dq4-ch1-full.sfc uv run --locked python -m unittest discover -s sfc/dq4/tools -p test_dq4ch3bonmalmo.py -k BuiltRomTest 2>&1 | tee work/ch3bonmalmo.log | tail -1 | grep -qx OK"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 groups = ["ch1-build"]
+
+[[check]]
+name = "dq4-ch3-bridge-screen"
+why = "3장 본몰 앞 다리 화면: 고치기 전에는 끊긴 석교(dq4fieldport.BROKEN_BRIDGE: 아래층 물, 위층에 FC 끊긴 다리 모양대로 남긴 석교 조각)로, 고친 뒤에는 석교로 그려지는지 걷기 검사 상태에서 정한 프레임의 화면 칸 해시로 본다(암초로 되돌리면 그 칸 넷이 달라짐)"
+paths = [
+  "@ch3-modules",
+  "sfc/dq4/tools/dq4ch3*.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
+  "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4libretro.py",
+  "sfc/dq4/tools/dq4bridgescreencheck.py",
+  "tools/mesence_settings.py",
+  "sfc/dq4/tools/dq4screens.py",
+  "sfc/dq4/tools/dq4screencheck.py",
+  "sfc/dq4/tools/dq4fieldgfx.py",
+  "sfc/dq4/tools/dq4fieldport.py",
+  "sfc/dq4/tools/dq4environmentart.py",
+  "sfc/dq4/tools/dq4ch3bonmalmo.py",
+  "sfc/dq4/tools/dq4ch3bonmalmo_checks.py",
+  "sfc/dq4/tools/lua/dq4screen.lua",
+  "sfc/dq4/screens.toml",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && rm -rf work/bridgescreen && uv run --locked python sfc/dq4/tools/dq4bridgescreencheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/bridgescreen"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(3장 출발 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]

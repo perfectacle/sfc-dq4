@@ -143,15 +143,15 @@ SCRIPTS = {'fox': (LIST, 2, '10:BEFA'), 'gaade': (LIST, 4, '10:BF14'), 'son': (L
            'guard': (LIST, 9, '10:BF9F')}
 
 # 다리: FC 필드 0 의 블록 16(다리). FC 는 3장에서 $6286 bit4 가 꺼져 있으면 그 블록 정의를 00 17(속성 80, 막힘)로
-# 올린다(08:$808E, fc/dq4/docs/dq4-block-format.md). 이 롬은 그 칸들을 같은 512 갈래의 막힌 블록(암초: 물 위 바위)으로
-# 바꾼다. 10·11번째 비트 평면은 롬이라 바꿀 수 없어, 같은 평면 값(번호 // 512)의 블록끼리만 7F 바이트로 바꿀 수 있다
+# 올린다(08:$808E, fc/dq4/docs/dq4-block-format.md). 이 롬은 그 칸들을 같은 512 갈래의 막힌 블록(끊긴 석교: 아래층 물,
+# 위층에 FC 끊긴 다리 모양대로 남긴 석교 조각, dq4fieldport.BROKEN_BRIDGE)으로 바꾼다. 10·11번째 비트 평면은 롬이라 바꿀 수 없어, 같은 평면 값(번호 // 512)의 블록끼리만 7F 바이트로 바꿀 수 있다
 # 필드를 불러올 때 한 번 움직이는 바다를 만드는 JSL(세계 지도를 푼 뒤, 수문 칸을 쓰는 01:9FDA 앞). 바로 뒤 01:9FD6 은 환경 훅
 # wrap 이 세 자리를 한 대상으로 묶어 지키므로(dq4wrapcheck) 건드리지 않는다
 FIELD_CALL = 0x019FD2
 SEA_FRAMES = 0x01C5C8
 WORLD = 0x7E1949               # 지금 세계(0: FC 필드 0)
 MAP_AT = 0x7F0000              # 세계 지도(256 × 256, 블록 번호 아래 8비트)
-FC_BRIDGE, FC_REEF = 0x16, 0x0A
+FC_BRIDGE = 0x16
 # FC 필드 0 의 블록 16 칸 전부(bridge_cells 와 같은지 test_dq4ch3bonmalmo 가 FC 롬으로 봄). 3장에 닿는 것은 (6F,4F)·(6D,63)
 BRIDGE_CELLS = ((0xC8, 0x48), (0xCF, 0x4A), (0xD8, 0x4A), (0x6F, 0x4F), (0x6D, 0x63), (0xBD, 0x7B), (0x33, 0xB9),
                 (0x25, 0xBA))
@@ -170,7 +170,7 @@ def bridge_cells(dq4=None):
 def bridge_blocks():
     """(다리 블록, 막힌 블록) DQ5 번호."""
     import dq4fieldport
-    bridge, blocked = dq4fieldport.OWN_BLOCKS[FC_BRIDGE], dq4fieldport.OWN_BLOCKS[FC_REEF]
+    bridge, blocked = dq4fieldport.OWN_BLOCKS[FC_BRIDGE], dq4fieldport.OWN_BLOCKS[dq4fieldport.BROKEN_BRIDGE]
     if bridge >> 8 != blocked >> 8:
         raise SystemExit(f'다리 {bridge}·막힌 블록 {blocked}: 9번째 비트 위가 달라 7F 바이트로 바꿀 수 없음')
     return bridge, blocked
