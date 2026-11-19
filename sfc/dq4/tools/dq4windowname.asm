@@ -5097,12 +5097,15 @@ WnShift:
 WnOffset:
     dw 0, 1, 2, 3
 
-; WnText(길이 $00, 방식 0)의 문자열이 빈칸 01 로 시작할 때: 끝까지 빈칸이면 C = 1(빈 자리). 아니면 C = 0, 앞 빈칸 수를
-; !wt_lead 에. 04:C0DD 는 일곱 글자보다 짧은 이름 앞뒤에 빈칸을 넣어 가운데 맞춘다
+; WnText(길이 $00, 방식 0)의 문자열이 빈칸 01 로 시작할 때: 04:C0DD 가 가운데 맞춘 이름이면 C = 0, 앞 빈칸 수 k 를
+; !wt_lead 에. 아니면 C = 1(빈 자리, 원래 가나 길). 04:C0DD 는 탁점(83·84)을 뺀 글자 수 Y 가 7 이상이 될 때까지 앞에 빈칸을
+; 하나 넣고 Y 를 2 늘리므로, 그 결과는 2k + (나머지 글자 수) 가 7 또는 8 이다. 빈 주문 칸(「01 01 79」, 2k + 1 = 5)처럼
+; 빈칸으로 시작하는 다른 문자열을 이름으로 보면 $42·$43 에 남은 앞 이름(「모두 힘내자」 등)이 줄마다 찍힌다
 WtLeadBlanks:
     LDA.l $7E0000|!wt_mode
     AND #$00FF
     BNE .empty16
+    PHY
     SEP #$20
     LDX #$0000
 -
@@ -5118,10 +5121,40 @@ WtLeadBlanks:
     REP #$20
     TXA
     STA.l $7E0000|!wt_lead
+    ASL
+    TAY
+    SEP #$20
+.count
+    TXA
+    CMP.b $00
+    BCS .counted
+    LDA.b $01,X
+    INX
+    CMP #$83
+    BEQ .count
+    CMP #$84
+    BEQ .count
+    INY
+    BRA .count
+.counted
+    REP #$20
+    TYA
+    CMP #$0007
+    BCC .reject
+    CMP #$0009
+    BCS .reject
+    PLY
     CLC
+    RTS
+.reject
+    LDA #$0000
+    STA.l $7E0000|!wt_lead
+    PLY
+    SEC
     RTS
 .empty
     REP #$20
+    PLY
 .empty16
     SEC
     RTS
