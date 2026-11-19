@@ -95,7 +95,7 @@ SEGMENTS = [
     # 다시 말을 걸어 물음이 되풀이되므로(12번째 A 에서 실측) 넘길 만큼만 누른다
     ('opening', 'walk', 'wait:200;' + taps(10, 90) + ';wait:300;' + CLOSE,
      {'maxf': 4000, 'map': ch2.THRONE, 'want': ['CHAPTER2'], 'off': ['OPENING', 'BANK_HERB', 'BANK_GOLD'],
-      'items': [ch2.SILK_ROBE]}),
+      'items': [ch2.SILK_ROBE], 'start': (7, 2)}),
 ]
 HEAD = 3
 

@@ -1,6 +1,7 @@
 """3장 전멸 때 금화(dq4ch3safe 의 20:8162 훅)를 MesenCE 헤드리스로 본다.
 
-검사 롬으로 만든 출발 상태(dq4freshstate)에서 금화 1000, 주인공 HP 1 로 북쪽 동굴 입구 층(3E/03, FC 3D/00)에 순간이동해
+검사 롬으로 만든 출발 상태(dq4freshstate)에서 주인공을 3장 톨네코 FC 시작 기록(ch2 장면은 2장 아리나)으로, 반드시
+쓰러지게 장비 없음·みのまもり 0·HP 1(dq4ch1walkcheck.BARE_HERO), 금화 1000 으로 두고 북쪽 동굴 입구 층(3E/03, FC 3D/00)에 순간이동해
 걸음마다 싸우게(dq4dungeonencountercheck 의 조우율) 두고 전멸시킨 뒤 금화를 본다. 난수는 걷기 검사의 시드 0 으로 묶는다.
 
   keep   3장 flag, 일행 소지품에 철 금고 → 1000(잃지 않음)
@@ -48,8 +49,10 @@ SCENES = {"keep": (f"{CHAPTER3};{SLOT:04X}={IRON_SAFE:02X}", GOLD),
 def run(mesence, rom, state, out, name):
     sets, want = SCENES[name]
     gold = ";".join(f"{0x2019 + k:04X}={GOLD >> 8 * k & 0xFF:02X}" for k in range(3))
+    # 3장 장면은 톨네코 FC 시작 기록, 「다른 장」 장면은 2장 아리나로 돈다. 반드시 쓰러지게 장비 없음·수비 0·HP 1
+    hero = wc.record_set(wc.chapter_hero(rom.read_bytes(), 2 if name == "ch2" else 3))
     got = dq4groupcheck.scene(mesence, rom, state, out, name, TO=TO, MAXF="6000", TEST=dq4wellresetcheck.WIPE_TEST,
-                              SET=f"{wc.RNG};2042=01;2043=00;{gold};{sets}", POKE=wc.rng_hold(0),
+                              SET=f"{wc.RNG};{hero};{wc.BARE_HERO};{gold};{sets}", POKE=wc.rng_hold(0),
                               ROMPATCH=dq4dungeonencountercheck.rates(rom.read_bytes()), TRACE="0188ED")
     final = out / name / "final.wram"
     if not final.exists():

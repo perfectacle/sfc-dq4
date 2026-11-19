@@ -2,7 +2,8 @@
 of dq4fieldtravel (MesenCE headless from a start state built from the ROM under test, dq4freshstate; continuing on
 the libretro cores of dq4savefixture).
 
-  wipe-*     stand on the field by テンペ with the hero's HP at 1, the saved slot 7E:2033 set, and every step
+  wipe-*     stand on the field by テンペ as chapter 2's Alena, bare with HP 1 (dq4ch1walkcheck.BARE_HERO), the
+             saved slot 7E:2033 set, and every step
              fighting (the field check's rates): the party stands again at that slot's church of the start table
              (FC and NDS go back to the church saved last, not to the last town entered). An unsaved record (16)
              goes to バトランド's church, FC chapter 1's start
@@ -30,6 +31,7 @@ for path in (TOOLS, FC_TOOLS):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import dq4ch1walkcheck  # noqa: E402
 import dq4ch2event  # noqa: E402
 import dq4fieldencountercheck  # noqa: E402
 import dq4fieldtravel  # noqa: E402
@@ -43,8 +45,7 @@ RNG = "075B=00;075C=00;075D=00"
 PARTY, RECORD, PARTY_COUNTS = 0x2040, 42, (0x201D, 0x201E, 0x201F)
 PLACE = dq4fieldtravel.PLACE_SAVED & 0xFFFF
 CHAPTER2 = f"{0x2190 + dq4ch2event.CHAPTER2[0]:04X}|{dq4ch2event.CHAPTER2[1]:02X}"
-HERO_HP_1 = "2042=01;2043=00"
-# Walk till the fight, then let it go on: the party of one with HP 1 falls in the first round.
+# Walk till the fight, then let it go on: the party of one, bare with HP 1, falls to the first hit.
 WIPE_TEST = ",".join(["left:24,right:24"] * 4 + ["a:4,wait:40"] * 90)
 # The report flags of chapter 1's end at 36/00 (dq4-chapter2-format 「검증」): A every 90 frames through the end text,
 # the chapter box and the opening.
@@ -88,11 +89,14 @@ def main():
     wipes = {"wipe-tempe": slot(0x0E), "wipe-frenol": slot(0x0F), "wipe-saran": slot(0x13), "wipe-santeem": slot(0x01),
              "wipe-imuru": slot(0x12), "wipe-unsaved": dq4fieldtravel.UNSAVED}
 
+    # 2장 장면이라 주인공은 아리나 기록, 반드시 쓰러지게 장비 없음·수비 0·HP 1(dq4ch1walkcheck.BARE_HERO)
+    hero = f"{dq4ch1walkcheck.record_set(dq4ch1walkcheck.chapter_hero(data, 2))};{dq4ch1walkcheck.BARE_HERO}"
+
     def run_wipe(name):
         k = wipes[name]
         want = church(slot(dq4fieldtravel.FIRST_CHURCH_FC) if k >= dq4fieldtravel.UNSAVED else k)
         got = dq4groupcheck.scene(mesence, rom, state, out, name, FIELD="{},{}".format(*field), TEST=WIPE_TEST,
-                                  MAXF="6000", SET=f"{RNG};{CHAPTER2};{HERO_HP_1};{PLACE:04X}={k:02X}", LATESET=RNG,
+                                  MAXF="6000", SET=f"{RNG};{CHAPTER2};{hero};{PLACE:04X}={k:02X}", LATESET=RNG,
                                   POKE=dq4pins.RNG_HOLD, ROMPATCH=dq4fieldport_warp(data, field) + ";" + dq4fieldencountercheck.RATES)
         return name, {"saved": f"{k:02X}", "got": got, "want": want, "ok": dq4groupcheck.same_place(got, want)}
 

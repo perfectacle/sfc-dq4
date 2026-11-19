@@ -198,8 +198,9 @@ def wipe_scene(mesence, rom, states, out):
     name = 'wipe'
     dq4groupcheck.WARP = DQ5_TOOLS / 'lua' / 'dq5warptrace.lua'
     gold = f'2019={GOLD & 0xFF:02X};201A={GOLD >> 8:02X};201B=00'
-    # 일행 레코드는 7E:2040 부터 42바이트씩, 지금 HP 는 +2
-    hp = ';'.join(f'{0x2042 + 42 * n:04X}=01;{0x2043 + 42 * n:04X}=00' for n in range(2))
+    # 일행 레코드는 7E:2040 부터 42바이트씩, 지금 HP 는 +2. 반드시 쓰러지게 라이안은 장비 없음·みのまもり 0(walk.BARE_HERO):
+    # 수비력이 남으면 호이민의 ホイミ 가 따라와 쓰러지지 않는다
+    hp = ';'.join(f'{0x2042 + 42 * n:04X}=01;{0x2043 + 42 * n:04X}=00' for n in range(2)) + ';' + walk.BARE_HERO
     got = dq4groupcheck.scene(mesence, rom, states / 'hoimin' / 'end.mss', out, name, TO=WIPE_TO, MAXF='6000',
                               TEST=well.WIPE_TEST, SET=f'{gold};{hp};{WELL:04X}|{dq4wellswitch.FLAG[1]:02X}', ROMPATCH=enc.rates(rom.read_bytes()), TRACE='0188EF', POKE=WIPE_RNG,
                               LOG='7E201D')

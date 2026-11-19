@@ -387,6 +387,10 @@ def main():
                       'first_odds': {f'{k}': n for k, n in dq4fieldencounter.fc_pick_odds(first).items()},
                       'problems': problems, 'ok': not problems}
 
+    # 떨어뜨림 장면은 3장 톨네코 FC 시작 기록으로 돈다. 뜻은 「이길 때마다 표를 굴린다」 라, 레벨을 올려 둔 채 레벨업 글이
+    # 고정 입력(FIGHT)을 밀어내지 않게 다음 레벨 경험치(+26~+28)를 끝까지 둔다
+    drop_hero = f"{wc.record_set(wc.chapter_hero(data, 3))};2066=FF;2067=FF;2068=FF"
+
     def drop_scene(name, level, sure=False, off=False):
         field = stand(0x14)
         patch = ';'.join((dq4fieldport.warp_patch(data, *field), dq4battlecheck.force_patch([(DROP_MONSTER, 1)]),
@@ -396,7 +400,7 @@ def main():
         pc = [f"{labels[k]:06X}" for k in ('drop', 'start', 'rolled', 'hit', 'none')] + [GIVE]
         got = dq4groupcheck.scene(mesence, rom, state, out, name, FIELD='{},{}'.format(*field), ROMPATCH=patch,
                                   TEST=DROP_WALK, MAXF='12000', TRACE=','.join(pc), LOG='7E2052',
-                                  SET=f'2052={level:02X}' + ('' if off else f';{ch3_set}'),
+                                  SET=f'{drop_hero};2052={level:02X}' + ('' if off else f';{ch3_set}'),
                                   POKE=f"{wc.HERO_HP} {CLOCK['day']}")
         trace = list(fec.lines(out / name / 'trace.txt')) if (out / name / 'trace.txt').exists() else []
         rolls = drop_rolls(trace, labels)

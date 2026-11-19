@@ -80,7 +80,10 @@ SHOPS.update({
 X, Y = 0x7E3020, 0x7E3080
 FACE = (8, 24)         # 카운터 쪽을 누르는 프레임(돌아서려면 6프레임 넘게, 한 걸음보다 짧게), 걸음이 끝나기를 기다리는 프레임
 FACE_TRIES = 2         # 카운터 쪽을 짧게 누르는 최대 횟수
-BASE_ITEMS = (0x42, 0x00)   # 새 게임 밑판: 천 옷·노송나무 막대, 둘 다 장비(비트 0003)
+# 장면이 가방을 직접 쓸 때(sets 의 items) 앞 두 칸에 두는 바탕: 천 옷·노송나무 막대, 둘 다 장비(비트 0003). 가방을 쓰지 않는
+# 장면은 1장 시작 가방(START_ITEMS: FC 1장 시작 표의 どうのつるぎ·かわのよろい, dq4ch1walkcheck.start_want)을 물려받는다
+BASE_ITEMS = (0x42, 0x00)
+START_ITEMS = (0x06, 0x48)
 HERB, ANTIDOTE, CHAIN_MAIL, WOOD_HAT = 0xA1, 0xA2, 0x4D, 0x87
 STEEL_SWORD, LEATHER_SHIELD, MOON_HERB = 0x0C, 0x75, 0xA7
 # 텐페의 괴물을 이긴 flag(dq4ch2tempe.WON). 그 뒤의 목록에만 도구점 판매자가 선다(dq4shopport.EVENT_LISTS)
@@ -90,6 +93,19 @@ def _tempe_won():
 
 
 TEMPE_WON = _tempe_won()
+
+
+def _alena():
+    """2장 가게 장면의 주인공: 아리나 기록(dq4ch1walkcheck.chapter_hero, 원래 DQ5 롬 틀 위). 롬이 없으면 빈 글(장면 표만 읽을 때)."""
+    import dq4ch1walkcheck as wc
+    dq5 = Path(__file__).resolve().parents[3] / 'rom' / 'dq5.sfc'
+    return wc.record_set(wc.chapter_hero(dq5.read_bytes(), 2)) if dq5.exists() else ''
+
+
+# 2장 가게 장면은 2장 flag 와 아리나 혼자로 돈다. 2장 장비 판정은 FC 장비 표(dq4party)라 아리나는 산 무기·방패·
+# 앞치마를 장비하지 못한다(FC 12:$8C9C, 실측 표: はがねのつるぎ·かわのたて 모두 아리나 불가)
+CH2 = (('flag', 'CHAPTER2'), ('poke', _alena()))
+ALENA_ITEMS = (0x62,)        # きぬのローブ, 장비(비트 0001)
 # 엔돌 가게의 DQ5 에 없는 물건이 빌린 자리(dq4itemport.BORROWED)
 ABACUS, APRON = 0x34, 0x4E
 
@@ -217,35 +233,34 @@ SCENES = [
           BUY + (pick(ITEM, WOOD_HAT), to('a', W_YESNO), to('a', 0x00), to('a', W_YESNO), to('a', W_SHOP)),
           gold=880, items=BASE_ITEMS + (WOOD_HAT,), equip=0x0007,
           windows=(W_COMMAND, W_SHOP, W_PARTNER, W_YESNO, W_YESNO, W_SHOP)),
-    # 2장 가게: 가게마다 한 가지를 사서 목록에 FC 품목이 있고 FC 값으로 살 수 있는지 본다(장비는 바로 장비함)
-    Scene('saran-weapon', '사란 무기점에서 강철 검(2000G)', 'saran-weapon', (('gold', '5000'),),
+    # 2장 가게: 가게마다 한 가지를 사서 목록에 FC 품목이 있고 FC 값으로 살 수 있는지 본다(2장 flag·아리나 혼자)
+    Scene('saran-weapon', '사란 무기점에서 강철 검(2000G)', 'saran-weapon', (('gold', '5000'),) + CH2,
           BUY + (pick(ITEM, STEEL_SWORD), to('a', W_YESNO), to('a', 0x00), to('a', W_YESNO), to('a', W_SHOP)),
-          # 산 칼을 장비하면 칸 1 로 들어가고 노송나무 막대가 뒤로 밀린다(천 옷·강철 검 장비)
-          gold=3000, items=(0x42, STEEL_SWORD, 0x00), equip=0x0003,
+          gold=3000, items=ALENA_ITEMS + (STEEL_SWORD,), equip=0x0001,
           windows=(W_COMMAND, W_SHOP, W_PARTNER, W_YESNO, W_YESNO, W_SHOP)),
-    Scene('saran-armor', '사란 방어구점에서 가죽 방패(90G)', 'saran-armor', (('gold', '5000'),),
+    Scene('saran-armor', '사란 방어구점에서 가죽 방패(90G)', 'saran-armor', (('gold', '5000'),) + CH2,
           BUY + (pick(ITEM, LEATHER_SHIELD), to('a', W_YESNO), to('a', 0x00), to('a', W_YESNO), to('a', W_SHOP)),
-          gold=4910, items=BASE_ITEMS + (LEATHER_SHIELD,), equip=0x0007,
+          gold=4910, items=ALENA_ITEMS + (LEATHER_SHIELD,), equip=0x0001,
           windows=(W_COMMAND, W_SHOP, W_PARTNER, W_YESNO, W_YESNO, W_SHOP)),
-    Scene('bazaar-item', '사막의 바자 도구점에서 약초(8G)', 'bazaar-item', (('gold', '5000'),),
+    Scene('bazaar-item', '사막의 바자 도구점에서 약초(8G)', 'bazaar-item', (('gold', '5000'),) + CH2,
           BUY + (pick(ITEM, HERB), to('a', W_QTY), to('a', W_YESNO), to('a', W_SHOP)),
-          gold=4992, items=BASE_ITEMS + (HERB,), equip=0x0003, wram={QTY_MAX: 0},
+          gold=4992, items=ALENA_ITEMS + (HERB,), equip=0x0001, wram={QTY_MAX: 0},
           windows=(W_COMMAND, W_SHOP, W_PARTNER, W_QTY, W_YESNO, W_SHOP)),
-    Scene('frenor-item', '프레놀 도구점에서 만월초(30G)', 'frenor-item', (('gold', '5000'),),
+    Scene('frenor-item', '프레놀 도구점에서 만월초(30G)', 'frenor-item', (('gold', '5000'),) + CH2,
           BUY + (pick(ITEM, MOON_HERB), to('a', W_QTY), to('a', W_YESNO), to('a', W_SHOP)),
-          gold=4970, items=BASE_ITEMS + (MOON_HERB,), equip=0x0003, wram={QTY_MAX: 0},
+          gold=4970, items=ALENA_ITEMS + (MOON_HERB,), equip=0x0001, wram={QTY_MAX: 0},
           windows=(W_COMMAND, W_SHOP, W_PARTNER, W_QTY, W_YESNO, W_SHOP)),
-    Scene('endor-weapon', '엔돌 무기점에서 정의의 주판(빌린 자리, 1600G)', 'endor-weapon', (('gold', '5000'),),
+    Scene('endor-weapon', '엔돌 무기점에서 정의의 주판(빌린 자리, 1600G)', 'endor-weapon', (('gold', '5000'),) + CH2,
           BUY + (pick(ITEM, ABACUS), to('a', W_YESNO), to('a', 0x00), to('a', W_YESNO), to('a', W_SHOP)),
-          gold=3400, items=BASE_ITEMS + (ABACUS,), equip=0x0003,
+          gold=3400, items=ALENA_ITEMS + (ABACUS,), equip=0x0001,
           windows=(W_COMMAND, W_SHOP, W_PARTNER, W_YESNO, W_YESNO, W_SHOP)),
-    Scene('endor-armor', '엔돌 방어구점에서 철의 앞치마(빌린 자리, 1500G)', 'endor-armor', (('gold', '5000'),),
+    Scene('endor-armor', '엔돌 방어구점에서 철의 앞치마(빌린 자리, 1500G)', 'endor-armor', (('gold', '5000'),) + CH2,
           BUY + (pick(ITEM, APRON), to('a', W_YESNO), to('a', 0x00), to('a', W_YESNO), to('a', W_SHOP)),
-          gold=3500, items=BASE_ITEMS + (APRON,), equip=0x0003,
+          gold=3500, items=ALENA_ITEMS + (APRON,), equip=0x0001,
           windows=(W_COMMAND, W_SHOP, W_PARTNER, W_YESNO, W_YESNO, W_SHOP)),
-    Scene('tempe-item', '괴물을 이긴 뒤의 텐페 도구점에서 약초(8G)', 'tempe-item', (('gold', '5000'), ('poke', TEMPE_WON)),
+    Scene('tempe-item', '괴물을 이긴 뒤의 텐페 도구점에서 약초(8G)', 'tempe-item', (('gold', '5000'), ('poke', TEMPE_WON)) + CH2,
           BUY + (pick(ITEM, HERB), to('a', W_QTY), to('a', W_YESNO), to('a', W_SHOP)),
-          gold=4992, items=BASE_ITEMS + (HERB,), equip=0x0003, wram={QTY_MAX: 0},
+          gold=4992, items=ALENA_ITEMS + (HERB,), equip=0x0001, wram={QTY_MAX: 0},
           windows=(W_COMMAND, W_SHOP, W_PARTNER, W_QTY, W_YESNO, W_SHOP)),
     Scene('armor-cannot-equip', '$0F21 = 3 을 남긴 채 장비할 수 없는 체인 메일 사기: 한 벌만(350G)', 'armor',
           (('gold', '1000'),),
@@ -254,6 +269,9 @@ SCENES = [
           gold=650, items=BASE_ITEMS + (CHAIN_MAIL,), equip=0x0003,
           windows=(W_COMMAND, W_SHOP, W_PARTNER, W_YESNO, W_YESNO, W_SHOP)),
 ]
+for _scene in SCENES:
+    if not any(k in ('items', 'poke') for k, _ in _scene.sets):
+        _scene.items = START_ITEMS + _scene.items[len(BASE_ITEMS):]
 
 
 class Fail(Exception):

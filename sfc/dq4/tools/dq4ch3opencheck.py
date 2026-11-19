@@ -75,7 +75,7 @@ def segments(start):
     out = list(cw.SEGMENTS[:names.index(LAST) + 1])
     out.append(('ch3_open', 'walk', OPEN_INPUT,
                 {'changes': 1, 'after': 3200, 'maxf': 6000, 'map': ch3.HOUSE, 'cell': ch3.START_CELL,
-                 'want': ['CHAPTER3'], 'off': ['CHAPTER2', 'OPENING3'],
+                 'want': ['CHAPTER3'], 'off': ['CHAPTER2', 'OPENING3'], 'start': (5, 3),
                  'bytes': {'COUNT': 1, 'GOLD0': 0, 'GOLD1': 0, 'GOLD2': 0, 'HP0': start['hp'],
                            'STR0': start['stats'][0], 'VIT0': start['stats'][1],
                            'NAME0': ch2.name_bytes(ch3.TORNEKO_NAME)[0], 'STASH_HP': ch2.ALENA_STATS['hp'],
