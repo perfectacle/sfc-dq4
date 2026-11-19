@@ -41,6 +41,8 @@ QTY_OPEN, QTY_SELL = 0x40, 0x80
 GOLD = 0x7E2019        # 3바이트
 EQUIP = 0x7E2054       # 주인공 장비 비트(bit n = 물건 칸 n)
 ITEMS = 0x7E2056       # 주인공 물건 12칸, 빈 칸 FF
+# 창 타일맵 버퍼(7E:5000, 32열)에서 동료 창 3A 첫 줄 주인공 상태의 끝 칸(줄 18 열 15)의 타일 번호 낮은 바이트
+PARTNER_TAIL = 0x7E5000 + (18 * 32 + 15) * 2
 
 W_COMMAND, W_SHOP, W_LIST, W_PARTNER, W_SELL, W_QTY, W_YESNO = 0x01, 0x33, 0x39, 0x3A, 0x37, 0x5C, 0x32
 # 버튼을 누르며 지나가도 되는 창: 메시지 창(00)·상태 창(02)·목록을 둔 채 뜬 메시지(35)·가게 첫 창(34)·
@@ -204,6 +206,13 @@ SCENES = [
           SELL + (to('b', W_SHOP),),
           gold=20, items=BASE_ITEMS + (HERB,), equip=0x0003,
           windows=(W_COMMAND, W_SHOP, W_SELL, W_SHOP)),
+    # 체인 메일을 장비한 채 방어구점 목록 첫 줄(체인 메일)에 서면 주인공 상태가 「장비 중」 꼴(E 와 수비력)이 된다.
+    # 그 꼴은 여덟 글자만 쓰므로 상태 끝 칸(아홉째 글자)이 빈칸이어야 한다(앞서 쓴 바이트가 남아 「ㅡ」 로 보였음)
+    Scene('armor-equipped-tail', '장비한 체인 메일을 목록에서 볼 때 동료 창의 상태 끝 칸이 빈칸', 'armor',
+          (('gold', '1000'), ('items', f'{CHAIN_MAIL:02X},00'), ('poke', '2054=03')),
+          BUY + (see(PARTNER_TAIL, 0x01), to('b', W_SHOP)),
+          gold=1000, items=(CHAIN_MAIL, 0x00), equip=0x0003,
+          windows=(W_COMMAND, W_SHOP, W_PARTNER, W_SHOP)),
     Scene('armor-equip', '나무 모자를 사고 바로 장비(120G)', 'armor', (('gold', '1000'),),
           BUY + (pick(ITEM, WOOD_HAT), to('a', W_YESNO), to('a', 0x00), to('a', W_YESNO), to('a', W_SHOP)),
           gold=880, items=BASE_ITEMS + (WOOD_HAT,), equip=0x0007,

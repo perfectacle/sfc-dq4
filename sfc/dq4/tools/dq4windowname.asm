@@ -1717,6 +1717,10 @@ WnMonster:
     LDA.l $7E0A00
     CMP #!shop_members
     BNE ++
+    ; 「장비 중」 꼴(04:C381 → 04:C3A4)은 $01~$08 여덟 글자만 쓰는데 04:B6A3 → 04:BC08 이 아홉 글자를 찍어, $09 에
+    ; 앞서 쓴 바이트가 상태 끝 칸에 조각으로 남는다. 이 창의 상태 끝 칸(아홉째 글자)은 늘 빈칸이다
+    LDA #$01
+    STA.b $09
     LDA #!shop_state_cells
     BRA +
 ++

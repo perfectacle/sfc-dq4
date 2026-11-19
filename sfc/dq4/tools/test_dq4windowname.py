@@ -677,3 +677,14 @@ class LeadBlankNameTest(unittest.TestCase):
         self.assertIn('CMP #$83\n    BEQ .count\n    CMP #$84\n    BEQ .count', body)
         self.assertIn('CMP #$0007\n    BCC .reject\n    CMP #$0009\n    BCS .reject', body)
         self.assertIn('PHY', body)
+
+
+class ShopEquippedTailTest(unittest.TestCase):
+    """가게 동료 창(3A)의 「장비 중」 꼴은 여덟 글자만 쓰므로, WnMonster 가 아홉째 글자($09)를 빈칸으로 둔다."""
+
+    def test_ninth_char_is_blank_in_shop_members(self):
+        asm = ASM.read_text(encoding='utf-8')
+        body = asm[asm.index('\nWnMonster:'):asm.index('\nWnText:')]
+        self.assertIn('CMP #!shop_members\n    BNE ++', body)
+        branch = body[body.index('BNE ++'):body.index('LDA #!shop_state_cells')]
+        self.assertIn('LDA #$01\n    STA.b $09', branch)
