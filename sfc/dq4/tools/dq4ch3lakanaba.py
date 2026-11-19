@@ -69,6 +69,13 @@ TEMP = 0x7E21A4
 FOXED = (0x73, 0x01)           # 본몰 모듈(dq4ch3slots B)의 여우를 쫓음(FC $6280&02). 조건으로만 본다
 SON_FREED = (0x73, 0x04)       # 본몰 모듈의 감옥의 톰 아들을 풀어 줌(FC $6280&04). 레이크나바의 아들이 이때부터 선다
 PACE = 0x7E21A2                # 다음 손님까지 남은 차례(맵을 옮기면 0)
+# 손님 드나듦(FC 16/00 슬롯 11, 헤드리스 실측): 문 안 (06,1A)에 나타나 약 14프레임 서 있다가 FC 한 칸 16프레임으로 두 칸
+# 걸어 (04,1A), 말이 끝나면 같은 걸음으로 (06,1A)에 돌아가 약 16프레임 뒤 숨고, 숨은 뒤 다시 나타날 때까지 26 + 16k
+# 프레임(k = rand & 7 + 2, 이벤트 20 의 되풀이). 이 엔진에서 쉼 한 차례는 약 8프레임에 앞뒤 9프레임이 붙어(실측: 20차례
+# 169프레임) 차례 수 2 × rand(8) + 6 이 같은 길이다. 속도 01 은 SFC 칸(FC 반 칸) 8프레임, 서 있기는 명령 하나 8프레임
+PACE_BASE, PACE_SPREAD = 6, 8
+CUSTOMER_SPEED = 0x01
+DOOR_TURNS = 2
 ANSWERED = ch2.ANSWERED        # 7E:21A3 bit0 대화가 끝남(맵을 옮기면 지워짐)
 
 # 변수 칸(dq4ch3slots L: +4~+9)
@@ -167,6 +174,8 @@ NENE_LAST = 0x7E21A2           # 집 맵에서만: bit7 이면 bit0-1 이 네네
 # 한다(걸음 자체는 검사 nene_walk 가 본다). 자리만 되돌리면 말 상대 판정이 따라오지 않았다(실측)
 NENE_SLOT = 0x0B
 NENE_HOLD = f'7E{0x3300 + NENE_SLOT:04X}=00'
+# 손님 쉼(PACE)을 0 이 되지 않게 묶는 POKE. 첫 출근만 보는 검사에서 손님이 오지 않게 한다(쉼은 마을 맵에서만 셈)
+CUSTOMER_HOLD = f'7E{PACE & 0xFFFF:04X}=FF'
 NENE_INTERVAL = 1             # 한 차례의 때는 FRAME 으로 잡으므로(nene_walk) 명령 사이 기다림은 가장 짧게(0 은 멈춤)
 # FC 16/01 낮 목록의 둘째 네네(슬롯 07, 돌아다님). FC 는 첫머리 뒤 이쪽만 두지만, 첫머리 자리 (1B,04) 의 네네를 남기고 이쪽을
 # 뺀다(한 사람만 서게, 말 거는 자리가 검사·첫머리 인물과 같게)
@@ -462,10 +471,10 @@ def _someone_at(c):
 
 
 def _pace():
-    """인물 명령 05: 손님 사이의 쉼. 처음 부르면 50 + rand(38) 차례(이동 간격 1 의 8프레임씩, FC 실측 400~700프레임)를
-    잡고 1, 그 뒤 하나씩 줄여 0 이 되면 0."""
+    """인물 명령 05: 손님 사이의 쉼. 처음 부르면 PACE_BASE + 2 × rand(PACE_SPREAD) 차례(한 차례 약 8프레임)를 잡고 1,
+    그 뒤 하나씩 줄여 0 이 되면 0."""
     a = Asm()(ENTER, lda(PACE)).br(BNE, 'count')
-    a(_rand(38), 0x18, 0x69, 50, sta(PACE)).br(BRA, 'wait')
+    a(_rand(PACE_SPREAD), 0x0A, 0x18, 0x69, PACE_BASE, sta(PACE)).br(BRA, 'wait')
     a.label('count')(0x3A, sta(PACE)).br(BEQ, 'go')
     a.label('wait')(POLL_END[1]).label('go')(POLL_END[0])
     return a.bytes()
@@ -904,22 +913,22 @@ def scripts(ctx):
     # 빌린 인물의 속도가 0 이라 걷기(13)가 끝나지 않았다(실측). 한 칸 4프레임으로. 숨기는 것은 DQ5 의 걷는 인물처럼 맵
     # 구석으로 순간이동(2B)해서 한다: 52(사라진 뒤 치우기)·53(나타나기) 뒤에는 걷기가 도착하지 않았다(실측)
     customer = [
-        _cmd('1E', WALK_SPEED), _cmd('2B', *PARK),
+        _cmd('1E', CUSTOMER_SPEED), _cmd('2B', *PARK),
         # 기다림은 09 로: 06 으로 같은 자리로 되뛰면 두 명령이 한 프레임 안에서 끝없이 돌아(출근 중 일찍 그만둔 뒤 낮
         # 마을이 멈췄다, 실측) 차례를 넘기지 않는다
         _wait_on(SHIFT) | {"label": "wait"}, _cmd('09', DONE[0], DONE[1]), poll(at['pace']),
         _if_off(SHIFT, 'wait'), _if_on(DONE, 'wait'),
-        # FC 손님(16/00 슬롯 11, 05:$A87D)처럼 주인공이 카운터 안에 없어도 문 칸 (12,53)에 나타나 카운터 앞 (8,53)으로 걸어와
+        # FC 손님(16/00 슬롯 11, 05:$A87D)처럼 주인공이 카운터 안에 없어도 문 안 칸 (12,53)(FC (06,1A))에 나타나 카운터 앞 (8,53)으로 걸어와
         # 기다리고, 주인공이 카운터 안에 서면 말을 건다. 주인공을 지나가지 않아(1C 없음) 길에 서 있으면 FC 처럼 막혀 서 있다.
         # 문 칸에 주인공이 서 있으면 나타나지 않는다
         call(at['look']), poll(at['door_free']),
-        _cmd('2B', out_x, out_y), _cmd('13', *COUNTER_OUT), _cmd('14'), _cmd('2F', 0x22),
+        _cmd('2B', out_x, out_y), *[_cmd('2F', 0x22)] * DOOR_TURNS, _cmd('13', *COUNTER_OUT), _cmd('14'), _cmd('2F', 0x22),
         poll(at['at_counter']), _cmd('3F'), call(at['arrive']),
         _and_off(ANSWERED) | {"label": "talk"}, _and_off(AGAIN), call(at['set_talk']), call(talk_here),
         _wait_on(ANSWERED), _if_on(AGAIN, 'talk'),
         _if_on(CLOSE, 'close'), _cmd('40'),
-        # 말이 끝나면 조작을 풀고 문 칸으로 걸어 나가 사라진다(FC 는 문 칸에 숨은 채 남지만 맵 구석으로)
-        _cmd('13', out_x, out_y), _cmd('14'), _cmd('2B', *PARK), _cmd('03', target='wait'),
+        # 말이 끝나면 조작을 풀고 나타난 칸으로 걸어 나가 잠깐 선 뒤 사라진다(FC 는 그 칸에 숨은 채 남지만 맵 구석으로)
+        _cmd('13', out_x, out_y), _cmd('14'), *[_cmd('2F', 0x88)] * DOOR_TURNS, _cmd('2B', *PARK), _cmd('03', target='wait'),
         # 가게를 닫는 것은 주인 스크립트가 맡는다(조작은 막힌 채)
         _cmd('2B', *PARK, label='close'), _cmd('16')]
     first = [_if_on(SEEN, 'hide'), _cmd('1E', WALK_SPEED), _cmd('1C'), poll(at['first_trigger']), _cmd('3F'), msg('late'),

@@ -289,7 +289,59 @@ def real_looks(mesence, rom, state, out, frames):
                         capture_output=True, timeout=1200)
     log = out / 'looks.txt'
     pics = [int(line.split()[2], 16) for line in log.read_text().splitlines()] if log.exists() else []
-    return looks_real_problems(pics)
+    ev = out / 'events.txt'
+    cells = [tuple(map(int, line.split())) for line in ev.read_text().splitlines()] if ev.exists() else []
+    return looks_real_problems(pics) + walk_problems(cells)
+
+
+# FC 손님 드나듦(dq4ch3lakanaba 의 실측 주석): 나타난 뒤 서 있기, SFC 칸(FC 반 칸)당 걸음, 돌아간 뒤 사라지기까지,
+# 숨어 있는 동안(57 + 16r). 프레임은 ±SLACK 까지 받는다(쉼 한 차례가 8프레임 안팎이라 앞뒤가 한두 프레임 흔들림)
+STAND_FRAMES, CELL_FRAMES, BACK_FRAMES, SLACK = 16, 8, 17, 2
+HIDDEN = (57, 169, 16)
+
+
+def walk_timings(cells):
+    """events.txt [(프레임, X, Y)] → 손님마다 {stand, cells, back, hidden}. 맵 구석에서 문 안 칸으로 나타나 카운터 앞까지
+    걷고 돌아가 사라지는 한 바퀴씩. 끝에 걸린 바퀴는 뺀다."""
+    door, row = L.CUSTOMER_IN
+    out, cur, hidden_at = [], None, None
+    for k, (n, x, y) in enumerate(cells):
+        if (x, y) == (door, row) and k and cells[k - 1][2] != row:
+            cur = {'appear': n, 'steps': [], 'hidden': None if hidden_at is None else n - hidden_at}
+        elif cur is not None and y == row and k and cells[k - 1][2] == row:
+            cur['steps'].append((n, x))
+        elif cur is not None and y != row:
+            steps = cur['steps']
+            back = [n2 for n2, x2 in steps if x2 == door]
+            if steps and back:
+                out.append({'stand': steps[0][0] - cur['appear'],
+                            'cells': [b[0] - a[0] for a, b in zip(steps, steps[1:]) if abs(b[1] - a[1]) == 1
+                                      and a[1] != L.COUNTER_OUT[0] and b[1] != door],
+                            'back': n - back[-1], 'hidden': cur['hidden']})
+            cur, hidden_at = None, n
+    return out
+
+
+def walk_problems(cells):
+    """손님 드나듦 프레임이 FC 실측과 어긋난 것."""
+    trips = walk_timings(cells)
+    if len(trips) < 5:
+        return [f'드나든 손님이 {len(trips)}명뿐']
+    out = []
+    near = lambda v, want: abs(v - want) <= SLACK  # noqa: E731
+    lo, hi, step = HIDDEN
+    for i, t in enumerate(trips):
+        if not near(t['stand'], STAND_FRAMES):
+            out.append(f'{i + 1}번째 손님: 나타나 {t["stand"]}프레임 서 있음(FC {STAND_FRAMES})')
+        bad = [c for c in t['cells'] if not near(c, CELL_FRAMES)]
+        if bad:
+            out.append(f'{i + 1}번째 손님: 칸당 {bad}프레임(FC 반 칸 {CELL_FRAMES})')
+        if not near(t['back'], BACK_FRAMES):
+            out.append(f'{i + 1}번째 손님: 돌아가 {t["back"]}프레임 뒤 사라짐(FC {BACK_FRAMES})')
+        h = t['hidden']
+        if h is not None and not (lo - SLACK <= h <= hi + SLACK and near((h - lo + SLACK) % step, SLACK)):
+            out.append(f'{i + 1}번째 손님: {h}프레임 숨어 있음(FC {lo} + {step}r, 최대 {hi})')
+    return out
 
 
 def looks_real_problems(pics):
