@@ -17,12 +17,9 @@ EQUIP = ('3장 장비 화면 「무기」 창 (2,18)-(12,29) 의 줄 글자 칸�
 GIVE = '도구 → 건네기 때 「누구에게」 창 (17,10)-(25,18) 위 변을 글자 칸이 덮음(창 검사 give-full·give-shop 의 바뀜·비침과 같은 때)'
 STATUS1 = '1인 상태 창 (19,22)-(27,28) 위 변 이름 자리에 이름 대신 조각 글자가 보임'
 SAVE = '모험의 서 고르기 창 (8,5)-(11,29) 에서 장소 이름(바트랜드) 끝 글자 칸이 오른쪽 테두리를 덮음'
-SWAMP = '늪 장면에서 메시지 창이 열리는 동안 주문 창 (4,15)-(20,24) 아랫부분이 지워져 보임'
-SWAMP_CELLS = tuple(((r, c), 3) for r in (17, 18, 19) for c in (15, 24)) + tuple(((20, c), 3) for c in range(15, 25))
 # 1장 세이브 검사(dq4ch1savecheck)와 그 호환 장면(dq4compatscenes save-high)은 같은 세이브 장면을 돈다
 SAVES = tuple((f'*/{run}/{name}', SAVE, (((9, 29), 137),)) for run in ('ch1save', 'save-high')
               for name in ('boss', 'hoimin', 'night', 'prologue', 'report'))
-SAVES += tuple((f'*/{run}/swamp-hoimin', SWAMP, SWAMP_CELLS) for run in ('ch1save', 'save-high'))
 KNOWN = tuple(ww.Known(scene, frozenset({cell}), frames, why) for scene, why, cells in (
     ('*/equip-ch3', EQUIP, (((4, 3), 7), ((4, 29), 7), ((5, 29), 334))),
     ('*/give-full', GIVE, (((17, 17), 12),)),
