@@ -486,9 +486,18 @@ def read_screen(screen, rom_table):
     return {w: read_window(screen, w, rom_table) for w in screen.rects}
 
 
+# 단위 시험의 가짜 롬은 이보다 작다. 실제 SFC 롬(원본 DQ5 3MB, 빌드 롬 4MB)은 이보다 크다
+FAKE_ROM = 0x100000
+
+
 def comparable(rom):
-    """원본 DQ5 보다 짧은 롬(단위 시험의 가짜 롬)에는 맞대 볼 롬 글자가 없다."""
-    return not DQ5_ROM.is_file() or len(rom) >= DQ5_ROM.stat().st_size
+    """맞대 볼 롬 글자가 있는 롬인가. 가짜 롬(FAKE_ROM 미만)이면 False. 그보다 크면서 원본 DQ5 보다 짧은 롬은 빌드가
+    잘못된 것이라, 글자 규칙이 통째로 안 도는 채 통과하지 않게 예외를 낸다."""
+    if len(rom) < FAKE_ROM:
+        return False
+    if DQ5_ROM.is_file() and len(rom) < DQ5_ROM.stat().st_size:
+        raise ValueError(f'롬 {len(rom):#x}바이트가 원본 DQ5 보다 짧음: 글자를 읽을 수 없다')
+    return True
 
 
 def lines(screen):
