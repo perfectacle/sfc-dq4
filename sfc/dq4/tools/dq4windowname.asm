@@ -6122,15 +6122,16 @@ WhReq:
     BEQ +
     JMP .out
 +
+    ; 전투·타일맵 4C00 동안은 다른 길이 창 타일맵 VRAM 을 쓸 수 있어 사본을 믿지 않는다
     LDA.l $001944
     CMP #$8952
     BNE +
-    JMP .out
+    JMP .stale
 +
     LDA.l $7E21BF
     AND #$0020
     BEQ +
-    JMP .out
+    JMP .stale
 +
     PEA $7F7F
     PLB
@@ -6218,6 +6219,11 @@ endif
     LDA.l $7E0000|!wq_defer
     ORA #$20
     STA.l $7E0000|!wq_defer
+    BRA .out
+.stale
+    LDA #$0000
+    STA.l !wh_lastok
+    STA.l !wh_lastok+4
 .out
     REP #$30
     PLY
