@@ -795,6 +795,15 @@ org $24A5E9
 !wt_slot2 = $A972           ; 이번에 쓴 슬롯 × 2, FFFF = 명령 창 전용 칸
 !wt_lead  = $AB50           ; WnText 안에서만: 이름 앞에 04:C0DD 가 넣은 빈칸 수(0 = 없음)
 !wt_centered = $AB52        ; 1바이트: 코드 D2 가 04:C0DD 로 가운데 맞춘 이름을 막 넘김. WnText 가 들어올 때마다 읽고 지운다
+; 가나 항목(12개)마다 그린 그림 자리·위 줄 바탕 표식·둘째 키. 7E:A921~ABFF 는 원래 코드가 쓰지 않는 자리(위 「창 글자 변수 자리」)
+!wt_kptr  = $AAC0           ; 12 워드: 그린 그림 자리(!wt_ptr)
+!wt_ksig  = $AAD8           ; 12 워드: 그릴 때 위 줄 바탕 타일(뒤집기 포함)의 표식
+!wt_key2  = $AAF0           ; 12 워드: 같은 그림을 함께 쓰는 둘째 버퍼 자리, 0 = 없음
+!wt_sig   = $AB08           ; WtAlloc 안에서만: 이번 자리의 위 줄 바탕 표식
+!wt_shared = $AB0A          ; 1 = WtAlloc 이 보이는 같은 그림 슬롯을 내줘 WtQueue 가 그림을 올리지 않음
+!wt_nofit = $AB24           ; 1 = WtAlloc 이 보이는 슬롯밖에 없어 그리지 않음(필드)
+!wt_key3  = $AB0C           ; 12 워드: 셋째 버퍼 자리(같은 이름이 미리보기·장비 칸·제목에 셋), 0 = 없음
+!wt_lend  = $80             ; 가나 항목 첫 칸(!wt_kbase)이 이 값 이상이면 이름 렌더러 자리(180 + 자리 × 10)를 빌린 것
 !wt_fixkeys = $3EA0         ; 8 워드: 전용 칸에 그린 명령 창·가게 창 문구의 버퍼 자리, 0 = 빈 칸. WtVis 가 안 보이는 것을 지움
 !wt_fix_scan = 6           ; WtVis: 전용 칸 문구 자리에서 1D0~ 을 찾는 칸 수(문구 첫 칸이 덮여도 뒤 칸이 보이면 보임)
 !wt_k     = $A974           ; 그리는 고정 문구 번호
@@ -1393,6 +1402,10 @@ WnSlot:
     BEQ .take
     DEC.w !wn_r
     BEQ .take
+    ; 창 글자가 빌려 쓰는 중인 자리는 건너뛴다(빌린 항목이 살아 있는 동안. 버퍼만 보면 게임이 뒤 창을 다시 그리는 동안 비어 있음)
+    JSR WnLentVis
+    BCS .pick
+    LDA.w !wn_keys,X
     PHX
     TAY
     TXA
@@ -1415,6 +1428,7 @@ WnSlot:
     LDA.w !wn_key
     STA.w !wn_keys,X
 .found
+    JSR WnUnlend
     STX.w !wn_slot
     TXA
     LSR
@@ -1983,9 +1997,15 @@ WnText:
     JSR WtCenter
 +
     JSR WtAlloc
-    BCS .full
+    BCC +
+    ; 보이는 슬롯을 덮어야만 그릴 수 있으면 그리지 않는다(칸은 창이 깐 빈칸 그대로). 보이는 글자가 다른 그림으로 바뀌지 않게
+    LDA.w !wt_nofit
+    BEQ .full
+    BRA .advance
++
     JSR WtQueue
     JSR WtTilemap
+.advance
     ; Y 는 원래처럼 가나 글자 수만큼만 나아간다. 창 해석에는 Y 가 정한 열에 닿을 때까지 칸을 채우는 코드가 있어,
     ; 그 열을 넘기면 끝나지 않고 WRAM 을 덮었다.
     LDA.w !wt_len
@@ -2058,6 +2078,9 @@ WtAlloc:
     CLC
     ADC.w !wn_y
     STA.w !wn_key
+    STZ.w !wt_shared
+    STZ.w !wt_nofit
+    JSR WtAboveSig
     INC.w !wt_age
     ; 그린 문구의 표식(!wt_vis bit1~7): 그림 자리의 7비트 해시, bit0 = 보임
     LDA.w !wt_ptr
@@ -2091,11 +2114,12 @@ WtAlloc:
     PLX
     AND #$00FF
     BIT #$0001
-    BEQ .found
+    BEQ ++
     EOR.w !wt_hash
     AND #$00FE
-    BEQ .found
-    BRA +
+    BNE +
+++
+    JMP .same
 .resize
     JSR WtResize
 +
@@ -2103,11 +2127,19 @@ WtAlloc:
     INX
     CPX.w #!wt_nslot*2
     BCC -
-    ; 필드에서는 가나 칸에서 열 수만큼 잘라 쓴다. 가나 칸은 메시지 캔버스 밖이라 메시지와 함께 뜨는 목록이 비치지 않는다
+    ; 필드에서는 가나 칸에서 열 수만큼 잘라 쓴다. 가나 칸은 메시지 캔버스 밖이라 메시지와 함께 뜨는 목록이 비치지 않는다.
+    ; 그 앞에, 같은 그림을 같은 위 줄 바탕에 그려 둔 보이는 가나 항목이 있으면 함께 쓴다. 장비 화면은 같은 물건 이름이
+    ; 미리보기·장비 칸·목록·제목에 거듭 나와 가나 칸 104칸을 넘고, 넘친 이름은 메시지가 쓰는 캔버스로 가 조각났다
     LDA.w !wt_field
     BEQ +
+    JSR WtShare
+    BCC ++
+    JMP .shared
+++
+    JSR WtLendName
+    BCS .store
     JSR WtKana
-    BCS .found
+    BCS .store
 +
     ; 캔버스 안 고정 슬롯: 들어갈 크기 가운데 빈 슬롯, 이미 안 보이는 슬롯, 가장 오래된 슬롯 순. 오래된 순만 보면 전투처럼
     ; 슬롯이 모자란 곳에서 아직 보이는 작전 창을 밀어내고 닫힌 창의 슬롯을 남겼다. 안 보이는지는 지금 버퍼가 아니라 WtVis
@@ -2149,8 +2181,32 @@ WtAlloc:
     BCC -
 .pick
     TYX
+    JSR WtNoFit
+    BCC +
+    RTS
++
     LDA.w !wn_key
     STA.w !wt_keys,X
+.same
+    ; 같은 자리에 다시 그린다. 그림·위 줄 표식이 같으면 함께 쓰는 둘째 자리가 그대로 보이므로 둘째 키를 둔다
+    CPX.w #!wt_nkana*2
+    BCS .found
+    LDA.w !wt_kptr,X
+    CMP.w !wt_ptr
+    BNE .store
+    LDA.w !wt_ksig,X
+    CMP.w !wt_sig
+    BEQ .found
+.store
+    ; 새로 내준(또는 다른 그림으로 바꾼) 가나 항목: 그림 자리·위 줄 표식을 적고 둘째 키를 지운다
+    CPX.w #!wt_nkana*2
+    BCS .found
+    LDA.w !wt_ptr
+    STA.w !wt_kptr,X
+    LDA.w !wt_sig
+    STA.w !wt_ksig,X
+    STZ.w !wt_key2,X
+    STZ.w !wt_key3,X
 .found
     STX.w !wt_slot2
     LDA.w !wt_age
@@ -2170,6 +2226,31 @@ WtAlloc:
     STA.w !wt_ubase
     CLC
     RTS
+.shared
+    ; 둘째 키가 비었거나 이 자리면 둘째에, 아니면 셋째에
+    LDA.w !wt_key2,X
+    BEQ +
+    CMP.w !wn_key
+    BEQ +
+    LDA.w !wn_key
+    STA.w !wt_key3,X
+    BRA ++
++
+    LDA.w !wn_key
+    STA.w !wt_key2,X
+++
+    LDA #$0001
+    STA.w !wt_shared
+    STX.w !wt_slot2
+    LDA.w !wt_age
+    STA.w !wt_ages,X
+    JSR WtBaseOf
+    STA.w !wt_base
+    JSR WtUpperOf
+    STA.w !wt_ubase
+    CLC
+    RTS
+
 
 ; 슬롯 X 의 첫 칸(A). 가나 항목은 RAM, 캔버스 슬롯은 필드면 WtSlotF, 전투면 WtSlot
 WtBaseOf:
@@ -2182,6 +2263,21 @@ WtBaseOf:
     LDA.w !wt_kbase,X
     PLX
     AND #$00FF
+    CMP.w #!wt_lend
+    BCC ++
+    ; 빌린 이름 렌더러 자리 p: 180 + p × 10
+    AND #$007F
+    ASL
+    PHA
+    ASL
+    ASL
+    CLC
+    ADC 1,S
+    STA 1,S
+    PLA
+    CLC
+    ADC #$0180
+++
     RTS
 +
     LDA.w $1944
@@ -2191,6 +2287,57 @@ WtBaseOf:
     RTS
 +
     LDA.l WtSlot,X
+    RTS
+
+; WtVis 안: 가나 항목 X 의 둘째 키(같은 그림을 함께 쓰는 자리) 줄에 그 슬롯 그림이 보이면 A = 0, 아니면 1
+WtSeenKey2:
+    CPX.w #!wt_nkana*2
+    BCS .no
+    LDA.w !wt_key2,X
+    JSR .one
+    BEQ .yes
+    LDA.w !wt_key3,X
+    JSR .one
+    BEQ .yes
+.no
+    LDA #$0001
+    RTS
+.yes
+    LDA #$0000
+    RTS
+; A = 버퍼 자리(0 이면 없음). 그 줄의 열 칸 가운데 슬롯 그림이 있으면 Z = 1
+.one
+    BEQ .none
+    SEC
+    SBC #$5000
+    CMP #$0800
+    BCS .none
+    TAY
+    JSR WtBaseOf
+    STA.w !wq_left
+    JSR WtColsOf
+    PHA
+-
+    LDA 1,S
+    BEQ .gone
+    DEC
+    STA 1,S
+    LDA.w $5000,Y
+    AND #$03FF
+    CMP.w !wq_left
+    BEQ .seen
+    INC.w !wq_left
+    INY
+    INY
+    BRA -
+.seen
+    PLA
+    LDA #$0000
+    RTS
+.gone
+    PLA
+.none
+    LDA #$0001
     RTS
 
 ; 슬롯 X 가 그릴 수 있는 열 수(A). 가나 항목은 칸 수(열 수 × 2)의 반, 캔버스 슬롯은 크기 묶음(작은 4·중간 7·큰 10)
@@ -2246,6 +2393,23 @@ WtUpperOf:
     BEQ +
     LDA.l WtUpperF,X
     BEQ +
+    RTS
++
+    ; 빌린 이름 렌더러 자리는 이름 5칸 뒤가 위 줄(열 수와 상관없이)
+    CPX.w #!wt_nkana*2
+    BCS +
+    PHX
+    TXA
+    LSR
+    TAX
+    LDA.w !wt_kbase,X
+    PLX
+    AND #$00FF
+    CMP.w #!wt_lend
+    BCC +
+    LDA.w !wt_base
+    CLC
+    ADC #$0005
     RTS
 +
     LDA.w !wt_base
@@ -2450,6 +2614,11 @@ WtOcc:
     TAX
     LDA.w !wt_kbase,X
     AND #$00FF
+    CMP.w #!wt_lend
+    BCC +
+    PLX
+    BRA .next
++
     SEC
     SBC #$0010
     STA.w !wn_c
@@ -3327,64 +3496,6 @@ WtLen:
 ; 그림(A = 뱅크 안 주소, 0 이면 그대로 돌아감)을 7E:!wn_stage 로 옮긴다. X = 0 이면 뱅크 !wt_bank, 아니면 몬스터 그림
 ; 뱅크 !wt_mbank. 몬스터 이름 그림이 !wt_bank 에 다 들어가지 않아 나눴고, 그리기 쪽은 뱅크와 상관없이 사본을 읽는다.
 ; A·X·Y·DB 를 지킨다(M = X = 16)
-; 지금 그리는 창($0A00)이 물건 이름을 아홉 칸 그림으로 그리는 창(WtNineWins)이면 C = 1. M·X 는 그대로
-WtNineWin:
-    PHP
-    SEP #$20
-    REP #$10
-    PHX
-    LDA.l $7E0A00
-    LDX #$0000
--
-    CMP.l WtNineWins,X
-    BEQ .yes
-    INX
-    CPX.w #WtNineWinsEnd-WtNineWins
-    BCC -
-    PLX
-    PLP
-    CLC
-    RTS
-.yes
-    PLX
-    PLP
-    SEC
-    RTS
-; dq4windowname.NINE_WINDOWS 와 같아야 한다(test_dq4windowname)
-WtNineWins:
-    db $08, $14, $43, $3E, $3F, $40, $41, $2E, $44
-WtNineWinsEnd:
-
-; WtNameDraw 의 그림 고르기(M = 16, X = 16, A = 색인 자리, !wt_ptr = 그 그림). 아홉 칸 창에서 열 칸 물건 이름이면
-; 그림 뒤(1 + 열 × 9)의 아홉 칸 그림으로 바꾼다(그 그림의 열 수가 0 이면 그대로). A = !wt_ptr 로 돌아간다
-WtNineName:
-    PHX
-    AND #$FE00
-    CMP.w #5*$200
-    BNE .keep
-    JSR WtNineWin
-    BCC .keep
-    LDA.l $7E0000|!wt_ptr
-    BEQ .keep
-    TAX
-    LDA.l !wt_bank<<16,X
-    AND #$00FF
-    CMP #$000A
-    BCC .keep
-    TXA
-    CLC
-    ADC.w #(10*9)+1                ; 이 파일은 math pri 가 꺼져 왼쪽부터 셈한다(1+10*9 는 99)
-    TAX
-    LDA.l !wt_bank<<16,X
-    AND #$00FF
-    BEQ .keep
-    TXA
-    STA.l $7E0000|!wt_ptr
-.keep
-    PLX
-    LDA.l $7E0000|!wt_ptr
-    RTS
-
 WtFetchPic:
     PHB
     PHY
@@ -3518,6 +3629,11 @@ WtNameDraw:
 ; 대기열에 두 항목: 글자 줄(방식 1, 평면 0 만 열 × 8바이트, NMI 가 평면 1 을 FF 로)과 위 줄(방식 0, 두 평면 열 × 16바이트).
 ; 위 줄은 지금 그 자리의 타일 그림에 글자 맨 윗줄을 겹친다. 넣는 동안은 NMI 를 끈다.
 WtQueue:
+    LDA.w !wt_shared
+    BEQ +
+    STZ.w !wt_shared
+    RTS
++
     SEP #$20
     LDA.b $1E
     AND #$7F
@@ -4049,7 +4165,7 @@ WtVis:
     BRA -
 .unseen
     PLA
-    LDA #$0001
+    JSR WtSeenKey2
     BRA .mark
 .seen
     PLA
@@ -4755,6 +4871,64 @@ WqRunBytes:
 ; 뒤, !wn_code2 ~ !wn_code2_end)에 둔다. 같은 뱅크라 JSR 로 부른다. 첫 구역에 넣을 자리가 모자라면 둘째 구역 쪽에 더한다
 assert pc() <= !wn_code_end
 org !wn_code2
+; 지금 그리는 창($0A00)이 물건 이름을 아홉 칸 그림으로 그리는 창(WtNineWins)이면 C = 1. M·X 는 그대로
+WtNineWin:
+    PHP
+    SEP #$20
+    REP #$10
+    PHX
+    LDA.l $7E0A00
+    LDX #$0000
+-
+    CMP.l WtNineWins,X
+    BEQ .yes
+    INX
+    CPX.w #WtNineWinsEnd-WtNineWins
+    BCC -
+    PLX
+    PLP
+    CLC
+    RTS
+.yes
+    PLX
+    PLP
+    SEC
+    RTS
+; dq4windowname.NINE_WINDOWS 와 같아야 한다(test_dq4windowname)
+WtNineWins:
+    db $08, $14, $43, $3E, $3F, $40, $41, $2E, $44
+WtNineWinsEnd:
+
+; WtNameDraw 의 그림 고르기(M = 16, X = 16, A = 색인 자리, !wt_ptr = 그 그림). 아홉 칸 창에서 열 칸 물건 이름이면
+; 그림 뒤(1 + 열 × 9)의 아홉 칸 그림으로 바꾼다(그 그림의 열 수가 0 이면 그대로). A = !wt_ptr 로 돌아간다
+WtNineName:
+    PHX
+    AND #$FE00
+    CMP.w #5*$200
+    BNE .keep
+    JSR WtNineWin
+    BCC .keep
+    LDA.l $7E0000|!wt_ptr
+    BEQ .keep
+    TAX
+    LDA.l !wt_bank<<16,X
+    AND #$00FF
+    CMP #$000A
+    BCC .keep
+    TXA
+    CLC
+    ADC.w #(10*9)+1                ; 이 파일은 math pri 가 꺼져 왼쪽부터 셈한다(1+10*9 는 99)
+    TAX
+    LDA.l !wt_bank<<16,X
+    AND #$00FF
+    BEQ .keep
+    TXA
+    STA.l $7E0000|!wt_ptr
+.keep
+    PLX
+    LDA.l $7E0000|!wt_ptr
+    RTS
+
 ; 필드에서 그림을 올린 캔버스 슬롯(!wt_dirty)의 창이 닫히면, 게임이 캔버스를 다시 보내기 전까지 메시지 창이 그 칸에 옛
 ; 이름을 보인다(가게 팔기 목록을 닫으며 「어느 물건을 팔아 주시겠어요?」 창을 다시 그릴 때). NMI 끝(WtVisTail, VBlank 일이
 ; 끝난 뒤)마다 WtVis 가 안 보인다고 잰 그런 슬롯을 둘까지
@@ -5228,6 +5402,277 @@ WtCenter:
     DEC.w !wt_lead
     BNE -
 .none
+    RTS
+
+; 이번 자리(!wn_key)의 위 줄 바탕 타일 !wt_cols 개(뒤집기 포함 낱말)로 표식을 만든다. 위 줄 합성은 그 바탕에 글자
+; 맨 윗줄을 겹치므로, 그림과 이 표식이 같아야 슬롯을 함께 쓸 수 있다
+WtAboveSig:
+    LDA.w !wn_key
+    SEC
+    SBC #$0040
+    TAY
+    LDX.w !wt_cols
+    STZ.w !wt_sig
+-
+    CPX #$0000
+    BEQ +
+    LDA.w $0000,Y
+    AND #$C3FF                  ; 색은 타일맵 쪽이라 빼고 타일 번호·뒤집기만
+    EOR.w !wt_sig
+    ASL
+    ADC #$0000
+    STA.w !wt_sig
+    INY
+    INY
+    DEX
+    BRA -
++
+    RTS
+
+; 필드, 다섯 열 이하: 화면에 없는 이름 렌더러 자리(180 + 자리 × 10, 이름 5칸 + 위 줄 5칸)를 빈 가나 항목으로 빌린다.
+; 가나 칸을 긴 이름에 남겨, 같은 이름이 여러 창에 뜨는 화면에서 넘친 이름이 메시지가 쓰는 캔버스로 가지 않게 한다.
+; 뒤에 올 「누구」 목록 이름 몫으로, 빈 자리가 일행 수 이상일 때만 빌린다. C = 1 이면 X = 가나 항목 × 2
+WtLendName:
+    LDA.w !wt_cols
+    CMP #$0006
+    BCC +
+    CLC
+    RTS
++
+    ; 빈 가나 항목
+    LDX #$0000
+-
+    LDA.w !wt_ages,X
+    BEQ +
+    INX
+    INX
+    CPX.w #!wt_nkana*2
+    BCC -
+    BRA .no
++
+    PHX
+    ; 화면에 없는 자리 수(!wn_r)와 마지막으로 찾은 자리 × 2(!wn_k). 둘 다 WtKana 가 다시 쓰는 임시값
+    STZ.w !wn_r
+    LDA #$FFFF
+    STA.w !wn_k
+    LDX #$000E
+-
+    JSR WnPosFree
+    BCC +
+    INC.w !wn_r
+    STX.w !wn_k
++
+    DEX
+    DEX
+    BPL -
+    LDA.l $7E201D
+    AND #$00FF
+    CMP.w !wn_r
+    BEQ +
+    BCS .none                   ; 빈 자리가 일행 수보다 적음
++
+    LDX.w !wn_k
+    ; 그 자리를 이 문구의 키로 적어 WnSlot 이 쓰는 중으로 보게 하고, 같은 자리를 빌렸던 옛 항목은 비운다
+    LDA.w !wn_key
+    STA.w !wn_keys,X
+    TXA
+    LSR
+    ORA.w #!wt_lend
+    STA.w !wn_r
+    LDX #$0000
+-
+    PHX
+    TXA
+    LSR
+    TAX
+    LDA.w !wt_kbase,X
+    PLX
+    AND #$00FF
+    CMP.w !wn_r
+    BNE +
+    STZ.w !wt_ages,X
++
+    INX
+    INX
+    CPX.w #!wt_nkana*2
+    BCC -
+    PLX
+    LDA.w !wn_key
+    STA.w !wt_keys,X
+    PHX
+    TXA
+    LSR
+    TAX
+    SEP #$20
+    LDA.w !wn_r
+    STA.w !wt_kbase,X
+    LDA #$0A
+    STA.w !wt_klen,X
+    REP #$20
+    PLX
+    SEC
+    RTS
+.none
+    PLX
+.no
+    CLC
+    RTS
+
+; 이름 렌더러 자리 X/2 가 화면 버퍼에 없으면 C = 1(키가 없거나, 키 자리가 그 자리의 첫 칸을 가리키지 않음)
+WnPosFree:
+    JSR WnLentVis
+    BCS .used
+    LDA.w !wn_keys,X
+    BEQ .free
+    TAY
+    TXA
+    LSR
+    STA.w !wn_c
+    ASL
+    ASL
+    CLC
+    ADC.w !wn_c
+    ASL
+    CLC
+    ADC #$0180
+    STA.w !wn_c
+    LDA.w $0000,Y
+    AND #$03FF
+    CMP.w !wn_c
+    BEQ .used
+.free
+    SEC
+    RTS
+.used
+    CLC
+    RTS
+
+; 필드: 보이는 가나 항목 가운데 같은 그림(!wt_ptr)·같은 위 줄 표식이면 C = 1, X = 그 슬롯 × 2
+WtShare:
+    LDX #$0000
+-
+    LDA.w !wt_ages,X
+    BEQ .next
+    LDA.w !wt_key2,X
+    BEQ +
+    CMP.w !wn_key
+    BEQ +
+    LDA.w !wt_key3,X
+    BEQ +
+    CMP.w !wn_key
+    BNE .next
++
+    LDA.w !wt_kptr,X
+    CMP.w !wt_ptr
+    BNE .next
+    LDA.w !wt_ksig,X
+    CMP.w !wt_sig
+    BNE .next
+    PHX
+    TXA
+    LSR
+    TAX
+    LDA.w !wt_vis,X
+    PLX
+    AND #$0001
+    BEQ .next
+    SEC
+    RTS
+.next
+    INX
+    INX
+    CPX.w #!wt_nkana*2
+    BCC -
+    CLC
+    RTS
+
+; 이름 렌더러 자리 X/2 를 빌린 가나 항목이 살아 있으면 C = 1. X 를 지킨다. 보임으로 가르면, 뒤 창(「누구의」 제목 등)이
+; 잠깐 덮였다가 저장한 타일맵으로 되돌아오는 동안 이름이 그 자리를 가져가 제목이 이름으로 바뀌었다
+WnLentVis:
+    PHX
+    TXA
+    LSR
+    ORA.w #!wt_lend
+    PHA
+    LDX #$0000
+-
+    LDA.w !wt_ages,X
+    BEQ +
+    PHX
+    TXA
+    LSR
+    TAX
+    LDA.w !wt_kbase,X
+    AND #$00FF
+    CMP 3,S
+    BNE ++
+    PLX
+    PLA
+    PLX
+    SEC
+    RTS
+++
+    PLX
++
+    INX
+    INX
+    CPX.w #!wt_nkana*2
+    BCC -
+    PLA
+    PLX
+    CLC
+    RTS
+
+; WnSlot 이 자리 X/2 를 가져갈 때, 그 자리를 빌려 쓰던 가나 항목(WtLendName)을 비운다. 이름이 이긴다
+WnUnlend:
+    PHX
+    TXA
+    LSR
+    ORA.w #!wt_lend
+    STA.w !wn_c
+    LDX #$0000
+-
+    LDA.w !wt_ages,X
+    BEQ +
+    PHX
+    TXA
+    LSR
+    TAX
+    LDA.w !wt_kbase,X
+    PLX
+    AND #$00FF
+    CMP.w !wn_c
+    BNE +
+    STZ.w !wt_ages,X
++
+    INX
+    INX
+    CPX.w #!wt_nkana*2
+    BCC -
+    PLX
+    RTS
+
+; WtAlloc 캔버스 고르기 끝(X = 고른 슬롯 × 2): 빈 슬롯도 안 보이는 슬롯도 없어 가장 오래된 슬롯이 아직 보이면, 덮으면
+; 그 글자가 다른 그림으로 바뀐다. 필드에서는 그리지 않게 C = 1, !wt_nofit = 1(창이 깐 빈칸 그대로)
+WtNoFit:
+    LDA.w !wt_field
+    BEQ .fit
+    LDA.w !wt_ages,X
+    BEQ .fit
+    PHX
+    TXA
+    LSR
+    TAX
+    LDA.w !wt_vis,X
+    PLX
+    AND #$0001
+    BEQ .fit
+    LDA #$0001
+    STA.w !wt_nofit
+    SEC
+    RTS
+.fit
+    CLC
     RTS
 
 assert pc() <= !wn_code2_end

@@ -52,3 +52,12 @@ class UnfinishedSceneTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class KnownTest(unittest.TestCase):
+    def test_known_scenes_exist_and_are_measured_every_frame(self):
+        names = {s[0] for s in wc.scenes('ship', 'party', 'shop', 'battle')}
+        for name, n in wc.KNOWN.items():
+            self.assertIn(name, names)
+            self.assertIn(name, wc.EVERY)        # 상한은 --every 로 잰 수
+            self.assertGreater(n, 0)
