@@ -409,10 +409,56 @@ class WatchTest(unittest.TestCase):
         v.update(kw)
         return v
 
+    def head_runs(self, *ids, old=()):
+        """gh run list 응답(fake_gh 가 리스트를 차례 응답으로 읽어 한 겹 더 쌈): ids 는 작업 워크트리 머리 커밋의 실행, old 는 앞 커밋의 실행."""
+        head = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=self.r.wt, capture_output=True, text=True).stdout.strip()
+        return [[{'databaseId': i, 'headSha': head} for i in ids]
+                + [{'databaseId': i, 'headSha': 'f' * 40} for i in old]]
+
+    def bad_shard(self, run):
+        return {'name': 'pr-guards / shard 7', 'status': 'COMPLETED', 'conclusion': 'FAILURE',
+                'detailsUrl': f'https://github.com/o/r/actions/runs/{run}/job/43'}
+
+    def test_failure_of_a_run_on_an_older_commit_is_waited_out(self):
+        gh = fake_gh({'pr view': [self.view(statusCheckRollup=[self.bad_shard(8)]), self.view(state='MERGED')],
+                      'run list': self.head_runs(9, old=[8])})
+        s, out = self.r.ship(gh=gh)
+        s.pr = 5
+        s.watch()
+        self.assertIn('[watch] MERGED', out)
+        self.assertFalse(any(c[:2] == ['run', 'view'] and '--log-failed' in c for c in gh.calls))
+        self.assertTrue(any('앞 커밋의 검사 1개는 보지 않음' in x for x in out))
+
+    def test_failure_before_the_head_commit_has_a_run_is_waited_out(self):
+        gh = fake_gh({'pr view': [self.view(statusCheckRollup=[self.bad_shard(8)]), self.view(state='MERGED')],
+                      'run list': self.head_runs(old=[8])})
+        s, out = self.r.ship(gh=gh)
+        s.pr = 5
+        s.watch()
+        self.assertIn('[watch] MERGED', out)
+
+    def test_failure_of_a_run_on_the_head_commit_stops(self):
+        gh = fake_gh({'pr view': self.view(statusCheckRollup=[self.bad_shard(9)]),
+                      'run list': self.head_runs(9, old=[8]), 'run view': '  dq4-x: failed (종료 코드 1)\n'})
+        s, _ = self.r.ship(gh=gh)
+        s.pr = 5
+        with self.assertRaises(ship.Stop) as e:
+            s.watch()
+        self.assertIn('--rerun dq4-x', e.exception.reason)
+
+    def test_rollup_of_another_head_is_not_read(self):
+        gh = fake_gh({'pr view': [self.view(headRefOid='e' * 40, statusCheckRollup=[self.bad_shard(9)]),
+                                  self.view(state='MERGED')],
+                      'run list': self.head_runs(9)})
+        s, out = self.r.ship(gh=gh)
+        s.pr = 5
+        s.watch()
+        self.assertIn('[watch] MERGED', out)
+
     def test_ci_failure_prints_log_tail(self):
         bad = {'name': 'test (common)', 'status': 'COMPLETED', 'conclusion': 'FAILURE',
                'detailsUrl': 'https://github.com/o/r/actions/runs/1/job/42'}
-        gh = fake_gh({'pr view': [self.view(), self.view(statusCheckRollup=[bad])],
+        gh = fake_gh({'pr view': [self.view(), self.view(statusCheckRollup=[bad])], 'run list': self.head_runs(1),
                       'run view': 'a\nAssertionError: 틀림\n'})
         s, out = self.r.ship(gh=gh)
         s.pr = 5
@@ -425,7 +471,7 @@ class WatchTest(unittest.TestCase):
     def test_guard_shard_failure_names_the_guard(self):
         bad = {'name': 'pr-guards / shard 2', 'status': 'COMPLETED', 'conclusion': 'FAILURE',
                'detailsUrl': 'https://github.com/o/r/actions/runs/7/job/43'}
-        gh = fake_gh({'pr view': self.view(statusCheckRollup=[bad]),
+        gh = fake_gh({'pr view': self.view(statusCheckRollup=[bad]), 'run list': self.head_runs(7),
                       'run view': '  dq4-x: failed (종료 코드 1)\n'})
         s, _ = self.r.ship(gh=gh)
         s.pr = 5
@@ -440,7 +486,7 @@ class WatchTest(unittest.TestCase):
                    'detailsUrl': 'https://github.com/o/r/actions/runs/7/job/43'},
                   {'name': 'ci-ok', 'status': 'COMPLETED', 'conclusion': 'SUCCESS'}]
         gh = fake_gh({'pr view': [self.view(isDraft=True, statusCheckRollup=checks), self.view(state='MERGED')],
-                      'run download': (1, ''), 'pr edit': '', 'pr ready': '', 'pr merge': ''})
+                      'run list': self.head_runs(7), 'run download': (1, ''), 'pr edit': '', 'pr ready': '', 'pr merge': ''})
         s, out = self.r.ship(gh=gh)
         s.pr, s.ci = 5, ['dq4-b']
         s.lines = {'dq4-a': '- [x] dq4-a: 통과 (1초)'}
