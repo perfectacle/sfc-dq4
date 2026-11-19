@@ -19,21 +19,23 @@ class ZeroRuleTest(unittest.TestCase):
             return zero.check_run(RUN), status.check_run(RUN)
 
     def test_ink_lines_with_nothing_recognised_fail(self):
-        fail, note = self.judge((3, 5, 0))
+        fail, note = self.judge((3, 5, 0, 0))
         self.assertEqual(len(fail), 1)
         self.assertIn('알아본 줄 0개', note[0][1])
 
     def test_read_lines_pass_and_are_logged(self):
-        fail, note = self.judge((3, 12, 11))
+        fail, note = self.judge((3, 12, 11, 1))
         self.assertEqual(fail, [])
         self.assertIn('알아본 줄 11개', note[0][1])
 
-    def test_empty_windows_pass(self):
-        # 창 틀만 뜨고 잉크가 없는 모습(문 순간이동 뒤 빈 창)은 못 읽음이 아니다
-        self.assertEqual(self.judge((1, 0, 0))[0], [])
+    def test_empty_windows_are_counted_not_failed(self):
+        # 메시지 창을 연 순간처럼 창 안에 잉크가 없는 모습은 못 읽음이 아니다. 대신 결과 줄에 따로 센다
+        fail, note = self.judge((1, 0, 0, 1))
+        self.assertEqual(fail, [])
+        self.assertIn('창 안이 빈 모습 1개', note[0][1])
 
     def test_scene_without_windows_passes(self):
-        self.assertEqual(self.judge((0, 0, 0))[0], [])
+        self.assertEqual(self.judge((0, 0, 0, 0))[0], [])
 
     def test_fake_rom_is_silent(self):
         self.assertEqual(self.judge(status.FAKE_ROM), ([], []))

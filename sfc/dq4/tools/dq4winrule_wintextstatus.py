@@ -19,15 +19,16 @@ def known(line):
 
 
 def read_lines(run):
-    """(창이 뜬 안정 모습 수, 잉크가 있는 줄 수, 그 가운데 글자를 알아본 줄 수). 글꼴이 없으면 NO_FONT, 가짜
-    롬(단위 시험)이면 FAKE_ROM. dq4wintext 는 맞는 글자가 없는 잉크도 ⍰ 줄로 남기므로, 잉크 줄 0 은 빈 창이다."""
+    """(창이 뜬 안정 모습 수, 잉크가 있는 줄 수, 그 가운데 글자를 알아본 줄 수, 창 안이 모두 빈 모습 수). 글꼴이
+    없으면 NO_FONT, 가짜 롬(단위 시험)이면 FAKE_ROM. dq4wintext 는 맞는 글자가 없는 잉크도 ⍰ 줄로 남기므로, 잉크 줄이
+    하나도 없는 모습은 창 안이 빈 것이다."""
     try:
         wt.font('galmuri9')
     except SystemExit:
         return NO_FONT
     if not wt.comparable(run.ref.rom):
         return FAKE_ROM
-    shots = lines = read = 0
+    shots = lines = read = empty = 0
     for _, screen, _ in wt.steady_screens(run):
         if not screen.rects:
             continue
@@ -35,10 +36,12 @@ def read_lines(run):
         if got is None:
             return NO_FONT
         shots += 1
+        here = sum(len(v) for v in got.values())
+        lines += here
+        empty += here == 0
         for v in got.values():
-            lines += len(v)
             read += sum(known(ln) for ln in v)
-    return shots, lines, read
+    return shots, lines, read, empty
 
 
 def check_run(run):
@@ -47,4 +50,4 @@ def check_run(run):
         return []
     if got == NO_FONT:
         return [(0, 'DQ4_GALMURI 없음, 글자 규칙을 안 봄')]
-    return [(0, f'창이 뜬 모습 {got[0]}개에서 잉크 줄 {got[1]}개, 글자를 알아본 줄 {got[2]}개')]
+    return [(0, f'창이 뜬 모습 {got[0]}개에서 잉크 줄 {got[1]}개, 글자를 알아본 줄 {got[2]}개, 창 안이 빈 모습 {got[3]}개')]

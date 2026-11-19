@@ -8,9 +8,16 @@
 """
 from collections import Counter
 
+from dq4winwatch import Known
+
 NAME = '커서'
-MODE = 'report'
+MODE = 'fail'
 ALLOW = ()
+KNOWN = (
+    Known('*/wc/out/equip-ch3', frozenset({(5, 19)}), 7,
+          '창 (2,18)-(12,29) 의 4·5줄 글자 칸이 한 칸 밀려 오른쪽 테두리를 덮는 동안(프레임 789~) ▶ 오른쪽 칸 첫 열에 '
+          '밀린 글자 잉크가 든다. 창 글자 칸 넘침(창 검사 equip-ch3 눈금)과 같은 때의 화면, 그 넘침을 고치면 이 눈금을 지운다'),
+)
 CURSOR = 0x7C
 ROM_FONT = 0x04E528
 # 롬 1bpp 글자 칸. 원본 DQ5 가나는 첫 열부터 잉크가 있어 덮음 검사에서 뺀다
