@@ -30,9 +30,7 @@ MONSTER_RECORDS, MONSTER_SIZE, DROP = 0x238000, 25, 0x17
 NO_ITEM = 0xFF
 
 # 알려진 다름: (가게·상자·몬스터, 자리) → 까닭. 고치면 지운다. 더 다르지 않은 줄이 남으면 「지난 줄」 로 실패한다
-_LOCAL_PRICE = ('3장 여우 마을 도구점의 はがねのつるぎ 는 FC 가 그 가게에서만 10G 로 판다(장소별 값 15:$B2F7). DQ5 엔진은 물건마다 '
-                '값이 하나라 이식이 목록에서 뺐다(dq4shopport report local_prices). 가게별 값을 담는 훅이 지운다')
-KNOWN = {('가게', '18/00 종류 2'): _LOCAL_PRICE, ('값', '18/00 はがねのつるぎ'): _LOCAL_PRICE}
+KNOWN = {}
 
 
 def _fc(dq4):
@@ -80,8 +78,11 @@ def shop_rows(data, dq4=FC_ROM, dq5=DQ5_ROM):
 
 
 def price_rows(data, dq4=FC_ROM, dq5=DQ5_ROM):
-    """[(FC 맵, FC 이름, FC 값, DQ5 번호, 빌드 값)]. 가게에 판매자가 있는 맵의 FC 목록 물건마다."""
+    """[(FC 맵, FC 이름, FC 값, DQ5 번호, 빌드 값)]. 가게에 판매자가 있는 맵의 FC 목록 물건마다. 빌드 값은 그 맵 가게 키의
+    장소별 값(dq4localprice)이 있으면 그것, 없으면 물건 값."""
     import dq4groupbuild
+    import dq4itemreach
+    import dq4localprice
     import dq4shop
     import dq4shopport
     import dq5shop
@@ -90,13 +91,16 @@ def price_rows(data, dq4=FC_ROM, dq5=DQ5_ROM):
     rom = Rom(bytes(data))
     items = dq4shopport.dq5_items(Rom(Path(dq5).read_bytes()))
     names = dq4shop.item_names(prg)[0]
+    keys, local = dq4itemreach.key_rows(rom), dq4localprice.parse(rom)
     out = []
-    for (g, k) in sorted(dq4groupbuild.placement(prg)):
+    for (g, k), (g5, m5) in sorted(dq4groupbuild.placement(prg).items()):
+        key = next((key for rg, a, b, key in keys if rg == g5 and a <= m5 <= b), None)
         for kind in sorted(set(dq4shopport.merchants(prg, g, k, items).values()) & set(FC_KINDS)):
             for i in dq4shop.lookup(prg, kind, g, k) or []:
                 n = items.get(dq4shopport._fold(names[i]))
                 if n is not None:
-                    out.append(((g, k), names[i], dq4shop.price(prg, g, k, i), n, dq5shop.price(rom, n)))
+                    out.append(((g, k), names[i], dq4shop.price(prg, g, k, i), n,
+                                local.get((key, n), dq5shop.price(rom, n))))
     return out
 
 

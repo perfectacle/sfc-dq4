@@ -1,11 +1,10 @@
-"""Use each chapter 2 story item from どうぐ in MesenCE and expect its DQ5 field-use handler.
+"""Use each story item from どうぐ in MesenCE and expect its DQ5 field-use handler.
 
-For each item of dq4itemport (おうごんのうでわ and さえずりのみつ on borrowed key-item slots, とうぞくのカギ on DQ5's B7)
+For each item of dq4itemport (the story items on borrowed key-item slots, EVENT_ITEMS, and とうぞくのカギ on DQ5's B7)
 the hero warps (dq4doorcheck.warp, from the ROM's dq4freshstate start) to the Santeem castle courtyard, holds that
 item alone in its first item slot (7E:2056, the rest FF, equip bits 7E:2054 off), and opens the command window →
-どうぐ → the item → つかう. The case passes when the item's own handler ran (11:8F5B[item - A1]: 11:8BE4 「しかし
-ここでは 何も おこらなかった！」 for the story items, 11:8E43 the key-level-1 door use for B7) and no other watched
-handler did. A screenshot is kept each time the window number (7E:0A00) changes, as the evidence of the item names.
+どうぐ → the item → つかう. The case passes when the item's own handler ran (11:8F5B[item - A1], HANDLER) and no
+other watched handler did. A screenshot is kept each time the window number (7E:0A00) changes, as the evidence of the item names.
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4storyitemcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/storyitem
 """
@@ -31,11 +30,18 @@ from dq4doorcheck import run, warp  # noqa: E402
 USE = TOOLS / "lua" / "dq4itemuse.lua"
 # The Santeem castle courtyard, an open floor cell with no door or person in front.
 PLACE = ("3D/00", 30, 40)
+# 11:8BE4 「しかし ここでは 何も おこらなかった！」(ゴールドオーブ), 11:8E43 열쇠 단계 1 문 열기(B7)
 NOTHING, KEY_USE = 0x118BE4, 0x118E43
+# FC 필드 효과 비트($8D1B bit7)가 꺼진 물건: FC 「しかし なにも おこらなかった。」 와 같은 18E 를 띄우는 いのちのいし 처리기
+FC_NOTHING = 0x118BB9
 # あやかしのふえ 는 DQ5 피리 はるかぜのフルート(C7)의 필드 쓰기를 빌린다(dq4itemport.EVENT_TEMPLATES): 11:8F5B[C7 - A1]
 FLUTE_USE = 0x118BD0
+# おべんとう 는 FC 에서 やくそう 와 같은 물건: やくそう 처리기 11:8906
+HERB_USE = 0x118906
 HANDLER = {**{item: NOTHING for item in dq4itemport.EVENT_ITEMS}, dq4itemport.THIEF_KEY: KEY_USE,
-           dq4itemport.FLUTE: FLUTE_USE}
+           dq4itemport.FLUTE: FLUTE_USE, dq4itemport.BENTO: HERB_USE,
+           **{item: FC_NOTHING for item in (0xC6, dq4itemport.IRON_SAFE, dq4itemport.STATUE, dq4itemport.SILENCE_ORB,
+                                            dq4itemport.SHIP_TICKET, dq4itemport.HORSE_DUNG)}}
 # Command window → どうぐ (right of つよさ), the only item, つかう. The field reads the pad once every 8 frames, so one
 # press of fixed length opens the command window only for some frame phases of the warp's arrival (a phase shift left
 # the window shut and every handler at 0). "open" pulses A until the window number changes.

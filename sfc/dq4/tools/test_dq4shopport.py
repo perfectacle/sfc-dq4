@@ -76,6 +76,7 @@ class SyntheticPortTest(unittest.TestCase):
         progress = {"shops": [{"kind": 0}, {"kind": 2}, {"kind": 2}]}
         fc_of = {v: k for k, v in self.PLACE.items()}
         self.itemwrites = mock.Mock(return_value=[{"at": "23:B000", "hex": "00"}])
+        self.localwrites = mock.Mock(return_value=[])
         with tempfile.TemporaryDirectory() as t, \
                 mock.patch.multiple(shopport, GROUPS=groups, placement=lambda prg: self.PLACE,
                                     fc_map=lambda prg, g, n: fc_of[g, n], has_people=lambda g, w: w,
@@ -92,7 +93,8 @@ class SyntheticPortTest(unittest.TestCase):
                 mock.patch.object(shopport.dq4shop, "price", lambda prg, g, n, i: prices.get((g, n, i), 10 * i + 5)), \
                 mock.patch.object(shopport.dq4shop, "inn_price",
                                   lambda prg, g, n: 10 if (g, n) == shopport.MERCHANT else inn.get((g, n))), \
-                mock.patch.object(shopport.dq4itemport, "writes", self.itemwrites):
+                mock.patch.object(shopport.dq4itemport, "writes", self.itemwrites), \
+                mock.patch.object(shopport.dq4localprice, "writes", self.localwrites):
             dq5, dq4 = Path(t) / "dq5.sfc", Path(t) / "dq4.nes"
             dq5.write_bytes(b"")
             dq4.write_bytes(b"")
@@ -160,13 +162,15 @@ class SyntheticPortTest(unittest.TestCase):
         self.assertEqual(writes[-1], {"at": "23:B000", "hex": "00"})
         self.assertEqual(report["prices"]["02 item02"], 15)
 
-    def test_place_price_leaves_the_item_out(self):
-        # FC 15:$B2F7 이 그 장소에서만 다른 값을 주는 물건(여우 마을의 はがねのつるぎ 10G)은 DQ5 값이 물건마다 하나라
-        # 목록에서 빠지고 보고에 남는다
+    def test_place_price_goes_to_the_local_price_table(self):
+        # FC 15:$B2F7 이 그 장소에서만 다른 값을 주는 물건(여우 마을의 はがねのつるぎ 10G)은 목록에 남고, 값은 물건 값이
+        # 아니라 그 가게 키의 장소별 값 표(dq4localprice)로 간다
         _, shops, _, report = self.run_port(prices={(0x10, 0, 1): 10})
         first = shopport.dq4shopkey.KEY_FIRST
-        self.assertEqual(shops[0], {"kind": 2, "index": 2, "key": first, "items": [0x06]})
+        self.assertEqual(shops[0], {"kind": 2, "index": 2, "key": first, "items": [0x02, 0x06]})
         self.assertEqual(report["local_prices"], ["36/00 こんぼう 10"])
+        self.assertEqual(self.localwrites.call_args.args[1], [(first, 0x02, 10)])
+        self.assertNotIn(0x02, self.itemwrites.call_args.args[2])
         self.assertEqual(self.itemwrites.call_args.args[2][0x06], 25)
 
     def test_refusals(self):
@@ -188,13 +192,27 @@ class HasGoodsTest(unittest.TestCase):
         self.addCleanup(shopport._names.cache_clear)
         names = ["うまのふん", "いばらのむち"]
         with mock.patch.object(shopport.dq4shop, "item_names", lambda prg: (names, None)), \
-                mock.patch.object(shopport.dq4shop, "lookup", lambda prg, k, g, n: {(1, 0): [0x80], (1, 1): [0x00, 0x81]}[k, n]):
+                mock.patch.object(shopport, "has_list", lambda prg, k, g, n: n != 2), \
+                mock.patch.object(shopport.dq4shop, "lookup",
+                                  lambda prg, k, g, n: {(1, 0): [0x80], (1, 1): [0x00, 0x81], (1, 2): [0x01]}[k, n]):
             items = {"イバラノムチ": 6}
             self.assertFalse(shopport.has_goods(b"x", 1, 0x10, 0, items))
             # 항목 bit7 은 이름 번호가 아니고, 히라가나 이름도 DQ5 의 가타카나 이름에 맞는다
             self.assertTrue(shopport.has_goods(b"x", 1, 0x10, 1, items))
+            # 제 장소 목록이 없으면(목록 끝 FF 줄을 읽음) DQ5 에 있는 물건이어도 말만 한다
+            self.assertFalse(shopport.has_goods(b"x", 1, 0x10, 2, items))
             # 목록이 없는 여관·교회는 늘 있다
             self.assertTrue(shopport.has_goods(b"x", 6, 0x10, 0, {}))
+
+
+class HasListTest(unittest.TestCase):
+    @unittest.skipUnless(DQ4.is_file(), "rom/dq4.nes 가 필요")
+    def test_lakanaba_back_room_has_no_list(self):
+        # FC 16/01 (10,00) 판매자는 장소 목록이 없어 목록 끝 FF 줄(うまのふん 다섯)을 읽는다: 걸어 닿지 못하는 자리라 옮기지 않는다
+        prg = shopport.ines.prg(DQ4.read_bytes())
+        self.assertFalse(shopport.has_list(prg, 3, 0x16, 1))
+        self.assertTrue(shopport.has_list(prg, 3, 0x16, 0))
+        self.assertTrue(shopport.has_list(prg, 2, 0x18, 0))
 
 
 class Dq5ItemsTest(unittest.TestCase):
@@ -226,10 +244,13 @@ class PortTest(unittest.TestCase):
         found = shopport.merchants(shopport.ines.prg(DQ4.read_bytes()), 0x0E, 0)
         self.assertEqual(found[0x0C, 0x18, False], 5)
 
-    def test_fox_village_sells_only_what_has_its_own_price(self):
-        # 여우 마을(18/00) 도구점의 はがねのつるぎ 는 그 마을에서만 10G 라 빠지고 やくそう 만 남는다
+    def test_fox_village_sells_the_steel_sword_at_its_own_price(self):
+        # 여우 마을(18/00) 도구점의 はがねのつるぎ 는 그 마을에서만 10G(장소별 값 표, dq4localprice)
         self.assertEqual(self.report["local_prices"], ["48/00 はがねのつるぎ 10"])
-        self.assertEqual([s["fc"] for s in self.report["shops"] if s["map"] == "48/00"], [["やくそう", "はがねのつるぎ"]])
+        self.assertEqual([s["dq5"] for s in self.report["shops"] if s["map"] == "48/00"], [[0xA1, 0x0C]])
+        fox = self.report["keys"]["48/00-01"]
+        local = next(w for w in self.writes if w["note"].startswith("장소별 가게 값"))
+        self.assertIn(f"{int(fox, 16):02X} 0C 0A 00 FF", local["hex"])
 
     def test_lists_keyed_by_fc_group(self):
         # 3D holds three FC groups: テンペ (inn, church) and フレノール (item shop) get keys of their own.

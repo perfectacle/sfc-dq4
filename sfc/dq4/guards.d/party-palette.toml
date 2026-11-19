@@ -5,6 +5,8 @@ name = "dq4-party-palette"
 tier = "release"
 why = "장마다 일행 전용 OBJ 줄(dq4people.PARTIES)이 그 장 걷기 검사가 들르는 맵 그룹마다 CGRAM 에 그 일행 색으로 실리는지 헤드리스로 본다(장마다 출발 상태에서 그룹마다 두 맵으로 순간이동). 2장 엔돌(3장 그룹 40)이 줄 덮기 목록에서 빠져 아리나 일행이 1장 색(초록·파랑)으로 그려졌다. 선두 밖 일행(2장 크리프트·브라이, 3장 용병 스콧·로렌스)과 따라 걷는 그림(3장 개)은 JOINS 의 기록·깃발로 같은 맵마다 세워, 그 슬롯이 제 세트·줄로 그려지고 전용 줄 색이 맞는지, 공용 줄이면 NDS 색이 줄에 있고 맵 사이 색이 같은지 본다. #1170 전 롬은 용병 줄 5·6 을 덮지 않고 그림 5A·5F 가 없어 실패한다. 새 장은 PARTIES·JOINS 와 그 장 걷기 검사만 있으면 장면이 붙는다. 롬 없이 보는 짝은 test_dq4partylines"
 paths = [
+  "sfc/dq4/tools/dq4fcitems.py",
+  "sfc/dq4/tools/dq4localprice.py",
   "sfc/dq4/tools/dq4partypalcheck.py",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/people-pin.toml",

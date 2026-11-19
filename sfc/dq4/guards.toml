@@ -693,6 +693,8 @@ groups = ["ch1-build", "ch1-walk", "ch3-modules"]
 name = "dq4-shop-scene"
 why = "이무르 가게의 사기 1개·여러 개·개수 창 최대·금화 모자람·가방 가득·사기 취소·팔기 1개·여러 개·장비한 물건(알림 ▼, 장비 비트)·장비한 물건을 사기 목록에서 볼 때 동료 창 상태 끝 칸이 빈칸·팔기 취소($0F2C 되돌리기)·목록 B·사고 바로 장비·장비 못 하는 장비($0F21 남은 값)와 2장 가게(사란 무기·방어구, 바자 도구, 프레놀 도구, 엔돌의 빌린 물건 둘) 장면에서 금화·물건·장비 비트·가게 임시값이 기대대로인지(bsnes·snes9x, 같은 입력 두 번). 가게 훅·메시지·창·가게 표를 바꾸면 깨진다"
 paths = [
+  "sfc/dq4/tools/dq4fcitems.py",
+  "sfc/dq4/tools/dq4localprice.py",
   "sfc/dq4/tools/dq4growth.py",
   "sfc/dq4/tools/dq4party.py",
   "sfc/dq4/tools/dq4shopscene.py",
@@ -1523,7 +1525,7 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-story-items"
-why = "2장 사건 물건(황금의 팔찌 C6·지저귐의 꿀 BE 는 빌린 DQ5 자리, 도적의 열쇠는 DQ5 B7)을 どうぐ 에서 쓰면 자기 처리기(사건 물건 11:8BE4 「여기서는 아무 일도 일어나지 않았다」, 도적의 열쇠 11:8E43 열쇠 쓰기)가 돌아야 한다. 빌린 자리의 물건 표·처리기를 잘못 베끼면(B7 에 마법의 열쇠 처리기를 베껴 잠금 2 를 여는 일) 다른 길로 간다"
+why = "사건 물건(빌린 DQ5 열쇠 물건 자리, 도적의 열쇠는 DQ5 B7)을 どうぐ 에서 쓰면 자기 처리기가 돌아야 한다: FC 필드 효과 비트가 꺼진 것(황금의 팔찌·금고·여신상·말똥·구슬·승선권)은 11:8BB9 「아무 일도 일어나지 않았다.」, 켜진 꿀·편지는 11:8BE4 「여기서는…」, 도시락은 약초 11:8906, 피리는 11:8BD0, 도적의 열쇠는 11:8E43 열쇠 쓰기. 빌린 자리의 물건 표·처리기를 잘못 베끼면(B7 에 마법의 열쇠 처리기를 베껴 잠금 2 를 여는 일) 다른 길로 간다"
 paths = [
   "sfc/dq4/tools/dq4itemport.py",
   "sfc/dq4/tools/dq4storyitemcheck.py",
@@ -3396,6 +3398,8 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 # test_dq4guardpaths). 빠진 것은 `uv run --locked python sfc/dq4/tools/dq4guardpaths.py` 가 찍는다
 [groups]
 ch1-build = [
+  "sfc/dq4/tools/dq4fcitems.py",
+  "sfc/dq4/tools/dq4localprice.py",
   "fc/dq4/tools/dq4apu.py",
   "fc/dq4/tools/dq4bank.py",
   "fc/dq4/tools/dq4block.py",
@@ -3584,6 +3588,8 @@ ch1-build = [
   "tools/headless_slots.py",
 ]
 ch1-walk = [
+  "sfc/dq4/tools/dq4fcitems.py",
+  "sfc/dq4/tools/dq4localprice.py",
   "sfc/dq4/tools/dq4swampdeath.py",
   "sfc/dq4/tools/dq4environmentnight.py",
   "fc/dq4/tools/dq4bank.py",
@@ -3807,8 +3813,10 @@ groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
 name = "dq4-item-match"
-why = "빌드 롬의 가게 목록(차례)·값·상자 칸·タンス·つぼ·발밑 숨은 물건·몬스터가 떨어뜨리는 물건이 FC 원작 표의 같은 가게·칸·종과 같아야 한다(이식 길의 이름 바꿈·대체를 거쳐). 집합만 보면 같은 물건이 다른 가게·칸으로 간 것을 못 봐서 따로 잰다. 여우 마을 장소별 값은 알려진 줄"
+why = "빌드 롬의 가게 목록(차례)·값·상자 칸·タンス·つぼ·발밑 숨은 물건·몬스터가 떨어뜨리는 물건이 FC 원작 표의 같은 가게·칸·종과 같아야 한다(이식 길의 이름 바꿈·대체를 거쳐). 집합만 보면 같은 물건이 다른 가게·칸으로 간 것을 못 봐서 따로 잰다. 여우 마을의 강철 검 10G 는 그 가게 키의 장소별 값(dq4localprice)으로 견준다"
 paths = [
+  "sfc/dq4/tools/dq4fcitems.py",
+  "sfc/dq4/tools/dq4localprice.py",
   "sfc/dq4/tools/dq4itemmatch.py",
   "sfc/dq4/tools/dq4itemreach.py",
   "sfc/dq4/tools/dq4chestport.py",
@@ -3842,6 +3850,8 @@ groups = ["ch1-build"]
 name = "dq4-chapter-box-preview"
 why = "미리보기 판정(게임 장면 아님): 빌드가 넣는 장 제목·끝 상자와 명칭표의 뒤 장 제목(4·5장)을 빌드와 같은 그리기로 그려, 상자가 화면 안이고 금테가 끊기지 않고 제목이 상자 안 너비에 드는지 본다. 상자 너비를 제목 길이대로 바꾸는 고침이 가장 긴 제목에서 깨지는지가 여기서 갈린다. 보고만"
 paths = [
+  "sfc/dq4/tools/dq4fcitems.py",
+  "sfc/dq4/tools/dq4localprice.py",
   "sfc/dq4/tools/dq4boxjudge.py",
   "sfc/dq4/tools/dq4chapterbox.py",
   "sfc/dq4/tools/dq4menupatch.py",

@@ -31,19 +31,23 @@ class RewardTests(unittest.TestCase):
     def test_item_is_matched_by_name_ignoring_kana_type(self):
         self.assertEqual(chestport._reward(NAMES, ITEMS, 5), 0x30)
 
-    def test_item_without_dq5_counterpart_takes_substitute(self):
-        # ラックのたね → ふしぎなきのみ, うまのふん → やくそう
-        self.assertEqual(chestport._reward(NAMES, ITEMS, 2), 0x20)
-        self.assertEqual(chestport._reward(NAMES, ITEMS, 4), 0x01)
+    def test_fc_only_items_take_their_own_slots(self):
+        # DQ5 에 없는 FC 물건은 다른 DQ5 물건으로 바꾸지 않고 제 자리(dq4itemport.EVENT_ITEMS)로 준다
+        import dq4itemport
+        self.assertEqual(chestport.SUBSTITUTE, {})
+        self.assertEqual(chestport._reward(NAMES, ITEMS, 4), dq4itemport.HORSE_DUNG)
+        self.assertEqual(chestport._reward(NAMES, ITEMS, 3), dq4itemport.SHIP_TICKET)
 
     def test_borrowed_slot_item_is_not_substituted(self):
         # サントハイム 의 タンス 의 はねぼうし 는 빌린 자리(dq4itemport.BORROWED)로, きのぼうし 로 바꾸지 않는다
         import dq4itemport
-        self.assertNotIn("はねぼうし", chestport.SUBSTITUTE)
-        self.assertIn("はねぼうし", dq4itemport.BORROWED.values())
+        for name in ("はねぼうし", "ラックのたね"):
+            self.assertNotIn(name, chestport.SUBSTITUTE)
+            self.assertIn(name, dq4itemport.BORROWED.values())
 
     def test_item_waiting_for_its_event_is_empty(self):
-        self.assertEqual(chestport._reward(NAMES, ITEMS, 3), chestport.EMPTY)
+        with mock.patch.object(chestport, "LATER", {"じょうせんけん"}):
+            self.assertEqual(chestport._reward(NAMES, ITEMS, 3), chestport.EMPTY)
 
     def test_unknown_item_name_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "no DQ5 item named"):
