@@ -486,14 +486,15 @@ def read_screen(screen, rom_table):
     return {w: read_window(screen, w, rom_table) for w in screen.rects}
 
 
-# 단위 시험의 가짜 롬은 이보다 작다. 실제 SFC 롬(원본 DQ5 3MB, 빌드 롬 4MB)은 이보다 크다
-FAKE_ROM = 0x100000
+HEADER_TITLE = 0x7FC0           # LoROM 내부 헤더의 제목 21바이트
 
 
 def comparable(rom):
-    """맞대 볼 롬 글자가 있는 롬인가. 가짜 롬(FAKE_ROM 미만)이면 False. 그보다 크면서 원본 DQ5 보다 짧은 롬은 빌드가
-    잘못된 것이라, 글자 규칙이 통째로 안 도는 채 통과하지 않게 예외를 낸다."""
-    if len(rom) < FAKE_ROM:
+    """맞대 볼 롬 글자가 있는 롬인가. 롬 1bpp 글자 자리와 내부 헤더 제목이 모두 빈 롬(단위 시험의 가짜 롬)이면 False.
+    가짜 롬은 크기로 가르지 않는다: 판정 틀 시험의 가짜 롬은 원본 DQ5(1.5MB)보다 크다. 글자가 있으면서 원본 DQ5 보다
+    짧은 롬은 빌드가 잘못된 것이라, 글자 규칙이 통째로 안 도는 채 통과하지 않게 예외를 낸다."""
+    o = lorom(ROM_FONT)
+    if not any(rom[o:o + len(ROM_TILES) * 8]) and not any(rom[HEADER_TITLE:HEADER_TITLE + 21]):
         return False
     if DQ5_ROM.is_file() and len(rom) < DQ5_ROM.stat().st_size:
         raise ValueError(f'롬 {len(rom):#x}바이트가 원본 DQ5 보다 짧음: 글자를 읽을 수 없다')
@@ -501,8 +502,8 @@ def comparable(rom):
 
 
 def lines(screen):
-    """규칙 파일이 나눠 쓰는 읽기: {창 사각형: [Line]}. 모습마다 한 번만 읽는다. 글꼴(DQ4_GALMURI)이 없거나, 롬이 원본
-    DQ5 보다 짧아(단위 시험의 가짜 롬) 맞대 볼 롬 글자가 없으면 None."""
+    """규칙 파일이 나눠 쓰는 읽기: {창 사각형: [Line]}. 모습마다 한 번만 읽는다. 글꼴(DQ4_GALMURI)이 없거나, 단위 시험의
+    가짜 롬이라 맞대 볼 롬 글자가 없으면(comparable) None."""
     got = getattr(screen, '_wintext', False)
     if got is False:
         try:

@@ -1,6 +1,7 @@
 """화면 글자 읽기 상태: 장면마다 winwatch.log 에 글자를 읽은 줄 수를 한 줄 남긴다. 글꼴(DQ4_GALMURI)이 없어 dq4wintext 가
 글자를 읽지 못한 장면이면 그렇다고 남긴다. 글자 규칙(잘림·조사·모르는 잉크 등)이 「안 봐서 통과」 로 보이지 않게 하는
-표시다. 늘 report(실패로 올리지 않는다). 창이 떴는데 한 줄도 못 읽은 장면은 dq4winrule_wintextzero 가 실패로 건다.
+표시다. 늘 report(실패로 올리지 않는다). 실제 롬에서 글꼴을 못 실었거나 창이 떴는데 한 줄도 못 읽은 장면은
+dq4winrule_wintextzero 가 실패로 건다.
 """
 import dq4wintext as wt
 

@@ -34,22 +34,35 @@ class ZeroRuleTest(unittest.TestCase):
     def test_fake_rom_is_silent(self):
         self.assertEqual(self.judge(status.FAKE_ROM), ([], []))
 
-    def test_missing_font_is_noted_not_failed(self):
+    def test_missing_font_on_a_real_rom_fails(self):
         fail, note = self.judge(status.NO_FONT)
-        self.assertEqual(fail, [])
+        self.assertEqual(len(fail), 1)
+        self.assertIn('DQ4_GALMURI', fail[0][1])
         self.assertIn('DQ4_GALMURI', note[0][1])
+
+
+def titled(size):
+    rom = bytearray(size)
+    rom[wt.HEADER_TITLE:wt.HEADER_TITLE + 12] = b'DRAGONQUEST5'
+    return bytes(rom)
 
 
 class ComparableTest(unittest.TestCase):
     def test_fake_rom_is_not_compared(self):
         self.assertFalse(wt.comparable(bytes(0x30000)))
 
-    def test_real_sized_rom_shorter_than_dq5_is_an_error(self):
+    def test_fake_rom_larger_than_dq5_is_not_compared(self):
+        # 판정 틀 시험(test_dq4winwatch)의 가짜 롬은 3MB 로 원본 DQ5 보다 크다
+        dq5 = mock.Mock(is_file=lambda: True, stat=lambda: SimpleNamespace(st_size=0x180000))
+        with mock.patch.object(wt, 'DQ5_ROM', dq5):
+            self.assertFalse(wt.comparable(bytes(0x300000)))
+
+    def test_real_rom_shorter_than_dq5_is_an_error(self):
         dq5 = mock.Mock(is_file=lambda: True, stat=lambda: SimpleNamespace(st_size=0x300000))
         with mock.patch.object(wt, 'DQ5_ROM', dq5):
             with self.assertRaises(ValueError):
-                wt.comparable(bytes(0x200000))
-            self.assertTrue(wt.comparable(bytes(0x400000)))
+                wt.comparable(titled(0x200000))
+            self.assertTrue(wt.comparable(titled(0x400000)))
 
 
 if __name__ == '__main__':
