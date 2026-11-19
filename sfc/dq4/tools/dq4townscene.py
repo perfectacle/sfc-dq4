@@ -46,8 +46,16 @@ RECORD, RECORD_SIZE = 0x7E2040, 42
 STATE, HP, MP, EXP, MAX_HP, MAX_MP, LEVEL, NEXT_EXP = 0x01, 0x02, 0x04, 0x0B, 0x0E, 0x10, 0x12, 0x26
 ALIVE, POISON, CURSE = 0x80, 0x20, 0x08
 MORNING, NIGHT_START = 0x0050, 0x00F0
-# 프로브: 누르고 기다린 뒤 커서를 본다. 고르기 창은 누른 지 몇 프레임 안에 커서를 옮긴다
-PROBE_HOLD, PROBE_WAIT, PROBE_EVERY = 6, 14, 5
+# 고르기 창 알아보기: 창의 선택 고리(04:CB29)가 입력을 기다리는 동안 프레임마다 부르는 커서 깜박임(04:D162)이 $0AD9 를
+# 8씩 올린다. 이 박자가 바뀌는 동안만(선택 고리가 입력을 받는 중) 아래·위를 눌러 커서가 움직이는지 본다. 그래서 창이 몇 프레임
+# 늦게 입력을 받기 시작해도 판별이 늦거나 틀리지 않는다. 칸이 하나뿐인 창(일행 한 사람의 「누구에게」)은 커서가 움직이지 않아
+# 고르기 창으로 치지 않고 글 넘기기 A 가 고른다. 메시지가 키를 기다리는 동안은 선택 고리가 아니라 박자가 그대로다
+BLINK = 0x7E0AD9
+BLINK_FRAMES = 2
+PROBE_HOLD, PROBE_WAIT = 6, 14
+# 창 쌓기 맨 위 창 번호($09FF + 깊이 $0AD6). 메시지가 키를 기다리는 동안에도 깜박임 박자가 돌아, 맨 위가 메시지 창(00)이면
+# 고르기 창으로 보지 않는다
+STACK, DEPTH, MESSAGE_WINDOW = 0x7E09FF, 0x7E0AD6, 0x00
 # 글 넘기기 A 의 주기와 누르는 길이. 고르기 창이 뜨면 다음 A 전에 프로브가 먼저 알아본다. 필드 명령 창은 7E:007F & 7 = 0
 # 인 프레임에만 입력을 읽으므로(dq4npccheck.TALKS) 8프레임을 눌러야 빠지지 않는다
 ADVANCE_EVERY, ADVANCE_HOLD = 40, 8
@@ -89,11 +97,18 @@ class Probe:
         풀리지 않아 멈췄으므로(여관 잠들기·기도 기록 징글) 그동안은 프로브하지 않는다."""
         return self.c.rd(SOUND_QUEUE_TAIL) != self.c.rd(SOUND_QUEUE_HEAD)
 
-    def choosing(self):
-        """고르기 창이 입력을 기다리는지. 상태를 저장해 아래·위를 눌러 보고 커서가 움직였는지 본 뒤 되돌린다.
-        소리 대기열이 차 있으면 보지 않고 False."""
-        if self.sound_busy():
-            return False
+    def selecting(self):
+        """선택 고리가 입력을 받는 중인지: 상태를 저장해 입력 없이 BLINK_FRAMES 프레임 돌려 깜박임 박자가 바뀌는지 본 뒤
+        되돌린다."""
+        st, before = self.c.save(), self.c.rd(BLINK)
+        for _ in range(BLINK_FRAMES):
+            self.c.run(set())
+        moving = self.c.rd(BLINK) != before
+        self.c.load(st)
+        return moving
+
+    def movable(self):
+        """선택 고리가 도는 창에서 아래·위를 눌러 커서가 움직이는지(상태를 되돌림). 고리가 입력을 받는 중일 때만 부른다."""
         st, before = self.c.save(), self.c.rd(CURSOR)
         for key in ('down', 'up'):
             for _ in range(PROBE_HOLD):
@@ -105,6 +120,13 @@ class Probe:
             if moved:
                 return True
         return False
+
+    def choosing(self):
+        """커서를 옮겨 고르는 창이 입력을 기다리는지(선택 고리가 돌고, 커서가 움직임). 소리 대기열이 차 있으면 보지 않고
+        False."""
+        if self.sound_busy():
+            return False
+        return self.selecting() and self.movable()
 
     def coming(self, frames=LOOKAHEAD):
         """frames 프레임 쉬면 고르기 창이 뜨는지(상태를 저장해 보고 되돌림). 글 넘기기 A 가 막 뜨는 예/아니요를 기본값으로
@@ -145,6 +167,7 @@ class Probe:
         watch(frame) 는 프레임마다 부른다.
         돌려주는 것: {'choices': [(프레임, 고른 칸, 창이 뜰 때의 커서)], 'ended': 프레임 또는 None}."""
         choices, began, t0, press = [], None, self.c.n, True
+        blink, seen, choice = self.c.rd(BLINK), None, False
         while self.c.n - t0 < limit:
             if until and until():
                 return {'choices': choices, 'ended': self.c.n}
@@ -154,7 +177,16 @@ class Probe:
                 elif began is not None:
                     return {'choices': choices, 'ended': self.c.n}
             tail = default is None and len(choices) >= len(answers)
-            if not tail and (self.c.n - t0) % PROBE_EVERY == 0 and self.choosing():
+            # 지난 프레임에 선택 고리가 돌았으면(박자가 바뀜) 고르기 창이다. 입력 없이 지켜보기만 한다
+            selecting, blink = self.c.rd(BLINK) != blink, self.c.rd(BLINK)
+            depth = self.c.rd(DEPTH)
+            top = (self.c.rd(STACK + depth), depth)
+            if not selecting or top[0] == MESSAGE_WINDOW:
+                seen, choice = None, False
+            elif top != seen and not self.sound_busy():
+                # 창 하나가 뜰 때 한 번만 커서가 움직이는지 본다(상태 저장·되돌리기를 프레임마다 하지 않음)
+                seen, choice = top, self.movable()
+            if not tail and choice:
                 k = len(choices)
                 target = answers[k] if k < len(answers) else default
                 choices.append((self.c.n, target, self.c.rd(CURSOR)))
@@ -163,6 +195,7 @@ class Probe:
                 elif not self.pick(target):
                     choices[-1] = (self.c.n, f'{target} 에 닿지 못함', choices[-1][2])
                     return {'choices': choices, 'ended': None}
+                blink, seen, choice = self.c.rd(BLINK), None, False
                 continue
             phase = (self.c.n - t0) % ADVANCE_EVERY
             if phase == 0 and not tail:
