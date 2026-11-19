@@ -201,6 +201,11 @@ def chapter3_parts():
     return segs, groups, k + cw.HEAD, ch3_at
 
 
+
+def walk_text(slips, locked):
+    """Walker.walk 의 막힘·timeout [(프레임, 줄)] 과 사건 잠금 [(첫, 끝)] → walk.txt 와 같은 꼴의 글."""
+    return ''.join(f'f{f:05d} {e}\n' for f, e in slips) + 'locked ' + ','.join(f'{a}-{b}' for a, b in locked) + '\n'
+
 class Walker:
     """한 코어에서 구간을 차례로 걷는다."""
 
@@ -284,10 +289,18 @@ class Walker:
         tick = held = None
         tick_age = 0
         maps, buttons = [], set()
+        # lua/dq4walk.lua 가 walk.txt 에 적는 것과 같은 꼴의 막힘·timeout 줄과 사건 잠금 프레임 구간(lua/dq4walkstate.lua 의
+        # locked 줄). check 가 dq4ch1walkcheck.stuck_problems 로 판정한다
+        self.slips, self.locked, locked_from = [], [], None
         while True:
             self.step(buttons)
             n += 1
             buttons = set()
+            if self.rd(wc.LOCK) & 1:
+                locked_from = n if locked_from is None else locked_from
+            elif locked_from is not None:
+                self.locked.append((locked_from, n - 1))
+                locked_from = None
             here = (self.rd(0x7E00BC), self.rd(0x7E00BD))
             x, y = self.rd(0x7E3020), self.rd(0x7E3080)
             cur = cur or here
@@ -311,12 +324,16 @@ class Walker:
                     press, since = (p[1], w) if press is None else (press, since)
                     press -= 1
                     if w != since or press <= 0:
+                        if w == since:
+                            self.slips.append((n, f'until timeout window {w:02X}'))
                         press, wi = None, wi + 1
                 elif p[0] == 'cursor' or p[0] == 'pick':
                     c = self.rd(wc.PICK if p[0] == 'pick' else wc.CURSOR)
                     press = 120 if press is None else press
                     press -= 1
                     if c == p[1] or press <= 0:
+                        if c != p[1]:
+                            self.slips.append((n, f'{p[0]} timeout at {c} want {p[1]}'))
                         press, wi = None, wi + 1
                     elif press % 12 >= 6:
                         buttons = {'down' if p[0] == 'pick' or c < p[1] else 'up'}
@@ -329,6 +346,8 @@ class Walker:
                     press -= 1
                     since = since + 1 if calm else 0
                     if since >= wc.DONE_CALM or press <= 0:
+                        if since < wc.DONE_CALM:
+                            self.slips.append((n, f'done timeout window {w:02X}'))
                         press, since, wi = None, None, wi + 1
                     elif not closed:
                         if w == wc.ASK_WINDOW and c != 0:
@@ -342,12 +361,16 @@ class Walker:
                     press = wc.GONE_MAX if press is None else press
                     press -= 1
                     if x == wc.GONE_X or press <= 0:
+                        if x != wc.GONE_X:
+                            self.slips.append((n, f'gone timeout slot {p[1]} x={x:02X}'))
                         press, wi = None, wi + 1
                 elif p[0] == 'stand':
                     at = (self.rd(wc.NPC_X + p[1]), self.rd(wc.NPC_Y + p[1]), self.rd(wc.NPC_WALK + p[1]) & 0x80)
                     press = wc.STAND_MAX if press is None else press
                     press -= 1
                     if at == (p[2], p[3], 0) or press <= 0:
+                        if at != (p[2], p[3], 0):
+                            self.slips.append((n, f'stand timeout slot {p[1]:02X}'))
                         press, wi = None, wi + 1
                 elif p[0] == 'settle':
                     c = self.rd(wc.CURSOR)
@@ -356,6 +379,8 @@ class Walker:
                     press -= 1
                     since, held = (since + 1, held) if c == held else (0, c)
                     if since >= p[1] or press <= 0:
+                        if since < p[1]:
+                            self.slips.append((n, f'settle timeout cursor {c}'))
                         press, since, wi = None, None, wi + 1
                 elif p[0] in ('ask', 'open'):
                     w = self.rd(wc.WINDOW)
@@ -363,6 +388,8 @@ class Walker:
                     press, since = ((p[1] if p[0] == 'ask' else wc.OPEN_MAX), 0) if press is None else (press, since)
                     press -= 1
                     if w == want or press <= 0:
+                        if w != want:
+                            self.slips.append((n, f'{p[0]} timeout window {w:02X}'))
                         press, wi = None, wi + 1
                     else:
                         buttons = {'a'} if since % 16 < 8 else set()
@@ -379,9 +406,12 @@ class Walker:
                     stuck = stuck + 1 if (x, y) == last else 0
                     last = (x, y)
                     if stuck > STUCK:
+                        self.slips.append((n, f'stuck at {x},{y} heading {p[0]},{p[1]}'))
                         wi, stuck = wi + 1, 0
                     buttons = {'right' if x < p[0] else 'left' if x > p[0] else 'down' if y < p[1] else 'up'}
             if (last_change is not None and changes >= want and n >= last_change + after) or n >= maxf:
+                if locked_from is not None:
+                    self.locked.append((locked_from, n))
                 return maps or ['%02X/%02X' % here]
 
     def warp(self, arg, start='', late=(), party=''):
@@ -465,8 +495,10 @@ class Walker:
         if how == 'walk':
             problems += [f'{k} = {self.rd(self.flags[k][0]):02X}, 기대 {v:02X}' for k, v in opt.get('bytes', {}).items()
                          if self.rd(self.flags[k][0]) != v]
+            problems += wc.stuck_problems(name, walk_text(getattr(self, 'slips', []), getattr(self, 'locked', [])))
         return {'name': name, 'status': 'failed' if problems else 'passed', 'problems': problems, 'maps': maps,
-                'flags': [k for k, v in flags.items() if v], 'frame': self.c.n}
+                'flags': [k for k, v in flags.items() if v], 'frame': self.c.n,
+                **({'slips': [e for _, e in self.slips]} if how == 'walk' and getattr(self, 'slips', None) else {})}
 
     def ending(self, scene='end'):
         """끝 서술 둘을 넘기고 끝 상자에서 누른 뒤(dq4ch1walkcheck.ending_pre) 리셋되어 타이틀이 다시 뜨고 소리가 나는지."""
