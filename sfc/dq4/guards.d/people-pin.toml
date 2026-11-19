@@ -4,6 +4,8 @@
 name = "dq4-people-pin"
 why = "인물 그림 배치 표가 NDS 인물 시트와 맞아야 한다(표의 색 → 칸이 줄인 그림의 색과 같고, 표의 인물이 PEOPLE 과 같음). 맞지 않으면 빌드가 멈추거나, 표 없이 계산하던 때처럼 한 장의 인물을 더하고 빼기만 해도 다른 장 맵의 줄 색이 바뀐다. CI test 잡에는 시트가 없어 시트를 읽는 시험이 건너뛰어지므로 여기서 돌린다(건너뛰면 OK 줄이 아니라 실패)"
 paths = [
+  "sfc/dq4/tools/dq4fcitems.py",
+  "sfc/dq4/tools/dq4localprice.py",
   "sfc/dq4/people-pin.toml",
   "sfc/dq4/tools/dq4people.py",
   "sfc/dq4/tools/test_dq4people.py",

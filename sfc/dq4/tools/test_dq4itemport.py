@@ -29,6 +29,8 @@ class PriceTest(unittest.TestCase):
         self.assertEqual(dq4itemport.korean_names(), {0x01: "철 창", 0x34: "정의의 주판", 0x4E: "철의 앞치마",
                                                       0x61: "외톨이 메탈 갑옷", 0x89: "금 머리장식", 0x8C: "깃털 모자",
                                                   0x37: "미소의 지팡이", 0x84: "외톨이 메탈 방패", 0xAE: "운의 씨앗",
+                                                      0x6E: "핑크 레오타드", 0xC4: "정적의 구슬", 0xC1: "승선권",
+                                                      0xC2: "말똥",
                                                       0xC6: "황금의 팔찌", 0xBE: "지저귐의 꿀",
                                                       0xBB: "도시락", 0xBC: "철 금고", 0xBD: "은의 여신상",
                                                       0xC3: "왕자의 편지", 0xCA: "왕의 편지", 0xCB: "불가사의의 피리"})
@@ -97,8 +99,11 @@ class RomTest(unittest.TestCase):
                          [original.u8(t + 0xC7) for t in dq4itemport.RECORD])
         self.assertEqual(rom.u16(dq4itemport.USE_HANDLERS + (dq4itemport.FLUTE - 0xA1) * 2),
                          original.u16(dq4itemport.USE_HANDLERS + (0xC7 - 0xA1) * 2))
-        for item in (0xBA, 0xBF, 0xC2, 0xC4, 0xC9):
+        for item in (0xBA, 0xBF, 0xC5, 0xC9):
             self.assertEqual(dq5chest.item_name(rom, item), dq5chest.item_name(original, item))
+        # 4장 셋: 정적의 구슬은 ドラム 자리, 승선권·말똥은 C1·C2 를 한 줄로(7 + 6 = 8 + 5)
+        self.assertEqual([dq5chest.item_name(rom, i) for i in (0xC4, 0xC1, 0xC2)],
+                         ["せいじゃくのたま", "じょうせんけん", "うまのふん"])
         self.assertEqual(dq4itemport.name_at(rom, 0xBE), dq4itemport.name_at(original, 0xBE))
 
     def test_thief_key(self):

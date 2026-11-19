@@ -76,6 +76,8 @@ SHOPS.update({
     'endor-armor': ('40/00,50,54', (50, 55), 1, 'right'),    # 엔돌 (27,27), 낮
     # 텐페 FC 0E/00 (4,26): 괴물을 이긴 뒤(dq4ch2tempe.WON)의 목록에만 서는 도구점, 낮
     'tempe-item': ('3D/03,8,56', (8, 56), 0, 'up'),
+    # 3장 여우 마을 FC 18/00 (20,6): 카운터 (20,7) 아래 (20,8)
+    'fox-item': ('48/00,40,16', (40, 16), 0, 'up'),
 })
 X, Y = 0x7E3020, 0x7E3080
 FACE = (8, 24)         # 카운터 쪽을 누르는 프레임(돌아서려면 6프레임 넘게, 한 걸음보다 짧게), 걸음이 끝나기를 기다리는 프레임
@@ -87,6 +89,8 @@ START_ITEMS = (0x06, 0x48)
 HERB, ANTIDOTE, CHAIN_MAIL, WOOD_HAT = 0xA1, 0xA2, 0x4D, 0x87
 STEEL_SWORD, LEATHER_SHIELD, MOON_HERB = 0x0C, 0x75, 0xA7
 FLUTE = 0xCB            # dq4itemport.FLUTE
+PINK, LUCK_SEED = 0x6E, 0xAE   # dq4itemport.BORROWED: ピンクのレオタード·ラックのたね
+DUNG = 0xC2             # dq4itemport.HORSE_DUNG(2G)
 # 텐페의 괴물을 이긴 flag(dq4ch2tempe.WON). 그 뒤의 목록에만 도구점 판매자가 선다(dq4shopport.EVENT_LISTS)
 def _tempe_won():
     import dq4ch2tempe
@@ -107,6 +111,17 @@ def _alena():
 # 앞치마를 장비하지 못한다(FC 12:$8C9C, 실측 표: はがねのつるぎ·かわのたて 모두 아리나 불가)
 CH2 = (('flag', 'CHAPTER2'), ('poke', _alena()))
 ALENA_ITEMS = (0x62,)        # きぬのローブ, 장비(비트 0001)
+def _torneko():
+    """3장 가게 장면: 3장 flag(dq4ch3event.CHAPTER3)와 톨네코 기록. 롬이 없으면 flag 만(장면 표만 읽을 때)."""
+    import dq4ch1walkcheck as wc
+    import dq4ch3event as ch3
+    dq5 = Path(__file__).resolve().parents[3] / 'rom' / 'dq5.sfc'
+    flag = f'{0x2190 + ch3.CHAPTER3[0]:04X}|{ch3.CHAPTER3[1]:02X}'
+    return f'{flag};{wc.record_set(wc.chapter_hero(dq5.read_bytes(), 3))}' if dq5.exists() else flag
+
+
+CH3 = (('poke', _torneko()),)
+TORNEKO_ITEMS = (0x42, 0xBB)   # FC 3장 시작 소지품: 장비한 かわのよろい(비트 0001)와 おべんとう(dq4itemport.BENTO)
 # 엔돌 가게의 DQ5 에 없는 물건이 빌린 자리(dq4itemport.BORROWED)
 ABACUS, APRON = 0x34, 0x4E
 
@@ -201,6 +216,19 @@ SCENES = [
           SELL + (pick(CURSOR, 2), to('a', 0x00), wait(W_YESNO, QUIET), to('a', W_SHOP)),
           gold=26, items=BASE_ITEMS + (ANTIDOTE,), equip=0x0003, wram={QTY_MAX: 0},
           windows=(W_COMMAND, W_SHOP, W_SELL, W_YESNO, W_SHOP)),
+    # 빌린 자리의 FC 값: 핑크 레오타드 6300G·운의 씨앗 70G·말똥 2G 의 3/4
+    Scene('sell-pink', '핑크 레오타드 팔기(4725G)', 'item', (('gold', '20'), ('items', items(PINK, ANTIDOTE))),
+          SELL + (pick(CURSOR, 2), to('a', 0x00), wait(W_YESNO, QUIET), to('a', W_SHOP)),
+          gold=4745, items=BASE_ITEMS + (ANTIDOTE,), equip=0x0003, wram={QTY_MAX: 0},
+          windows=(W_COMMAND, W_SHOP, W_SELL, W_YESNO, W_SHOP)),
+    Scene('sell-luck', '운의 씨앗 팔기(52G)', 'item', (('gold', '20'), ('items', items(LUCK_SEED, ANTIDOTE))),
+          SELL + (pick(CURSOR, 2), to('a', 0x00), wait(W_YESNO, QUIET), to('a', W_SHOP)),
+          gold=72, items=BASE_ITEMS + (ANTIDOTE,), equip=0x0003, wram={QTY_MAX: 0},
+          windows=(W_COMMAND, W_SHOP, W_SELL, W_YESNO, W_SHOP)),
+    Scene('sell-dung', '말똥 팔기(1G)', 'item', (('gold', '20'), ('items', items(DUNG, ANTIDOTE))),
+          SELL + (pick(CURSOR, 2), to('a', 0x00), wait(W_YESNO, QUIET), to('a', W_SHOP)),
+          gold=21, items=BASE_ITEMS + (ANTIDOTE,), equip=0x0003, wram={QTY_MAX: 0},
+          windows=(W_COMMAND, W_SHOP, W_SELL, W_YESNO, W_SHOP)),
     Scene('sell-multi', '약초 3개 팔기(개수 창 위 세 번이어도 최대 3)', 'item',
           (('gold', '20'), ('items', items(HERB, HERB, HERB, ANTIDOTE))),
           SELL + (pick(CURSOR, 2), to('a', W_QTY), see(QTY_MAX, QTY_SELL | QTY_OPEN | 3), press('up', 3),
@@ -270,6 +298,17 @@ SCENES = [
           BUY + (pick(ITEM, HERB), to('a', W_QTY), to('a', W_YESNO), to('a', W_SHOP)),
           gold=4992, items=ALENA_ITEMS + (HERB,), equip=0x0001, wram={QTY_MAX: 0},
           windows=(W_COMMAND, W_SHOP, W_PARTNER, W_QTY, W_YESNO, W_SHOP)),
+    # 장소별 값(dq4localprice): 여우 마을에서만 강철 검이 FC 처럼 10G. 사란 무기점의 같은 검은 2000G(saran-weapon)
+    Scene('fox-item', '여우 마을 도구점에서 강철 검(장소별 값 10G)', 'fox-item', (('gold', '5000'),) + CH3,
+          BUY + (pick(ITEM, STEEL_SWORD), to('a', W_YESNO), to('a', 0x00), to('a', W_YESNO), to('a', W_SHOP)),
+          gold=4990, items=TORNEKO_ITEMS + (STEEL_SWORD,), equip=0x0001,
+          windows=(W_COMMAND, W_SHOP, W_PARTNER, W_YESNO, W_YESNO, W_SHOP)),
+    # 팔 때는 FC 도 물건 값(15:$B387)이라 여우 마을에서도 2000G 의 3/4
+    Scene('fox-sell', '여우 마을 도구점에 강철 검 팔기(1500G)', 'fox-item',
+          (('gold', '20'),) + CH3 + (('items', ','.join(f'{b:02X}' for b in TORNEKO_ITEMS + (STEEL_SWORD, ANTIDOTE))),),
+          SELL + (pick(CURSOR, 2), to('a', 0x00), wait(W_YESNO, QUIET), to('a', W_SHOP)),
+          gold=1520, items=TORNEKO_ITEMS + (ANTIDOTE,), equip=0x0001, wram={QTY_MAX: 0},
+          windows=(W_COMMAND, W_SHOP, W_SELL, W_YESNO, W_SHOP)),
     Scene('armor-cannot-equip', '$0F21 = 3 을 남긴 채 장비할 수 없는 체인 메일 사기: 한 벌만(350G)', 'armor',
           (('gold', '1000'),),
           BUY + (poke(QTY, 3), pick(ITEM, CHAIN_MAIL), see(QTY, 3), to('a', W_YESNO), to('a', 0x00), to('a', W_YESNO),

@@ -175,8 +175,8 @@ why = "조우 구역 표(23:96F3) 안 레코드를 FC 구역으로(dq5progresswr
 
 [[original]]
 stage = "chapter1"
-at = "23:B081~23:B1BD"
-why = "물건 값 바탕(23:B081)·배수(23:B159) 표에서 옮긴 가게가 파는 물건을 FC 값으로(dq4itemport)"
+at = "23:B081~23:B1C7"
+why = "물건 값 바탕(23:B081)·배수(23:B159) 표에서 옮긴 가게가 파는 물건과 빌린 자리(ピンクのレオタード 6E 까지)를 FC 값으로(dq4itemport)"
 
 [[original]]
 stage = "chapter1"

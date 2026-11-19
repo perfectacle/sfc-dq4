@@ -4,6 +4,9 @@ dq4storyitemcheck 와 같은 자리(산트하임 앞마당)·같은 입력으로
 한다. 장면마다 지켜볼 처리기와 쓰기 전·뒤 WRAM 칸(READ)을 보고 판정한다.
 
 - luck: ラックのたね(AE). 처리기 11:89A4 가 돌고, 운(7E:204A)이 1~3 오르고, 물건이 없어진다(7E:2056 = FF).
+- dung·orb·ticket: うまのふん(C2)·せいじゃくのたま(C4)·じょうせんけん(C1). FC 「しかし なにも おこらなかった。」 와 같은 글 18E
+  를 띄우는 いのちのいし 처리기 11:8BB9 가 돌고(たたかいのドラム·てんしのすず 처리기는 돌지 않음) 물건이 남는다(FC: 셋 다
+  쓰면 남음. いのちのいし 기록은 쓰면 없어짐).
 
   MESENCE=… LIBDIR=… python sfc/dq4/tools/dq4fcitemcheck.py --rom work/ch2/dq4-ch1-full.sfc --out work/fcitem
 """
@@ -40,8 +43,32 @@ def _luck(reads, hits):
     return problems
 
 
+NOTHING = dq4fcitems.NOTHING_USE
+
+
+def _nothing(item, own):
+    def judge(reads, hits):
+        problems = []
+        if hits.get(NOTHING, 0) == 0:
+            problems.append(f"처리기 {NOTHING:06X} 가 돌지 않음")
+        if own is not None and hits.get(own, 0):
+            problems.append(f"DQ5 처리기 {own:06X} 가 돎")
+        if reads[FIRST_ITEM][1] != item:
+            problems.append(f"물건 칸 {reads[FIRST_ITEM][1]:02X}(남아야 함)")
+        return problems
+    return judge
+
+
+# 원래 DQ5 롬의 그 자리 필드 처리기(11:8F5B 표): てんしのすず·たたかいのドラム. いのちのいし 자리는 처리기를 그대로 쓴다
+DQ5_HANDLERS = {dq4fcitems.SHIP_TICKET: 0x118BBD, dq4fcitems.HORSE_DUNG: None, dq4fcitems.SILENCE_ORB: 0x118BC1}
+
+
 CASES = {"luck": {"item": dq4fcitems.LUCK_SEED, "set": f"{LUCK:04X}={LUCK_START:02X}",
-                  "watch": (dq4fcitems.FIELD_AT,), "read": (LUCK, FIRST_ITEM), "judge": _luck}}
+                  "watch": (dq4fcitems.FIELD_AT,), "read": (LUCK, FIRST_ITEM), "judge": _luck},
+         **{name: {"item": item, "set": "", "watch": tuple(a for a in (NOTHING, DQ5_HANDLERS[item]) if a),
+                   "read": (FIRST_ITEM,), "judge": _nothing(item, DQ5_HANDLERS[item])}
+            for name, item in (("dung", dq4fcitems.HORSE_DUNG), ("orb", dq4fcitems.SILENCE_ORB),
+                               ("ticket", dq4fcitems.SHIP_TICKET))}}
 
 
 def one(mesence, rom, state, out, name):
@@ -51,7 +78,7 @@ def one(mesence, rom, state, out, name):
     if start is None:
         return {"case": name, "ok": False, "problems": ["순간이동 실패"]}
     run(mesence, rom, story.USE, dest, {
-        "STATE": str(start), "INPUT": story.INPUT, "SET": f"{story.items_set(case['item'])};{case['set']}",
+        "STATE": str(start), "INPUT": story.INPUT, "SET": ";".join(v for v in (story.items_set(case["item"]), case["set"]) if v),
         "WATCH": ",".join(f"{a:06X}" for a in case["watch"]), "READ": ",".join(f"{a:04X}" for a in case["read"])})
     use, read = dest / "use.txt", dest / "read.txt"
     if not use.exists() or not read.exists():

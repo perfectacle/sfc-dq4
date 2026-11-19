@@ -25,6 +25,7 @@ for path in (TOOLS, DQ5_TOOLS, FC_TOOLS):
         sys.path.insert(0, str(path))
 
 import dq4itemport  # noqa: E402
+import dq4localprice  # noqa: E402
 import dq4shop  # noqa: E402
 import dq5item  # noqa: E402
 import dq4shopkey  # noqa: E402
@@ -125,17 +126,34 @@ def _names(prg):
     return dq4shop.item_names(prg)[0]
 
 
+def has_list(prg, kind, fc_group, number):
+    """Whether 15:$B2CB finds a row for the place itself (in this kind's lists or the ones it falls through to) before
+    the FF row. That last row, うまのふん five times, is what a seller at a place without lists reads past the end: FC
+    レイクナバ 16/01 (10,00), a seller nobody can walk up to."""
+    order = sorted(dq4shop.KINDS, key=lambda x: dq4shop.list_start(prg, x))
+    for x in order[order.index(kind):]:
+        for g, k, _ in dq4shop.shop_lists(prg, x):
+            if g == 0xFF:
+                return False
+            if (g, k) == (fc_group, number):
+                return True
+    return False
+
+
 def has_goods(prg, kind, fc_group, number, items):
-    """Whether an FC service sells anything DQ5 has: a list kind needs one DQ5 item (dq5_items) in its FC list."""
+    """Whether an FC service sells anything DQ5 has: a list kind needs a list of its place (has_list) with one DQ5 item
+    (dq5_items) in it."""
     if kind not in LIST_KIND:
         return True
+    if not has_list(prg, kind, fc_group, number):
+        return False
     names = _names(prg)
     return any(_fold(names[i & 0x7F]) in items for i in dq4shop.lookup(prg, kind, fc_group, number))
 
 
 def merchants(prg, fc_group, number, items=None):
     """{(x, y, night): FC service kind} for the base person list (no story-flag list). With `items` (dq5_items),
-    a seller whose list has no DQ5 item at all only talks: レイクナバ 16/01 sells nothing but うまのふん."""
+    a seller without a list of its place or whose list has no DQ5 item at all only talks (has_goods)."""
     out = {}
     for x, y, _, kind, cond, _ in dq4shop.merchants(prg, fc_group, number):
         if any(FLAG_LIST in c for c in cond):
@@ -245,7 +263,7 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
     names, own_prices = dq4shop.item_names(prg)
     progress = json.loads(_dump_progress(dq5_path))
     counts = {k: sum(1 for s in progress["shops"] if s["kind"] == k) for k in range(4)}
-    services, shops, inns, prices = {}, [], {}, {}
+    services, shops, inns, prices, local = {}, [], {}, {}, {}
     report = {"shops": [], "missing_items": [], "local_prices": [], "inns": {}, "keys": {}, "prices": {},
               "event_sellers": {}}
     maps = sorted(GROUPS.values())
@@ -282,9 +300,11 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
                 for i in fc_items:
                     item = names[i & 0x7F]
                     price = dq4shop.price(prg, fc_group, fc_number, i & 0x7F)
-                    if price != own_prices.get(i & 0x7F):
-                        # 장소별 값(여우 마을 18 의 はがねのつるぎ 10G·うまのふん 2G, FC 15:$B2F7): DQ5 는 물건마다 값이
-                        # 하나라 그 물건을 목록에서 뺀다
+                    if price != own_prices.get(i & 0x7F) and _fold(item) in items:
+                        # 장소별 값(여우 마을 18 의 はがねのつるぎ 10G, FC 15:$B2F7): 그 가게 키에서만 그 값(dq4localprice)
+                        picked.append(items[_fold(item)])
+                        if local.setdefault((key, picked[-1]), price) != price:
+                            raise ValueError(f"{item}: FC prices {local[key, picked[-1]]} and {price} under key {key:02X}")
                         report["local_prices"].append(f"{group:02X}/{number:02X} {item} {price}")
                     elif _fold(item) in items:
                         picked.append(items[_fold(item)])
@@ -371,6 +391,7 @@ def port(dq5_path, dq4_path, inn_at, key_at, with_people=True):
          "note": "여관 표 주소"},
         *dq4shopkey.writes(key_at, rows, ONE_SHOT_AT, ONE_SHOT_GATE),
         *dq4itemport.writes(rom, prg, prices),
+        *dq4localprice.writes(rom, [(k, i, p) for (k, i), p in sorted(local.items())]),
     ]
     if coin:
         writes += [
