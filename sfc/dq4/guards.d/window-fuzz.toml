@@ -1,0 +1,35 @@
+# 무작위 입력 창 깨짐 장면(talkNN 대화 번호 훑기·shipN·partyNN·battleNN). 긴 가드라 PR 에서는 빠지고 main 머지 뒤와 배포 관문이 돌린다
+# (결정적 장면은 guards.toml 의 dq4-window-check 가 PR 에서 돌림). 형식은 tools/guards.py, 규칙은 guards 스킬
+
+[[check]]
+name = "dq4-window-fuzz"
+tier = "release"
+why = "dq4-window-check 와 같은 창 글자 깨짐·비침 판정을 무작위 입력 장면(대화 번호 64개 훑기 talk00~3F, 선실·동료·전투의 fuzz ship1~4·party21·22·battle11·12)에 돌린다. 한 번에 길어(약 600초) PR 에서는 빠지고 main 머지 뒤가 돌린다. 장면 나눔은 dq4windowcheck.RANDOM_SCENE."
+paths = [
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4windowname.asm",
+  "sfc/dq4/tools/dq4windowname.py",
+  "sfc/dq4/tools/dq4windowtext.py",
+  "sfc/dq4/tools/dq4windowcheck.py",
+  "sfc/dq4/tools/dq4bg3slot.py",
+  "sfc/dq4/tools/dq4ch2partytalk.py",
+  "sfc/dq4/tools/dq4ch2partytalk.tsv",
+  "sfc/dq4/tools/dq4ch2partytalk-text.tsv",
+  "sfc/dq4/tools/dq4ch2partytalk-people.tsv",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/lua/dq4walk.lua",
+  "sfc/dq4/tools/dq4msglabels.py",
+  "sfc/dq4/tools/dq4pins.py",
+  "sfc/dq5/tools/lua/dq5warp.lua",
+  "sfc/dq4/tools/dq4readset.py",
+  "sfc/dq4/tools/lua/dq4readset.lua",
+  "sfc/dq4/tools/dq4mesen.py",
+  "sfc/dq4/tools/lua/dq4bigenv.lua",
+  "sfc/dq4/tools/dq4winwatch.py",
+  "sfc/dq4/tools/lua/dq4winwatch.lua",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/wc && DQ4_WINDOWNAME_SYMBOLS=$PWD/work/wc/wn.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/wc/menu.sfc && rm -rf work/wc/out && uv run --locked python sfc/dq4/tools/dq4windowcheck.py --rom work/ch1/dq4-ch1.sfc --symbols work/wc/wn.sym --symbols-rom work/wc/menu.sfc --out work/wc/out --jobs 4 --every --kind random"
+parts = 3
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]

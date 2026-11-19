@@ -29,6 +29,7 @@
 
   MESENCE=... LIBDIR=... uv run --locked python sfc/dq4/tools/dq4windowcheck.py --rom work/ch1/dq4-ch1.sfc \\
       --symbols wn.sym --symbols-rom 메뉴롬 --out 새폴더
+  --kind fixed|random 은 결정적 장면만 또는 무작위 입력 장면만(RANDOM_SCENE)
   --part k/n 은 장면을 n 몫으로 나눠 k 번째만(기본 DQ4_GUARD_PART, CI 가드 하위 조각)
   (wn.sym·메뉴롬은 dq4menupatch.py build 를 DQ4_WINDOWNAME_SYMBOLS 와 함께 돌려 만든다. 창 코드 뱅크가 같은지 본다)
 """
@@ -97,6 +98,16 @@ RULER_PRE = (OPEN + 'right:4,wait:30,a:6,wait:60,a:6,wait:80,' + 'down:4,wait:20
 # 없이 상태 창에 이름이 넘치는 battle11·party21 의 구간
 EVERY = {'talk02-full': range(60, 700), 'shopwho': range(100, 1900), 'partyitems': range(60, 900),
          'battle11': range(330, 430), 'party21': range(3380, 3420)}
+
+
+# 무작위 입력 장면(talkNN 대화 번호 훑기·shipN·partyNN·battleNN 의 fuzz). 나머지는 고정 출발 상태와 정해진 입력의 결정적 장면이라
+# PR 가드(dq4-window-check, --kind fixed)가 돌리고, 무작위 입력 장면은 main 머지 뒤 가드(dq4-window-fuzz, --kind random)가 돌린다.
+# 장면을 더할 때 이름이 아래 꼴이 아니면 자동으로 결정적 장면(PR 가드)이다
+RANDOM_SCENE = re.compile(r'^(talk[0-9A-F]{2}|ship\d+|party\d+|battle\d+)$')
+
+
+def is_random(name):
+    return bool(RANDOM_SCENE.match(name))
 
 
 def fuzz(seed):
@@ -388,6 +399,8 @@ def main():
     ap.add_argument('--out', type=Path, required=True)
     ap.add_argument('--only', help='이 글자가 이름에 든 장면만')
     ap.add_argument('--scenes', help='이 이름의 장면만(쉼표로, 이름이 꼭 같아야 함. dq4compatscenes 의 하위 조각)')
+    ap.add_argument('--kind', choices=('fixed', 'random'),
+                    help='fixed 는 결정적 장면만(PR 가드), random 은 무작위 입력 장면만(main 머지 뒤 가드). 없으면 모두')
     ap.add_argument('--jobs', type=int, default=8)
     ap.add_argument('--every', action='store_true', help='EVERY 장면을 매 프레임 잰다')
     import dq4shards
@@ -408,6 +421,8 @@ def main():
         ['uv', 'run', '--locked', 'krpatch', 'sfc', 'lua'], text=True).strip()
     st = make_states(mesence, a.rom.resolve(), rom, out / 'states')
     todo = [s for s in scenes(st['shop'], st['shop'], st['shop'], st['battle']) if not a.only or a.only in s[0]]
+    if a.kind:
+        todo = [s for s in todo if is_random(s[0]) == (a.kind == 'random')]
     if a.scenes:
         want = a.scenes.split(',')
         unknown = sorted(set(want) - {s[0] for s in todo})
