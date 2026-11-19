@@ -33,6 +33,38 @@ def winwatch(events):
     return b'V' + struct.pack('<H', 5) + b''.join(b'E' + struct.pack('<Ii', f, i) for f, i in events)
 
 
+class GlyphTest(unittest.TestCase):
+    """필드 캔버스 슬롯은 이름의 평면 0 을 메시지 캔버스에도 쓰므로, VRAM 이 「캔버스 그대로」 인지로는 이름이 올라갔는지 알 수
+    없다. asm 이 적은 !wt_csum(열 수 << 12 | 글자 줄 평면 0 합의 낮은 12비트)과 VRAM 글자 줄을 견준다."""
+
+    def vram_with_glyph(self, lo, rows):
+        vram = bytearray(0x10000)
+        for k, row in enumerate(rows):
+            for r, b in enumerate(row):
+                vram[(0x1000 + (lo + k) * 8) * 2 + 2 * r] = b
+                vram[(0x1000 + (lo + k) * 8) * 2 + 2 * r + 1] = 0xFF
+        return bytes(vram)
+
+    def csum(self, i, cols, rows):
+        words = bytearray(36)
+        total = sum(sum(row) for row in rows) & 0xFFF
+        words[2 * (i - wc.KANA_ENTRIES):2 * (i - wc.KANA_ENTRIES) + 2] = (cols << 12 | total).to_bytes(2, 'little')
+        return bytes(words)
+
+    def test_matching_glyph_is_ok_and_blank_is_not(self):
+        rows = [bytes([1, 2, 3, 4, 5, 6, 7, 8]), bytes([9] * 8)]
+        cs = self.csum(20, 2, rows)
+        self.assertTrue(wc.glyph_ok(self.vram_with_glyph(0x122, rows), cs, 20, 0x122))
+        self.assertFalse(wc.glyph_ok(self.vram_with_glyph(0x122, [bytes(8), bytes(8)]), cs, 20, 0x122))
+
+    def test_no_record_or_outside_canvas_is_none(self):
+        vram = bytes(0x10000)
+        self.assertIsNone(wc.glyph_ok(vram, None, 20, 0x122))
+        self.assertIsNone(wc.glyph_ok(vram, bytes(36), 20, 0x122))
+        self.assertIsNone(wc.glyph_ok(vram, self.csum(13, 2, [bytes(8)] * 2), 13, 0x1E4))
+        self.assertIsNone(wc.glyph_ok(vram, bytes(36), 3, 0x40))
+
+
 class ScreenOffTest(unittest.TestCase):
     """화면이 꺼진 프레임(winwatch 기록의 모습 -1)은 깨짐 판정에서 뺀다. 꺼짐 기준은 dq4winwatch.lua: 강제 끔·밝기 0·주 화면에
     BG3 없음. 밝기 1 이상(어두워지는 중)은 꺼짐이 아니다."""
