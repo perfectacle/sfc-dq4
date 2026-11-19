@@ -114,7 +114,7 @@ RULER_PRE = (OPEN + 'right:4,wait:30,a:6,wait:60,a:6,wait:80,' + 'down:4,wait:20
 # 줄면 통과하며 새 수를 알린다(숫자를 고쳐 못박는다). 메시지 캔버스 전송이 창 타일맵보다 먼저 가는 차례와 가린 캔버스
 # 칸 슬롯을 고치면 0 이 되어야 한다(형식 문서 「남은 것」)
 NAME_FIRST, NAME_POSITIONS = 0x180, 8     # 이름 렌더러 자리(dq4windowname WnSlot, 자리마다 이름 5칸 + 위 줄 5칸)
-KNOWN = {'give-full': 5, 'give-shop-ch1': 245, 'equip-ch3': 6, 'sell-shop-ch1': 8, 'sell-equip-ch3': 7,
+KNOWN = {'give-full': 224, 'give-shop-ch1': 245, 'equip-ch3': 9, 'sell-shop-ch1': 8, 'sell-equip-ch3': 7,
          'sell-long-ch1': 90, 'sell-long-ch2': 89, 'sell-long-ch3': 89}
 # --every 로 매 프레임 재는 장면과 구간(장면의 원래 프레임에 더함). 넘친 목록 이름을 묶음 버퍼로 보내는 장면들과, 메시지 창
 # 없이 상태 창에 이름이 넘치는 battle11·party21 의 구간
@@ -290,7 +290,7 @@ def check(folder, rom, slots):
     out, seen, before = [], {}, {}
     for frame, d in sorted(dumps(folder).items()):
         vram_path = folder / f'v{frame:05d}.bin'
-        if not vram_path.exists() or len(d) < 5:
+        if not vram_path.exists() or len(d) < 5 or dark(folder / f's{frame:05d}.png'):
             continue
         vram = vram_path.read_bytes()
         keys, ages = d[KEYS], d[AGES]
@@ -374,6 +374,14 @@ def check(folder, rom, slots):
         if bad:
             out.append((frame, bad))
     return out
+
+
+def dark(shot):
+    """화면이 온통 검으면(전투로 넘어가는 페이드 등) 무엇이 비쳐도 보이지 않는다. 그 프레임의 칸은 재지 않는다."""
+    if not shot.exists():
+        return False
+    from PIL import Image
+    return Image.open(shot).convert('L').getextrema()[1] == 0
 
 
 def shared_names(vram, tilemap):
