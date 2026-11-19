@@ -4841,161 +4841,6 @@ WqRunBytes:
 ; 뒤, !wn_code2 ~ !wn_code2_end)에 둔다. 같은 뱅크라 JSR 로 부른다. 첫 구역에 넣을 자리가 모자라면 둘째 구역 쪽에 더한다
 assert pc() <= !wn_code_end
 org !wn_code2
-; 00:8E9E(NMI 작업 안, 게임이 메시지 캔버스를 보내기 직전, M = 8, X = 16). 캔버스 안에 그림을 올린 슬롯의 평면 1 을
-; 원래 글자 칸처럼 FF 로 되돌리고 슬롯을 비운다. 게임은 캔버스의 평면 0 만 보내므로, 위 줄 합성(테두리 무늬가 든 평면 1)이
-; 남아 메시지 창 빈 줄에 선으로 보였다. NMI 작업 안이라 큐용 NMI 변수(!wq_head·!wq_len·!wq_left)를 쓴다.
-WqClean:
-    ; 비울 슬롯이 없으면 곧바로 원래 길로(이 NMI 의 캔버스 DMA 는 귀선을 0줄까지 채우므로 앞일을 줄인다)
-    LDA.l $7E0000|!wt_dirty
-    ORA.l $7E0000|(!wt_dirty+1)
-    ORA.l $7E0000|(!wt_dirty+2)
-    ORA.l $7E0000|(!wt_dirty+3)
-    BEQ .send
-    ; 귀선 하나에 다 못 비우면 남은 슬롯은 다음 NMI 에 이어 비운다(미룬 채 보내면 그 슬롯은 키가 산 채 캔버스에 덮여
-    ; 목록이 이름을 다시 그리지 않았다). 다만 게임이 매 프레임 이름을 새로 그리는 화면에서는 슬롯이 늘 새로 차므로
-    ; !wq_cdefer_max 번 미룬 뒤에는 비우지 않고 보낸다
-    LDA.l $7E0000|!wq_cdefer
-    CMP #!wq_cdefer_max
-    BCC +
-.send
-    LDA #$00
-    STA.l $7E0000|!wq_cdefer
-    PHB
-    LDA #$00
-    PHA
-    PLB
-    LDA #$7E
-    JML $008EA3
-+
-    PHB
-    PEA $7E7E
-    PLB
-    PLB
-    REP #$30
-    STZ.w !wq_cleaned
-    LDA.w !wt_dirty
-    ORA.w !wt_dirty+2
-    BNE +
-    JMP .out
-+
-    LDX #$0000
-.slot
-    LDA.l WtBitLo,X
-    AND.w !wt_dirty
-    BNE +
-    LDA.l WtBitHi,X
-    AND.w !wt_dirty+2
-    BNE +
-    JMP .next
-+
-    LDA.w $1944
-    CMP #$8952
-    BEQ .battle
-    ; 필드의 캔버스 밖 슬롯은 메시지가 덮지 않아 그대로 둔다
-    LDA.l WtClassF,X
-    AND #$0020
-    BEQ +
-    JSR WqCleanBit
-    JMP .next
-+
-    JSR WqCleanRoom
-    BCC +
-    JMP .stop
-+
-    STZ.w !wt_keys,X
-    STZ.w !wt_ages,X
-    ; 필드 캔버스 슬롯은 글자 줄과 위 줄이 떨어져 있다(WtSlotF·WtUpperF)
-    LDA.l WtClassF,X
-    AND #$000F
-    JSR WqRunBytes
-    STA.w !wq_left
-    LDA.l WtUpperF,X
-    BEQ .joined
-    JSR WqCleanRun
-    LDA.l WtSlotF,X
-    JSR WqCleanRun
-    BRA .next
-.joined
-    ASL.w !wq_left
-    LDA.l WtSlotF,X
-    JSR WqCleanRun
-    BRA .next
-.battle
-    LDA.l WtClass,X
-    AND #$0020
-    BEQ +
-    JSR WqCleanBit
-    JMP .next
-+
-    JSR WqCleanRoom
-    BCC +
-    JMP .stop
-+
-    STZ.w !wt_keys,X
-    STZ.w !wt_ages,X
-    LDA.l WtClass,X
-    AND #$000F
-    JSR WqRunBytes
-    ASL
-    STA.w !wq_left
-    LDA.l WtSlot,X
-    JSR WqCleanRun
-.next
-    INX
-    INX
-    CPX.w #!wt_nslot*2
-    BCS .out
-    JMP .slot
-.stop
-    INC.w !wq_cleaned
-.out
-    ; 슬롯을 비웠으면(평면 1 을 되돌린 DMA) 이 NMI 의 캔버스 DMA 는 다음 NMI 로 미룬다($0F59 를 남기고 작업에서 돌아감).
-    ; 두 일을 한 귀선에 넣으면 캔버스 DMA 가 화면 그리는 줄로 넘어(V 5 → 16) 버려졌다
-    SEP #$20
-    LDA.w !wq_cleaned
-    BEQ +
-    INC.w !wq_cdefer
-    PLB
-    JML $008E9D
-+
-    STZ.w !wq_cdefer
-    PLB
-    ; 원래 명령: PHB / PHK / PLB(DB = 00) / LDA #$7E
-    PHB
-    LDA #$00
-    PHA
-    PLB
-    LDA #$7E
-    JML $008EA3
-
-; WqClean 안(M = X = 16, DB = 7E, X = 슬롯 × 2). 이 슬롯의 !wt_dirty 비트를 지운다
-WqCleanBit:
-    LDA.l WtBitLo,X
-    EOR #$FFFF
-    AND.w !wt_dirty
-    STA.w !wt_dirty
-    LDA.l WtBitHi,X
-    EOR #$FFFF
-    AND.w !wt_dirty+2
-    STA.w !wt_dirty+2
-    RTS
-
-; WqClean 안. 주사선이 !wq_clean_line 앞(귀선 안)이면 이 슬롯을 비울 자리로 셈해 비트를 지우고 C = 0. 아니면 C = 1(남은
-; 슬롯은 다음 NMI 에, 캔버스 DMA 도 그때)
-WqCleanRoom:
-    JSR WtLine
-    CMP #$00E1
-    BCC .no
-    CMP.w #!wq_clean_line
-    BCS .no
-    JSR WqCleanBit
-    INC.w !wq_cleaned
-    CLC
-    RTS
-.no
-    SEC
-    RTS
-
 ; 지금 그리는 창($0A00)이 물건 이름을 아홉 칸 그림으로 그리는 창(WtNineWins)이면 C = 1. M·X 는 그대로
 WtNineWin:
     PHP
@@ -6656,5 +6501,161 @@ WhMsgWin:
     STA.l !wh_msgwin
 .out
     RTS
+
+; 00:8E9E(NMI 작업 안, 게임이 메시지 캔버스를 보내기 직전, M = 8, X = 16). 캔버스 안에 그림을 올린 슬롯의 평면 1 을
+; 원래 글자 칸처럼 FF 로 되돌리고 슬롯을 비운다. 게임은 캔버스의 평면 0 만 보내므로, 위 줄 합성(테두리 무늬가 든 평면 1)이
+; 남아 메시지 창 빈 줄에 선으로 보였다. NMI 작업 안이라 큐용 NMI 변수(!wq_head·!wq_len·!wq_left)를 쓴다.
+WqClean:
+    ; 비울 슬롯이 없으면 곧바로 원래 길로(이 NMI 의 캔버스 DMA 는 귀선을 0줄까지 채우므로 앞일을 줄인다)
+    LDA.l $7E0000|!wt_dirty
+    ORA.l $7E0000|(!wt_dirty+1)
+    ORA.l $7E0000|(!wt_dirty+2)
+    ORA.l $7E0000|(!wt_dirty+3)
+    BEQ .send
+    ; 귀선 하나에 다 못 비우면 남은 슬롯은 다음 NMI 에 이어 비운다(미룬 채 보내면 그 슬롯은 키가 산 채 캔버스에 덮여
+    ; 목록이 이름을 다시 그리지 않았다). 다만 게임이 매 프레임 이름을 새로 그리는 화면에서는 슬롯이 늘 새로 차므로
+    ; !wq_cdefer_max 번 미룬 뒤에는 비우지 않고 보낸다
+    LDA.l $7E0000|!wq_cdefer
+    CMP #!wq_cdefer_max
+    BCC +
+.send
+    LDA #$00
+    STA.l $7E0000|!wq_cdefer
+    PHB
+    LDA #$00
+    PHA
+    PLB
+    LDA #$7E
+    JML $008EA3
++
+    PHB
+    PEA $7E7E
+    PLB
+    PLB
+    REP #$30
+    STZ.w !wq_cleaned
+    LDA.w !wt_dirty
+    ORA.w !wt_dirty+2
+    BNE +
+    JMP .out
++
+    LDX #$0000
+.slot
+    LDA.l WtBitLo,X
+    AND.w !wt_dirty
+    BNE +
+    LDA.l WtBitHi,X
+    AND.w !wt_dirty+2
+    BNE +
+    JMP .next
++
+    LDA.w $1944
+    CMP #$8952
+    BEQ .battle
+    ; 필드의 캔버스 밖 슬롯은 메시지가 덮지 않아 그대로 둔다
+    LDA.l WtClassF,X
+    AND #$0020
+    BEQ +
+    JSR WqCleanBit
+    JMP .next
++
+    JSR WqCleanRoom
+    BCC +
+    JMP .stop
++
+    STZ.w !wt_keys,X
+    STZ.w !wt_ages,X
+    ; 필드 캔버스 슬롯은 글자 줄과 위 줄이 떨어져 있다(WtSlotF·WtUpperF)
+    LDA.l WtClassF,X
+    AND #$000F
+    JSR WqRunBytes
+    STA.w !wq_left
+    LDA.l WtUpperF,X
+    BEQ .joined
+    JSR WqCleanRun
+    LDA.l WtSlotF,X
+    JSR WqCleanRun
+    BRA .next
+.joined
+    ASL.w !wq_left
+    LDA.l WtSlotF,X
+    JSR WqCleanRun
+    BRA .next
+.battle
+    LDA.l WtClass,X
+    AND #$0020
+    BEQ +
+    JSR WqCleanBit
+    JMP .next
++
+    JSR WqCleanRoom
+    BCC +
+    JMP .stop
++
+    STZ.w !wt_keys,X
+    STZ.w !wt_ages,X
+    LDA.l WtClass,X
+    AND #$000F
+    JSR WqRunBytes
+    ASL
+    STA.w !wq_left
+    LDA.l WtSlot,X
+    JSR WqCleanRun
+.next
+    INX
+    INX
+    CPX.w #!wt_nslot*2
+    BCS .out
+    JMP .slot
+.stop
+    INC.w !wq_cleaned
+.out
+    ; 슬롯을 비웠으면(평면 1 을 되돌린 DMA) 이 NMI 의 캔버스 DMA 는 다음 NMI 로 미룬다($0F59 를 남기고 작업에서 돌아감).
+    ; 두 일을 한 귀선에 넣으면 캔버스 DMA 가 화면 그리는 줄로 넘어(V 5 → 16) 버려졌다
+    SEP #$20
+    LDA.w !wq_cleaned
+    BEQ +
+    INC.w !wq_cdefer
+    PLB
+    JML $008E9D
++
+    STZ.w !wq_cdefer
+    PLB
+    ; 원래 명령: PHB / PHK / PLB(DB = 00) / LDA #$7E
+    PHB
+    LDA #$00
+    PHA
+    PLB
+    LDA #$7E
+    JML $008EA3
+
+; WqClean 안(M = X = 16, DB = 7E, X = 슬롯 × 2). 이 슬롯의 !wt_dirty 비트를 지운다
+WqCleanBit:
+    LDA.l WtBitLo,X
+    EOR #$FFFF
+    AND.w !wt_dirty
+    STA.w !wt_dirty
+    LDA.l WtBitHi,X
+    EOR #$FFFF
+    AND.w !wt_dirty+2
+    STA.w !wt_dirty+2
+    RTS
+
+; WqClean 안. 주사선이 !wq_clean_line 앞(귀선 안)이면 이 슬롯을 비울 자리로 셈해 비트를 지우고 C = 0. 아니면 C = 1(남은
+; 슬롯은 다음 NMI 에, 캔버스 DMA 도 그때)
+WqCleanRoom:
+    JSR WtLine
+    CMP #$00E1
+    BCC .no
+    CMP.w #!wq_clean_line
+    BCS .no
+    JSR WqCleanBit
+    INC.w !wq_cleaned
+    CLC
+    RTS
+.no
+    SEC
+    RTS
+
 assert pc() <= !wn_kana_table
 pullpc
