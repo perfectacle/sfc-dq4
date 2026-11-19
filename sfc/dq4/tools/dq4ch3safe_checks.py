@@ -77,7 +77,8 @@ SEGMENT_BLOCKS = {
         ('safe_cave_top', 'walk', '20,9;20,7;6,7;6,9;wait:200', {'map': safe.GATES, 'changes': 1, 'after': 60}),
         ('safe_cave_round', 'walk', '14,9;28,9;28,23;40,23;40,55;wait:200', {'map': safe.ENTRY, 'changes': 1, 'after': 60}),
         ('safe_cave_left', 'walk', '12,51;12,33;4,33;4,35;wait:200', {'map': safe.GATES, 'changes': 1, 'after': 60}),
-        ('safe_cave_button', 'walk', f'16,31;16,29;{SAFE_ASK};a:8;wait:60;a:8;wait:1300',
+        # 17,29 를 밟으면 수문 물음이 뜬다(물음이 열린 동안에는 그 너머로 걸을 수 없음)
+        ('safe_cave_button', 'walk', f'17,29;{SAFE_ASK};a:8;wait:60;a:8;wait:1300',
          {'map': safe.PIT, 'want': ['SAFE_DRAINED'], 'changes': 1, 'after': 60}),
         ('safe_cave_down', 'walk', '16,13;8,13;8,7;4,7;wait:200', {'map': safe.ROLL, 'changes': 1, 'after': 60}),
         ('safe_boulder', 'walk', '38,29;34,29;34,21;6,21;6,29;6,39;22,39;22,43;wait:800;22,61;16,61;wait:330;8,61;8,53;wait:260;'
@@ -103,8 +104,9 @@ SEGMENT_BLOCKS = {
          {'map': endor.CAVE_LOW_WET, 'changes': 1, 'after': 60, 'want': ['RAFT_RIDING']}),
         ('raft_low', 'walk', 'wait:200;6,63;6,55;8,55;22,55;22,39;26,39;26,35;64,35;64,53;68,53;68,63;wait:300',
          {'map': endor.CAVE_WET, 'changes': 1, 'after': 60, 'off': ['RAFT_RIDING'], 'bytes': {'RAFT_X': 3, 'RAFT_Y': 0x1B}}),
+        # 34,6 에 닿으면 단추 물음이 뜬다(그 위 34,5 로는 걸어갈 수 없음)
         ('raft_button', 'walk', 'wait:200;56,55;56,47;52,47;52,39;48,39;48,35;20,35;20,25;22,25;22,21;24,21;24,19;26,19;'
-         '26,11;30,11;30,7;34,7;34,5;ask:400;cursor:0;a:8;wait:60;a:8;wait:600',
+         '26,11;30,11;30,7;34,7;34,6;ask:400;cursor:0;a:8;wait:60;a:8;wait:600',
          {'map': endor.CAVE_DRY, 'cell': endor.BUTTON_LAND[1], 'want': ['ENDOR_BUTTON'], 'changes': 1, 'after': 60}),
         ('raft_dry', 'walk', 'wait:200;24,5;24,31;28,31;28,33;54,33;54,45;60,45;60,49;wait:300',
          {'map': endor.CAVE_LOW_DRY, 'changes': 1, 'after': 60}),

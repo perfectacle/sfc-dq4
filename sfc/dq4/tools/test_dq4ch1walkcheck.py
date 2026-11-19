@@ -362,7 +362,7 @@ class WalkSlipTests(unittest.TestCase):
         import dq4ch2walkcheck
         import dq4ch3walkcheck
         walks = {s[0] for segs in (wc.SEGMENTS, wc.CHAPTER2_END, dq4ch2walkcheck.SEGMENTS, dq4ch3walkcheck.SEGMENTS)
-                 for s in segs if s[1] == 'walk'} | {'scold'}    # dq4ch3lakanabacheck 의 꾸지람 단계
+                 for s in segs if s[1] == 'walk'}
         for (name, line), why in wc.KNOWN_STUCK.items():
             self.assertIn(name, walks)
             self.assertTrue(why)

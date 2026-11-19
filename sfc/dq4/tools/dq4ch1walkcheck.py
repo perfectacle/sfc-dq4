@@ -628,14 +628,9 @@ STUCK_FRAMES = 90
 KNOWN_STUCK = {
     # 2장 사당: 왕이 낫기 전 병사가 위 방으로 가는 틈을 막는 것이 이 구간이 보는 것이다(끝 칸 8,15 판정, 잠금 없음 실측)
     ('closed', 'stuck at 8,15 heading 8,11'): '사당 병사가 막음',
-    # 아래는 3장 막힘으로 사건 잠금 안인지 아직 재지 않았다(미확인 — 가르는 중). 사건이면 판정이 받아 주므로 지운다
-    ('shop_first', 'stuck at 17,53 heading 16,53'): '미확인: 무기점 꾸지람 사건(경로 주석)',
-    ('scold', 'stuck at 17,53 heading 16,53'): '미확인: 무기점 꾸지람 사건(경로 주석)',
-    ('bm_forest_in', 'stuck at 4,31 heading 248,104'): '미확인: 나무에 막힌 4,31 에서 멈춤(경로 주석)',
-    ('safe_cave_button', 'stuck at 17,29 heading 16,31'): '미확인: 17,29 에서 왼쪽이 막힘',
-    ('safe_cave_button', 'stuck at 17,29 heading 16,29'): '미확인: 17,29 에서 왼쪽이 막힘',
-    ('raft_button', 'stuck at 34,6 heading 34,5'): '미확인: 배가 34,6 에서 멈춤',
-    ('tunnel_below', 'stuck at 62,8 heading 62,7'): '미확인: 계단 아래 62,8 에서 위가 막힘',
+    # 3장 본몰로 숲 어귀: 들판의 입구 칸을 향해 걷다 숲 어귀(0,31)에 내린 뒤에도 같은 쪽으로 이어 걸어 나무에 막힌 4,31
+    # 에서 멈추는 것이 이 구간의 끝이다(끝 칸 판정, 잠금 없음 실측). 누름 길이로 걸으면 snes9x 에서 입구에 못 닿아 좌표로 걷는다
+    ('bm_forest_in', 'stuck at 4,31 heading 248,104'): '숲 어귀 끝 칸에서 멈춤',
 }
 WALK_SLIP = re.compile(r'^f(\d+) (stuck at .*|\S+ timeout.*)$', re.M)
 LOCKED = re.compile(r'^locked (.*)$', re.M)
