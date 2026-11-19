@@ -53,7 +53,7 @@ class EventTest(unittest.TestCase):
         self.assertLessEqual(ctx.code_at + len(code), ctx.slot.code[1])
         event = code[at['event'] - ctx.code_at:]
         warp = bytes((0x90, 0x3D, 0x03, 0x18, 0x07, 0x01, 0x80))
-        self.assertEqual(event, warp + b'\xc2' * tempe.PAUSE_STEPS + bytes((0xA0, 0x00, 0xA0, 0x5F)) +
+        self.assertEqual(event, warp + b'\xc2' * tempe.PAUSE_STEPS + bytes((0xA0, *at['fight'].to_bytes(3, 'little'))) +
                          bytes((0x60, ctx.msg['won'] & 0xFF, ctx.msg['won'] >> 8)) +
                          bytes((0xA0, *at['morning'].to_bytes(3, 'little'))) + warp + b'\xff')
         # 앞 절반의 바구니 이벤트: 메시지 60 lo hi 뒤의 옮기기를 이 이벤트로 뛰는 C3 으로

@@ -17,8 +17,10 @@ paths = [
   "sfc/dq4/tools/dq4compatcheck.py",
   "sfc/dq4/tools/dq4libretro.py",
   "sfc/dq4/tools/dq4cores.py",
+  "sfc/dq4/tools/dq4cores-bsnes-romtrace.patch",
+  "sfc/dq4/tools/dq4brkscan.py",
   "sfc/dq5/tools/dq5sram.py",
 ]
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4cores.py && rm -rf work/chaptersave && uv run --locked python sfc/dq4/tools/dq4chaptersavecheck.py --rom work/ch3/dq4-ch1-full.sfc --out work/chaptersave"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "dq4cores.py 로 빌드한 코어(또는 LIBRETRO_BSNES·LIBRETRO_SNES9X)"]
-groups = ["ch1-build"]
+groups = ["ch1-build", "ch1-walk", "ch3-modules"]
