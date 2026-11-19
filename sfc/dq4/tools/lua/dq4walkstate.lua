@@ -8,6 +8,13 @@ local L = require('lib')
 local messages, frame = {}, 0
 local limit = tonumber(os.getenv('LIMIT') or '400')
 emu.addEventCallback(function() frame = frame + 1 end, emu.eventType.endFrame)
+-- 사건(스크립트)이 조작을 쥔 프레임 구간(7E:19AE bit0 = 1). 걷기가 막힌 것이 사건 중이었는지를 판정이 보게 끝에 적는다
+local locked, lockedFrom = {}, nil
+emu.addEventCallback(function()
+  local on = emu.read(0x7E19AE, emu.memType.snesMemory) & 1 == 1
+  if on and not lockedFrom then lockedFrom = frame end
+  if not on and lockedFrom then locked[#locked + 1] = lockedFrom .. '-' .. (frame - 1); lockedFrom = nil end
+end, emu.eventType.endFrame)
 emu.addMemoryCallback(function()
   if #messages < limit then
     messages[#messages + 1] = string.format('%03X@%d', emu.getState()['cpu.a'] & 0xFFFF, frame)
@@ -24,6 +31,8 @@ L.write = function(name, data)
   end
   if name == 'walk.txt' then
     data = data .. 'messages ' .. table.concat(messages, ',') .. '\n'
+    local open = lockedFrom and {lockedFrom .. '-' .. frame} or {}
+    data = data .. 'locked ' .. table.concat(locked, ',') .. (#open > 0 and ((#locked > 0 and ',' or '') .. open[1]) or '') .. '\n'
     local save = os.getenv('SAVE')
     if save then
       -- 세이브스테이트는 다음 명령의 exec 훅에서 만들어지므로(lib.lua), walk.lua 의 emu.stop 을 그 뒤로 미룬다

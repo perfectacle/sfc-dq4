@@ -619,39 +619,47 @@ def warp_messages(msg_text):
     return out
 
 
-# 걷기 드라이버(tools/lua/walk.lua·lua/dq4walk.lua)는 경유점 앞에서 90프레임 막히거나 기다리는 토큰(until·done·ask 등)이
-# 한도에 닿으면 walk.txt 에 적기만 하고 다음 경유점으로 넘어간다. 끝 맵·깃발이 맞으면 통과라, 경로가 우연히 되살아난
-# 실행도 통과한다. 그래서 지금 경로가 늘 내는 막힘만 (구간 이름, walk.txt 줄) 로 여기 두고, 그 밖의 막힘·timeout 은 구간
-# 실패다. 목록의 막힘이 나오지 않는 것은 실패가 아니다(경로를 고쳐 없앴으면 목록에서 뺀다)
+# 걷기 드라이버(tools/lua/walk.lua·lua/dq4walk.lua)는 경유점 앞에서 STUCK_FRAMES 프레임 막히거나 기다리는 토큰(until·done·
+# ask 등)이 한도에 닿으면 walk.txt 에 적기만 하고 다음 경유점으로 넘어간다. 끝 맵·깃발이 맞으면 통과라, 경로가 우연히
+# 되살아난 실행도 통과한다. 그래서 막힘·timeout 은 구간 실패다. 다만 막힌 STUCK_FRAMES 프레임 내내 사건이 조작을 쥐고
+# 있었으면(lua/dq4walkstate.lua 가 적는 locked 구간, 7E:19AE bit0) 사건이 주인공을 데려간 것이라 실패로 치지 않는다.
+# 사건이 아닌 막힘 가운데 경로가 일부러 내는 것만 (구간 이름, walk.txt 줄) 로 KNOWN_STUCK 에 까닭과 둔다
+STUCK_FRAMES = 90
 KNOWN_STUCK = {
-    # 다리 위에서 개구리가 뛰어올라 말을 거는 사건이 35,9 에서 조작을 가져간다. 사건이 끝나면 다음 경유점으로 간다
-    ('prologue', 'stuck at 35,9 heading 34,9'): '개구리 사건',
-    # 병사가 갈라서고 주인공이 왕 앞까지 저절로 걸어가는 사건이 30,53 에서 조작을 가져간다
-    ('king', 'stuck at 30,53 heading 30,51'): '왕 앞 사건',
-    # 2장 사당: 왕이 낫기 전 병사가 위 방으로 가는 틈을 막는 것이 이 구간이 보는 것이다(끝 칸 8,15 판정)
+    # 2장 사당: 왕이 낫기 전 병사가 위 방으로 가는 틈을 막는 것이 이 구간이 보는 것이다(끝 칸 8,15 판정, 잠금 없음 실측)
     ('closed', 'stuck at 8,15 heading 8,11'): '사당 병사가 막음',
-    # 2장 탑 꼭대기: 꿀을 찾는 사건이 16,20 에서 조작을 가져간다
-    ('honey', 'stuck at 16,20 heading 16,18'): '꿀 찾기 사건',
-    # 2장 엔돌 무술 대회: 28,25 에서 링에 드는 사건이 조작을 가져간다
-    **{(f'endor_{k}', 'stuck at 28,25 heading 28,24'): '링에 드는 사건'
-       for k in ('lose', 'bout0', 'bout1', 'bout2', 'bout3', 'held', 'final')},
-    # 3장 레이크나바 무기점 첫 출근: 문 밖 17,53 에서 꾸지람 사건이 조작을 가져가 카운터 안으로 걸려 들어간다
-    ('shop_first', 'stuck at 17,53 heading 16,53'): '꾸지람 사건',
-    # 3장 본몰로 숲 어귀: 내린 뒤 걷기가 입구 칸 쪽으로 이어 걸어 나무에 막힌 4,31 에서 멈추는 것이 이 구간의 끝이다
-    ('bm_forest_in', 'stuck at 4,31 heading 248,104'): '나무에 막힘',
-    # 아래 셋은 까닭을 실측하지 못했다(끝 맵·깃발은 맞음). 경로를 고쳐 없애야 할 몫
-    ('safe_cave_button', 'stuck at 17,29 heading 16,31'): '17,29 에서 왼쪽이 막힘',
-    ('safe_cave_button', 'stuck at 17,29 heading 16,29'): '17,29 에서 왼쪽이 막힘',
-    ('raft_button', 'stuck at 34,6 heading 34,5'): '배가 34,6 에서 멈춤',
-    ('tunnel_below', 'stuck at 62,8 heading 62,7'): '계단 아래 62,8 에서 위가 막힘',
+    # 아래는 3장 막힘으로 사건 잠금 안인지 아직 재지 않았다(미확인 — 가르는 중). 사건이면 판정이 받아 주므로 지운다
+    ('shop_first', 'stuck at 17,53 heading 16,53'): '미확인: 무기점 꾸지람 사건(경로 주석)',
+    ('scold', 'stuck at 17,53 heading 16,53'): '미확인: 무기점 꾸지람 사건(경로 주석)',
+    ('bm_forest_in', 'stuck at 4,31 heading 248,104'): '미확인: 나무에 막힌 4,31 에서 멈춤(경로 주석)',
+    ('safe_cave_button', 'stuck at 17,29 heading 16,31'): '미확인: 17,29 에서 왼쪽이 막힘',
+    ('safe_cave_button', 'stuck at 17,29 heading 16,29'): '미확인: 17,29 에서 왼쪽이 막힘',
+    ('raft_button', 'stuck at 34,6 heading 34,5'): '미확인: 배가 34,6 에서 멈춤',
+    ('tunnel_below', 'stuck at 62,8 heading 62,7'): '미확인: 계단 아래 62,8 에서 위가 막힘',
 }
-WALK_SLIP = re.compile(r'^f\d+ (stuck at .*|\S+ timeout.*)$', re.M)
+WALK_SLIP = re.compile(r'^f(\d+) (stuck at .*|\S+ timeout.*)$', re.M)
+LOCKED = re.compile(r'^locked (.*)$', re.M)
+
+
+def locked_ranges(text):
+    """walk.txt 의 locked 줄 → [(첫 프레임, 끝 프레임)], 줄이 없으면 None."""
+    found = LOCKED.search(text)
+    if not found:
+        return None
+    return [tuple(int(v) for v in r.split('-')) for r in found[1].split(',') if r]
+
+
+def during_event(frame, ranges):
+    """frame 에 끝난 막힘(앞 STUCK_FRAMES 프레임)이 내내 사건 잠금 안이었나."""
+    return any(a <= frame - STUCK_FRAMES and frame <= b for a, b in ranges or ())
 
 
 def stuck_problems(name, text, known=None):
-    """walk.txt 의 막힘·timeout 줄 가운데 known(기본 KNOWN_STUCK)에 없는 것의 문제 줄."""
+    """walk.txt 의 막힘·timeout 줄 가운데 사건 중 막힘도, known(기본 KNOWN_STUCK)에 든 것도 아닌 것의 문제 줄."""
     known = KNOWN_STUCK if known is None else known
-    return [f'걷기가 막혀 넘어감: {e}' for e in WALK_SLIP.findall(text) if (name, e) not in known]
+    ranges = locked_ranges(text)
+    return [f'걷기가 막혀 넘어감: {e}' for f, e in WALK_SLIP.findall(text)
+            if (name, e) not in known and not (e.startswith('stuck at') and during_event(int(f), ranges))]
 
 
 def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, readset=False, flags=None):

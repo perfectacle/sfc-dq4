@@ -335,30 +335,38 @@ class RunFailureTests(unittest.TestCase):
 
 
 class WalkSlipTests(unittest.TestCase):
-    LOG = ('f00010 reached 30,53\nf00100 stuck at 30,53 heading 30,51\nf00200 until timeout window 32\n'
-           'f00300 cursor timeout at 0 want 1\nf00400 settle timeout cursor 2\nf00500 end map 36/00 x=30 y=53\n')
+    LOG = ('f00010 reached 30,53\nf00290 stuck at 30,53 heading 30,51\nf00300 until timeout window 32\n'
+           'f00400 cursor timeout at 0 want 1\nf00500 end map 36/00 x=30 y=53\nmessages E85@386\n')
 
-    def test_unknown_stuck_and_timeouts_are_problems(self):
-        known = {('king', 'stuck at 30,53 heading 30,51'): '왕 앞 사건'}
-        self.assertEqual(wc.stuck_problems('king', self.LOG, known),
-                         ['걷기가 막혀 넘어감: until timeout window 32', '걷기가 막혀 넘어감: cursor timeout at 0 want 1',
-                          '걷기가 막혀 넘어감: settle timeout cursor 2'])
-        # 같은 줄도 다른 구간이면 알려진 것이 아니다
+    def test_stuck_outside_an_event_and_timeouts_are_problems(self):
+        self.assertEqual(wc.stuck_problems('king', self.LOG, {}),
+                         ['걷기가 막혀 넘어감: stuck at 30,53 heading 30,51', '걷기가 막혀 넘어감: until timeout window 32',
+                          '걷기가 막혀 넘어감: cursor timeout at 0 want 1'])
+
+    def test_stuck_while_an_event_holds_control_is_fine(self):
+        held = self.LOG + 'locked 150-420\n'
+        self.assertEqual(wc.stuck_problems('king', held, {}),
+                         ['걷기가 막혀 넘어감: until timeout window 32', '걷기가 막혀 넘어감: cursor timeout at 0 want 1'])
+        # 막힌 90프레임 가운데 일부만 사건이면 사건이 데려간 것이 아니다
+        self.assertIn('걷기가 막혀 넘어감: stuck at 30,53 heading 30,51',
+                      wc.stuck_problems('king', self.LOG + 'locked 250-420\n', {}))
+        self.assertEqual(wc.locked_ranges('locked \n'), [])
+        self.assertIsNone(wc.locked_ranges(self.LOG))
+
+    def test_known_entry_is_per_segment(self):
+        known = {('closed', 'stuck at 30,53 heading 30,51'): 'x'}
+        self.assertNotIn('걷기가 막혀 넘어감: stuck at 30,53 heading 30,51', wc.stuck_problems('closed', self.LOG, known))
         self.assertIn('걷기가 막혀 넘어감: stuck at 30,53 heading 30,51', wc.stuck_problems('castle', self.LOG, known))
-
-    def test_clean_walk_and_known_entries_are_fine(self):
-        self.assertEqual(wc.stuck_problems('king', 'f00010 reached 30,51\nf00500 end map 36/00 x=30 y=51\n', {}), [])
-        self.assertEqual(wc.stuck_problems('king', 'f00100 stuck at 30,53 heading 30,51\n'), [])
 
     def test_known_entries_name_real_walk_segments(self):
         import dq4ch2walkcheck
         import dq4ch3walkcheck
         walks = {s[0] for segs in (wc.SEGMENTS, wc.CHAPTER2_END, dq4ch2walkcheck.SEGMENTS, dq4ch3walkcheck.SEGMENTS)
-                 for s in segs if s[1] == 'walk'}
-        for name, line in wc.KNOWN_STUCK:
+                 for s in segs if s[1] == 'walk'} | {'scold'}    # dq4ch3lakanabacheck 의 꾸지람 단계
+        for (name, line), why in wc.KNOWN_STUCK.items():
             self.assertIn(name, walks)
-            self.assertEqual(wc.WALK_SLIP.findall(f'f00001 {line}'), [line])
-
+            self.assertTrue(why)
+            self.assertEqual(wc.WALK_SLIP.findall(f'f00001 {line}'), [('00001', line)])
 
 if __name__ == '__main__':
     unittest.main()
