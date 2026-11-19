@@ -195,6 +195,35 @@ def kana_glyphs(d, font, render):
     return numbers
 
 
+# 가게 동료 창에서 이름이 다섯째 칸까지 차는 사람(장, 이름). 그 사람은 비교 값이 바꾸기 전·후 둘 다 세 자리면 값이 이름에
+# 붙는다(형식 문서 「가게 동료 창의 칸」 남은 것). 비교 값을 그림으로 그리는 고침이 들어가기 전까지, 이 밖의 사람이 생기면
+# 빌드가 멈춘다(4장부터 동료가 늘 때 바로 알게)
+SHOP_FULL_NAMES = {(1, '주인공 이름'), (2, '크리프트')}
+
+
+def shop_member_names():
+    """장 → (동료 창에 서는 이름, 이름 입력으로 정하는 주인공이 있는지)."""
+    import dq4ch2event
+    import dq4ch3event
+    import dq4groupbuild as g
+    person, companion = dict(g.PERSON_NAMES), dict(g.COMPANION_NAMES)
+    return {1: ([companion[0x05 * 4]], True),
+            2: ([dq4ch2event.ALENA_NAME] + [person[k] for k in sorted(person)], False),
+            3: ([dq4ch3event.TORNEKO_NAME, companion[0x28 * 4], companion[0x29 * 4]], False)}
+
+
+def shop_full_names(font):
+    """다섯째 칸까지 차는 (장, 이름). 이름 입력 주인공은 넉 자(dq4nameentry.MAX_CHARS)면 넉 자 한글 이름처럼 찬다."""
+    import dq4nameentry as ne
+    import dq4windowtext
+    out = set()
+    for chapter, (names, entered) in shop_member_names().items():
+        out |= {(chapter, n) for n in names if len(dq4windowtext.columns(font, n)) >= SHOP_NAME_CELLS}
+        if entered and ne.MAX_CHARS >= 4:
+            out.add((chapter, '주인공 이름'))
+    return out
+
+
 def shop_states():
     """가게 동료 창(3A)의 상태 문구 키(dq4windowtext.FIXED): 04:C511 표의 넷과 「 N개 소지」."""
     import dq4windowtext
@@ -321,6 +350,9 @@ def apply(data, font=None, asar=None):
     for key in shop_states():
         if len(dq4windowtext.columns(font, dq4windowtext.FIXED[key])) > SHOP_STATE_COLS:
             raise ValueError(f'가게 동료 창 상태 「{dq4windowtext.FIXED[key]}」 이 {SHOP_STATE_COLS}열을 넘음')
+    new_full = shop_full_names(font) - SHOP_FULL_NAMES
+    if new_full:
+        raise ValueError(f'가게 동료 창 이름이 다섯째 칸까지 차는 사람이 늘었음: {sorted(new_full)}')
     banks = {}
     text, _ = dq4windowtext.build(d, font, banks)
     for bank, blob in banks.items():
