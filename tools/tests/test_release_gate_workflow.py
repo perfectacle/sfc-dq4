@@ -197,7 +197,8 @@ class ReleaseGateWorkflowTest(unittest.TestCase):
     def test_permissions_read_only(self):
         for text in (self.text, GATE.read_text(encoding='utf-8'), WARM.read_text(encoding='utf-8')):
             self.assertEqual([x.strip() for x in top_block(text, 'permissions') if x.strip()], ['contents: read'])
-            self.assertNotRegex(text, r':\s*write\b')
+            # 쓰기 권한은 ci.yml main-guard-issues 잡의 issues: write 하나뿐(test_pr_guards_workflow 가 그 잡을 지킴)
+            self.assertNotRegex(text.replace('      issues: write\n', ''), r':\s*write\b')
 
     def test_actions_pinned_to_commits(self):
         for f in (WORKFLOW, GATE, WARM, *ALL_ACTIONS):

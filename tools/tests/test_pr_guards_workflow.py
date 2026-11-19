@@ -57,14 +57,24 @@ class PrGuardsWorkflowTest(unittest.TestCase):
             self.assertNotRegex(self.text, rf'\b{bad}\b')
         self.assertNotRegex(self.text, r'secrets:\s*inherit')
 
-    def test_newer_push_cancels_older_run(self):
-        # PR 과 main push 는 ref 하나에 그룹 하나라 새 푸시가 앞 run 을 끊는다. 손으로 띄운 run 은 run 마다 그룹이 달라 끝까지 돈다.
+    def test_newer_pr_push_cancels_older_run_but_main_runs_finish(self):
+        # PR 은 ref 하나에 그룹 하나라 새 푸시가 앞 run 을 끊는다. main push 는 길어서(release 등급 가드) 끊지 않고, 도는 것이
+        # 끝나면 가장 새 대기 하나만 돈다(GitHub 이 가운데 대기를 버림): 끝까지 간 실행만이 main 이 깨졌는지 안다.
+        # 손으로 띄운 run 은 run 마다 그룹이 달라 끝까지 돈다.
         block = '\n'.join(top_block(self.text, 'concurrency'))
         group = re.search(r'group: (.+)', block)[1]
         self.assertIn("format('{0}-{1}', github.event_name, github.ref)", group)
         self.assertIn("github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id)", group)
         self.assertNotIn('github.sha', group)
-        self.assertIn("cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}", block)
+        self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", block)
+
+    def test_main_run_leaves_runners_for_prs(self):
+        # 계정 동시 잡 20 가운데 main 실행은 조각을 4개까지만 함께 돌린다(guard-shards 의 max_parallel)
+        job = self.jobs['pr-guards']
+        self.assertIn("max_parallel: ${{ github.event_name == 'push' && 4 || 0 }}", job)
+        shards = (WORKFLOWS / 'guard-shards.yml').read_text(encoding='utf-8')
+        self.assertIn('max-parallel: ${{ inputs.max_parallel > 0 && inputs.max_parallel || 64 }}', shards)
+        self.assertLessEqual(guards.MAIN_SHARDS_MAX, 8)
 
     def test_gate_and_warm_never_cancel(self):
         # 관문은 손으로 띄운 결과를 끝까지 봐야 하고, 데우기는 관문과 그룹을 나눠 겹치지 않을 뿐 끊기면 안 된다.
@@ -113,8 +123,26 @@ class PrGuardsWorkflowTest(unittest.TestCase):
         self.assertEqual(len(plan), 1)
         self.assertLess(tests[0], plan[0])
         self.assertEqual(job_key(self.jobs['guard-plan'], 'if'), f"github.event_name == 'pull_request' || {MAIN_PUSH}")
-        # 권한은 읽기만
-        self.assertNotRegex(self.text, r':\s*write\b')
+        # 권한은 읽기만(쓰기는 main-guard-issues 의 issues: write 하나, 아래 시험이 지킴)
+        self.assertNotRegex(self.text.replace('      issues: write\n', ''), r':\s*write\b')
+
+    def test_only_the_issue_job_may_write_and_it_holds_no_secret(self):
+        self.assertEqual(self.text.count('issues: write'), 1)
+        job = self.jobs['main-guard-issues']
+        self.assertIn('issues: write', job)
+        self.assertNotIn('secrets.', job)
+        self.assertNotIn('guard-shards.yml', job)
+        self.assertEqual(job_key(job, 'needs'), '[guard-plan, pr-guards]')
+        self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/main'", job_key(job, 'if'))
+        self.assertIn("needs.pr-guards.result == 'failure'", job_key(job, 'if'))
+        # 실패해도 ci-ok(머지 관문)를 막는 잡이 아니다
+        self.assertNotIn('main-guard-issues', self.jobs['ci-ok'])
+
+    def test_main_push_adds_the_release_guards_and_a_pr_does_not(self):
+        plan = [s for s in self.steps['guard-plan'] if '--plan' in run_texts(s)][0]
+        self.assertIn('"${extra[@]}"', plan)
+        self.assertIn('if [ "$EVENT" = push ]; then extra=(--with-release); fi', plan)
+        self.assertIn('EVENT: ${{ github.event_name }}', plan)
 
     def test_verdict_job_gates_ci_ok(self):
         ok = self.jobs['ci-ok']

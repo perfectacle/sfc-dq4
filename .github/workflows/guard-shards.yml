@@ -27,6 +27,10 @@ on:
         description: Number of guard shards (1-64)
         type: number
         default: 8
+      max_parallel:
+        description: At most this many shards run at once (0 = all). A push to main sets it so its long run leaves runners for PRs
+        type: number
+        default: 0
       sweeps:
         description: Also run the seed sweeps of every release.toml, one unit per seed (mode release only)
         type: boolean
@@ -420,6 +424,7 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
+      max-parallel: ${{ inputs.max_parallel > 0 && inputs.max_parallel || 64 }}
       matrix:
         k: ${{ fromJSON(needs.build.outputs.shards) }}
     steps:

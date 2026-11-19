@@ -173,7 +173,7 @@ class GuardsTest(unittest.TestCase):
         self.assertTrue(any('tier' in p for p in problems), problems)
 
     def test_full_paths_turn_on_full_mode_for_their_track(self):
-        """바뀐 파일이 트랙의 [full] paths 에 맞으면 그 트랙 검사가 paths·등급과 상관없이 모두 걸린다. 다른 트랙은 그대로다."""
+        """바뀐 파일이 트랙의 [full] paths 에 맞으면 그 트랙의 PR 등급 검사가 paths 와 상관없이 모두 걸린다. 다른 트랙은 그대로다."""
         text = ('[full]\npaths = ["sfc/dq4/tools/dq4build.py"]\n'
                 + GOOD.replace('dq4-walk', 'dq4-heavy').replace('needs = ["rom"]', 'needs = ["rom"]\ntier = "release"')
                 + GOOD.replace('dq4-walk', 'dq4-grouped').replace('paths = ["sfc/dq4/tools/dq4ch*event.py"]',
@@ -187,7 +187,8 @@ class GuardsTest(unittest.TestCase):
         self.assertEqual(problems, [])
         changed = ['sfc/dq4/tools/dq4build.py']
         self.assertEqual(guards.full_files(checks, changed), changed)
-        self.assertEqual([c['name'] for c in guards.triggered(checks, changed)], ['dq4-heavy', 'dq4-grouped'])
+        # [full] 이 켜는 전체 모드는 PR 등급만: release 등급(dq4-heavy)은 main 머지 뒤·배포 관문이 돌린다
+        self.assertEqual([c['name'] for c in guards.triggered(checks, changed)], ['dq4-grouped'])
         self.assertEqual(guards.full_files(checks, ['sfc/dq4/tools/dq4ch1event.py']), [])
         self.assertEqual([c['name'] for c in guards.triggered(checks, ['sfc/dq4/tools/dq4ch1event.py'])], [])
         self.assertEqual([c['name'] for c in guards.triggered(checks, ['sfc/dq4/tools/dq4ch1event.py'], full=True)],

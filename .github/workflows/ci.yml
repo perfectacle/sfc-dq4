@@ -13,11 +13,12 @@ permissions:
   contents: read
 
 concurrency:
-  # A newer push to the same PR or to main supersedes the older run, so piled-up merges do not each run the
-  # guard shards; the latest main run and the nightly cache-warm still warm the caches. A manual run gets its
-  # own group and always finishes, and a push never cancels it.
+  # A newer push to the same PR supersedes the older run. Main runs are long (the release-tier guards), so they are
+  # never cancelled: a run in progress finishes and only the newest later push waits behind it (GitHub drops the
+  # older pending ones), so a red main is always found by a run that ran to the end, and the runs never pile up. A
+  # manual run gets its own group and always finishes, and a push never cancels it.
   group: ${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.run_id) || format('{0}-{1}', github.event_name, github.ref) }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Only pr-guards (through guard-shards.yml) gets the ROM bundle; every other job checks what needs none.
@@ -174,13 +175,17 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          EVENT: ${{ github.event_name }}
         run: |
+          # A push to main also runs every release-tier guard (the long ones a PR skips); a PR runs only the short ones.
+          extra=()
+          if [ "$EVENT" = push ]; then extra=(--with-release); fi
           if [ -n "$PR" ]; then gh api "repos/$REPO/pulls/$PR" --jq .body > "$RUNNER_TEMP/pr-body.md"; else : > "$RUNNER_TEMP/pr-body.md"; fi
           if [ -n "$(git diff --name-only "$BASE...$HEAD_SHA" -- .github tools/ci_gate_setup.sh tools/ci_cache.py tools/ci_artifact_check.py)" ]; then
             echo "::notice::이 PR 은 워크플로·CI 비밀 처리 파일을 바꾼다: 보호 테스트를 통과해 가드 잡이 돈다(리뷰에서 그 파일을 볼 것)"
           fi
           uv run --frozen python tools/guards.py --base "$BASE" --head "$HEAD_SHA" --pr-body "$RUNNER_TEMP/pr-body.md" \
-            --plan "$GITHUB_OUTPUT"
+            --plan "$GITHUB_OUTPUT" "${extra[@]}"
 
   # Same-repository branches and main only: a fork's code must never run with the ROM bundle secrets:
   # fork PRs skip this job and ci-ok rejects them (this repository takes no fork PRs).
@@ -193,6 +198,8 @@ jobs:
       mode: pr
       guards: ${{ needs.guard-plan.outputs.guards }}
       shards: ${{ fromJSON(needs.guard-plan.outputs.shards) }}
+      # A main run holds at most 4 runners, so the 16 left serve PRs (the account runs 20 jobs at once)
+      max_parallel: ${{ github.event_name == 'push' && 4 || 0 }}
       cache: true
     secrets:
       CI_ROM_TOKEN: ${{ secrets.CI_ROM_TOKEN }}
@@ -222,6 +229,37 @@ jobs:
           if [ "$RESULT" = success ]; then echo "CI 가드 통과: $GUARDS"; exit 0; fi
           echo "::error::CI 가드 잡이 $RESULT: $GUARDS"
           exit 1
+
+  # A merge to main runs the long guards (tier release) after the fact. When one fails, open or extend one issue per
+  # guard naming the PRs merged since the last green main run, so a red main is traced to a merge. Only this job
+  # may write (issues); it holds no ROM secret and reads only the verdict artifacts of the guard shards.
+  main-guard-issues:
+    needs: [guard-plan, pr-guards]
+    if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.pr-guards.result == 'failure' }}
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: guard-shard-pr-*
+          path: work/ci-report
+
+      - name: Open or extend the guard issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 tools/main_guard_issue.py --reports work/ci-report --sha "$SHA" --repo "$REPO" --run-url "$RUN_URL"
 
   # guards.toml format, and body result lines for the guards CI does not run: the local share (needs in
   # LOCAL_NEEDS, GUARD-02). The body comes from the API so a rerun of this job alone sees an edited body.
