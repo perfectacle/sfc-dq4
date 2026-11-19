@@ -32,7 +32,10 @@ USE = TOOLS / "lua" / "dq4itemuse.lua"
 # The Santeem castle courtyard, an open floor cell with no door or person in front.
 PLACE = ("3D/00", 30, 40)
 NOTHING, KEY_USE = 0x118BE4, 0x118E43
-HANDLER = {**{item: NOTHING for item in dq4itemport.EVENT_ITEMS}, dq4itemport.THIEF_KEY: KEY_USE}
+# あやかしのふえ 는 DQ5 피리 はるかぜのフルート(C7)의 필드 쓰기를 빌린다(dq4itemport.EVENT_TEMPLATES): 11:8F5B[C7 - A1]
+FLUTE_USE = 0x118BD0
+HANDLER = {**{item: NOTHING for item in dq4itemport.EVENT_ITEMS}, dq4itemport.THIEF_KEY: KEY_USE,
+           dq4itemport.FLUTE: FLUTE_USE}
 # Command window → どうぐ (right of つよさ), the only item, つかう. The field reads the pad once every 8 frames, so one
 # press of fixed length opens the command window only for some frame phases of the warp's arrival (a phase shift left
 # the window shut and every handler at 0). "open" pulses A until the window number changes.
