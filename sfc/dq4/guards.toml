@@ -3700,3 +3700,19 @@ paths = [
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4itemmatch.py --rom work/ch1/dq4-ch1.sfc && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4itemmatch.py --rom work/ch2/dq4-ch1.sfc && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4itemmatch.py --rom work/ch3/dq4-ch1.sfc"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 groups = ["ch1-build"]
+
+[[check]]
+name = "dq4-window-lint"
+why = "롬 실행 없이 창 레코드 꼴을 잰다: 줄 칸 합이 창 안쪽을 넘거나(가게 동료 창 3A 를 +1 만 넓혀 둘째 사람 상태 끝 빈칸이 오른쪽 테두리를 지운 것), 이름 다섯째 칸이 덮이거나, 창이 화면 밖이거나, 제목이 넘치거나, 함께 뜨는 창이 앞 창 글자를 원래보다 더 덮거나, 숫자 칸이 최댓값을 못 담는 것"
+paths = [
+  "sfc/dq4/tools/dq4windowlint.py",
+  "sfc/dq4/tools/dq4windowname.py",
+  "sfc/dq4/tools/dq4windowname.asm",
+  "sfc/dq4/tools/dq4windowtext.py",
+  "sfc/dq4/tools/dq4menupatch.py",
+  "sfc/dq4/tools/dq4neneshop.py",
+  "@ch3-modules",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4windowlint.py --rom work/ch1/dq4-ch1.sfc --base rom/dq5.sfc && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4windowlint.py --rom work/ch2/dq4-ch1.sfc --base rom/dq5.sfc && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4windowlint.py --rom work/ch3/dq4-ch1.sfc --base rom/dq5.sfc"
+needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
+groups = ["ch1-build"]
