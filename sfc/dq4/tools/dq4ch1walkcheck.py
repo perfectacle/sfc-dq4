@@ -619,6 +619,44 @@ def warp_messages(msg_text):
     return out
 
 
+# 걷기 드라이버(tools/lua/walk.lua·lua/dq4walk.lua)는 경유점 앞에서 STUCK_FRAMES 프레임 막히거나 기다리는 토큰(until·done·
+# ask 등)이 한도에 닿으면 walk.txt 에 적기만 하고 다음 경유점으로 넘어간다. 끝 맵·깃발이 맞으면 통과라, 경로가 우연히
+# 되살아난 실행도 통과한다. 그래서 막힘·timeout 은 구간 실패다. 다만 막힌 STUCK_FRAMES 프레임 내내 사건이 조작을 쥐고
+# 있었으면(lua/dq4walkstate.lua 가 적는 locked 구간, 7E:19AE bit0) 사건이 주인공을 데려간 것이라 실패로 치지 않는다.
+# 사건이 아닌 막힘 가운데 경로가 일부러 내는 것만 (구간 이름, walk.txt 줄) 로 KNOWN_STUCK 에 까닭과 둔다
+STUCK_FRAMES = 90
+KNOWN_STUCK = {
+    # 2장 사당: 왕이 낫기 전 병사가 위 방으로 가는 틈을 막는 것이 이 구간이 보는 것이다(끝 칸 8,15 판정, 잠금 없음 실측)
+    ('closed', 'stuck at 8,15 heading 8,11'): '사당 병사가 막음',
+    # 3장 본몰로 숲 어귀: 들판의 입구 칸을 향해 걷다 숲 어귀(0,31)에 내린 뒤에도 같은 쪽으로 이어 걸어 나무에 막힌 4,31
+    # 에서 멈추는 것이 이 구간의 끝이다(끝 칸 판정, 잠금 없음 실측). 누름 길이로 걸으면 snes9x 에서 입구에 못 닿아 좌표로 걷는다
+    ('bm_forest_in', 'stuck at 4,31 heading 248,104'): '숲 어귀 끝 칸에서 멈춤',
+}
+WALK_SLIP = re.compile(r'^f(\d+) (stuck at .*|\S+ timeout.*)$', re.M)
+LOCKED = re.compile(r'^locked (.*)$', re.M)
+
+
+def locked_ranges(text):
+    """walk.txt 의 locked 줄 → [(첫 프레임, 끝 프레임)], 줄이 없으면 None."""
+    found = LOCKED.search(text)
+    if not found:
+        return None
+    return [tuple(int(v) for v in r.split('-')) for r in found[1].split(',') if r]
+
+
+def during_event(frame, ranges):
+    """frame 에 끝난 막힘(앞 STUCK_FRAMES 프레임)이 내내 사건 잠금 안이었나."""
+    return any(a <= frame - STUCK_FRAMES and frame <= b for a, b in ranges or ())
+
+
+def stuck_problems(name, text, known=None):
+    """walk.txt 의 막힘·timeout 줄 가운데 사건 중 막힘도, known(기본 KNOWN_STUCK)에 든 것도 아닌 것의 문제 줄."""
+    known = KNOWN_STUCK if known is None else known
+    ranges = locked_ranges(text)
+    return [f'걷기가 막혀 넘어감: {e}' for f, e in WALK_SLIP.findall(text)
+            if (name, e) not in known and not (e.startswith('stuck at') and during_event(int(f), ranges))]
+
+
 def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, readset=False, flags=None):
     """한 구간을 걷는다. extra 는 시작에 더 둘 SET(묶음 첫 구간의 깃발·물건), party 는 dq5warp.lua PARTY.
     readset 은 run 과 같다. flags 는 setup 과 같다."""
@@ -687,6 +725,8 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
     for k in opt.get('off', []):
         if flags[k]:
             problems.append(f'깃발 {k} 켜짐')
+    if how != 'warp':
+        problems += stuck_problems(name, text)
     if 'field' in opt and bool(seen.get('BE', 0x80) & 0x80) == opt['field']:
         problems.append('필드가 아님' if opt['field'] else '필드에 있음')
     for want in opt.get('items', []):

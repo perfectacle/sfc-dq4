@@ -97,5 +97,15 @@ class WaitChildTest(unittest.TestCase):
         self.assertAlmostEqual(cc.unit_waits(out), 3.5)
 
 
+class WalkTextTests(unittest.TestCase):
+    def test_slips_and_lock_read_like_the_lua_walk_log(self):
+        import dq4ch1walkcheck as wc
+        text = cc.walk_text([(290, 'stuck at 30,53 heading 30,51'), (400, 'until timeout window 32')], [(150, 420)])
+        self.assertEqual(text, 'f00290 stuck at 30,53 heading 30,51\nf00400 until timeout window 32\nlocked 150-420\n')
+        self.assertEqual(wc.stuck_problems('king', text, {}), ['걷기가 막혀 넘어감: until timeout window 32'])
+        self.assertEqual(wc.stuck_problems('king', cc.walk_text([(290, 'stuck at 30,53 heading 30,51')], []), {}),
+                         ['걷기가 막혀 넘어감: stuck at 30,53 heading 30,51'])
+
+
 if __name__ == '__main__':
     unittest.main()
