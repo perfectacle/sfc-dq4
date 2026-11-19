@@ -93,6 +93,8 @@ NENE_VIEW_MORE = 7
 from dq4ch3slots import NENE_VIEW_MARK as NENE_MARK, NENE_VIEW_LINES as NENE_LINES, NENE_VIEW_SPLIT as NENE_SPLIT  # noqa: E402,E501  쪽 줄 수(1~8)는 창 높이를 고른다
 # 타일맵 버퍼 줄 y 가 화면에서는 한 줄 위(y − 1)에 보인다(BG3 세로 스크롤). FC 창 66 의 위 테두리가 화면 타일 2줄이라 y = 3
 NENE_VIEW_XY = (18, 3)
+# 네네 보기 표지(7E:2824 등)는 3장 변수 칸이라 다른 장에서는 다른 값이 남을 수 있어, 3장 flag 가 설 때만 표지로 본다
+CHAPTER3 = (0x7E2208, 0x08)     # dq4growth.CHAPTER3·dq4ch3event.CHAPTER3
 # 그 레코드와 별칭 갈래 자리. 창 제목 목록(04:AD78~, 제목 43개)을 dq4windowtext.fixed_records 가 한국어로 줄이고 뒤 코드
 # (04:AE7C) 앞까지 FF 로 채운 곳이라 제목 번호로는 닿지 않는다. 제목을 쓴 뒤 FF 인지 본다
 NENE_SPOT, NENE_SPOT_END = 0x04AE21, 0x04AE7C
@@ -413,7 +415,8 @@ def apply(data, font=None, asar=None):
             f'!shop_sell_spot = ${SELL_SPOT:06X}\n!shop_sell_end = ${SELL_SPOT_END:06X}\n'
             f'!nene_view_more = {NENE_VIEW_MORE}\n!nene_view_last = {NENE_VIEW_MORE + 1}\n'
             f'!nene_view_x = {NENE_VIEW_XY[0]}\n!nene_view_y = {NENE_VIEW_XY[1]}\n'
-            f'!nene_arrow = $7E{qp_cell(NENE_VIEW_XY[0] + 1, NENE_VIEW_XY[1]):04X}\n!nene_spot = ${NENE_SPOT:06X}\n!nene_mark = ${NENE_MARK:06X}\n!nene_lines = ${NENE_LINES:06X}\n!nene_split = ${NENE_SPLIT:06X}\n')
+            f'!nene_arrow = $7E{qp_cell(NENE_VIEW_XY[0] + 1, NENE_VIEW_XY[1]):04X}\n!nene_spot = ${NENE_SPOT:06X}\n!nene_mark = ${NENE_MARK:06X}\n!nene_lines = ${NENE_LINES:06X}\n!nene_split = ${NENE_SPLIT:06X}\n'
+            f'!chapter3_flag = ${CHAPTER3[0]:06X}\n!chapter3_bit = ${CHAPTER3[1]:02X}\n')
     defs += dq4battlemsg.apply(d, font or dq4menupatch.Font('galmuri9'), dq4menupatch.render,
                                len(ne.GLYPHS) + len(kana))
     with tempfile.TemporaryDirectory() as tmp:

@@ -1906,12 +1906,8 @@ WnText:
     BEQ .nine
     JSR WtNineWin
     BCS .ninewin
-    LDA.l !nene_mark
-    AND #$00FF
-    SEC
-    SBC.w #!nene_view_more
-    CMP #$0002
-    BCS +
+    JSR NeneOn
+    BCC +
 .ninewin
     LDA.w !wt_cols
     CMP #$000A
@@ -1996,6 +1992,7 @@ WnText:
     BEQ +
     JSR WtCenter
 +
+    JSR NeneSplitBase
     JSR WtAlloc
     BCC +
     ; 보이는 슬롯을 덮어야만 그릴 수 있으면 그리지 않는다(칸은 창이 깐 빈칸 그대로). 보이는 글자가 다른 그림으로 바뀌지 않게
@@ -2867,11 +2864,8 @@ QpFrame:
     LDA.l $7E0F2C
     AND #$40
     BNE .shop
-    LDA.l !nene_mark          ; 네네 보기 표지(7·8)일 때만. 다른 때 $0F20 은 가게 밖 값이라 표지로 쓰지 않는다
-    SEC
-    SBC #!nene_view_more
-    CMP #$02
-    BCS +
+    JSR NeneOn                ; 네네 보기 표지(7·8)일 때만. 다른 때 $0F20 은 가게 밖 값이라 표지로 쓰지 않는다
+    BCC +
     JSR NeneArrow
 +
     LDA.w $0AD9
@@ -2890,12 +2884,8 @@ QpFrame:
 ; 별칭 창 37 을 풀 때 네네 보기 표지(7·8)면 그 쪽 줄 수(!nene_lines)의 NeneViewRecs 레코드와 자리를, 아니면 원래 레코드를
 ; 돌려준다. M = 16, X = 16(창 번호 × 2, 보존), DB = 04
 NeneListFar:
-    LDA.l !nene_mark
-    AND #$00FF
-    SEC
-    SBC.w #!nene_view_more
-    CMP.w #$0002
-    BCS .plain
+    JSR NeneOn
+    BCC .plain
     SEP #$20
     LDA #!nene_view_x       ; 별칭 창은 레코드 자리 대신 별칭 레코드(89 02 0F)의 x·y 가 든 $0A43·$0A44 를 쓴다
     STA.l $7E0A43
@@ -3003,45 +2993,27 @@ NeneArrow:
 .put
     STA.l !nene_arrow
     ; 마지막 쪽을 앞 쪽 위에 겹칠 때(!nene_split = 그 쪽 물건 수 n) FC 창 66 처럼 n 줄 창의 아래 테두리를 그린다. 줄 k 는
-    ; 버퍼 줄 2k + 1(글자 윗점)·2k + 2 라, n + 1 번째 줄(앞 쪽 물건)의 윗 줄 2n + 3 의 x 19~28 은 빈칸, 아랫 줄 2n + 4 의
-    ; x 18~29 는 아래 테두리(n 줄 창의 아래 끝, FC 와 같은 화면 줄)로 덮는다
+    ; 버퍼 줄 2k + 1(글자 윗점)·2k + 2 라 테두리는 n + 1 번째 줄(앞 쪽 물건)의 윗 줄 2n + 3 에 둔다. 그 줄 글자 칸은 위 줄
+    ; 합성(바탕 = 뒤집은 아래 테두리 + 글자 맨 윗줄, NeneSplitBase)이라 칸 번호 096 이상은 두고, 나머지만 테두리로 쓴다
     SEP #$20
     LDA.l !nene_split
     BEQ .nosplit
     REP #$30
     PHX
     PHY
-    AND #$00FF
-    XBA
-    LSR                     ; n × 128 = 2n 줄 × 32 칸 × 2바이트
-    PHA
-    CLC
-    ADC.w #$00E6            ; (3 × 32 + 19) × 2: 버퍼 줄 3·x 19
-    TAX
-    LDY.w #10
--   LDA.w #$2001            ; 창 안 빈칸
+    JSR NeneBorderAt
+    LDY.w #12
+-   LDA.l $7E5000,X
+    AND #$03FF
+    CMP #$0096
+    BCS +
+    JSR NeneBorderTile
     STA.l $7E5000,X
++
     INX
     INX
     DEY
     BNE -
-    PLA
-    CLC
-    ADC.w #$0124            ; (4 × 32 + 18) × 2: 버퍼 줄 4·x 18
-    TAX
-    LDA.w #$A08B            ; 왼쪽 아래 모서리
-    STA.l $7E5000,X
-    LDY.w #10
--   INX
-    INX
-    LDA.w #$A08D            ; 아래 테두리 가로
-    STA.l $7E5000,X
-    DEY
-    BNE -
-    INX
-    INX
-    LDA.w #$E08B            ; 오른쪽 아래 모서리
-    STA.l $7E5000,X
     PLY
     PLX
 .nosplit
@@ -5673,6 +5645,90 @@ WtNoFit:
     RTS
 .fit
     CLC
+    RTS
+
+; C = 1 이면 네네 보기(3장 flag 가 서고 표지가 7·8) 중. A 는 바뀌고, M·X 는 그대로
+NeneOn:
+    PHP
+    SEP #$20
+    LDA.l !chapter3_flag
+    AND #!chapter3_bit
+    BEQ .no
+    LDA.l !nene_mark
+    SEC
+    SBC #!nene_view_more
+    CMP #$02
+    BCS .no
+    PLP
+    SEC
+    RTS
+.no
+    PLP
+    CLC
+    RTS
+
+; X = 겹친 마지막 쪽의 아래 테두리 줄(버퍼 줄 2n + 3) x 18 의 버퍼 자리(7E:5000 기준), M = X = 16
+NeneBorderAt:
+    LDA.l !nene_split
+    AND #$00FF
+    XBA
+    LSR                     ; n × 128 = 2n 줄 × 32 칸 × 2바이트
+    CLC
+    ADC.w #((3*32)+!nene_view_x)*2
+    TAX
+    RTS
+
+; Y = 남은 칸 수(12 = 왼쪽 모서리 … 1 = 오른쪽 모서리)의 아래 테두리 타일
+NeneBorderTile:
+    CPY.w #12
+    BNE +
+    LDA.w #$A08B            ; 왼쪽 아래 모서리
+    RTS
++
+    CPY.w #1
+    BNE +
+    LDA.w #$E08B            ; 오른쪽 아래 모서리
+    RTS
++
+    LDA.w #$A08D            ; 아래 테두리 가로
+    RTS
+
+; WnText .counted(DB = 7E, M = X = 16): 겹친 마지막 쪽에서 n + 1 번째 줄(앞 쪽 물건)을 그릴 때, 그 위 줄(2n + 3)에 아래
+; 테두리를 먼저 깔아 위 줄 합성이 테두리를 바탕으로 읽게 한다. 아래 테두리(뒤집은 08D·08B)는 선이 타일 위쪽이라 글자 맨
+; 윗줄(합성 7줄째)과 겹치지 않는다
+NeneSplitBase:
+    JSR NeneOn
+    BCC .out
+    LDA.l !nene_split
+    AND #$00FF
+    BEQ .out
+    PHX
+    PHY
+    JSR NeneBorderAt
+    TXA
+    CLC
+    ADC.w #$5000+(32*2)     ; 같은 x 의 아래 줄(2n + 4) 자리
+    SEC
+    SBC.w #!nene_view_x*2
+    STA.w !wn_c
+    LDA.w !wt_buf
+    CLC
+    ADC.w !wn_y
+    SEC
+    SBC.w !wn_c             ; 이번 글자 자리 − 그 줄 첫 칸
+    CMP.w #32*2
+    BCS .done               ; 그 줄이 아니다
+    LDY.w #12
+-   JSR NeneBorderTile
+    STA.l $7E5000,X
+    INX
+    INX
+    DEY
+    BNE -
+.done
+    PLY
+    PLX
+.out
     RTS
 
 assert pc() <= !wn_code2_end
