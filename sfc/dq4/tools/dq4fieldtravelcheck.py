@@ -55,6 +55,9 @@ CH2_SLOTS = (1, 3, 12, 13, 14)
 # 1장: バトランド(2)·イムル(7). 3장: エンドール(3)·ボンモール(4)·レイクナバ(10)
 CH1_SLOTS, CH3_SLOTS = (2, 7), (3, 4, 10)
 ROW = "down:6,wait:12,"
+# 마지막으로 그린 창 번호 7E:0A00 의 「どこへ」 목록 창(실측: ルーラ 목록 장면 끝). 목록을 여는 장면이 제자리만 보면
+# 창이 안 열려도 통과하므로 이 창이 끝에 떠 있는지 본다
+LIST_WINDOW = 0x4D
 VISITED, LAST_TOWN = 0x2030, 0x2193
 # 7E:21A5 bit1: the party owns the ship (00:D315), so ルーラ moves it (00:D2EB). 7E:21B5 bit7: the ship stands on the
 # field at 7E:21CD/21CF (2B:8367). $1954 = 03 is sailing.
@@ -86,6 +89,12 @@ def sail_moves(props, ship):
 def flags(slots):
     bits = sum(1 << s for s in slots)
     return ";".join(f"{VISITED + i:04X}={bits >> 8 * i & 0xFF:02X}" for i in range(3))
+
+
+def window_at_end(folder):
+    """장면 끝 WRAM 의 창 번호(16진 두 자리), 끝 WRAM 이 없으면 None."""
+    final = folder / "final.wram"
+    return f"{final.read_bytes()[0x0A00]:02X}" if final.is_file() else None
 
 
 def main():
@@ -187,7 +196,9 @@ def main():
     def run_list():
         got = field_scene(mesence, rom, state, out, "list", *leave(dests[0]), TO_LIST + ",wait:10",
                           SET=f"{SPELLS};{flags([d['slot'] for d in listed])}", MAXF="3000")
-        return "list", {"got": got, "ok": got == {"field": list(leave(dests[0]))}}
+        win = window_at_end(out / "list")
+        return "list", {"got": got, "window": win,
+                        "ok": got == {"field": list(leave(dests[0]))} and win == f"{LIST_WINDOW:02X}"}
 
     import dq4growth
     flag, bit = dq4growth.CHAPTER2
@@ -210,6 +221,16 @@ def main():
         want = {"field": list(by_slot[picks[k]]["land"])}
         return name, {"row": k, "slot": picks[k], "got": got, "want": want, "ok": got == want}
 
+    def run_kimera2_list():
+        """취소 장면과 같은 출발·입력에서 B 앞까지: 「どこへ」 목록이 떠 있어야 한다. 취소 장면은 목록이 안 떠도 자리·
+        물건이 그대로라 통과하므로, 같은 입력으로 목록이 뜬다는 것을 이 장면이 보인다."""
+        moves = CHIMERA.rsplit(",wait:600", 1)[0] + ",wait:80"
+        got = field_scene(mesence, rom, state, out, "kimera2-list", *away, moves,
+                          SET=f"{chapter2};2056={CHIMERA_ITEM:02X};{LAST_TOWN:04X}=00", MAXF="3000")
+        win = window_at_end(out / "kimera2-list")
+        return "kimera2-list", {"got": got, "window": win,
+                                "ok": got == {"field": list(away)} and win == f"{LIST_WINDOW:02X}"}
+
     def run_kimera2_cancel():
         moves = CHIMERA.rsplit(",wait:600", 1)[0] + ",wait:80,b:8,wait:200"
         got = field_scene(mesence, rom, state, out, "kimera2-cancel", *away, moves,
@@ -228,7 +249,7 @@ def main():
 
     jobs = [(f, (d,)) for d in listed for f in (run_ruler, run_chimera, run_visit)] + [(run_list, ())]
     jobs += [(run_kimera, (c, k)) for c, (_, slots) in kimera_chapters.items() for k in range(len(slots))]
-    jobs += [(run_kimera2_cancel, ()), (run_ruler2, (len(rows) - 1,))]
+    jobs += [(run_kimera2_list, ()), (run_kimera2_cancel, ()), (run_ruler2, (len(rows) - 1,))]
     jobs += [(run_visit, (d,)) for d in extra if not d["listed"]] + [(run_blocked, (fc,)) for fc in blocked]
     jobs += [(f, (d,)) for d in listed if d["ship"] for f in (run_ship, run_sail)]
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
