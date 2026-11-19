@@ -3719,3 +3719,16 @@ paths = [
 run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && uv run --locked python sfc/dq4/tools/dq4windowlint.py --rom work/ch1/dq4-ch1.sfc --base rom/dq5.sfc && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch2 --chapter2 && uv run --locked python sfc/dq4/tools/dq4windowlint.py --rom work/ch2/dq4-ch1.sfc --base rom/dq5.sfc && uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch3 --chapter3 && uv run --locked python sfc/dq4/tools/dq4windowlint.py --rom work/ch3/dq4-ch1.sfc --base rom/dq5.sfc"
 needs = ["rom", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS"]
 groups = ["ch1-build"]
+
+[[check]]
+name = "dq4-chapter-box-preview"
+why = "미리보기 판정(게임 장면 아님): 빌드가 넣는 장 제목·끝 상자와 명칭표의 뒤 장 제목(4·5장)을 빌드와 같은 그리기로 그려, 상자가 화면 안이고 금테가 끊기지 않고 제목이 상자 안 너비에 드는지 본다. 상자 너비를 제목 길이대로 바꾸는 고침이 가장 긴 제목에서 깨지는지가 여기서 갈린다. 보고만"
+paths = [
+  "sfc/dq4/tools/dq4boxjudge.py",
+  "sfc/dq4/tools/dq4chapterbox.py",
+  "sfc/dq4/tools/dq4menupatch.py",
+  "nds/dq4/tables/adopt.tsv",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4boxjudge.py preview"
+needs = ["rom", "DQ4_GALMURI"]
+groups = ["ch1-build"]
