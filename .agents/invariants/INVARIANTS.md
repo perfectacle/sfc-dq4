@@ -40,6 +40,7 @@
 | JOURNAL-02 | 일지는 한 마일스톤, 한 순서대로·틀렸던 것들·남은 것                   | [journal §JOURNAL-02](../skills/journal/SKILL.md#journal-02--일지-구성)        |
 | DOC-01     | 개인 경로를 쓰지 않고, 외부 자료는 링크                               | [journal §DOC-01](../skills/journal/SKILL.md#doc-01--개인-경로-금지)           |
 | DOC-02     | 형식 문서는 인터페이스와 새 형식만 짧게, 실측 과정은 PR 본문          | [journal §DOC-02](../skills/journal/SKILL.md#doc-02--형식-문서는-인터페이스만) |
+| DOC-03     | 새 todo·「남은 것」·가드·시험은 큰 파일 끝에 덧붙이지 않고 항목마다 파일 하나  | [journal §DOC-03](../skills/journal/SKILL.md#doc-03--새-todo남은-것은-조각-파일로) |
 | FIG-01     | 그림은 WebP, 트랙의 `<트랙>figures.py` 가 롬에서 다시 만든다          | [journal §FIG-01](../skills/journal/SKILL.md#fig-01--그림)                     |
 | COPY-01    | 한국어 문서는 합니다체, 번역투 없이, 용어집을 따른다                  | [korean-copy](../skills/korean-copy/SKILL.md)                                  |
 

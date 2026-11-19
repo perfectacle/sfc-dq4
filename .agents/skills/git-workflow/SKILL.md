@@ -41,6 +41,8 @@ description: 분석·코드·문서를 바꾸기 전에(워크트리·브랜치)
 
 ## 규칙
 
+새 항목은 조각 파일로 더한다: 가드 `guards.d/<이름>.toml`, todo·「남은 것」 `todo.d/`·`docs/remaining.d/`([DOC-03](../journal/SKILL.md#doc-03--새-todo남은-것은-조각-파일로)), 시험은 새 `test_*.py`. 큰 공용 파일 끝에 덧붙이면 동시 PR 이 충돌한다.
+
 ### GIT-01 — 브랜치와 PR
 
 분석 결과·코드·문서 모든 변경은 브랜치에서 하고 PR 로 main 에 넣는다. main 에 직접 커밋·push 하지 않는다.
