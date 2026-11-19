@@ -110,5 +110,67 @@ class CursorRuleTest(unittest.TestCase):
         self.assertEqual(rule.check(s), [])
 
 
+def digit(n):
+    return 0x02 + n
+
+
+def compare_row(s, r, c, before, after):
+    """장비 비교 창의 「before▶ after」: 숫자, ▶, 뒤 숫자는 세 칸에 오른쪽 맞춤."""
+    for k, ch in enumerate(str(before)):
+        s.put(r, c - len(str(before)) + k, digit(int(ch)), LETTER)
+    s.put(r, c, rule.CURSOR, TRIANGLE)
+    text = str(after).rjust(3)
+    for k, ch in enumerate(text):
+        s.put(r, c + 1 + k, 0x001 if ch == ' ' else digit(int(ch)), [0] * 8 if ch == ' ' else LETTER)
+
+
+class ArrowTest(unittest.TestCase):
+    """장비 비교 창의 능력치 화살표(숫자 사이 07C)는 커서로 세지 않는다."""
+    def setUp(self):
+        self.window = (2, 1, 8, 30)
+
+    def test_two_compare_arrows_pass(self):
+        s = Screen([self.window])
+        compare_row(s, 4, 6, 5, 10)
+        compare_row(s, 4, 20, 18, 36)
+        self.assertEqual(rule.check(s), [])
+
+    def test_one_and_three_digit_values_are_arrows(self):
+        s = Screen([self.window])
+        compare_row(s, 4, 6, 7, 7)
+        compare_row(s, 4, 20, 99, 100)
+        self.assertEqual(rule.check(s), [])
+
+    def test_two_cursors_not_between_numbers_still_fail(self):
+        s = Screen([self.window])
+        for r in (4, 6):
+            s.put(r, 3, rule.CURSOR, TRIANGLE)
+            s.put(r, 4, 0x194, LETTER)
+        self.assertIn('2개', rule.check(s)[-1][2])
+
+    def test_arrows_do_not_hide_two_real_cursors(self):
+        s = Screen([self.window])
+        compare_row(s, 4, 10, 5, 10)
+        compare_row(s, 4, 22, 18, 36)
+        for r in (5, 6):
+            s.put(r, 3, rule.CURSOR, TRIANGLE)
+            s.put(r, 4, 0x194, LETTER)
+        self.assertIn('2개', rule.check(s)[-1][2])
+
+    def test_number_picker_cursor_counts(self):
+        """메시지 빠르기 같은 숫자 고르기 줄 「4▶5 6」 의 커서는 화살표가 아니다."""
+        s = Screen([self.window])
+        for k, n in enumerate((1, 2, 3, 4)):
+            s.put(4, 3 + 2 * k, digit(n), LETTER)
+            s.put(4, 4 + 2 * k, 0x001, [0] * 8)
+        s.put(4, 10, rule.CURSOR, TRIANGLE)
+        s.put(4, 11, digit(5), LETTER)
+        s.put(4, 12, 0x001, [0] * 8)
+        s.put(4, 13, digit(6), LETTER)
+        s.put(6, 3, rule.CURSOR, TRIANGLE)
+        s.put(6, 4, 0x194, LETTER)
+        self.assertIn('2개', rule.check(s)[-1][2])
+
+
 if __name__ == '__main__':
     unittest.main()

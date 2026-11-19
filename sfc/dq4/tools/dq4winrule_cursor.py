@@ -1,7 +1,8 @@
 """UI 깨짐 규칙 커서: 고르기 손가락 ▶(BG3 칸 07C, 그림이 롬 1bpp 글자 07C 와 같은 칸)가 (1) 창 테두리 칸에 있다(어느 창에도
 들지 않는 ▶ 는 틀의 「창 밖」 이 잡는다), (2) 글자 위에 섰다 — 바로 오른쪽 칸이 그려 넣은 칸(롬 글자 칸 01~8A 밖)이고 왼쪽 첫 열에 잉크가 있다(한글은 앞 1점을
 비우고 그리므로, 첫 열 잉크는 ▶ 가 앞 글자를 덮어 잘린 것. 「▶ㅂㅂㅂ」 꼴), (3) 가리키는 줄이 비었다 — 오른쪽 칸들(같은 칸 줄과 위 한 줄)에 창 끝까지 잉크가
-없다(그 줄이 위 창에 일부라도 가려지면 보지 않는다), (4) 한 창 안쪽에 ▶ 가 둘 이상이다. dq4winwatch 의 규칙 파일.
+없다(그 줄이 위 창에 일부라도 가려지면 보지 않는다), (4) 한 창 안쪽에 ▶ 가 둘 이상이다. 장비 비교 창이 숫자 사이에 찍는 능력치
+화살표(같은 칸 07C)는 커서로 보지 않는다(is_arrow). dq4winwatch 의 규칙 파일.
 위 창에 가려진 칸은 보지 않는다.
 
 잉크는 창 바탕색(창 안쪽 칸에서 가장 많은 색)과 투명(0)이 아닌 점이다.
@@ -20,6 +21,13 @@ KNOWN = (
 )
 CURSOR = 0x7C
 ROM_FONT = 0x04E528
+# 롬 글자 숫자 0~9 와 빈칸
+DIGITS = range(0x02, 0x0C)
+BLANK = 0x01
+# 장비 비교 창은 능력치가 바뀌는 「→」 로 커서와 같은 칸 07C 를 숫자 사이에 찍는다(「5▶ 10」「7▶  7」: 뒤 숫자는 세 칸에
+# 오른쪽 맞춤). 왼쪽이 숫자이고 오른쪽 세 칸이 오른쪽 맞춘 수인 ▶ 만 화살표로 보고 커서로 세지 않는다. 숫자 고르기 줄의
+# 커서(「4▶5 6」)는 바로 뒤가 숫자이고 그다음이 빈칸이라 여기 들지 않는다
+ARROW_RIGHT = (('b', 'b', 'd'), ('b', 'd', 'd'), ('d', 'd', 'd'))
 # 롬 1bpp 글자 칸. 원본 DQ5 가나는 첫 열부터 잉크가 있어 덮음 검사에서 뺀다
 ROM_TILES = range(0x01, 0x8B)
 
@@ -49,6 +57,13 @@ def is_cursor(screen, r, c, glyph):
     return [[int(v != bg and v != 0) for v in row] for row in px] == glyph
 
 
+def is_arrow(screen, r, c):
+    def kind(cc):
+        t = screen.word(r, cc) & 0x3FF
+        return 'd' if t in DIGITS else 'b' if t == BLANK else 'x'
+    return kind(c - 1) == 'd' and tuple(kind(c + k) for k in (1, 2, 3)) in ARROW_RIGHT
+
+
 def background(screen, w):
     r1, c1, r2, c2 = w
     count = Counter()
@@ -70,7 +85,8 @@ def check(screen):
         return []
     glyph = cursor_glyph(rom)
     out = []
-    cursors = [(r, c) for r in range(32) for c in range(32) if screen.visible(r) and is_cursor(screen, r, c, glyph)]
+    cursors = [(r, c) for r in range(32) for c in range(32)
+               if screen.visible(r) and is_cursor(screen, r, c, glyph) and not is_arrow(screen, r, c)]
     per_window = Counter()
     rects = list(dict.fromkeys(screen.rects))
     for r, c in cursors:
