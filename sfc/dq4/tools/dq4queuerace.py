@@ -36,9 +36,10 @@ WQ_COUNT, WQ_RD, WQ_BUF = 0xA97E, 0xA978, 0x3EB0
 WH_COUNT, WH_OFF, WH_BUF = 0x18302, 0x18304, 0x18320   # 7F:8302 등의 WRAM 오프셋
 VBLANK_LINE = 0xE5          # WqNmi 가 읽는 주사선: 귀선 안
 PER_CLASS = 2               # 갈래마다 견줄 상태 수
-# (장면, 뜰 프레임 범위). 건네기는 앞 항목이 남은 채 이름을 바로 올리는 경우, talk02-full(팔기)은 메시지 창이 보여
-# 이름을 묶음으로 빼는 경우(313·321)가 이 범위에 있다
-WINDOWS = {'give-full': (440, 660), 'talk02-full': (300, 340)}
+# (장면, 뜰 프레임 범위). 건네기는 앞 항목이 남은 채 이름을 바로 올리는 경우, sell-long-ch1(넘치는 팔기 목록)은 메시지 창이
+# 보여 이름을 묶음으로 빼는 경우(WhStash, 311~328)가 이 범위에 있다. talk02-full 은 이름이 캔버스 밖 빌린 자리로 가 묶음
+# 갈래가 생기지 않는다
+WINDOWS = {'give-full': (440, 660), 'sell-long-ch1': (300, 340)}
 WQ_OFF = 0xA980
 # 입구 대기열이 빈 상태에 끼워 넣는 앞 항목: 방식 1(평면 0 + 평면 1 FF), 한 칸씩. 이름 슬롯이 쓰지 않는 VRAM 워드.
 # 이름 하나는 항목 둘(글자 줄·위 줄)로 들어가므로 둘까지 넣는다. 항목 수에 따라 갈리는 검사(항목 수가 0 이 되나)가 있어서다
@@ -229,7 +230,8 @@ def snapshots(rom_path, symbols, out, mesence, libdir):
     import dq4vblankcheck as vb
     rom = Path(rom_path).read_bytes()
     states = wc.make_states(mesence, rom_path, rom, out / 'states')
-    found = {s[0]: s for s in vb.scenes(states)}
+    found = {s[0]: s for s in wc.scenes(states['shop'], states['shop'], states['shop'], states['battle'])}
+    found.update({s[0]: s for s in vb.scenes(states)})
     paths = []
     for name, (a, b) in WINDOWS.items():
         scene = found[name]
