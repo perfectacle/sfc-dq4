@@ -902,7 +902,8 @@ def _build(pool, dq5, dq4, out, with_people):
     _save(out / "chest-report.json", chest_report)
     dumps["chest-tables-orig"].result()
     drain()
-    base = dq4chestport.base_tables(json.loads((out / "chest-tables-orig.json").read_text(encoding="utf-8")))
+    base = dq4chestport.base_tables(json.loads((out / "chest-tables-orig.json").read_text(encoding="utf-8")),
+                                    dq4chestport.feet(dq5, dq4))
     with_patches = [a for m in manifests for a in ("--with-patch", m)]
     checks.append(step("dq5chestplace.py", "chests", place, dq5, *CHEST_AT, "--tables", _save(out / "chest-tables.json", base),
                        *new_map_args, *with_patches))

@@ -32,7 +32,7 @@ uv run --locked python sfc/dq4/tools/dq4itemmatch.py --rom work/ch3/dq4-ch1.sfc 
 | 값 | 가게 물건마다 FC 값(fc `dq4shop.price`) | `23:B081` × 배율(`dq5shop.price`) |
 | 상자 | 맵 안 상자 차례(fc `dq4chest.chests`) | 그 맵 상자 |
 | 조사 | タンス·つぼ(fc `dq4block.pots`) | 조사 표의 (2x+1, 2y+1) |
-| 발밑 | 숨은 물건(fc `dq4chest.feet_items`)의 물건·금화, 「위를 보면」 물건(`FEET_GIFTS`). 그 장 이하 | 발밑·두 칸 앞 표의 (2x+1, 2y+1) |
+| 발밑 | 숨은 물건(fc `dq4chest.feet_items`)의 물건·금화, 「위를 보면」 물건(`FEET_GIFTS`). 그 장 이하 | 그 칸에서 조사는 발밑 표의 일행 칸 (2x, 2y+1), 「위를 보면」 은 바로 위 빈 가구의 조사 표 (2x+1, 2y−1) |
 | 몬스터 | `dq4monport` 가 옮긴 종마다 FC 떨어뜨림 | 레코드 `+17` |
 
 사람이 대화로 주는 물건과 떨어뜨림 확률은 견주지 않는다.

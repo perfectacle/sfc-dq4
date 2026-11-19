@@ -106,6 +106,69 @@ def run_entry(mesence, rom, state, out, preset, name, to, facing, reward, messag
             "message": f"value={message:04X}" in trace, "opened": [f"7E:{a:04X}&{m:02X}" for a, m in bits]}
 
 
+# FC 발밑 숨은 물건(dq4chestport.feet). 조사 메시지는 12B「足もとを　調べた！」, 열림 비트는 발밑 7E:2240 + flag_index.
+# 한 번 더 조사해도 보상이 다시 나오지 않아야 한다(FC 의 주웠음 플래그). 「위를 보면」 물건은 위 가구 칸의 서랍 항목이라
+# 위의 상자·서랍 장면이 연다
+FOOT_MESSAGE = 0x12B
+FOOT_BITS = 0x2240
+DOWN = 0x44                                    # 7E:31E0 방향(FACING 과 같은 값)
+SEARCH_TWICE = SEARCH + "," + SEARCH
+
+
+def feet_jobs(rom_bytes):
+    """[(이름, TO, 방향, 기대 보상 목록, 기대 열림 비트 또는 None)]. 새 그룹 맵의 발밑 줄마다 FC 와 같은 칸에서 두 번
+    조사(보상 한 번)와, 옆 FC 칸에서 한 번 조사(그 줄 보상 없음)."""
+    import dq5chestreloc
+    from dq5map import Rom
+    doc = dq5chestreloc.parse(Rom(rom_bytes))
+    jobs = []
+    for r in doc["foot"]:
+        if r["group"] < 0x36:
+            continue
+        at, x, y = f"{r['group']:02X}/{r['map']:02X}", r["x"], r["y"]
+        bit = (FOOT_BITS + r["flag_index"], r["mask"])
+        jobs.append((f"foot-{at.replace('/', '')}-{x}-{y}", f"{at},{x},{y}", DOWN, [r["reward"]], bit))
+        jobs.append((f"foot-{at.replace('/', '')}-{x}-{y}-beside", f"{at},{x + 2},{y}", DOWN, [], None))
+    return jobs
+
+
+def run_foot(mesence, rom, state, out, preset, name, to, facing, rewards, bit):
+    extra = {"SET": preset} if preset else {}
+    where = scene(mesence, rom, state, out, name, TO=to, LATESET=f"31E0={facing:02X}", SAVE="scene.mss", **extra)
+    saved = out / name / "scene.mss"
+    want = {"map": to.split(",")[0], "cell": [int(v) for v in to.split(",")[1:3]]}
+    if not saved.is_file() or not same_place(where, want):
+        if not rewards:
+            # 걸릴 수 없어야 하는 자리에 설 수 없으면(벽) 그 자리에서는 FC 처럼 조사할 수도 없다
+            return {"passed": True, "skipped": f"설 수 없는 칸: {where}"}
+        return {"passed": False, "error": f"warp: {where} != {want}"}
+    dest = out / name / "search"
+    dest.mkdir()
+    env = environment(os.environ["LIBDIR"], saved, dest)
+    env.update(INPUT=SEARCH_TWICE if rewards else SEARCH)
+    if dq4readset.run(mesence, rom, CHECK, dest, env, timeout=300)["timed_out"]:
+        return {"passed": False, "error": "search: MesenCE timed out"}
+    if not all((dest / f).is_file() for f in ("trace.txt", "before.wram", "after.wram")):
+        return {"passed": False, "error": "search: no trace or WRAM dump"}
+    trace = (dest / "trace.txt").read_text(encoding="utf-8")
+    got = [int(v, 16) for v in re.findall(r"reward .* value=([0-9A-F]+)", trace)]
+    before, after = (dest / "before.wram").read_bytes(), (dest / "after.wram").read_bytes()
+    bits = opened(before, after)
+    reward = rewards[0] if rewards else None
+    added = gold(after) - gold(before)
+    want_gold = reward - GOLD if reward is not None and GOLD <= reward < SPECIAL else 0
+    # 12B 는 조사하면 늘 뜨고(없으면 12C 가 이어짐), 보상이 있을 때만 그 뒤 물건·금화 메시지가 나온다
+    message = f"value={FOOT_MESSAGE:04X}" in trace
+    if not rewards:
+        # 옆 칸에는 다른 조사 칸(가구 등)이 있을 수 있어, 이 줄의 비트가 켜지지 않았는지만 본다
+        mine = name.rsplit("-beside", 1)[0]
+        own = next((j[4] for j in feet_jobs(Path(rom).read_bytes()) if j[0] == mine), None)
+        return {"passed": own not in bits, "rewards": [f"{v:X}" for v in got], "opened": [f"7E:{a:04X}&{m:02X}" for a, m in bits]}
+    passed = got == rewards and bits == [bit] and added == want_gold and message
+    return {"passed": passed, "rewards": [f"{v:X}" for v in got], "gold": added, "message": message,
+            "opened": [f"7E:{a:04X}&{m:02X}" for a, m in bits]}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--build", required=True, type=Path, help="dq4groupbuild.py --out folder")
@@ -115,6 +178,7 @@ def main():
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--set", default="", help="WRAM writes before the warp (dq5warp.lua SET), e.g. 2199|01")
     ap.add_argument("--maps", help="only these comma-separated maps, e.g. 36/01")
+    ap.add_argument("--feet-only", action="store_true", help="발밑·두 칸 앞 장면만")
     args = ap.parse_args()
     mesence = Path(os.environ["MESENCE"])
     out = args.out.resolve()
@@ -127,7 +191,7 @@ def main():
     place = json.loads((args.build / "chests.json").read_text(encoding="utf-8"))
     jobs, skipped = [], {}
     only = set(args.maps.split(",")) if args.maps else None
-    for row in place["maps"]:
+    for row in [] if args.feet_only else place["maps"]:
         if only and row["map"] not in only:
             continue
         source = sources[row["map"]]
@@ -142,9 +206,11 @@ def main():
                 (hx, hy), facing = stand(source, x, y)
                 drawer = (e["flag_index"], e["mask"]) if kind == "furniture" else None
                 jobs.append((name, f"{row['map']},{hx},{hy}", facing, e["reward"], message, drawer))
+    feet = [j for j in feet_jobs(rom.read_bytes()) if not only or j[1].split(",")[0] in only]
     with ThreadPoolExecutor(args.jobs) as pool:
         results = dict(zip((j[0] for j in jobs),
                            pool.map(lambda j: run_entry(mesence, rom, state, out, args.set, *j), jobs)))
+        results.update(zip((j[0] for j in feet), pool.map(lambda j: run_foot(mesence, rom, state, out, args.set, *j), feet)))
     failed = {k: v for k, v in results.items() if not v["passed"]}
     report = {"status": "failed" if failed else "passed", "entries": len(results), "failed": failed, "skipped": skipped}
     (out / "results.json").write_text(json.dumps(results, indent=1) + "\n", encoding="utf-8")

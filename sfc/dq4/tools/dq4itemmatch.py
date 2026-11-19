@@ -32,10 +32,7 @@ NO_ITEM = 0xFF
 # 알려진 다름: (가게·상자·몬스터, 자리) → 까닭. 고치면 지운다. 더 다르지 않은 줄이 남으면 「지난 줄」 로 실패한다
 _LOCAL_PRICE = ('3장 여우 마을 도구점의 はがねのつるぎ 는 FC 가 그 가게에서만 10G 로 판다(장소별 값 15:$B2F7). DQ5 엔진은 물건마다 '
                 '값이 하나라 이식이 목록에서 뺐다(dq4shopport report local_prices). 가게별 값을 담는 훅이 지운다')
-_FEET = ('FC 발밑 숨은 물건(fc dq4chest.feet_items)을 옮기지 않았다: dq4chestport 는 상자·タンス·つぼ만 DQ5 표로 쓴다. '
-         'DQ5 발밑 표(1E:F08B 를 옮긴 자리)나 두 칸 앞 표로 옮기는 고침이 지운다')
-KNOWN = {('가게', '18/00 종류 2'): _LOCAL_PRICE, ('값', '18/00 はがねのつるぎ'): _LOCAL_PRICE,
-         ('발밑', '0E/00 (12,3)'): _FEET, ('발밑', '1C/01 (3,2)'): _FEET}
+KNOWN = {('가게', '18/00 종류 2'): _LOCAL_PRICE, ('값', '18/00 はがねのつるぎ'): _LOCAL_PRICE}
 
 
 def _fc(dq4):
@@ -175,7 +172,8 @@ FEET_GIFTS = {0xE9: 'すばやさのたね', 0xE7: 'かわのよろい', 0xE6: '
 
 def foot_rows(data, dq4=FC_ROM, dq5=DQ5_ROM, chapter=3):
     """[(FC 자리, FC 설명, 기대 보상, 빌드 보상 또는 None)]. FC 발밑 숨은 물건(fc dq4chest.feet_items) 가운데 물건·금화를
-    주는 것을, 그 장 이하 새 그룹 맵의 빌드 발밑·두 칸 앞 표 같은 칸(2x+1, 2y+1)과 견준다."""
+    주는 것을, 그 장 이하 새 그룹 맵의 빌드 표와 견준다: 그 칸에서 조사는 발밑 표의 일행 칸 (2x, 2y+1), 「위를 보면」 은 바로
+    위 FC 칸(빈 가구)의 서랍 표 칸 (2x+1, 2y−1)(dq4chestport.feet·look_up_feet)."""
     import dq4chest
     import dq4chestport
     import dq4groupbuild
@@ -190,12 +188,14 @@ def foot_rows(data, dq4=FC_ROM, dq5=DQ5_ROM, chapter=3):
     names, _ = dq4shop.item_names(prg)
     target = dq4groupbuild.placement(prg)
     doc = dq5chestreloc.parse(rom)
-    built = {(r['group'], r['map'], r['x'], r['y']): r['reward'] for name in ('foot', 'ahead') for r in doc[name]}
+    foot = {(r['group'], r['map'], r['x'], r['y']): r['reward'] for r in doc['foot']}
+    search = {(r['group'], r['map'], r['x'], r['y']): r['reward'] for r in doc['search']}
     out = []
     for g, k, x, y, c, desc, _ in dq4chest.feet_items(prg):
         there = target.get((g, k))
         if there is None or (dq4itemreach.group_chapter(there[0]) or 99) > chapter:
             continue
+        at, table = (2 * x, 2 * y + 1), foot
         if c < 0x80:
             want = dq4chestport._reward(names, items, c)
         elif 0xA0 <= c < 0xAB:
@@ -204,9 +204,10 @@ def foot_rows(data, dq4=FC_ROM, dq5=DQ5_ROM, chapter=3):
         elif c in FEET_GIFTS:
             gift = FEET_GIFTS[c]
             want = dq4chestport.GOLD + gift if isinstance(gift, int) else items[dq4shopport._fold(gift)]
+            at, table = (2 * x + 1, 2 * y - 1), search
         else:
             continue                    # 사건(탈옥·벽 단추·금고 등)은 사건 모듈이 옮긴다
-        out.append((f'{g:02X}/{k:02X} ({x},{y})', desc, want, built.get((*there, 2 * x + 1, 2 * y + 1))))
+        out.append((f'{g:02X}/{k:02X} ({x},{y})', desc, want, table.get((*there, *at))))
     return out
 
 
