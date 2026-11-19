@@ -845,10 +845,13 @@ org $24A5E9
 !wt_qoff  = $AB26           ; WtQueue 안에서만: 이번에 짜는 글자 줄 항목의 대기열 자리
 !wt_csum  = $AB28           ; 캔버스 슬롯(12~29)마다 워드: 열 수 << 12 | WtMirror 가 5800 에 쓴 글자 줄 평면 0 바이트 합의 낮은
                             ; 12비트(창 검사가 VRAM 과 견줌)
-!wt_keep  = $AB4C           ; 30바이트: WtCanvasClear 가 그림자에서 되살릴 캔버스 칸 096~17F 의 비트
+!wt_keep  = $AB54           ; 30바이트: WtCanvasClear 가 그림자에서 되살릴 캔버스 칸 096~17F 의 비트
+!wt_mshow = $AB72           ; WtMirror 안에서만: 1 = 메시지 창이 이 슬롯 칸을 보여 5800 에는 쓰지 않음(그림자만)
+!wt_mbusy = $AB74           ; 1바이트: WtMirror 가 5800·그림자·!wt_csum 을 쓰는 동안 1(창 검사가 그 프레임을 쓰는 중으로 봄)
 !wt_shadow = $7FA400        ; 1872바이트: WtMirror 가 캔버스 칸에 올린 그림의 평면 0(칸 096 부터 8바이트씩), 이어서
 !wt_shadow1 = $7FAB50       ; 1872바이트: 평면 1. 게임이 캔버스(5800·VRAM)를 지울 때 보이는 슬롯만 이것으로 채운다.
-                            ; 7F:A340~FFFF 는 give-full·battle11 장면에서 접근이 없던 자리(MesenCE 접근 카운터)
+                            ; 7F:A400~B29F 는 give-full·battle11 장면에서 접근이 없던 자리(MesenCE 접근 카운터)
+assert !wt_shadow >= $7FA330 && !wt_shadow1+1872 <= $7FC000   ; 7F:A320~A32F·C000~CF7F 는 묶음 전송 사본(WhWith)
 !wt_key3  = $AB0C           ; 12 워드: 셋째 버퍼 자리(같은 이름이 미리보기·장비 칸·제목에 셋), 0 = 없음
 !wt_lend  = $80             ; 가나 항목 첫 칸(!wt_kbase)이 이 값 이상이면 이름 렌더러 자리(180 + 자리 × 10)를 빌린 것
 !wt_fixkeys = $3EA0         ; 8 워드: 전용 칸에 그린 명령 창·가게 창 문구의 버퍼 자리, 0 = 빈 칸. WtVis 가 안 보이는 것을 지움
@@ -6623,6 +6626,18 @@ WtMirror:
     LDA.w $1944
     CMP #$8952
     BEQ .out
+    SEP #$20
+    LDA #$01
+    STA.w !wt_mbusy
+    REP #$20
+    ; 메시지 창이 이 슬롯 칸을 보이는 동안은 5800 이 메시지 글자다. 거기 이름을 쓰면 다음 캔버스 전송에 메시지 창으로 비친다
+    STZ.w !wt_mshow
+    LDX.w !wt_slot2
+    BMI +
+    JSR WhShown
+    BCC +
+    INC.w !wt_mshow
++
     LDA.w !wt_qoff
     CLC
     ADC.w #!wq_buf+4
@@ -6642,6 +6657,9 @@ WtMirror:
     LDA.w !wt_ubase
     JSR .row
 .out
+    SEP #$20
+    STZ.w !wt_mbusy
+    REP #$20
     RTS
 ; A = 첫 칸, X = 대기열의 그림 자리, !wn_k = 평면 0 바이트 사이(글자 줄은 평면 0 만이라 1, 위 줄은 평면 0·1 이 엇갈려 2).
 ; 캔버스 밖이면 C = 1(X 는 그대로). 끝나면 X 는 그 항목 그림 뒤
@@ -6666,7 +6684,13 @@ WtMirror:
 -
     LDA.w $0000,X
     SEP #$20
+    PHA
+    LDA.w !wt_mshow
+    BNE +
+    LDA 1,S
     STA.w $0000,Y
++
+    PLA
     PHX
     TYX
     STA.l !wt_shadow-$5800,X
@@ -6698,7 +6722,7 @@ WtMirror:
 .outside
     SEC
     RTS
-; 방금 5800 에 쓴 글자 줄 평면 0 의 합(낮은 12비트)과 열 수(높은 4비트)를 슬롯(!wt_slot2)의 !wt_csum 에. X 는 지킨다
+; 방금 그림자에 쓴 글자 줄 평면 0 의 합(낮은 12비트)과 열 수(높은 4비트)를 슬롯(!wt_slot2)의 !wt_csum 에. X 는 지킨다
 .csum
     PHX
     LDA.w !wt_base
@@ -6707,8 +6731,6 @@ WtMirror:
     ASL
     ASL
     ASL
-    CLC
-    ADC #$5800
     TAX
     LDA.w !wt_cols
     ASL
@@ -6718,7 +6740,7 @@ WtMirror:
     LDA #$0000
 -
     PHA
-    LDA.w $0000,X
+    LDA.l !wt_shadow,X
     AND #$00FF
     CLC
     ADC 1,S

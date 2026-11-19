@@ -57,6 +57,16 @@ class GlyphTest(unittest.TestCase):
         self.assertTrue(wc.glyph_ok(self.vram_with_glyph(0x122, rows), cs, 20, 0x122))
         self.assertFalse(wc.glyph_ok(self.vram_with_glyph(0x122, [bytes(8), bytes(8)]), cs, 20, 0x122))
 
+    def test_mirrored_means_canvas_buffer_holds_the_name(self):
+        rows = [bytes([1, 2, 3, 4, 5, 6, 7, 8]), bytes([9] * 8)]
+        cs = self.csum(20, 2, rows)
+        canvas = bytearray(len(wc.CANVAS) * 8)
+        o = (0x122 - wc.CANVAS.start) * 8
+        canvas[o:o + 16] = rows[0] + rows[1]
+        self.assertTrue(wc.mirrored(bytes(canvas), cs, 20, 0x122))
+        self.assertFalse(wc.mirrored(bytes(len(wc.CANVAS) * 8), cs, 20, 0x122))
+        self.assertFalse(wc.mirrored(bytes(canvas), None, 20, 0x122))
+
     def test_no_record_or_outside_canvas_is_none(self):
         vram = bytes(0x10000)
         self.assertIsNone(wc.glyph_ok(vram, None, 20, 0x122))
