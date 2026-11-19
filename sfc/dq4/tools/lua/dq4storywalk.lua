@@ -116,6 +116,14 @@ local function personAt(cx, cy)
   end
   return false
 end
+-- 셀 (cx,cy) 둘레 r칸 안에 선 사람(칸 skip 은 뺌)의 칸 번호와 자리. 걷는 줄은 personAt 과 같이 뺀다
+local function personNear(cx, cy, skip, r)
+  for k = math.max(1, rd(0x7E1967)), rd(0x7E1982) - 1 do
+    local qx, qy = rd(0x7E3020 + k), rd(0x7E3080 + k)
+    if k ~= skip and math.abs(qx - cx) <= r and math.abs(qy - cy) <= r then return k, qx, qy end
+  end
+  return nil
+end
 -- 조작이 풀린 채 가만히 서 있으면 상태 창(02)이 저절로 뜬다. 걸음을 막지 않으므로 창이 없는 것과 같이 본다
 local function quiet() return win == W_NONE or (win == W_STATUS and not locked()) end
 local function isFree() return quiet() and freeFor >= FREE and not locked() end
@@ -346,6 +354,25 @@ local function step(tok)
     st.last = key
     local tkey = tx * 256 + ty
     if tkey ~= st.tlast then st.tlast, st.since = tkey, st.t end
+    -- 미는 자리 P 둘레에 다른 사람(떠도는 사람)이 서면, 주인공이 P 로 가는 길과 그 사람이 비킬 길이 서로 막힌다(레이크나바
+    -- 톰을 미는 동안 소년). 셀 걷기처럼 그 사람이 비킬 때까지 난수 묶기를 풀고 기다린다. 주인공은 그 사람에게서 물러서서
+    -- 비킬 칸을 내 준다. 기다리는 동안은 막힘을 세지 않고, 3 × STUCK 을 넘게 서 있으면 실패
+    -- 120 프레임 넘게 못 밀었고 P 둘레 2칸에 사람이 있으면 기다리기 시작하고, 그 사람이 P 칸(±1)에서 비키면 다시 민다
+    local k, qx, qy = nil, nil, nil
+    if st.waited then k, qx, qy = personNear(px, py, slot, 1)
+    elseif st.t - st.since > 120 then k, qx, qy = personNear(px, py, slot, 2) end
+    if k then
+      rngFree = true
+      st.waited, st.since = (st.waited or 0) + 1, st.t
+      if st.waited == 1 then note("push wait %02X at %d,%d (P %d,%d)", k, qx, qy, px, py) end
+      if st.waited > 3 * STUCK then fail("person stays near %d,%d", px, py); return true end
+      local ax, ay = x - qx, y - qy
+      if math.abs(ax) + math.abs(ay) < 6 then
+        if math.abs(ay) >= math.abs(ax) then hold(ay >= 0 and "down" or "up") else hold(ax >= 0 and "right" or "left") end
+      end
+      return false
+    end
+    st.waited = nil
     if st.t - st.since > STUCK then fail("push %02X stuck: person %d,%d hero %d,%d goal %d,%d", slot, tx, ty, x, y, gx, gy); return true end
     if st.stuck > 60 then st.flip = not st.flip; st.stuck = 0; note("push flip at %d,%d person %d,%d", x, y, tx, ty) end
     if x == px and y == py then

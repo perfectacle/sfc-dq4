@@ -65,6 +65,14 @@ class Runner:
                 return k
         return None
 
+    def person_near(self, cx, cy, skip, r):
+        """(cx, cy) 둘레 r칸 안에 선 사람(칸 skip 은 뺌)의 (칸, x, y), 없으면 None(lua personNear 와 같음)."""
+        for k in range(max(1, self.rd(0x7E1967)), self.rd(0x7E1982)):
+            qx, qy = self.rd(0x7E3020 + k), self.rd(0x7E3080 + k)
+            if k != skip and abs(qx - cx) <= r and abs(qy - cy) <= r:
+                return k, qx, qy
+        return None
+
     def observe(self):
         w = self.rd(WINDOW)
         self.since = self.since + 1 if w == self.win else 0
@@ -414,9 +422,15 @@ class Runner:
             yield {('down' if y < ny else 'up')} if y != ny else {('right' if x < tx else 'left')}
 
     def _push(self, arg):
+        try:
+            yield from self._push_steps(arg)
+        finally:
+            self.hold_rng(True)
+
+    def _push_steps(self, arg):
         s, gx, gy = arg.split(',')
         slot, gx, gy = int(s, 16), int(gx), int(gy)
-        ok, last, stuck, tlast, since, flip, t = 0, None, 0, None, 0, False, 0
+        ok, last, stuck, tlast, since, flip, t, waited = 0, None, 0, None, 0, False, 0, 0
         while True:
             t += 1
             x, y = self.hero()
@@ -439,6 +453,26 @@ class Runner:
             last = (x, y)
             if (tx, ty) != tlast:
                 tlast, since = (tx, ty), t
+            # 120 프레임 넘게 못 밀었고 미는 자리 P 둘레 2칸에 사람이 서면, 그 사람이 P 칸(±1)에서 비킬 때까지 난수 묶기를
+            # 풀고 물러서서 기다린다(lua push 와 같음)
+            near = self.person_near(px, py, slot, 1) if waited else \
+                self.person_near(px, py, slot, 2) if t - since > 120 else None
+            self.hold_rng(near is None)
+            if near is None:
+                waited = 0
+            else:
+                k, qx, qy = near
+                waited, since = waited + 1, t
+                if waited == 1:
+                    self.note(f'push wait {k:02X} at {qx},{qy} (P {px},{py})')
+                if waited > 3 * STUCK:
+                    raise Failed(f'person stays near {px},{py}')
+                ax, ay = x - qx, y - qy
+                if abs(ax) + abs(ay) < 6:
+                    yield {('down' if ay >= 0 else 'up') if abs(ay) >= abs(ax) else ('right' if ax >= 0 else 'left')}
+                else:
+                    yield set()
+                continue
             if t - since > STUCK:
                 raise Failed(f'push {slot:02X} stuck: person {tx},{ty} hero {x},{y} goal {gx},{gy}')
             if stuck > 60:

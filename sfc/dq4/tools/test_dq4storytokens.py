@@ -61,5 +61,51 @@ class HoldTests(unittest.TestCase):
         self.assertIsNone(r.held)
 
 
+TOM = 0x0C
+
+
+def pushing(boy_at):
+    """톰(칸 0C)을 (40,33)에서 왼쪽 (30,33)으로 미는 중, 주인공은 미는 자리 P (42,33) 아래 (42,34)."""
+    w, r = runner()
+    w.mem.update({0x7E3020 + TOM: 40, 0x7E3080 + TOM: 33, 0x7E3020: 42, 0x7E3080: 34,
+                  0x7E3020 + BOY: boy_at[0], 0x7E3080 + BOY: boy_at[1]})
+    return w, r, r._push(f'{TOM:02X},30,33')
+
+
+class PushTests(unittest.TestCase):
+    def blocked(self, boy_at):
+        """톰이 움직이지 않은 채 122프레임(> 120): 기다림이 시작되는 때까지 민다."""
+        w, r, push = pushing(boy_at)
+        for _ in range(122):
+            got = next(push)
+        return w, r, push, got
+
+    def test_person_near_the_push_spot_frees_rng_and_steps_away_once_stuck(self):
+        w, r, push, got = self.blocked((42, 31))
+        self.assertEqual(got, {'down'})
+        self.assertEqual(w.pokes, [])
+        self.assertTrue(any('push wait 16' in line for line in r.log))
+
+    def test_waiting_ends_when_the_person_leaves_the_push_spot(self):
+        w, r, push, _ = self.blocked((42, 33))
+        w.mem[0x7E3020 + BOY] = 45
+        self.assertEqual(next(push), {'up'})
+        self.assertEqual(w.pokes, HOLD)
+
+    def test_no_wait_before_the_push_is_stuck(self):
+        w, r, push = pushing((42, 31))
+        self.assertEqual(next(push), {'up'})
+        self.assertEqual(w.pokes, HOLD)
+
+    def test_hold_comes_back_when_the_push_ends_while_waiting(self):
+        w, r, push, _ = self.blocked((42, 31))
+        push.close()
+        self.assertEqual(w.pokes, HOLD)
+
+    def test_far_person_does_not_stop_the_push(self):
+        w, r, push, got = self.blocked((10, 10))
+        self.assertEqual(w.pokes, HOLD)
+        self.assertFalse(any('push wait' in line for line in r.log))
+
 if __name__ == '__main__':
     unittest.main()
