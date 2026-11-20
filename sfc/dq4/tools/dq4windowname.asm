@@ -5732,6 +5732,8 @@ WtNoFit:
 WqKeepVis:
     LDA.l !wh_msgwin
     BNE .no
+    JSR WtGiveOn
+    BCC .no
     PHX
     TXA
     LSR
@@ -6632,15 +6634,74 @@ WtMirror:
     BNE +
     RTS
 +
-    ; 메시지 창이 떠 있는 동안(팔기 등)은 지키기를 하지 않으므로 그림자도 두지 않는다. 합을 지워 창 검사가 옛 규칙으로 본다
+    ; 지키기는 도구 흐름(창 쌓기에 도구 「누구」 창 0E, 메시지 창 없음)에서만 하므로 그 밖에서는 그림자도 두지 않고 합을 지워
+    ; 창 검사가 옛 규칙으로 본다
     LDA.l !wh_msgwin
-    BEQ +
+    BNE .off
+    JSR WtGiveOn
+    BCS +
+.off
     LDX.w !wt_slot2
     BMI ++
     CPX.w #!wt_nkana*2
     BCC ++
+    ; 앞서 이 슬롯 이름을 5800 에 써 두었으면 0 으로 되돌린다. 남겨 두면 같은 이름을 다시 그릴 때 VRAM 과 5800 이 같아져
+    ; 창 검사의 옛 규칙이 「아직 안 올라감」 으로 본다
+    LDA.w !wt_csum-(!wt_nkana*2),X
+    BEQ +++
+    JSR .unmirror
++++
     STZ.w !wt_csum-(!wt_nkana*2),X
 ++
+    RTS
+; 슬롯 X(× 2, 필드 캔버스), A = !wt_csum: 글자 줄·위 줄 칸의 5800 평면 0 을 0 으로. X 는 지킨다
+.unmirror
+    PHX
+    XBA
+    LSR
+    LSR
+    LSR
+    LSR
+    AND #$000F
+    ASL
+    ASL
+    ASL
+    STA.w !wn_c             ; 한 줄 바이트 수
+    LDA.l WtSlotF,X
+    PHA
+    LDA.l WtUpperF,X
+    BNE ++++
+    LDA.w !wn_c
+    LSR
+    LSR
+    LSR
+    CLC
+    ADC 1,S
+++++
+    PHA
+    JSR .zero
+    PLA
+    PLA
+    JSR .zero
+    PLX
+    RTS
+; A = 첫 칸(캔버스 밖이면 하지 않음), !wn_c 바이트
+.zero
+    CMP #$0096
+    BCC .zret
+    CMP #$0180
+    BCS .zret
+    JSR .offset
+    TAX
+    LDY.w !wn_c
+-
+    STZ.w $5800,X
+    INX
+    INX
+    DEY
+    DEY
+    BNE -
+.zret
     RTS
 +
     LDA.w !wt_base
@@ -6803,6 +6864,37 @@ pullpc
 ; 셋째 구역(!wn_code3 ~ !wn_code3_end). 24 뱅크의 캔버스 지우기에서 JSL 로 들어오고 안에서만 JSR 로 오간다
 pushpc
 org !wn_code3
+; M = X = 16: 창 쌓기($0A00 ~ $09FF + 깊이 $0AD6)에 도구 「누구」 창 0E 가 있으면 C = 1(도구 → 건네기 흐름). 보이는 캔버스
+; 이름 지키기는 이 흐름에서만 켠다(장비 13·상태 05·팔기 화면은 창이 뜨는 프레임이 main 과 같도록 끔). 건네기의 아래 물건
+; 목록(0F)은 「어떻게 할까」(10)보다 먼저 그려지므로 0E 로 본다. X 는 지킨다
+WtGiveOn:
+    LDA #$000E
+; A = 창 번호가 창 쌓기에 있으면 C = 1. NMI(WqClean)에서도 불려 WRAM 임시 칸을 쓰지 않는다. X 는 지킨다
+WtWinOn:
+    PHX
+    PHA
+    LDA.l $7E0AD6
+    AND #$00FF
+    BEQ .no
+    TAX
+-
+    LDA.l $7E09FF,X
+    AND #$00FF
+    CMP 1,S
+    BEQ .yes
+    DEX
+    BNE -
+.no
+    PLA
+    PLX
+    CLC
+    RTS
+.yes
+    PLA
+    PLX
+    SEC
+    RTS
+
 ; 아래 셋(본 흐름): 게임이 메시지 창을 열며 캔버스 칸을 지울 때(버퍼 5800 과 VRAM 대기열), 필드에서 아직 보이는 캔버스
 ; 슬롯의 칸은 지우지 않고 그림자(!wt_shadow·!wt_shadow1)의 그림으로 채운다. 게임은 메시지 창 없이도 캔버스를 지우고 보내
 ; (물건 건네기의 「누구에게」) 아직 보이는 목록 이름이 빈칸이 됐다. 지운 뒤 되살리면 그사이 NMI 가 지운 것을 보내므로 채우는
@@ -6994,6 +7086,48 @@ WtFillTiles:
     LDA #$0075
     STA.w !wn_c
 .tile
+    ; 여덟 칸 묶음의 비트가 모두 꺼졌으면 한 번에 FF00 으로
+    TYA
+    AND #$0007
+    BNE .one
+    LDA.w !wn_c
+    CMP #$0008
+    BCC .one
+    PHY
+    TYA
+    LSR
+    LSR
+    LSR
+    TAY
+    LDA.w !wt_keep,Y
+    PLY
+    AND #$00FF
+    BNE .one
+    PHY
+    LDY #$0040
+    LDA #$FF00
+--
+    STA.w $4000,X
+    INX
+    INX
+    DEY
+    BNE --
+    PLY
+    TYA
+    CLC
+    ADC #$0008
+    TAY
+    LDA.w !wn_r
+    CLC
+    ADC #$0040
+    STA.w !wn_r
+    LDA.w !wn_c
+    SEC
+    SBC #$0008
+    STA.w !wn_c
+    BNE .tile
+    JMP .done
+.one
     JSR WtKept
     BCC .blank
     PHY
@@ -7038,7 +7172,9 @@ WtFillTiles:
 .next
     INY
     DEC.w !wn_c
-    BNE .tile
+    BEQ .done
+    JMP .tile
+.done
     PLA
     STA.w !wn_r
     PLA
@@ -7088,6 +7224,8 @@ WtKeepBuild:
     BEQ .done
     LDA.l !wh_msgwin
     BNE .done
+    JSR WtGiveOn
+    BCC .done
     LDX.w #!wt_nkana*2
 .slot
     LDA.w !wt_ages,X
