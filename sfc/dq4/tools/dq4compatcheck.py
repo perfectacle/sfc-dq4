@@ -490,6 +490,8 @@ class Walker:
         problems += [f'깃발 {k} 켜짐' for k in opt.get('off', []) if flags[k]]
         if 'field' in opt and bool(self.rd(0x7E00BE) & 0x80) == opt['field']:
             problems.append('필드가 아님' if opt['field'] else '필드에 있음')
+        if opt.get('idle') and (self.rd(wc.WINDOW) not in (wc.NO_WINDOW, wc.STATUS_WINDOW) or self.rd(wc.LOCK) & 1):
+            problems.append(f'출발 상태가 걸을 수 없음: 창 {self.rd(wc.WINDOW):02X}, 사건 잠금 {self.rd(wc.LOCK):02X}')
         problems += [f'물건 {w:02X} 없음' for w in opt.get('items', []) if w not in items]
         here = (self.rd(0x7E3020), self.rd(0x7E3080))
         if 'cell' in opt and how == 'walk' and here != tuple(opt['cell']):

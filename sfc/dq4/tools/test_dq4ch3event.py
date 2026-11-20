@@ -104,7 +104,10 @@ class TransferTest(unittest.TestCase):
         g, n = (int(v, 16) for v in ev.HOUSE.split('/'))
         skip = ch2.native()[1]['skip_song']
         self.assertEqual(code[e:e + 12], bytes((0xA0, *_al(skip), 0x90, g, n, *ev.START_CELL, 0x01, 0x80, 0xFF)))
-        self.assertIn(bytes((0xA9, e + ev.CODE_AT & 0xFF, 0x8D, 0xB3, 0x19)), t)
+        # 옮기는 이벤트는 기록 물음 뒤 transfer_go 가 건다(transfer 는 상태만)
+        self.assertNotIn(bytes((0xA9, e + ev.CODE_AT & 0xFF, 0x8D, 0xB3, 0x19)), t)
+        go = code[at['transfer_go'] - ev.CODE_AT:at['chapter_save'] - ev.CODE_AT]
+        self.assertIn(bytes((0xA9, e + ev.CODE_AT & 0xFF, 0x8D, 0xB3, 0x19)), go)
 
     def test_pad_returns_zero_only_while_a_direction_is_held(self):
         code = ev._pad()
@@ -171,9 +174,10 @@ class ScriptTest(unittest.TestCase):
         def call(chapter3):
             made = ch2.scripts(0x1000, POINTS, chapter3)
             cmds = next(s['commands'] for s in made if s['address'] == ender)
-            return [c['args'] for c in cmds if c['op'] == '37'][-1]
-        self.assertEqual(call(False), list(_al(POINTS[en.END_SCENE])))
-        self.assertEqual(call(True), list(_al(ev.native()[1]['transfer'])))
+            return [(c['op'], c['args']) for c in cmds if c['op'] in ('37', '05')][-1]
+        self.assertEqual(call(False), ('37', list(_al(POINTS[en.END_SCENE]))))
+        # 3장 빌드: 「완」 상자·기록 물음·넘김 흐름을 명령 05 로(A 가 0 이 될 때까지 다시 부름)
+        self.assertEqual(call(True), ('05', list(_al(ev.native()[1]['chapter_flow']))))
 
     def test_messages_number_after_chapter_two(self):
         import dq4chapter1

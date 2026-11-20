@@ -76,6 +76,10 @@ CURSOR_HOLD = 3
 # 조용한 프레임 수, settle 이 기다릴 상한(lua/dq4walk.lua 와 같은 값)
 NO_WINDOW, STATUS_WINDOW, COMMAND_WINDOW, LOCK, FIELD_TICK = 0xFF, 0x02, 0x01, 0x7E19AE, 0x7E007F
 DONE_CALM, SETTLE_MAX = 30, 300
+# 서장 끝 done 의 상한(프레임). 저녁 대사·왕좌의 방 연출 뒤 남은 A 연타가 끝나는 데 넉넉히
+PROLOGUE_DONE_MAX = 4000
+# idle 구간이 끝에 적는 칸: 창 번호와 사건 잠금(done 이 보는 것과 같음)
+IDLE_WATCH = f'WINDOW={WINDOW:06X}:1;LOCK={LOCK:06X}:1'
 # gone:S 가 보는 인물 표 X(7E:3020 + 슬롯), 빠진 인물의 X(명령 52), 기다릴 상한(lua/dq4walk.lua 와 같은 값)
 NPC_X, GONE_X, GONE_MAX = 0x7E3020, 0x80, 6000
 # stand:SS,X,Y 가 보는 인물 표 Y·걷는 중(bit7), 기다릴 상한(lua/dq4walk.lua 와 같은 값)
@@ -368,9 +372,11 @@ def talk_yes(face, n=8):
 # want·off(끝에 켜져·꺼져 있을 깃발), map(끝 맵), field(끝에 필드인지), items(가진 물건),
 # start((FC 인물, 장): 끝의 일행 기록 0 장비·물건과 금화가 FC 장 시작 표대로, start_want)
 SEGMENTS = [
-    # 저녁 대사를 넘기는 A 가 왕좌의 방 연출(장 제목·서술·왕의 연설)까지 넘긴다
-    ('prologue', 'walk', ';'.join(w for _, w in pc.ROUTE),
-     {'maxf': 20000, 'changes': len(pc.MAPS), 'after': 2500, 'want': ['CHAPTER1'], 'map': '36/01',
+    # 저녁 대사를 넘기는 A 가 왕좌의 방 연출(장 제목·서술·왕의 연설)까지 넘긴다. 연출이 먼저 끝나면 남은 A 가 명령 창을
+    # 열므로, 끝에 done 으로 창이 닫히고 조작이 풀리기를 상태로 기다린다(남은 명령 창은 B 로 닫음). after 는 done 이 끝날
+    # 때까지의 상한일 뿐이고, idle 이 출발 상태를 남기기 전에 창이 닫히고 조작이 풀렸는지 본다
+    ('prologue', 'walk', ';'.join(w for _, w in pc.ROUTE) + f';done:{PROLOGUE_DONE_MAX}',
+     {'maxf': 20000, 'changes': len(pc.MAPS), 'after': 6000, 'idle': True, 'want': ['CHAPTER1'], 'map': '36/01',
       'start': (6, 1)}),
     ('throne_out', 'walk', '32,70;down:60', {'changes': 1, 'map': '36/00'}),
     ('imuru_night', 'warp', '37/00,4,30', {'poke': NIGHT + ';' + HOLD_CHILD, 'map': '37/00'}),
@@ -698,7 +704,8 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
                                                    'PRE': pc.CLOSE.replace(';', ','),
                                                    'SAVE': 'end.mss', 'MAXF': str(maxf),
                                                    'CHANGES': str(opt.get('changes', 99)), 'AFTER': str(opt.get('after', 120)),
-                                                   'WATCH': watch_flags(flags_), 'ROMPATCH': patch, 'SET': start,
+                                                   'WATCH': watch_flags(flags_) + (';' + IDLE_WATCH if opt.get('idle') else ''),
+                                                   'ROMPATCH': patch, 'SET': start,
                                                    **({'POKE': poke} if poke else {})}, maxf // 40 + 120, readset)
         log = dest / 'walk.txt'
         text = log.read_text(encoding='utf-8') if log.exists() else ''
@@ -729,6 +736,9 @@ def segment(mesence, rom, state, dest, seg, patch, extra='', party='', seed=0, r
             problems.append(f'깃발 {k} 켜짐')
     if how != 'warp':
         problems += stuck_problems(name, text)
+    if opt.get('idle') and (seen.get('WINDOW') not in (NO_WINDOW, STATUS_WINDOW) or seen.get('LOCK', 1) & 1):
+        problems.append(f"출발 상태가 걸을 수 없음: 창 {seen.get('WINDOW')}, 사건 잠금 {seen.get('LOCK')}(창이 닫히고 "
+                        '조작이 풀린 채 남겨야 함)')
     if 'field' in opt and bool(seen.get('BE', 0x80) & 0x80) == opt['field']:
         problems.append('필드가 아님' if opt['field'] else '필드에 있음')
     for want in opt.get('items', []):

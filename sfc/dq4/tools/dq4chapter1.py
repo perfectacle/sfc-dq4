@@ -341,7 +341,7 @@ def npc_doc(records, ported=(), prologue=False, report=None, ported_messages=(),
         import dq4ch2event
         first = dq4npcport.FIRST_MESSAGE + len(ported_messages)
         if chapter2:
-            scripts += dq4ch1event.scripts(first, dq4ch2event.native()[1]['transfer'])
+            scripts += dq4ch1event.scripts(first, dq4ch2event.native()[1]['chapter_flow'])
         else:
             scripts += dq4ch1event.scripts(first, ending_at=dq4chapterbox.entry_points(scenes(prologue))['end'])
         ported, ch2_new, ch2_overrides = dq4ch2event.npc_lists(ported, chapter2_talk())
@@ -444,7 +444,7 @@ def npc_scripts(first_message):
     ch2_to_ch3 = [s for s in dq4ch2event.scripts(chapter2_message(first_message), points, chapter3=True)
                   if s['address'] == ender]
     return ([throne_script(native), walk_out(WALK_OUT_LEFT, EXIT_LEFT), walk_out(WALK_OUT_RIGHT, EXIT_RIGHT)] +
-            dq4prologue.npc_lists()[3] + dq4ch1event.scripts(first_message, dq4ch2event.native()[1]['transfer']) +
+            dq4prologue.npc_lists()[3] + dq4ch1event.scripts(first_message, dq4ch2event.native()[1]['chapter_flow']) +
             ending + dq4ch2event.scripts(chapter2_message(first_message), points) + ch2_to_ch3 +
             dq4ch3event.scripts(chapter3_message(first_message), points))
 
@@ -689,14 +689,33 @@ def return_places(out, original, dq4):
     need = [bytes((g, *first[g], 1, 0x80)) for g in sorted(now - have) if g in first]
     # 한 그룹에 교회가 여럿인 칸(dq4fieldtravel.EXTRA)은 맵까지 같은 항목을 따로 둔다. 훅이 칸으로 이 항목을 찾는다.
     import dq4fieldtravel
-    for row in dq4fieldtravel.restart_rows(dq4fieldtravel.extras(prg, dq4groupbuild.LINKS, place)):
+    # 장 끝 기록 물음의 장 시작 칸도 맵까지 같은 항목을 따로 둔다(이어 하면 그 장 첫머리 맵의 시작 칸)
+    for row in (dq4fieldtravel.restart_rows(dq4fieldtravel.extras(prg, dq4groupbuild.LINKS, place)) +
+                dq4fieldtravel.chapter_start_rows()):
         if all(row[:2] != r[:2] for r in need) and all(out[r:r + 2] != row[:2] for r in rows):
             need.append(row)
     if len(need) > len(free):
         raise SystemExit(f'다시 시작 자리 표에 빈 항목이 모자람: {len(need)} > {len(free)}')
     for row, r in zip(need, free):
         out[r:r + 6] = row
+    _check_chapter_rows(out, original, rows)
     return out
+
+
+def _check_chapter_rows(out, original, rows):
+    """장 첫머리 줄(dq4fieldtravel.CHAPTER_STARTS)이 앉은 항목의 전제를 못박는다. 엔진은 칸 표(SLOT_TABLE)[칸] 의
+    그룹으로 표를 위에서부터 훑어 처음 맞는 항목을 쓰고, 훅만 (그룹, 맵) 짝으로 찾는다. 그래서 그 자리의 원래 그룹은 칸
+    표에 없어야 하고(옛 내용이 쓰이지 않음), 새 그룹은 더 앞 항목이 먼저 맞아야 한다(엔진 찾기가 이 줄에 닿지 않음)."""
+    import dq4fieldtravel
+    slots = set(out[lorom(SLOT_TABLE):lorom(SLOT_TABLE) + SLOT_COUNT])
+    for key in dq4fieldtravel.chapter_start_rows():
+        at = next((r for r in rows if out[r:r + 6] == key), None)
+        if at is None:
+            raise SystemExit(f'장 첫머리 줄 {key.hex()} 가 다시 시작 자리 표에 없음')
+        if original[at] in slots:
+            raise SystemExit(f'{at:06X}: 장 첫머리 줄이 덮은 원래 그룹 {original[at]:02X} 가 칸 표에 있음(쓰이는 항목)')
+        if not any(out[r] == key[0] for r in rows if r < at):
+            raise SystemExit(f'{at:06X}: 그룹 {key[0]:02X} 의 앞 항목이 없어 엔진 찾기가 장 첫머리 줄에 닿음')
 
 
 def build(rom, dq5, dq4, work, prologue=True, chapter2=False, chapter3=False):

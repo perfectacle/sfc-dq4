@@ -210,8 +210,8 @@ why = "필드 지형 조우율(23:F1E0)과 구역 격자(23:F1FC~)를 FC 로(dq5
 
 [[original]]
 stage = "chapter1"
-at = "25:8621~25:8684"
-why = "새 게임·다시 시작 자리 표(25:8621, 6바이트 항목)(dq4chapter1, dq4-chapter1-format.md)"
+at = "25:8621~25:869E"
+why = "새 게임·다시 시작 자리 표(25:8621, 6바이트 항목)(dq4chapter1.return_places, dq4-chapter1-format.md). 빌드가 표를 한 덩어리로 쓰므로 고친 마지막 항목까지 한 범위로 둔다. 25:8684 뒤에서 바뀌는 것은 18번째 항목(25:868D, DQ5 그룹 2D 맵 00 → 2장 첫머리 3D/01)과 20번째 항목(25:8699, 그룹 02 맵 01 → 3장 첫머리 3E/01, dq4fieldtravel.CHAPTER_STARTS)뿐이다. 그룹 2D·02 는 ルーラ 칸 표(25:85D5)에 없어 칸으로 그룹을 찾는 어떤 찾기도 그 항목에 맞지 않는다(return_places 가 고르는 빈 항목)"
 
 [[original]]
 stage = "chapter1"

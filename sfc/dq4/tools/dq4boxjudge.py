@@ -1,4 +1,4 @@
-"""장 제목 상자·끝 상자 화면 판정(보고만). 화면(RGB 256 × 224)에서 금테 상자를 찾아 깨짐을 가린다.
+"""장 제목 상자·끝 상자 화면 판정(보고만, 미리보기에서 상자가 상자 자리에 들지 않는 제목만 실패). 화면(RGB 256 × 224)에서 금테 상자를 찾아 깨짐을 가린다.
 
 형식은 sfc/dq4/docs/dq4-chapter1-format.md 「장 제목 상자 판정」. 상자 너비를 고정값으로 두지 않고 화면에서 잰다(제목 길이대로
 상자를 넓히는 고침이 와도 같은 판정).
@@ -12,7 +12,8 @@
   uv run --locked python sfc/dq4/tools/dq4boxjudge.py shots 장면폴더…           # 찍어 둔 화면 판정
 게임 장면은 dq4boxplay.py 가 띄워 이 판정(judge)에 돌린다.
 미리보기 판정은 빌드가 넣는 제목(dq4chapterbox.GAME_SCENES)과 명칭표(nds/dq4/tables/adopt.tsv)의 뒤 장 제목을 같은
-그리기(dq4chapterbox.box_pixels)로 그려 같은 판정을 돌린다. 그리기가 상자 안 너비를 넘는다고 거부하면 그것도 걸림이다.
+그리기(dq4chapterbox.box_pixels)로 그려 같은 판정을 돌린다. 그리기가 상자 자리·안 너비를 넘는다고 거부하면 그것도 걸림이고,
+이것만은 종료 코드 1 이다(빌드의 box_span 도 같은 제목에서 멈추므로 뒤 장 제목이 들어오기 전에 알게).
 """
 import argparse
 import sys
@@ -80,7 +81,7 @@ def preview_image(nes, font, title, subtitle=None):
     """dq4chapterbox.preview 와 같은 자리·색으로 그린 화면(PIL)."""
     from PIL import Image
     import dq4chapterbox as cb
-    img, pal = cb.box_pixels(nes, font, title, subtitle)
+    img, pal, _ = cb.box_pixels(nes, font, title, subtitle)
     colors = {cb.PAL_BORDER: [(0, 0, 0), cb.GOLD, cb.BLUE, cb.BLUE], cb.PAL_TEXT: [(0, 0, 0), cb.WHITE, cb.BLUE, cb.WHITE]}
     im = Image.new('RGB', (SCREEN_W, SCREEN_H))
     px = im.load()
@@ -122,13 +123,16 @@ def preview_cases():
     return cases
 
 
+REFUSED = '그리기가 거부: '
+
+
 def run_preview(nes, font):
     found = []
     for name, title, subtitle in preview_cases():
         try:
             im = preview_image(nes, font, title, subtitle)
         except ValueError as e:
-            found.append((name, '글자 침범', f'그리기가 거부: {e}'))
+            found.append((name, '글자 침범', f'{REFUSED}{e}'))
             continue
         found += [(name, kind, text) for kind, text in judge(im)]
     return found
@@ -160,7 +164,11 @@ def main():
     for name, kind, text in found:
         print(f'{name} {kind}: {text}')
     print(f'{label}: 걸림 {len(found)}건')
-    return 0                    # 보고만
+    refused = [name for name, _, text in found if text.startswith(REFUSED)]
+    if args.cmd == 'preview' and refused:
+        print(f'상자 자리에 들지 않는 제목: {", ".join(refused)}')
+        return 1
+    return 0                    # 나머지는 보고만
 
 
 if __name__ == '__main__':

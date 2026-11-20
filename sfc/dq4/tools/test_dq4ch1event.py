@@ -823,7 +823,8 @@ class SyntheticListTest(unittest.TestCase):
     def test_chapter_end_and_override_order(self):
         end = self.named("chapter_end")
         self.assertEqual([e["from"] for e in end[-2:]], [ev.ENDER_SRC] * 2)
-        self.assertEqual(end[-1]["fields"]["talk"], self.t['king'])
+        # 끝내는 인물의 대화는 장 끝 기록 물음(dq4ch2event.chapter_flow 가 이 인물과의 대화로 건다)
+        self.assertEqual(end[-1]["fields"]["talk"], self.t['chapter_save'])
         # 앞에 둔 override 부터 맞춰 보므로 진행 깃발 목록이 보스 뒤 목록보다 먼저다
         self.assertEqual([o["list"] for o in self.over][:7],
                          ["new:jail_after", "new:jail_reunion", "new:hoimin_gone", "new:hall_empty",

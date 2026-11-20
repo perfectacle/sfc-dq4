@@ -93,7 +93,8 @@ EXTRA = [{"slot": 12, "group": 0x3D, "listed": True, "maps": (3, 3), "land": (14
          {"slot": 15, "group": 0x45, "listed": False, "maps": (0, 4), "land": None, "restart": (2, (8, 19))}]
 MAPS = [(0x3D, 3, 3, 12, 1), (0x3D, 4, 5, 13, 1), (0x45, 0, 4, 15, 0), (0x45, 5, 5, 14, 1), (0x45, 6, 11, 0xFF, 0)]
 # 다시 시작 자리 표: 산트하임(3D/00)이 텐페(3D/03) 앞이라, 그룹만 보면 산트하임에 선다.
-STARTS = bytes((0x3D, 0, 54, 21, 1, 0x80, 0x3D, 3, 24, 51, 1, 0x80, 0x45, 2, 8, 19, 1, 0x80, 0xFF))
+STARTS = bytes((0x3D, 0, 54, 21, 1, 0x80, 0x3D, 3, 24, 51, 1, 0x80, 0x45, 2, 8, 19, 1, 0x80,
+                *b"".join(travel.chapter_start_rows()), 0xFF))
 RET = 0xFFFFFE
 
 
@@ -178,6 +179,24 @@ class HookTest(unittest.TestCase):
         for group, number in ((0x45, 7), (0x3D, 0), (0x36, 0)):
             at, cpu = self.run_hook(travel.SAVE_SITE, _BC=group, _BD=number)
             self.assertEqual((at, cpu.x & 0xFF, cpu.a & 0xFF), (travel.SAVE_BACK, 0, group))
+
+    def test_save_after_the_chapter_end_yes_keeps_the_place(self):
+        # 장 끝 기록 물음의 「예」(7E:21A3 bit3): 장 끝 맵(36/00 은 バトランド 칸)의 칸 대신 7E:2033(귀환 자리 칸) 그대로
+        at, cpu = self.run_hook(travel.SAVE_SITE, _BC=0x36, _BD=0, _21A3=0x08, _2033=0x93)
+        self.assertEqual((at, cpu.x & 0xFF, cpu.a & 0xFF), (travel.SAVE_DONE, 0x13, 0x36))
+        # 대답 없이 교회에서 저장하면 맵의 칸
+        at, cpu = self.run_hook(travel.SAVE_SITE, _BC=0x3D, _BD=3, _21A3=0x40, _2033=0x93)
+        self.assertEqual((at, cpu.x & 0xFF), (travel.SAVE_DONE, 12))
+
+    def test_continue_a_record_waiting_for_the_chapter_opening(self):
+        # 첫머리 대기 flag 가 켜진 기록은 칸과 상관없이 그 장 첫머리 맵의 시작 칸 줄로(뒤 장 flag 를 먼저 봄)
+        (_, g2, n2, c2, _, (a2, m2)), (_, g3, n3, c3, _, (a3, m3)) = travel.CHAPTER_STARTS
+        for flags, row in (({f"_{a2 & 0xFFFF:04X}": m2}, (g2, n2, *c2)), ({f"_{a3 & 0xFFFF:04X}": m3 | m2}, (g3, n3, *c3))):
+            at, cpu = self.run_hook(travel.CONTINUE_SITE, a=15, **flags)
+            self.assertEqual(at, travel.CONTINUE_DONE)
+            self.assertEqual(STARTS[cpu.x & 0xFF:(cpu.x & 0xFF) + 6], bytes((*row, 1, 0x80)))
+        at, cpu = self.run_hook(travel.CONTINUE_SITE, a=15)
+        self.assertEqual((at, cpu.x & 0xFF), (travel.CONTINUE_DONE, 12))
 
     def test_restart_rows_of_the_slots(self):
         for site, done in ((travel.WIPE_SITE, travel.WIPE_DONE), (travel.CONTINUE_SITE, travel.CONTINUE_DONE)):
@@ -266,7 +285,9 @@ class HookTest(unittest.TestCase):
         self.assertEqual((at, cpu.wram[0x2193], cpu.s), (travel.KIMERA_CANCEL, 0x37, sp + 2))
 
     def test_rom_restarts_reads_the_hook_table(self):
-        self.assertEqual(travel.rom_restarts(self.rom, at=0x3CF000), {12: (0x3D, 3), 13: (0x3D, 4), 15: (0x45, 2)})
+        # 장 끝 기록 물음의 첫머리 열쇠(CHAPTER_STARTS)는 그 장 첫머리 맵
+        self.assertEqual(travel.rom_restarts(self.rom, at=0x3CF000), {12: (0x3D, 3), 13: (0x3D, 4), 15: (0x45, 2),
+                                                                      0x17: (0x3D, 1), 0x18: (0x3E, 1)})
         self.assertEqual(travel.rom_restarts(bytes(0x200000)), {})
 
     def test_restart_rows(self):

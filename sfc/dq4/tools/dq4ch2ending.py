@@ -164,10 +164,12 @@ MESSAGES = {
     'closed': say('무술 대회도/끝났으니/투기장은/닫았습니다.'),                                         # 0803
     'hell': say('지옥의 제왕이/되살아난다는/소문도 있고……', '어느 소문이/정말인지/짐작이 가지/않는군요……'),   # 055E
     'hero': say('소문으로는 세상을/구할 용사가/어딘가에서 자라고/있다더군.'),                           # 055D
+    # 장 끝 기록 물음(FC 03BE·03BF, --chapter3 빌드에서 3장으로 넘길 때)
+    **ch2.save_messages(2),
 }
 
 _ENDOR_TALKS = tuple(dict.fromkeys([*WON_TALK.values(), *(c[5] for c in CASTLE_WON if c[5])]))
-TALKS = ('cat', 'minister_night', 'maid', 'guard_night', 'king_night') + _ENDOR_TALKS
+TALKS = ('cat', 'minister_night', 'maid', 'guard_night', 'king_night') + _ENDOR_TALKS + ('chapter_save',)
 
 
 def _msg(ctx, k):
@@ -189,6 +191,8 @@ def talk_scripts(ctx):
         'maid': _ill(ctx, 'maid_start', 'maid_ill', 'maid_cured'),
         'guard_night': _ill(ctx, 'guard_night', 'guard_ill', 'guard_night'),
         'king_night': _ill(ctx, 'king_sleep', 'king_silent', 'king_sleep'),
+        # 끝내는 인물의 흐름(dq4ch2event.chapter_flow)이 이 인물과의 대화로 건다
+        'chapter_save': ch2.save_talk(ctx.msg['save_ask'], ctx.msg['save_skip']),
     }
     return [bodies[name] if name in bodies else [_msg(ctx, name)] for name in TALKS]
 
@@ -229,10 +233,12 @@ def native(ctx):
 def scripts(ctx):
     lo, hi = (lambda v: v & 0xFF), (lambda v: v >> 8)
     msg = lambda k: _cmd('21', lo(ctx.msg[k]), hi(ctx.msg[k])) if ctx.msg else _cmd('21', 0, 0)  # noqa: E731
-    end_box = (ctx.points or {}).get(END_SCENE, 0)
+    end_box, end_op = (ctx.points or {}).get(END_SCENE, 0), '37'
     if ctx.chapter3:
+        # 「완」 상자·3장 상태 → 기록 물음 → 레이크나바 톨네코의 집(dq4ch2event.chapter_flow, 명령 05)
         import dq4ch3event
-        end_box = dq4ch3event.native()[1]['transfer']
+        end_box, end_op = dq4ch3event.native()[1]['chapter_flow'], '05'
+
     darken = ctx.at['darken_song']
 
     def voice(name, flag):
@@ -244,7 +250,7 @@ def scripts(ctx):
         # 1장에서 끝내는 판과 같은 끊기: 검은 화면·엔딩 곡 → 서술 → 「다음에 계속」 상자, 버튼을 누르면 타이틀(돌아오지 않음).
         # 3장으로 넘기는 빌드면 끝 상자 대신 3장 넘김(돌아오지 않음: 이벤트가 맵을 옮긴다)
         'ender': [_cmd('28'), _cmd('52'), _cmd('3F'), _cmd('37', *_al(darken)), msg('end'),
-                  _cmd('37', *_al(end_box)), _cmd('16')],
+                  _cmd(end_op, *_al(end_box)), _cmd('16')],
     }
     return [{"address": SCRIPTS[k][1], "commands": v} for k, v in out.items()]
 
@@ -327,7 +333,7 @@ def npc_lists(lists, ctx):
         return {"map": m, "flag": flag[0], "when": "on", "mask": flag[1], "list": f"new:{name}", "first": True}
     cat = _person('day', CAT, 'down', CAT_INTERVAL, CAT_PICTURE, t['cat'])
     new = [{"name": EMPTY_CASTLE, "entries": []},
-           {"name": ENDER, "entries": _invisible('ender', t['cat'])},
+           {"name": ENDER, "entries": _invisible('ender', t['chapter_save'])},
            {"name": EMPTY_THRONE, "entries": [cat, {**cat, "time": "night"}] + _invisible('brey', t['cat'])},
            {"name": EMPTY_BEDROOM, "entries": _invisible('kiryl', t['cat'])}]
     over = [on(CASTLE, SEEN_BREY, ENDER), on(CASTLE, SEEN_KIRYL, ENDER), on(CASTLE, EMPTY, EMPTY_CASTLE),

@@ -34,7 +34,9 @@ class Slot:
 # 고정 주소로도 쓰여 뺀다. 그 앞 21C2~21EE 에 남은 비트는 배 X·Y(21DB~21DE)의 16비트 쓰기 따위에 휩쓸려 쓰지 않는다
 # 21FF 는 장을 넘겨 쓰는 칸이라(dq4ch3slots.CROSS_CHAPTER_FLAGS) 어느 장 몫으로도 다시 잡지 않는다
 SLOTS = {
-    'E1': Slot('텐페 뒤 절반', 'dq4ch2tempe', (0x5FA000, 0x5FB000), flags=(0x60,),
+    # 앞 1KB 는 장 제목 상자 덩어리(dq4chapterbox, 5F:8000~)가 늘 자리: 상자를 제목 길이에 맞추자 테두리 행을 상자 폭마다
+    # 두게 되어 5F:A000 을 넘었다. 이 모듈 코드는 0x92 바이트라 3KB 로도 넉넉하다
+    'E1': Slot('텐페 뒤 절반', 'dq4ch2tempe', (0x5FA400, 0x5FB000), flags=(0x60,),
                groups=(0x31,), monsters=(0xA3, 0x53), battles=(0,),
                scripts=(('05:9C2B', tuple(range(14))),), lists='ch2_tempe2_',
                message_bytes=2048, talk_bytes=1024, list_bytes=2048),

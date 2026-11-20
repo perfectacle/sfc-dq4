@@ -22,8 +22,9 @@ FC_NO_SHADOW = (0x1D, 0x20, 0xA1, 0xA8)    # 이 두 묶음은 plane 1 이 모�
 # 1장 제목 상자의 nametable(열 4~29, 행 8~13). 바깥 줄이 테두리, 안이 바탕 9A
 FC_BORDER = {'tl': 0xA1, 't': 0xA2, 'tr': 0xA3, 'l': 0xA4, 'r': 0xA5, 'bl': 0xA6, 'b': 0xA7, 'br': 0xA8}
 FC_FILL = 0x9A
-# FC 는 열 4~29(왼쪽 여백 32, 오른쪽 16)지만 SFC 는 256점이 다 보여 한쪽으로 쏠려 보이므로 열 3 에 둔다
-BOX_COL, BOX_ROW, BOX_W, BOX_H = 3, 8, 26, 6
+# 상자 자리(열 4~27). 상자는 이 안에 제목 길이대로 가운데 둔다(box_span). FC 는 열 2~29 안에 두지만 SFC 는 256점이 다
+# 보여 화면 가운데(열 15.5)에 맞춘다. 가장 넓은 제목(2장, 24열)이 들어가는 폭이고, 넘는 제목은 빌드가 거부한다
+BOX_COL, BOX_ROW, BOX_W, BOX_H = 4, 8, 24, 6
 TEXT_ROW = 2                                # 상자 안 글자 띠(16점)의 첫 행
 TITLE = '제1장   왕궁의 전사들'
 
@@ -64,6 +65,17 @@ DONE = '완'
 DONE1 = Scene('done1', None, None, TITLE, subtitle=DONE, hold=475, song=0x12)
 DONE2 = Scene('done2', None, None, CHAPTER2.title, subtitle=DONE, hold=511)
 DONE3 = Scene('done3', None, None, ENDING2.title, subtitle=DONE, hold=415)
+class DarkLoad:
+    """상자 없이 맵만 검게 불러오는 자리(맵 훅의 if_pending 이 Scene 과 같은 뜻으로 본다): 그 맵이고 flag 가 꺼져 있고
+    since 가 켜져 있으면."""
+
+    def __init__(self, where, flag, since):
+        self.where, self.flag, self.since = where, flag, since
+
+
+# 1장 끝: FC 는 바트랜드 성 앞(02/00)에 들어서는 맵 들기 검사(1A:$B829)에서 장을 끝내 성 앞을 그리지 않고 검은 화면에
+# 서술을 띄운다. 보고 뒤(7E:2197 bit7) 2장 전(7E:2208 bit4)이면 성 앞(36/00)을 검게 불러온다
+DARK_LOADS = (DarkLoad((0x36, 0x00), (0x7E2208, 0x10), (0x7E2197, 0x80)),)
 # 게임에 넣는 장면 차례. 상자·밝히기 네이티브 주소가 이 목록으로 정해지므로, 주소를 부르는 스크립트(서장·1장)와
 # 빌드가 같은 목록을 써야 한다. 새 장면은 끝에 더해 앞 장면의 상자 주소를 지킨다
 GAME_SCENES = (PROLOGUE, CHAPTER1, CHAPTER2, ENDING, ENDING2, CHAPTER3, ENDING3, DONE1, DONE2, DONE3)
@@ -88,7 +100,9 @@ PAL_BORDER, PAL_TEXT = 1, 2                # BG3 팔레트(CGRAM 4~7, 8~11). 상
 BLANK = 0x2C00                             # 창 밖 BG3 칸(타일 0, 팔레트 3, 우선)
 
 FADE_STEP = 1       # 밝기 한 단계 프레임
-HOLD = 60           # 상자를 다 밝힌 채 두는 프레임(FC 는 페이드까지 75~90프레임쯤)
+# 상자를 다 밝힌 채 두는 프레임: 그대로 두면 HOLD_MAX, A 를 누르면 HOLD_MIN 뒤부터 곧 어둡게. FC 2장 첫머리 상자(1→2 넘김)는
+# 그대로 두면 약 180프레임, A 를 10프레임마다 누르면 약 45프레임 보였다(10프레임마다 찍음). 밝히기·어둡게 각 15프레임을 뺀 값
+HOLD_MIN, HOLD_MAX = 25, 150
 REVEAL_STEP = 1
 SONG_WAIT_MAX = 300  # 맵 곡이 시작되기를 기다리는 상한(프레임). FC 는 서술 창이 닫히고 67프레임 뒤 성 곡
 SONG_STOP, SONG_PLAY = 0x24FE91, 0x24FE9A    # 지금 곡 멈추기 / A 의 곡 틀기(dq4ch2ending 과 같음)
@@ -133,15 +147,36 @@ def rows(subtitle):
     return BOX_H + (SUB_GAP + SUB_ROWS if subtitle else 0)
 
 
+def title_width(font, text):
+    """제목 글자 점 폭(title_mask 와 같은 셈: 굵게 한 한 점 포함)."""
+    import dq4menupatch
+    cols = dq4menupatch.render(font, text)
+    band = [sum((col[y] for col in cols), []) for y in range(dq4menupatch.BAND)]
+    return max((x + 2 for row in band for x, v in enumerate(row) if v), default=0)
+
+
+def box_span(font, text):
+    """(상자 첫 열, 열 수): 상자 자리(BOX_W 열) 안의 열. FC 1A:$80EA 처럼 제목 길이에 테두리·여백 두 열씩을 더한
+    폭(제목 점 폭을 8점으로 올림 + 4)을 가운데에 둔다. 남는 한 열은 오른쪽으로(FC 의 홀수 글자 제목 1·5장은 가운데에서
+    한 열 오른쪽, 짝수 글자 제목은 가운데)."""
+    n = -(-title_width(font, text) // 8) + 4
+    if n > BOX_W:
+        raise ValueError(f'{text!r}: 상자 {n}열이 상자 자리 {BOX_W}열을 넘음')
+    return (BOX_W - n + 1) // 2, n
+
+
 def box_pixels(nes, font, text=TITLE, subtitle=None):
-    """상자 26x6 타일(부제가 있으면 그 아래 행까지)의 색 번호 그림과 타일마다의 팔레트(테두리 / 안)."""
+    """상자 자리 BOX_W x 6 타일(부제가 있으면 그 아래 행까지)의 색 번호 그림, 타일마다의 팔레트(테두리 / 안), 상자 밖
+    칸 집합((타일 x, 타일 y), 상자 행만). 상자는 제목 길이에 맞춘 폭(box_span)이다."""
     W, H = BOX_W * 8, rows(subtitle) * 8
     img = [[0] * W for _ in range(H)]
     pal = [[PAL_TEXT] * BOX_W for _ in range(rows(subtitle))]
+    first, cols = box_span(font, text)
+    outside = {(tx, ty) for ty in range(BOX_H) for tx in range(BOX_W) if not first <= tx < first + cols}
     for ty in range(BOX_H):
-        for tx in range(BOX_W):
+        for tx in range(first, first + cols):
             v = 't' if ty == 0 else 'b' if ty == BOX_H - 1 else ''
-            h = 'l' if tx == 0 else 'r' if tx == BOX_W - 1 else ''
+            h = 'l' if tx == first else 'r' if tx == first + cols - 1 else ''
             name = v + h
             n = FC_BORDER[name] if name else FC_FILL
             if name:
@@ -150,18 +185,18 @@ def box_pixels(nes, font, text=TITLE, subtitle=None):
             for y in range(8):
                 img[ty * 8 + y][tx * 8:tx * 8 + 8] = t[y]
     # 글자: FC 처럼 plane 0 = 점, plane 1 = 한 줄 위 점을 뒤집은 값 → 점 1·3(흰색), 바로 아래 0(검은 그림자), 나머지 2(파랑)
-    inner = (BOX_W - 2) * 8
+    inner = (cols - 2) * 8
     mask = title_mask(font, text, inner)
     for y, row in enumerate(mask):
         for x, g in enumerate(row):
             up = mask[y - 1][x] if y else 0
-            img[TEXT_ROW * 8 + y][8 + x] = g | (0 if up else 2)
+            img[TEXT_ROW * 8 + y][(first + 1) * 8 + x] = g | (0 if up else 2)
     if subtitle:
         # 검은 바탕 위라 그림자·파랑 없이 흰 점(색 1)만. 「완」 만 FC 「完」 자리
         done = subtitle == DONE
         for y, row in enumerate(title_mask(font, subtitle, W, DONE_X if done else None)):
             img[(BOX_H + SUB_GAP) * 8 + y + (DONE_Y if done else 0)] = row[:]
-    return img, pal
+    return img, pal, outside
 
 
 def snes_tile(rows):
@@ -178,10 +213,13 @@ def box_data(nes, font, texts=(TITLE,)):
     tiles, index, maps = bytearray(), {}, []
     for text in texts:
         text, subtitle = text if isinstance(text, tuple) else (text, None)
-        img, pal = box_pixels(nes, font, text, subtitle)
+        img, pal, outside = box_pixels(nes, font, text, subtitle)
         words = bytearray()
         for ty in range(rows(subtitle)):
             for tx in range(BOX_W):
+                if (tx, ty) in outside:
+                    words += BLANK.to_bytes(2, 'little')
+                    continue
                 t = snes_tile([img[ty * 8 + y][tx * 8:tx * 8 + 8] for y in range(8)])
                 if t not in index:
                     index[t] = CANVAS + len(index)
@@ -351,6 +389,12 @@ def _loop(body):
     return body[:-1] + bytes((-len(body) & 0xFF,))
 
 
+def hold_or_a(least, most):
+    """least 프레임 쉰 뒤, A($4218 bit7)가 눌릴 때까지 또는 most 프레임째까지 기다린다. X 를 8비트로 둔다."""
+    loop = bytes((0xDA,)) + wait(1) + bytes((0xFA, 0xAD, 0x18, 0x42, 0x29, 0x80, 0xD0, 0x03, 0xCA, 0xD0))
+    return wait(least) + bytes((0xE2, 0x10, 0xA2, most - least)) + loop + bytes((-(len(loop) + 1) & 0xFF,))
+
+
 def wait_button():
     """M 8. 앞 서술에서 누른 채인 버튼을 놓기를 기다린 뒤, A·B·X·Y·START 가운데 하나를 누르기를 기다린다
     (자동 조이패드 읽기 결과 $4218·$4219)."""
@@ -466,7 +510,7 @@ class Layout:
                         0x8F, *le(FIELD_EVENT_DONE[0], 3))) +                                # STA $7E2194
                  bytes((0xA9, 0x80, 0x6B)))                            # LDA #$80 / RTL
         # 맵을 불러올 때: 연출 전이면 주화면을 BG3 만으로. 메뉴 곡은 메뉴를 나갈 때 줄어든다(dq4overture.MENU_FADE)
-        hook = (if_pending(self.scenes, bytes((0xA9, 0x04)), bytes((0xA9, 0x17))) +
+        hook = (if_pending(list(self.scenes) + list(DARK_LOADS), bytes((0xA9, 0x04)), bytes((0xA9, 0x17))) +
                 bytes((0x8F, 0x33, 0x07, 0x7E, 0x6B)))                # STA $7E0733 / RTL
         clear_map = map_rows(lambda r: None)
         pal_off = (PAL_BORDER * 4) * 2
@@ -494,7 +538,7 @@ class Layout:
             return (ENTER + save + bytes((0x9C, 0x1D, 0x00)) + screen_off() + bytes((0xC2, 0x10)) +   # STZ $001D
                    call_load + map_rows(lambda r: row_at[r]) +
                    dma_vram(BG3_MAP, MAP_BUFFER, 0x800) + screen_on() +
-                   fade(1, 15, FADE_STEP) + wait(HOLD) + fade(14, 0, FADE_STEP) +
+                   fade(1, 15, FADE_STEP) + hold_or_a(HOLD_MIN, HOLD_MAX) + fade(14, 0, FADE_STEP) +
                    screen_off() + bytes((0xC2, 0x10)) + clear_map +
                    dma_vram(BG3_MAP, MAP_BUFFER, 0x800) +
                    fill_vram(BG3_CHR + CANVAS * 8, a['blank'], len(self.tiles) // 2) +
@@ -602,7 +646,7 @@ def apply(data, nes, font, scenes=(CHAPTER1,)):
 
 def preview(nes, font, path):
     from PIL import Image
-    img, pal = box_pixels(nes, font)
+    img, pal, _ = box_pixels(nes, font)
     colors = {PAL_BORDER: [(0, 0, 0), GOLD, BLUE, BLUE], PAL_TEXT: [(0, 0, 0), WHITE, BLUE, WHITE]}
     im = Image.new('RGB', (256, 224))
     px = im.load()
