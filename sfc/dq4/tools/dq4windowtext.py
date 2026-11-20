@@ -133,6 +133,10 @@ FIXED_WINDOWS = {0x01: 0, 0x10: 3, 0x09: 0, 0x0B: 1,
                  0x19: 0, 0x1A: 0, 0x87: 0, 0x88: 0, 0x1C: 0, 0x1D: 0, 0x1E: 0, 0x33: 0,
                  0x0A: 2, 0x1F: 2, 0x0F: 1, 0x3C: 0, 0x51: 0, 0x52: 0, 0x54: 0, 0x32: 1, 0x5A: 0, 0x62: 1,
                  0x4B: 0, 0x4E: 0, 0x59: 0, 0x75: 0, 0x77: 0, 0x7E: 2, 0x20: 0}
+# 넓힌 만큼 왼쪽으로 옮겨 오른쪽 변을 원래 자리에 두는 창. 32 예/아니요는 그 아래 깔리는 기록 고르기·도구 창·메시지 창(오른쪽
+# 변 29)과 원래 두 칸 띄워 맞물렸는데, 오른쪽으로 넓히면 한 칸 차이가 되어 뒤 창 오른쪽 변이 한 줄 삐져나와 보인다
+# (dq4winrule_align). 별칭 84·85 는 dq4windowname 이 따로 옮긴다
+KEEP_RIGHT = (0x32,)
 FIXED = {
     'はなす': '대화', 'じゅもん': '주문', 'つよさ': '상태', 'どうぐ': '도구',
     'そうび': '장비', 'さくせん': '작전', 'とびら': '문', 'しらべる': '조사',
@@ -436,6 +440,8 @@ def fixed_records(data, font):
         if len(new) > len(rec):
             raise ValueError(f'창 {w:02X}: 고친 레코드가 원래보다 김')
         new[2] += widen
+        if w in KEEP_RIGHT:
+            new[0] -= widen
         o = lorom(addr)
         if bytes(data[o:o + len(rec)]) != rec:
             raise ValueError(f'창 {w:02X}: 레코드 자리가 어긋남')

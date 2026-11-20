@@ -115,8 +115,10 @@ RULER_PRE = (OPEN + 'right:4,wait:30,a:6,wait:60,a:6,wait:80,' + 'down:4,wait:20
 # 줄면 통과하며 새 수를 알린다(숫자를 고쳐 못박는다). 메시지 캔버스 전송이 창 타일맵보다 먼저 가는 차례와 가린 캔버스
 # 칸 슬롯을 고치면 0 이 되어야 한다(형식 문서 「남은 것」)
 NAME_FIRST, NAME_POSITIONS = 0x180, 8     # 이름 렌더러 자리(dq4windowname WnSlot, 자리마다 이름 5칸 + 위 줄 5칸)
+# sell-long 셋은 출발 상태에 남은 이름 자리 키(!wn_keys·!wt_keys, 앞서 뜬 창 글자의 버퍼 자리)에 따라 한 프레임 오가는 값이라,
+# 키를 비운 출발 상태와 같은 값(잰 값)을 둔다
 KNOWN = {'give-full': 224, 'give-shop-ch1': 245, 'equip-ch3': 9, 'sell-shop-ch1': 6, 'sell-equip-ch3': 5,
-         'sell-long-ch1': 90, 'sell-long-ch2': 89, 'sell-long-ch3': 89}
+         'sell-long-ch1': 91, 'sell-long-ch2': 90, 'sell-long-ch3': 90}
 # --every 로 매 프레임 재는 장면과 구간(장면의 원래 프레임에 더함). 넘친 목록 이름을 묶음 버퍼로 보내는 장면들과, 메시지 창
 # 없이 상태 창에 이름이 넘치는 battle11·party21 의 구간
 EVERY = {'talk02-full': range(60, 700), 'shopwho': range(100, 1900), 'partyitems': range(60, 900),

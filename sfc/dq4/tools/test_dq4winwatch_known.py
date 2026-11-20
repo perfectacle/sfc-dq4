@@ -71,6 +71,13 @@ PAIR = '창 (4, 3, 10, 12) 과 (4, 2, 12, 13) 의 왼쪽 변이 한 칸 어긋�
 class PairTest(unittest.TestCase):
     """변 어긋남은 장면·칸이 아니라 어긋난 창 짝으로 알려진 깨짐을 가른다."""
 
+    def setUp(self):
+        # 실제 PAIRS 는 고치면 비므로 시험용 짝 하나를 둔다
+        key = (frozenset({(4, 3, 10, 12), (4, 2, 12, 13)}), '왼쪽')
+        patcher = mock.patch.dict(align.PAIRS, {key: 'E: 명령 창 위 장비 「누구」 창'}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def judge(self, why, scene='any-scene'):
         hit = (4, 3, align.NAME, why, 'fail', 123)
         return KnownTest.judge(self, [hit], scene=scene, rules=(align,))

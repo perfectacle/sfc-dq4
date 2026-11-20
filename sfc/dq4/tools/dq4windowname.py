@@ -37,7 +37,24 @@ NMI_SITES = ((0x0087F2, bytes.fromhex('a22689')), (0x00887C, bytes.fromhex('6c44
              (0x00FF9A, bytes.fromhex('22acc8115c8f8800')), (0x00FF08, bytes.fromhex('a200148e1621')))
 # 이름 하나를 04:B79B 로 찍는 「누구」 고르기 창(본문에 D0 자리 표시). 이름 칸 5칸을 담게 한 칸 왼쪽으로 옮겨 넓힌다.
 # 오른쪽에는 이어서 열리는 창(도구·주문 목록 등)이 붙어 있어 오른쪽으로는 넓히지 않는다.
-NAME_LISTS = (0x0C, 0x0E, 0x11, 0x13, 0x2C, 0x36, 0x38, 0x3D, 0x4A, 0x4F, 0x6F, 0x7A, 0x7F)
+NAME_LISTS = (0x0C, 0x11, 0x2C, 0x36, 0x38, 0x3D, 0x4A, 0x4F, 0x6F, 0x7A, 0x7F)
+# 그 가운데 왼쪽 변을 두고 오른쪽으로 넓히는 창. 왼쪽으로 옮기면 왼쪽 변이 함께 뜨는 창과 한 칸 어긋나 뒤 창 변이 한 줄
+# 삐져나온다(dq4winrule_align): 장비 누구 창 13 은 명령 창 01(열 2~13), 도구 누구 창 0E 는 그 위에 뜨는 「어떻게 할까」 2E
+# (원본에서 둘 다 왼쪽 변 6). 오른쪽으로 넓힌 열은 이어서 열리는 목록(장비 목록 별칭 14·물건 목록 0F)이 위에서 덮는다
+NAME_LISTS_RIGHT = (0x13, 0x0E)
+# 필드 상태 창 02 의 머리 x. 일행 열이 사람마다 6칸이라 원래 x(22)로는 오른쪽 변이 27 → 28 로 밀려, 위에 뜨는 물건 목록 0F·
+# 주문 목록 28·소비 MP 2F(왼쪽 변 15)와 왼쪽·오른쪽 변이 한 칸씩 어긋났다(dq4winrule_align). 한 칸 왼쪽에 두면 오른쪽 변이
+# 원래 27 이고 두 사람일 때 왼쪽 변이 15 로 그 창들과 같은 열이다
+STATUS_X = 21
+# 대열 바꾸기 정보 창 47·48(x 16, 너비 14, 오른쪽 변 29). 일행 상태 창 02 를 한 칸 왼쪽(STATUS_X)에 두면 두 사람일 때 그
+# 왼쪽 변이 15 라, 그 위에 뜨는 이 창의 왼쪽 변 16 과 한 칸 어긋난다(dq4winrule_align). 오른쪽 변은 두고 왼쪽으로 한 칸 넓힌다
+FORMATION_INFO = (0x47, 0x48)
+FORMATION_INFO_HEAD = (16, 14)
+# 예/아니요 32(dq4windowtext.KEEP_RIGHT) 의 별칭. 별칭 레코드는 x 를 따로 가져 32 와 함께 한 칸 왼쪽으로 옮긴다
+KEEP_RIGHT_ALIASES = (0x84,)
+# 별칭 85(y 4)는 3장 네네 가게 모험의 서 지우기에서 서 고르기 창(열 5~29) 위에 뜬다. 왼쪽으로 옮기면 그 창 첫 줄의 레벨 숫자
+# (열 21)를 덮으므로, 한 칸 오른쪽(열 23~29)에 두어 오른쪽 변을 서 고르기 창·메시지 창의 오른쪽 변 29 와 같은 열에 둔다
+RIGHT_EDGE_ALIASES = (0x85,)
 # 주문 목록 창(본문 00 81 FE D6 FF). 다섯 글자 칸을 한글 일곱 칸으로 오른쪽으로 넓힌다.
 SPELL_WINDOW = 0x28
 SPELL_BODY = bytes((0x00, 0x81, 0xFE, 0xD6, 0xFF))
@@ -259,6 +276,9 @@ def apply(data, font=None, asar=None):
     if d[o + 2] & 0x1F != 6:
         raise ValueError(f'창 {STATUS_WINDOW:02X} 머리 {d[o:o + 4].hex()}: 너비가 6 이 아님')
     d[o + 2] = (d[o + 2] & 0xE0) | 7
+    if d[o] & 0x1F != STATUS_X + 1:
+        raise ValueError(f'창 {STATUS_WINDOW:02X} 머리 {d[o:o + 4].hex()}: x 가 {STATUS_X + 1} 이 아님')
+    d[o] = (d[o] & 0xE0) | STATUS_X
     for w in BATTLE_STATUS:
         o = lorom(dq4menupatch.window_addr(d, w))
         if d[o + 2] & 0x1F != 6 or d[o + 4:o + 9] != BATTLE_STATUS_BODY:
@@ -275,6 +295,23 @@ def apply(data, font=None, asar=None):
             raise ValueError(f'창 {w:02X} 머리 {d[o:o + 10].hex()}: 누구 고르기 창 모양이 아님')
         d[o] -= 1
         d[o + 2] += 1
+    for w in NAME_LISTS_RIGHT:
+        o = lorom(dq4menupatch.window_addr(d, w))
+        if d[o + 2] & 0x1F not in (8, 9) or 0xD0 not in d[o + 4:o + 10]:
+            raise ValueError(f'창 {w:02X} 머리 {d[o:o + 10].hex()}: 누구 고르기 창 모양이 아님')
+        d[o + 2] += 1
+    for w in FORMATION_INFO:
+        o = lorom(dq4menupatch.window_addr(d, w))
+        if (d[o] & 0x1F, d[o + 2] & 0x1F) != FORMATION_INFO_HEAD or d[o] & 0x80:
+            raise ValueError(f'창 {w:02X} 머리 {d[o:o + 4].hex()}: 대열 바꾸기 정보 창 모양이 아님')
+        d[o] -= 1
+        d[o + 2] += 1
+    for ws, step in ((KEEP_RIGHT_ALIASES, -1), (RIGHT_EDGE_ALIASES, 1)):
+        for w in ws:
+            o = lorom(dq4menupatch.window_addr(d, w))
+            if not d[o] & 0x80 or d[o + 2] != dq4windowtext.KEEP_RIGHT[0] or d[o] & 0x1F in (0, 0x1F):
+                raise ValueError(f'창 {w:02X} 머리 {d[o:o + 4].hex()}: 창 {dq4windowtext.KEEP_RIGHT[0]:02X} 의 별칭이 아님')
+            d[o] += step
     o = lorom(dq4menupatch.window_addr(d, SPELL_WINDOW))
     if d[o + 2] & 0x1F != 8 or d[o + 4:o + 9] != SPELL_BODY:
         raise ValueError(f'창 {SPELL_WINDOW:02X} 머리 {d[o:o + 9].hex()}: 주문 목록 창 모양이 아님')
