@@ -698,7 +698,24 @@ def return_places(out, original, dq4):
         raise SystemExit(f'다시 시작 자리 표에 빈 항목이 모자람: {len(need)} > {len(free)}')
     for row, r in zip(need, free):
         out[r:r + 6] = row
+    _check_chapter_rows(out, original, rows)
     return out
+
+
+def _check_chapter_rows(out, original, rows):
+    """장 첫머리 줄(dq4fieldtravel.CHAPTER_STARTS)이 앉은 항목의 전제를 못박는다. 엔진은 칸 표(SLOT_TABLE)[칸] 의
+    그룹으로 표를 위에서부터 훑어 처음 맞는 항목을 쓰고, 훅만 (그룹, 맵) 짝으로 찾는다. 그래서 그 자리의 원래 그룹은 칸
+    표에 없어야 하고(옛 내용이 쓰이지 않음), 새 그룹은 더 앞 항목이 먼저 맞아야 한다(엔진 찾기가 이 줄에 닿지 않음)."""
+    import dq4fieldtravel
+    slots = set(out[lorom(SLOT_TABLE):lorom(SLOT_TABLE) + SLOT_COUNT])
+    for key in dq4fieldtravel.chapter_start_rows():
+        at = next((r for r in rows if out[r:r + 6] == key), None)
+        if at is None:
+            raise SystemExit(f'장 첫머리 줄 {key.hex()} 가 다시 시작 자리 표에 없음')
+        if original[at] in slots:
+            raise SystemExit(f'{at:06X}: 장 첫머리 줄이 덮은 원래 그룹 {original[at]:02X} 가 칸 표에 있음(쓰이는 항목)')
+        if not any(out[r] == key[0] for r in rows if r < at):
+            raise SystemExit(f'{at:06X}: 그룹 {key[0]:02X} 의 앞 항목이 없어 엔진 찾기가 장 첫머리 줄에 닿음')
 
 
 def build(rom, dq5, dq4, work, prologue=True, chapter2=False, chapter3=False):

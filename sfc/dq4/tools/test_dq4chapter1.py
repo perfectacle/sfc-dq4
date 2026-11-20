@@ -670,3 +670,33 @@ class BuildFlowTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ChapterRowCheckTest(unittest.TestCase):
+    """장 첫머리 줄 전제(_check_chapter_rows): 덮은 원래 그룹은 칸 표에 없고, 새 그룹은 앞 항목이 먼저 맞는다."""
+
+    def rom(self, covered=0x2D, earlier=True):
+        import dq4fieldtravel
+        out, original = bytearray(0x400000), bytearray(0x400000)
+        slots = ch.lorom(ch.SLOT_TABLE)
+        out[slots:slots + ch.SLOT_COUNT] = bytes([0x3D, 0x3E] + [0x44] * (ch.SLOT_COUNT - 2))
+        table = ch.lorom(ch.START_TABLE)
+        keys = dq4fieldtravel.chapter_start_rows()
+        heads = [bytes((0x3D, 0, 1, 1, 1, 0x80)), bytes((0x3E, 0, 1, 1, 1, 0x80))] if earlier else []
+        body = heads + keys
+        rows = [table + 6 * k for k in range(len(body))]
+        for r, row in zip(rows, body):
+            out[r:r + 6] = row
+            original[r] = 0x44 if row in heads else covered
+        return out, original, rows
+
+    def test_passes_on_unused_rows_after_the_engine_hits(self):
+        ch._check_chapter_rows(*self.rom())
+
+    def test_rejects_a_row_the_slot_table_still_uses(self):
+        with self.assertRaises(SystemExit):
+            ch._check_chapter_rows(*self.rom(covered=0x3E))
+
+    def test_rejects_a_row_the_engine_search_would_reach(self):
+        with self.assertRaises(SystemExit):
+            ch._check_chapter_rows(*self.rom(earlier=False))
