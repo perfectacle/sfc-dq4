@@ -21,7 +21,7 @@ KNOWN = tuple(ww.Known(scene, frozenset({cell}), frames, why) for scene, why, ce
     ('*/equip-ch3', EQUIP, (((4, 29), 299), ((5, 29), 334))),
     ('*/give-full', GIVE, (((17, 16), 6), ((17, 17), 18))),
     ('*/give-shop-ch1', GIVE, tuple(((17, c), 15) for c in range(11, 18))),
-    ('*/screens/status-mesence', STATUS1, (((19, 23), 10), ((19, 24), 10))),
+    ('*/status-mesence', STATUS1, (((19, 23), 10), ((19, 24), 10))),
 ) for cell, frames in cells)
 
 
