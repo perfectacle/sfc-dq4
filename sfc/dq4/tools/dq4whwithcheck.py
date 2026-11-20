@@ -35,7 +35,7 @@ DMA_CLOCKS = 8            # DMA 바이트 하나의 마스터 클록(채널 머�
 EVENTS = {'meas': 'WhWith_meas', 'go': 'WhWith_go', 'wait': 'WhWith_wait', 'give': 'WhWith_give',
           'done': 'WhWith_done', 'tmend': 'WhWith_dma'}
 # DMA 를 거는 코드: 이 심볼부터 다음 심볼 앞까지
-RANGES = (('WhWith', 'WhXfer'), ('WhNmi', 'WqClean'))
+RANGES = (('WhWith', 'WhXfer'), ('WhNmi', 'WqRunBytes'))
 
 
 def parse(text):

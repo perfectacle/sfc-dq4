@@ -75,6 +75,51 @@ needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출�
 groups = ["ch1-build", "ch1-walk"]
 
 [[check]]
+name = "dq4-vblank-dma"
+why = "메시지 캔버스 DMA·전송 목록 DMA 가 수직 귀선 안에 끝나게(원본 DQ5 는 V 244 → 0 으로 귀선을 꽉 채움). WtQueue 가 항목을 짜는 내내 NMI 를 꺼 게임 NMI 가 늦게 시작하거나 NMI 첫머리 우리 일·WqClean 의 평면 1 되돌리기가 캔버스 DMA 앞에 들어 끝 몫이 그리는 줄로 넘어 버려지던 것(건네기 화면 캔버스 V 5 → 16, shopwho·talk02-full 끝 V 2)이 다시 생기지 않게"
+paths = [
+  "sfc/dq4/tools/dq4vblankcheck.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/dq4windowname.asm",
+  "sfc/dq4/tools/dq4windowname.py",
+  "sfc/dq4/tools/dq4battlemsg.asm",
+  "sfc/dq4/tools/dq4windowcheck.py",
+  "sfc/dq4/tools/dq4ch1walkcheck.py",
+  "sfc/dq4/tools/lua/dq4walk.lua",
+  "sfc/dq5/tools/lua/dq5msg.lua",
+  "sfc/dq5/tools/lua/dq5warp.lua",
+  "sfc/dq4/tools/dq4readset.py",
+  "sfc/dq4/tools/lua/dq4readset.lua",
+  "sfc/dq4/tools/dq4mesen.py",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && rm -rf work/vblank && uv run --locked python sfc/dq4/tools/dq4vblankcheck.py --rom work/ch1/dq4-ch1.sfc --out work/vblank"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
+name = "dq4-queue-race"
+why = "WtQueue 가 이름 대기열을 짜는 동안 NMI 를 켜 두므로, 짜는 도중 아무 명령 경계에서 WqNmi 가 끼어들어도 앞 항목이 버려지거나 두 번 나가거나 반쯤 쓴 항목이 나가지 않게. 「대기열이 비었으면 읽을 자리를 이 항목 첫 자리로」 검사가 WhStash 뒤에 있어, 앞 항목이 남은 채 이름을 묶음으로 빼면 앞 항목을 버리고 뺀 이름을 바로 보내 메시지 창에 비쳤던 것. 장면에서 NMI 가 그 경계에 우연히 오기를 기다리지 않고, 뜬 상태에서 해석기로 경계를 모두 훑음"
+paths = [
+  "sfc/dq4/tools/dq4queuerace.py",
+  "sfc/dq4/tools/dq4shards.py",
+  "sfc/dq4/tools/lua/dq4queuesnap.lua",
+  "sfc/dq5/tools/w65816.py",
+  "sfc/dq4/tools/dq4vblankcheck.py",
+  "sfc/dq4/tools/dq4windowname.asm",
+  "sfc/dq4/tools/dq4windowname.py",
+  "sfc/dq4/tools/dq4windowcheck.py",
+  "sfc/dq5/tools/lua/dq5msg.lua",
+  "sfc/dq4/tools/dq4readset.py",
+  "sfc/dq4/tools/lua/dq4readset.lua",
+  "sfc/dq4/tools/dq4mesen.py",
+  "tools/mesence_settings.py",
+]
+run = "uv run --locked python sfc/dq4/tools/dq4build.py --out work/ch1 && mkdir -p work/wc && DQ4_WINDOWNAME_SYMBOLS=$PWD/work/wc/wn.sym uv run --locked python sfc/dq4/tools/dq4menupatch.py build --rom work/ch1/overture.sfc --messages work/ch1/messages.json --out work/wc/menu.sfc && rm -rf work/race && uv run --locked python sfc/dq4/tools/dq4queuerace.py --rom work/ch1/dq4-ch1.sfc --symbols work/wc/wn.sym --out work/race"
+needs = ["rom", "MESENCE", "LIBDIR", "ASAR", "DQ4_GALMURI", "DQ4_ASSETS", "출발 상태는 검사 롬으로 만듦(서장 끝 상태 캐시 DQ4_STATES_CACHE, 없으면 원래 체크아웃 work/cache/states)"]
+groups = ["ch1-build", "ch1-walk"]
+
+[[check]]
 name = "dq4-readset-soundness"
 why = "읽은 롬 바이트 캐시(dq4readset)가 결과에 닿는 입력을 빠뜨리지 않게: 읽은 집합 밖 바이트를 모두 뒤집어도 출력이 같고, 안 바이트 하나로 빗나가며, HDMA 표 읽기도 잡힌다. 배터리 기록(.srm)·상태 안 롬 이름·Lua emu.read 가 키를 비껴간 적이 있다"
 paths = [
