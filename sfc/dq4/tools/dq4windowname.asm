@@ -6608,256 +6608,6 @@ WhMsgWin:
     STA.l !wh_msgwin
 .out
     RTS
-; 등급(A: 0·1·2) → 한 줄(글자 줄 또는 위 줄)의 평면 1 바이트 수(열 4·7·10 × 8)
-WqRunBytes:
-    CMP #$0001
-    BNE +
-    LDA #$0038
-    RTS
-+
-    CMP #$0002
-    BNE +
-    LDA #$0050
-    RTS
-+
-    LDA #$0020
-    RTS
-
-; WtQueue 안(DB = 7E, M = X = 16): 필드에서 캔버스 096~17F 칸에 짠 글자 줄·위 줄 그림의 평면 0 을 메시지 캔버스 버퍼
-; 7E:5800(칸 096 부터 8바이트씩)의 같은 칸에, 평면 0·1 을 그림자(!wt_shadow·!wt_shadow1)에 쓰고 !wt_csum 을 둔다. 게임은
-; 캔버스의 평면 0 만 5800 에서 보내므로 캔버스 전송 뒤에도 이름이 남는다. 메시지 창이 이 슬롯 칸을 보이는 동안은 5800 이
-; 메시지 글자라 그림자에만 쓴다(다음 캔버스 전송에 메시지 창으로 비치지 않게). 목록 줄마다 불려 창이 뜨는 프레임을 늦추지
-; 않도록 글자 줄은 MVN, 위 줄은 바이트 하나에 명령 몇 개로 옮긴다
-WtMirror:
-    LDA.w $1944
-    CMP #$8952
-    BNE +
-    RTS
-+
-    ; 지키기는 도구 흐름(창 쌓기에 도구 「누구」 창 0E, 메시지 창 없음)에서만 하므로 그 밖에서는 그림자도 두지 않고 합을 지워
-    ; 창 검사가 옛 규칙으로 본다
-    LDA.l !wh_msgwin
-    BNE .off
-    JSR WtGiveOn
-    BCS +
-.off
-    LDX.w !wt_slot2
-    BMI ++
-    CPX.w #!wt_nkana*2
-    BCC ++
-    ; 앞서 이 슬롯 이름을 5800 에 써 두었으면 0 으로 되돌린다. 남겨 두면 같은 이름을 다시 그릴 때 VRAM 과 5800 이 같아져
-    ; 창 검사의 옛 규칙이 「아직 안 올라감」 으로 본다
-    LDA.w !wt_csum-(!wt_nkana*2),X
-    BEQ +++
-    JSR .unmirror
-+++
-    STZ.w !wt_csum-(!wt_nkana*2),X
-++
-    RTS
-; 슬롯 X(× 2, 필드 캔버스), A = !wt_csum: 글자 줄·위 줄 칸의 5800 평면 0 을 0 으로. X 는 지킨다
-.unmirror
-    PHX
-    XBA
-    LSR
-    LSR
-    LSR
-    LSR
-    AND #$000F
-    ASL
-    ASL
-    ASL
-    STA.w !wn_c             ; 한 줄 바이트 수
-    LDA.l WtSlotF,X
-    PHA
-    LDA.l WtUpperF,X
-    BNE ++++
-    LDA.w !wn_c
-    LSR
-    LSR
-    LSR
-    CLC
-    ADC 1,S
-++++
-    PHA
-    JSR .zero
-    PLA
-    PLA
-    JSR .zero
-    PLX
-    RTS
-; A = 첫 칸(캔버스 밖이면 하지 않음), !wn_c 바이트
-.zero
-    CMP #$0096
-    BCC .zret
-    CMP #$0180
-    BCS .zret
-    JSR .offset
-    TAX
-    LDY.w !wn_c
--
-    STZ.w $5800,X
-    INX
-    INX
-    DEY
-    DEY
-    BNE -
-.zret
-    RTS
-+
-    LDA.w !wt_base
-    CMP #$0096
-    BCS +
-    RTS
-+
-    CMP #$0180
-    BCC +
-    RTS
-+
-    SEP #$20
-    LDA #$01
-    STA.w !wt_mbusy
-    REP #$20
-    STZ.w !wt_mshow
-    LDX.w !wt_slot2
-    BMI +
-    JSR WhShown
-    BCC +
-    INC.w !wt_mshow
-+
-    LDA.w !wt_cols
-    ASL
-    ASL
-    ASL
-    STA.w !wn_r             ; 한 줄 바이트 수
-    ; 글자 줄: 대기열 그림(평면 0 만) → 5800·그림자 평면 0
-    LDA.w !wt_base
-    JSR .offset
-    STA.w !wn_k             ; 그림자 안 자리
-    LDA.w !wt_mshow
-    BNE +
-    LDA.w !wn_k
-    CLC
-    ADC #$5800
-    TAY
-    LDA.w !wt_qoff
-    CLC
-    ADC.w #!wq_buf+4
-    TAX
-    LDA.w !wn_r
-    DEC
-    PHB
-    db $54,$7E,$7E          ; MVN 7E → 7E
-    PLB
-+
-    LDA.w !wn_k
-    CLC
-    ADC.w #!wt_shadow&$FFFF
-    TAY
-    LDA.w !wt_qoff
-    CLC
-    ADC.w #!wq_buf+4
-    TAX
-    LDA.w !wn_r
-    DEC
-    PHB
-    db $54,!wt_shadow>>16,$7E   ; MVN 7E → 그림자 뱅크
-    PLB
-    ; 그림자 평면 1(글자 줄은 FF)과 합
-    LDX.w !wn_k
-    LDY.w !wn_r
-    LDA #$0000
-    PHA
--
-    LDA #$FFFF
-    STA.l !wt_shadow1,X
-    LDA.l !wt_shadow,X
-    AND #$00FF
-    CLC
-    ADC 1,S
-    STA 1,S
-    LDA.l !wt_shadow+1,X
-    AND #$00FF
-    CLC
-    ADC 1,S
-    STA 1,S
-    INX
-    INX
-    DEY
-    DEY
-    BNE -
-    PLA
-    AND #$0FFF
-    STA.w !wn_c
-    LDA.w !wt_cols
-    XBA
-    ASL
-    ASL
-    ASL
-    ASL
-    ORA.w !wn_c
-    LDX.w !wt_slot2
-    BMI +
-    STA.w !wt_csum-(!wt_nkana*2),X
-+
-    ; 위 줄: 대기열 그림(평면 0·1 엇갈림) → 5800 평면 0·그림자 두 벌
-    LDA.w !wt_ubase
-    CMP #$0096
-    BCC .out
-    CMP #$0180
-    BCS .out
-    JSR .offset
-    TAX                     ; 목적 자리
-    LDA.w !wt_qoff
-    CLC
-    ADC.w #!wq_buf+8
-    CLC
-    ADC.w !wn_r
-    TAY                     ; 원본 자리(글자 줄 그림과 위 줄 항목 머리 뒤)
-    LDA.w !wn_r
-    STA.w !wn_c
-    LDA.w !wt_mshow
-    BNE .shadowonly
--
-    LDA.w $0000,Y
-    SEP #$20
-    STA.l $7E5800,X
-    STA.l !wt_shadow,X
-    XBA
-    STA.l !wt_shadow1,X
-    REP #$20
-    INY
-    INY
-    INX
-    DEC.w !wn_c
-    BNE -
-    BRA .out
-.shadowonly
--
-    LDA.w $0000,Y
-    SEP #$20
-    STA.l !wt_shadow,X
-    XBA
-    STA.l !wt_shadow1,X
-    REP #$20
-    INY
-    INY
-    INX
-    DEC.w !wn_c
-    BNE -
-.out
-    SEP #$20
-    STZ.w !wt_mbusy
-    REP #$20
-    RTS
-; A = 칸 → A = 그 칸의 5800·그림자 안 자리((칸 − 096) × 8)
-.offset
-    SEC
-    SBC #$0096
-    ASL
-    ASL
-    ASL
-    RTS
-
 assert pc() <= !wn_kana_table
 pullpc
 
@@ -6869,6 +6619,7 @@ org !wn_code3
 ; 목록(0F)은 「어떻게 할까」(10)보다 먼저 그려지므로 0E 로 본다. X 는 지킨다
 WtGiveOn:
     LDA #$000E
+    BRA WtWinOn
 ; A = 창 번호가 창 쌓기에 있으면 C = 1. NMI(WqClean)에서도 불려 WRAM 임시 칸을 쓰지 않는다. X 는 지킨다
 WtWinOn:
     PHX
@@ -7351,6 +7102,256 @@ WtKeepBuild:
     DEY
     BNE -
     PLX
+    RTS
+
+; 등급(A: 0·1·2) → 한 줄(글자 줄 또는 위 줄)의 평면 1 바이트 수(열 4·7·10 × 8)
+WqRunBytes:
+    CMP #$0001
+    BNE +
+    LDA #$0038
+    RTS
++
+    CMP #$0002
+    BNE +
+    LDA #$0050
+    RTS
++
+    LDA #$0020
+    RTS
+
+; WtQueue 안(DB = 7E, M = X = 16): 필드에서 캔버스 096~17F 칸에 짠 글자 줄·위 줄 그림의 평면 0 을 메시지 캔버스 버퍼
+; 7E:5800(칸 096 부터 8바이트씩)의 같은 칸에, 평면 0·1 을 그림자(!wt_shadow·!wt_shadow1)에 쓰고 !wt_csum 을 둔다. 게임은
+; 캔버스의 평면 0 만 5800 에서 보내므로 캔버스 전송 뒤에도 이름이 남는다. 메시지 창이 이 슬롯 칸을 보이는 동안은 5800 이
+; 메시지 글자라 그림자에만 쓴다(다음 캔버스 전송에 메시지 창으로 비치지 않게). 목록 줄마다 불려 창이 뜨는 프레임을 늦추지
+; 않도록 글자 줄은 MVN, 위 줄은 바이트 하나에 명령 몇 개로 옮긴다
+WtMirror:
+    LDA.w $1944
+    CMP #$8952
+    BNE +
+    RTS
++
+    ; 지키기는 도구 흐름(창 쌓기에 도구 「누구」 창 0E, 메시지 창 없음)에서만 하므로 그 밖에서는 그림자도 두지 않고 합을 지워
+    ; 창 검사가 옛 규칙으로 본다
+    LDA.l !wh_msgwin
+    BNE .off
+    JSR WtGiveOn
+    BCS +
+.off
+    LDX.w !wt_slot2
+    BMI ++
+    CPX.w #!wt_nkana*2
+    BCC ++
+    ; 앞서 이 슬롯 이름을 5800 에 써 두었으면 0 으로 되돌린다. 남겨 두면 같은 이름을 다시 그릴 때 VRAM 과 5800 이 같아져
+    ; 창 검사의 옛 규칙이 「아직 안 올라감」 으로 본다
+    LDA.w !wt_csum-(!wt_nkana*2),X
+    BEQ +++
+    JSR .unmirror
++++
+    STZ.w !wt_csum-(!wt_nkana*2),X
+++
+    RTS
+; 슬롯 X(× 2, 필드 캔버스), A = !wt_csum: 글자 줄·위 줄 칸의 5800 평면 0 을 0 으로. X 는 지킨다
+.unmirror
+    PHX
+    XBA
+    LSR
+    LSR
+    LSR
+    LSR
+    AND #$000F
+    ASL
+    ASL
+    ASL
+    STA.w !wn_c             ; 한 줄 바이트 수
+    LDA.l WtSlotF,X
+    PHA
+    LDA.l WtUpperF,X
+    BNE ++++
+    LDA.w !wn_c
+    LSR
+    LSR
+    LSR
+    CLC
+    ADC 1,S
+++++
+    PHA
+    JSR .zero
+    PLA
+    PLA
+    JSR .zero
+    PLX
+    RTS
+; A = 첫 칸(캔버스 밖이면 하지 않음), !wn_c 바이트
+.zero
+    CMP #$0096
+    BCC .zret
+    CMP #$0180
+    BCS .zret
+    JSR .offset
+    TAX
+    LDY.w !wn_c
+-
+    STZ.w $5800,X
+    INX
+    INX
+    DEY
+    DEY
+    BNE -
+.zret
+    RTS
++
+    LDA.w !wt_base
+    CMP #$0096
+    BCS +
+    RTS
++
+    CMP #$0180
+    BCC +
+    RTS
++
+    SEP #$20
+    LDA #$01
+    STA.w !wt_mbusy
+    REP #$20
+    STZ.w !wt_mshow
+    LDX.w !wt_slot2
+    BMI +
+    JSR WhShown
+    BCC +
+    INC.w !wt_mshow
++
+    LDA.w !wt_cols
+    ASL
+    ASL
+    ASL
+    STA.w !wn_r             ; 한 줄 바이트 수
+    ; 글자 줄: 대기열 그림(평면 0 만) → 5800·그림자 평면 0
+    LDA.w !wt_base
+    JSR .offset
+    STA.w !wn_k             ; 그림자 안 자리
+    LDA.w !wt_mshow
+    BNE +
+    LDA.w !wn_k
+    CLC
+    ADC #$5800
+    TAY
+    LDA.w !wt_qoff
+    CLC
+    ADC.w #!wq_buf+4
+    TAX
+    LDA.w !wn_r
+    DEC
+    PHB
+    db $54,$7E,$7E          ; MVN 7E → 7E
+    PLB
++
+    LDA.w !wn_k
+    CLC
+    ADC.w #!wt_shadow&$FFFF
+    TAY
+    LDA.w !wt_qoff
+    CLC
+    ADC.w #!wq_buf+4
+    TAX
+    LDA.w !wn_r
+    DEC
+    PHB
+    db $54,!wt_shadow>>16,$7E   ; MVN 7E → 그림자 뱅크
+    PLB
+    ; 그림자 평면 1(글자 줄은 FF)과 합
+    LDX.w !wn_k
+    LDY.w !wn_r
+    LDA #$0000
+    PHA
+-
+    LDA #$FFFF
+    STA.l !wt_shadow1,X
+    LDA.l !wt_shadow,X
+    AND #$00FF
+    CLC
+    ADC 1,S
+    STA 1,S
+    LDA.l !wt_shadow+1,X
+    AND #$00FF
+    CLC
+    ADC 1,S
+    STA 1,S
+    INX
+    INX
+    DEY
+    DEY
+    BNE -
+    PLA
+    AND #$0FFF
+    STA.w !wn_c
+    LDA.w !wt_cols
+    XBA
+    ASL
+    ASL
+    ASL
+    ASL
+    ORA.w !wn_c
+    LDX.w !wt_slot2
+    BMI +
+    STA.w !wt_csum-(!wt_nkana*2),X
++
+    ; 위 줄: 대기열 그림(평면 0·1 엇갈림) → 5800 평면 0·그림자 두 벌
+    LDA.w !wt_ubase
+    CMP #$0096
+    BCC .out
+    CMP #$0180
+    BCS .out
+    JSR .offset
+    TAX                     ; 목적 자리
+    LDA.w !wt_qoff
+    CLC
+    ADC.w #!wq_buf+8
+    CLC
+    ADC.w !wn_r
+    TAY                     ; 원본 자리(글자 줄 그림과 위 줄 항목 머리 뒤)
+    LDA.w !wn_r
+    STA.w !wn_c
+    LDA.w !wt_mshow
+    BNE .shadowonly
+-
+    LDA.w $0000,Y
+    SEP #$20
+    STA.l $7E5800,X
+    STA.l !wt_shadow,X
+    XBA
+    STA.l !wt_shadow1,X
+    REP #$20
+    INY
+    INY
+    INX
+    DEC.w !wn_c
+    BNE -
+    BRA .out
+.shadowonly
+-
+    LDA.w $0000,Y
+    SEP #$20
+    STA.l !wt_shadow,X
+    XBA
+    STA.l !wt_shadow1,X
+    REP #$20
+    INY
+    INY
+    INX
+    DEC.w !wn_c
+    BNE -
+.out
+    SEP #$20
+    STZ.w !wt_mbusy
+    REP #$20
+    RTS
+; A = 칸 → A = 그 칸의 5800·그림자 안 자리((칸 − 096) × 8)
+.offset
+    SEC
+    SBC #$0096
+    ASL
+    ASL
+    ASL
     RTS
 
 assert pc() <= !wn_code3_end

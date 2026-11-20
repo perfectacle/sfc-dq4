@@ -119,7 +119,6 @@ RULER_PRE = (OPEN + 'right:4,wait:30,a:6,wait:60,a:6,wait:80,' + 'down:4,wait:20
 NAME_FIRST, NAME_POSITIONS = 0x180, 8     # 이름 렌더러 자리(dq4windowname WnSlot, 자리마다 이름 5칸 + 위 줄 5칸)
 KNOWN = {'give-full': 9, 'give-shop-ch1': 5, 'equip-ch3': 9, 'sell-shop-ch1': 6, 'sell-equip-ch3': 5,
          'sell-long-ch1': 90, 'sell-long-ch2': 89, 'sell-long-ch3': 89}
-         'sell-long-ch1': 90, 'sell-long-ch2': 89, 'sell-long-ch3': 89}
 # --every 로 매 프레임 재는 장면과 구간(장면의 원래 프레임에 더함). 넘친 목록 이름을 묶음 버퍼로 보내는 장면들과, 메시지 창
 # 없이 상태 창에 이름이 넘치는 battle11·party21 의 구간
 EVERY = {'talk02-full': range(60, 700), 'shopwho': range(100, 1900), 'partyitems': range(60, 900),
