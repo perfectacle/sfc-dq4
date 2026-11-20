@@ -195,7 +195,9 @@ NAME_LIST = bytes((0x05, F, 0x08, F, F, 0xD0, F, 0x80))
 
 def base_windows():
     out = {
-        wn.STATUS_WINDOW: bytes((F, F, 0x06, F, F, 0x80)),
+        wn.STATUS_WINDOW: bytes((wn.STATUS_X + 1, F, 0x06, F, F, 0x80)),
+        **{w: bytes((0x96, F, 0x32)) for w in wn.KEEP_RIGHT_ALIASES + wn.RIGHT_EDGE_ALIASES},
+        **{w: bytes((0x10, F, 0x0E, F, F, 0x80)) for w in wn.FORMATION_INFO},
         **{w: bytes((0x02, F, 0xE6, F)) + wn.BATTLE_STATUS_BODY + b'\x80' for w in wn.BATTLE_STATUS},
         **{w: bytes((F, F, 0x06, F)) + wn.HP_BODY[w] + b'\x80' for w in wn.HP_WINDOWS},
         wn.SPELL_WINDOW: bytes((F, F, 0x08, F)) + wn.SPELL_BODY + b'\x80',
@@ -207,7 +209,7 @@ def base_windows():
         wn.SHOP_SELL_ITEMS: wn.SHOP_SELL_ITEMS_SHAPE[:2] + b'\x08' + wn.SHOP_SELL_ITEMS_SHAPE[2:] + b'\x80',
         wn.QTY_WINDOW: wn.QTY_RECORD + b'\x80',
     }
-    out.update({w: NAME_LIST for w in wn.NAME_LISTS})
+    out.update({w: NAME_LIST for w in wn.NAME_LISTS + wn.NAME_LISTS_RIGHT})
     return out
 
 
@@ -342,6 +344,20 @@ class ApplyTests(unittest.TestCase):
         for w in wn.NAME_LISTS + (wn.TACTIC_WINDOW,):
             b, a = self.head(w, before), self.head(w, after)
             self.assertEqual((a[0], a[2]), (b[0] - 1, b[2] + 1), f'{w:02X}')
+        # 명령 창 위에 뜨는 장비 누구 창은 왼쪽 변을 두고 오른쪽으로 넓혀 명령 창 오른쪽 변과 같은 열에 둔다
+        for w in wn.NAME_LISTS_RIGHT:
+            b, a = self.head(w, before), self.head(w, after)
+            self.assertEqual((a[0], a[2]), (b[0], b[2] + 1), f'{w:02X}')
+        # 상태 창은 한 칸 왼쪽(오른쪽 변이 원래 자리), 예/아니요 별칭은 32 와 함께 한 칸 왼쪽
+        self.assertEqual(self.head(wn.STATUS_WINDOW)[0], wn.STATUS_X)
+        for w in wn.KEEP_RIGHT_ALIASES:
+            self.assertEqual(self.head(w)[:3], bytes((0x95, F, 0x32)), f'{w:02X}')
+        # 대열 바꾸기 정보 창은 오른쪽 변을 두고 왼쪽으로 한 칸(두 사람 상태 창 왼쪽 변 15 와 같은 열)
+        for w in wn.FORMATION_INFO:
+            self.assertEqual(self.head(w)[:3], bytes((0x0F, F, 0x0F)), f'{w:02X}')
+        # 네네 가게 서 지우기의 85 는 한 칸 오른쪽(서 고르기 창의 레벨 숫자를 덮지 않게)
+        for w in wn.RIGHT_EDGE_ALIASES:
+            self.assertEqual(self.head(w)[:3], bytes((0x97, F, 0x32)), f'{w:02X}')
         # 가게 동료 창은 아래 메시지 창과 좌우 변이 맞는 원래 자리·너비 그대로(한 사람 몫을 이름 5 + 상태 8 로 나눔)
         o, p = window(before, wn.SHOP_MEMBERS), window(after, wn.SHOP_MEMBERS)
         self.assertEqual(after[p:p + 5], before[o:o + 5])     # 제목 가로 자리(+4)도 그대로
@@ -427,7 +443,10 @@ class ApplyRejectTests(unittest.TestCase):
             run(rom)
 
     def test_window_shape_checks(self):
-        for n, at, value in ((wn.STATUS_WINDOW, 2, 0x07), (0x17, 2, 0xE7), (0x26, 5, 0x13),
+        for n, at, value in ((wn.STATUS_WINDOW, 2, 0x07), (wn.STATUS_WINDOW, 0, wn.STATUS_X),
+                             (wn.KEEP_RIGHT_ALIASES[0], 2, 0x33), (wn.NAME_LISTS_RIGHT[0], 5, F),
+                             (wn.FORMATION_INFO[0], 2, 0x0F),
+                             (0x17, 2, 0xE7), (0x26, 5, 0x13),
                              (wn.SPELL_WINDOW, 7, 0xD5), (0x45, 2, 0x0F),
                              (wn.SHOP_SELL_ALIAS, 2, 0x10)):
             with self.subTest(n=hex(n)):

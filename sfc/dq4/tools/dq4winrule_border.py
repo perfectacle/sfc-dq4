@@ -16,12 +16,12 @@ JOINT_TILE = 0x8B
 EQUIP = ('3장 장비 화면 「무기」 창 (2,18)-(12,29) 의 줄 글자 칸이 한 칸 밀려 오른쪽 테두리를 덮고 첫 줄이 조각남'
          '(창 글자 칸 넘침과 같은 화면)')
 GIVE = '도구 → 건네기 때 「누구에게」 창 (17,10)-(25,18) 위 변을 글자 칸이 덮음(창 검사 give-full·give-shop 의 바뀜·비침과 같은 때)'
-STATUS1 = '1인 상태 창 (19,22)-(27,28) 위 변 이름 자리에 이름 대신 조각 글자가 보임'
+STATUS1 = '1인 상태 창 (19,21)-(27,27) 위 변 이름 자리에 이름 대신 조각 글자가 보임'
 KNOWN = tuple(ww.Known(scene, frozenset({cell}), frames, why) for scene, why, cells in (
     ('*/equip-ch3', EQUIP, (((4, 29), 299), ((5, 29), 334))),
     ('*/give-full', GIVE, (((17, 16), 6), ((17, 17), 18))),
     ('*/give-shop-ch1', GIVE, tuple(((17, c), 15) for c in range(11, 18))),
-    ('*/status-mesence', STATUS1, (((19, 23), 10), ((19, 24), 10))),
+    ('*/status-mesence', STATUS1, (((19, 22), 10), ((19, 23), 10))),
 ) for cell, frames in cells)
 
 

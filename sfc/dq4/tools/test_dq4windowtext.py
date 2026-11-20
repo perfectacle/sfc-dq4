@@ -172,6 +172,11 @@ class FixedRecordsTests(unittest.TestCase):
         self.assertIn(o, self.at)
         self.assertGreaterEqual(self.rom.addr[0x32] & 0xFFFF, dq4menupatch.SHARED_JP & 0xFFFF)
         self.assertEqual(self.at[o][2], 6 + 1)
+        # 예/아니요 32 는 넓힌 만큼 왼쪽으로 옮겨 오른쪽 변(x + 너비)을 원래 자리에 둔다
+        self.assertIn(0x32, wt.KEEP_RIGHT)
+        self.assertEqual(self.at[o][0] + self.at[o][2], 4 + 6)
+        rec = self.written(0x10)
+        self.assertEqual(rec[0], records()[0x10][0])
 
     def test_line_window(self):
         rec = self.written(0x2D)
