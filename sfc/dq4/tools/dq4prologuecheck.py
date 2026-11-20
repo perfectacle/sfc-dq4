@@ -57,8 +57,9 @@ ROUTE = [
     # 신시아는 오른쪽 칸에서 말을 걸어야 시작한다(NDS 와 같음)
     ('cellar', CLOSE + ';28,9;42,9;42,7;42,5;up:24;wait:60;6,11;' + door('down') +
      ';6,15;8,15;8,29;' + talk('left') + ';' + taps(60) + ';wait:300'),
+    # 왕좌의 방 연출(장 제목 상자는 A 로 넘어감)이 끝난 뒤에 닿은 A 가 연 명령 창을 닫고 끝낸다
     ('supper', CLOSE + ';8,29;8,15;6,15;6,3;up:24;wait:60;42,7;42,9;28,9;28,37;12,37;' + talk('left') + ';' +
-     taps(70) + ';wait:600'),
+     taps(70) + ';wait:600;' + CLOSE),
 ]
 MAPS = ['3C/00', '3C/01', '3C/00', '36/01']
 FLAGS = {'DONE': pro.DONE, 'FROG_MET': pro.FROG_MET, 'SHINSIA_MET': pro.SHINSIA_MET, 'DINNER': pro.DINNER,

@@ -368,9 +368,10 @@ def talk_yes(face, n=8):
 # want·off(끝에 켜져·꺼져 있을 깃발), map(끝 맵), field(끝에 필드인지), items(가진 물건),
 # start((FC 인물, 장): 끝의 일행 기록 0 장비·물건과 금화가 FC 장 시작 표대로, start_want)
 SEGMENTS = [
-    # 저녁 대사를 넘기는 A 가 왕좌의 방 연출(장 제목·서술·왕의 연설)까지 넘긴다
+    # 저녁 대사를 넘기는 A 가 왕좌의 방 연출(장 제목·서술·왕의 연설)까지 넘긴다. after 는 그 A 와 끝의 창 닫기(pc.ROUTE)
+    # 까지 걷게 둔다: 연출이 먼저 끝나면 남은 A 가 명령 창을 열어 둔 채 상태가 남는다
     ('prologue', 'walk', ';'.join(w for _, w in pc.ROUTE),
-     {'maxf': 20000, 'changes': len(pc.MAPS), 'after': 2500, 'want': ['CHAPTER1'], 'map': '36/01',
+     {'maxf': 20000, 'changes': len(pc.MAPS), 'after': 3600, 'want': ['CHAPTER1'], 'map': '36/01',
       'start': (6, 1)}),
     ('throne_out', 'walk', '32,70;down:60', {'changes': 1, 'map': '36/00'}),
     ('imuru_night', 'warp', '37/00,4,30', {'poke': NIGHT + ';' + HOLD_CHILD, 'map': '37/00'}),
