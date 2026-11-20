@@ -119,6 +119,22 @@ class RuleTests(unittest.TestCase):
             c = line('다라', y=24, top=22)
             self.assertEqual(textlines.check(screen_with([a, c])), [])
 
+    def test_name_renderer_one_pixel_lower_passes_but_two_fail(self):
+        # 이름 렌더러 칸의 글자는 창 글자 그림보다 1점 아래가 공통 꼴이고, 2점이면 이름이 내려앉은 깨짐이다
+        def split(top, word):
+            ln = wt.Line(8, [(8, '가', 10, 'galmuri9', 6), (24, '나', 10, 'galmuri9', top)])
+            screen = screen_with([ln])
+            screen.word = lambda r, c: word.get(c - W[1], 0x0100 + c)
+            return screen
+
+        with mock.patch.object(wt, 'band_height', return_value=13):
+            self.assertEqual(textlines.check(split(7, {3: 0x0180})), [])
+            self.assertEqual(len(textlines.check(split(8, {3: 0x0180}))), 1)
+            self.assertEqual(len(textlines.check(split(7, {}))), 1)
+            # 모험의 서 목록 줄: 메뉴 칸(2D0~)이 이름이고, 180~ 칸은 장소 이름을 그린 창 글자다
+            self.assertEqual(textlines.check(split(7, {1: 0x0180, 3: 0x02D0})), [])
+            self.assertEqual(len(textlines.check(split(7, {1: 0x02D0, 3: 0x0180}))), 1)
+
     def test_party_order_against_records(self):
         wram = {party.COUNT: 2, party.RECORDS: 0x09, party.RECORDS + party.RECORD: 0x85}
         names = frozenset({'크리프트', '호이민'})
