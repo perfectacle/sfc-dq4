@@ -73,6 +73,8 @@ KEYS, AGES = asm_define('wt_keys'), asm_define('wt_ages')   # 슬롯마다 워�
 KANA_ENTRIES, KBASE = 12, asm_define('wt_kbase')            # !wt_nkana, 첫 칸 12바이트, 이어서 칸 수 12바이트
 LEND = 0x80                       # dq4windowname.asm !wt_lend
 KEY2, KEY3 = asm_define('wt_key2'), asm_define('wt_key3')   # 가나 항목마다 같은 그림을 함께 쓰는 둘째·셋째 버퍼 자리(워드, 0 = 없음)
+CSUM = asm_define('wt_csum')    # 캔버스 슬롯마다 워드: 열 수 << 12 | 메시지 캔버스에도 쓴 글자 줄 평면 0 합의 낮은 12비트
+MBUSY = asm_define('wt_mbusy')  # 1바이트: asm 이 이름을 메시지 캔버스에 쓰는 도중
 SHARED_JP = 0x60B400                # 맵을 불러올 때 7E:1AC0 으로 복사되는 원래 공용 창 레코드(dq4menupatch.SHARED_JP)
 # 위를 보고 명령 창을 연다. 필드는 몇 프레임에 한 번만 입력을 읽어 짧게 누르면 놓친다(놓치면 뒤 입력이 한 칸씩 밀림)
 OPEN = 'b:4,wait:40,up:10,wait:20,a:10,wait:30,'
@@ -115,7 +117,7 @@ RULER_PRE = (OPEN + 'right:4,wait:30,a:6,wait:60,a:6,wait:80,' + 'down:4,wait:20
 # 줄면 통과하며 새 수를 알린다(숫자를 고쳐 못박는다). 메시지 캔버스 전송이 창 타일맵보다 먼저 가는 차례와 가린 캔버스
 # 칸 슬롯을 고치면 0 이 되어야 한다(형식 문서 「남은 것」)
 NAME_FIRST, NAME_POSITIONS = 0x180, 8     # 이름 렌더러 자리(dq4windowname WnSlot, 자리마다 이름 5칸 + 위 줄 5칸)
-KNOWN = {'give-full': 224, 'give-shop-ch1': 245, 'equip-ch3': 9, 'sell-shop-ch1': 6, 'sell-equip-ch3': 5,
+KNOWN = {'give-full': 9, 'give-shop-ch1': 5, 'equip-ch3': 9, 'sell-shop-ch1': 6, 'sell-equip-ch3': 5,
          'sell-long-ch1': 90, 'sell-long-ch2': 89, 'sell-long-ch3': 89}
 # --every 로 매 프레임 재는 장면과 구간(장면의 원래 프레임에 더함). 넘친 목록 이름을 묶음 버퍼로 보내는 장면들과, 메시지 창
 # 없이 상태 창에 이름이 넘치는 battle11·party21 의 구간
@@ -283,7 +285,7 @@ def run(mesence, libdir, rom_path, rom, folder, scene):
     sets = [f'{0x7E1AC0 + i:X}={b:02X}' for i, b in enumerate(rom[o:o + 48])]
     sets += [f'{0x7E2001 + i:X}={NAME[2 * i:2 * i + 2]}' for i in range(8)]
     fs = ','.join(map(str, frames))
-    dump = ','.join(f'{f}:7E{KEYS:04X}:60,{f}:7E{AGES:04X}:60,{f}:7E{KBASE:04X}:24,{f}:7E{KEY2:04X}:24,{f}:7E{KEY3:04X}:24,{f}:7E0725:1,{f}:7E1944:2,'
+    dump = ','.join(f'{f}:7E{KEYS:04X}:60,{f}:7E{AGES:04X}:60,{f}:7E{KBASE:04X}:24,{f}:7E{KEY2:04X}:24,{f}:7E{KEY3:04X}:24,{f}:7E{CSUM:04X}:36,{f}:7E{MBUSY:04X}:1,{f}:7E0725:1,{f}:7E1944:2,'
                     f'{f}:7E{MSG_CANVAS:04X}:{len(CANVAS) * 8}' for f in frames)
     env = dict(os.environ, LIBDIR=libdir, SHOT_DIR=str(folder), STATE=str(state), PRE=pre, SHOTS=fs, VRAMDUMP=fs,
                DUMP=dump, SET=','.join(sets), MAXF=str(frames[-1] + 10))
@@ -368,24 +370,38 @@ def check(folder, rom, slots, off=frozenset()):
                 continue
             row = vram[(tilemap + c - 32) * 2:(tilemap + c - 22) * 2] + vram[(tilemap + c) * 2:(tilemap + c + 10) * 2]
             art = b''.join(vram[(0x1000 + t * 8) * 2:(0x1000 + t * 8) * 2 + 16] for t in tiles)
-            now[i, key] = row, art
+            ok = glyph_ok(vram, d.get(CSUM), i, tiles[0]) if not battle else None
+            now[i, key] = row, art, ok
             prev = before.get((frame - 1, i, key))
-            # 앞 프레임에 아직 그림이 올라가지 않아 메시지 캔버스 그대로였으면(묶음 버퍼, 창이 먼저 뜸) 다른 문구가 아니다
-            blank = prev and all(canvas_tile_bytes(prev[1][k * 16:k * 16 + 16], d.get(MSG_CANVAS), t)
-                                 for k, t in enumerate(tiles))
+            # 앞 프레임에 아직 그림이 올라가지 않아 메시지 캔버스 그대로였으면(묶음 버퍼, 창이 먼저 뜸) 다른 문구가 아니다.
+            # 캔버스 이름은 평면 0 을 메시지 캔버스에도 쓰므로, 앞 프레임에 그 이름 그림이 올라가 있었으면 캔버스 그대로여도 이름이다
+            blank = prev and not prev[2] and all(canvas_tile_bytes(prev[1][k * 16:k * 16 + 16], d.get(MSG_CANVAS), t)
+                                                 for k, t in enumerate(tiles))
             if prev and prev[0] == row and prev[1] != art and not blank:
                 bad += [(c // 32, c % 32 + j, '바뀜', tiles[0] + j) for j in range(len(tiles) // 2)]
-            if not battle and i >= KANA_ENTRIES and tiles[0] in CANVAS and all(
+            if ok is False:
+                bad += [(c // 32, c % 32 + j, '다름', tiles[0] + j) for j in range(len(tiles) // 2)]
+            elif ok is None and not battle and i >= KANA_ENTRIES and tiles[0] in CANVAS and all(
                     canvas_tile(vram, d.get(MSG_CANVAS), t) for t in tiles):
                 bad += [(c // 32, c % 32 + j, '빈칸', tiles[0] + j) for j in range(len(tiles) // 2)]
         before = {(frame, i, key): v for (i, key), v in now.items()}
+        # 그 이름 그림이 VRAM 에 올라간 캔버스 슬롯: 남의 칸이 그 칸을 가리키면 메시지 캔버스와 같아도 남의 이름이 보인다
+        ours = set() if battle else {i for i in set(live.values()) if glyph_ok(vram, d.get(CSUM), i, cells[i][0])}
+        # 이름 평면 0 을 메시지 캔버스에 써 두었지만 VRAM 에는 아직 올라가지 않은 슬롯: 그 칸은 게임이 먼저 올린 그림(메시지 글자)을
+        # 보인다. 메시지 캔버스가 이제 우리 이름이라 「캔버스와 다름」 으로는 비침을 가릴 수 없다
+        # 쓰는 도중에 덤프한 프레임은 글자 줄 일부만 써 합이 아직 옛 값이라 「써 둠」 을 셀 수 없다(VRAM 은 그대로)
+        busy = bool(d.get(MBUSY, b'\0')[0])
+        pending = set() if battle else {i for i in set(live.values()) - ours
+                                        if busy and i >= KANA_ENTRIES and cells[i][0] in CANVAS
+                                        or mirrored(d.get(MSG_CANVAS), d.get(CSUM), i, cells[i][0])}
         for cell in range(32 * 28):         # 화면은 28줄(224점)
             if cell in mine:
                 continue
             t = int.from_bytes(vram[(tilemap + cell) * 2:(tilemap + cell) * 2 + 2], 'little') & 0x3FF
             if t in KANA and vram[(0x1000 + t * 8) * 2:(0x1000 + t * 8) * 2 + 16] != kana[t]:
                 bad.append((cell // 32, cell % 32, '가나', t))
-            elif not battle and t in CANVAS and t in live and not canvas_tile(vram, d.get(MSG_CANVAS), t):
+            elif not battle and t in CANVAS and t in live and (live[t] in ours or (
+                    live[t] not in pending and not canvas_tile(vram, d.get(MSG_CANVAS), t))):
                 bad.append((cell // 32, cell % 32, '비침', t))
         if not battle:
             bad += shared_names(vram, tilemap)
@@ -428,6 +444,31 @@ def shared_names(vram, tilemap):
         if NAME_FIRST <= t < NAME_FIRST + NAME_POSITIONS * 10 and (t - NAME_FIRST) % 10 == 0:
             where.setdefault(t, []).append(cell)
     return [(c // 32, c % 32, '겹자리', t) for t, cells in where.items() if len(cells) > 1 for c in cells]
+
+
+def glyph_ok(vram, csum, i, lo):
+    """필드 캔버스 슬롯 i(글자 줄 첫 칸 lo)의 VRAM 글자 줄 평면 0 이 asm 이 메시지 캔버스에도 써 둔 그 이름 그림(!wt_csum)과
+    같은지. 캔버스 밖이거나 기록이 없으면 None."""
+    if csum is None or i < KANA_ENTRIES or lo not in CANVAS:
+        return None
+    w = int.from_bytes(csum[2 * (i - KANA_ENTRIES):2 * (i - KANA_ENTRIES) + 2], 'little')
+    cols = w >> 12
+    if not cols:
+        return None
+    total = sum(vram[(0x1000 + t * 8) * 2 + 2 * r] for t in range(lo, lo + cols) for r in range(8))
+    return total & 0xFFF == w & 0xFFF
+
+
+def mirrored(canvas, csum, i, lo):
+    """필드 캔버스 슬롯 i 의 메시지 캔버스 버퍼 글자 줄 평면 0 합이 !wt_csum 과 같은지(asm 이 이름을 메시지 캔버스에도 써 둠)."""
+    if canvas is None or csum is None or i < KANA_ENTRIES or lo not in CANVAS:
+        return False
+    w = int.from_bytes(csum[2 * (i - KANA_ENTRIES):2 * (i - KANA_ENTRIES) + 2], 'little')
+    cols = w >> 12
+    if not cols:
+        return False
+    o = (lo - CANVAS.start) * 8
+    return sum(canvas[o:o + cols * 8]) & 0xFFF == w & 0xFFF
 
 
 def canvas_tile_bytes(art, canvas, t):

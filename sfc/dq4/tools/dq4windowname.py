@@ -21,6 +21,9 @@ CODE_END = 0x60E000
 # 묶음 버퍼 보조 코드, E800~ 은 가나 표라 첫 구역을 늘릴 수 없다. 같은 뱅크여야 JSR 로 오간다
 CODE2 = 0x60F900
 CODE2_END = 0x610000
+# 셋째 구역: 메뉴 패치의 맵 훅·bg3slot 코드(60:8000~84BB) 뒤, 열 그림(60:9000~) 앞의 빈 자리. 메시지 캔버스 지키기 코드
+CODE3 = 0x608800
+CODE3_END = 0x609000
 # 구역마다 남은 자리가 이보다 적으면 빌드가 알린다
 ROOM_WARN = 128
 STATUS_WINDOW = 0x02
@@ -237,7 +240,8 @@ def room(out):
     전투 메시지 코드(dq4battlemsg.CODE_AT~둘째 구역 앞)도 같은 뱅크를 나눠 쓰므로 함께 센다."""
     import dq4battlemsg
     left = {}
-    for a, b in ((CODE, CODE_END), (WH_EXTRA, KANA_TABLE), (dq4battlemsg.CODE_AT, CODE2), (CODE2, CODE2_END)):
+    for a, b in ((CODE, CODE_END), (WH_EXTRA, KANA_TABLE), (dq4battlemsg.CODE_AT, CODE2), (CODE2, CODE2_END),
+                 (CODE3, CODE3_END)):
         seg = bytes(out[lorom(a):lorom(b - 1) + 1])
         left[(a, b)] = len(seg) - len(seg.rstrip(b'\0'))
     return left
@@ -392,6 +396,7 @@ def apply(data, font=None, asar=None):
     kana = kana_glyphs(d, font or dq4menupatch.Font('galmuri9'), dq4menupatch.render)
     flag = re.search(r'^!flag\s*=\s*\$([0-9A-Fa-f]{6})', (HERE / 'dq4nameentry.asm').read_text(), re.M).group(1)
     defs = (f'!wn_code = ${CODE:06X}\n!wn_code_end = ${CODE_END:06X}\n!wn_code2 = ${CODE2:06X}\n!wn_code2_end = ${CODE2_END:06X}\n'
+            f'!wn_code3 = ${CODE3:06X}\n!wn_code3_end = ${CODE3_END:06X}\n'
             f'!wn_hi_base = ${ne.HI_BASE:02X}\n!wn_hi_count = {hi_count}\n'
             f'!wn_glyph_bank = ${ne.GLYPH_BANK:02X}\n!wn_list_prev = ${int.from_bytes(d[o + 1:o + 4], "little"):06X}\n'
             f'!wn_menu_flag = ${flag}\n!wt_bank = ${dq4windowtext.TEXT_BANK:02X}\n!wt_mbank = ${dq4windowtext.MONSTER_BANK:02X}\n'

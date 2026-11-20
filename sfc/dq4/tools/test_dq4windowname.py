@@ -157,7 +157,8 @@ class WramTest(unittest.TestCase):
 
     # 7E:A9xx·AAxx 에 둔 변수마다 바이트 수(정의 주석의 크기). 없는 이름은 워드
     SIZES = {'wn_stage': 0xA0, 'wt_ages': 60, 'wt_keys': 60, 'wt_vis': 30, 'wt_kbase': 12, 'wt_klen': 12, 'wt_occ': 13,
-             'wt_dirty': 4, 'wt_xfer': 1, 'wt_stale': 1, 'wt_stale2': 1, 'wt_ecsave': 1, 'wq_defer': 1}
+             'wt_dirty': 4, 'wt_xfer': 1, 'wt_stale': 1, 'wt_stale2': 1, 'wt_ecsave': 1, 'wq_defer': 1,
+             'wt_csum': 36, 'wt_keep': 30, 'wt_mbusy': 1}
 
     def test_moved_block_stays_in_the_free_area_without_overlap(self):
         # 앞은 전투 글 엔진(!bm_sfx 가 마지막, 2바이트), 끝은 7E:AC00
