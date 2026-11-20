@@ -1325,7 +1325,9 @@ NeListBand:
     ASL
     ASL
     STA !ne_t4              ; 첫 열 × 16
-    LDY #$0000              ; 줄 r
+    ; 글리프 r 행을 r − 1 선에 둔다(0 행은 비어 있음). 게임 안 창 이름(WnKorean)과 같이 글자 1행이 글자 줄 0선에 와서
+    ; 커서·번호·Lv(롬 글자)와 윗줄이 같다
+    LDY #$0001              ; 글리프 행 r
 .row
     SEP #$20
     LDA [$00],Y             ; 왼쪽 8점
@@ -1355,9 +1357,10 @@ NeListBand:
     DEX
     BNE -
 +
-    TYA                     ; 줄 r 의 바이트: 글자 줄은 2r, 아래 줄은 128 + 2(r - 8)
+    TYA                     ; 선 l = r − 1 의 바이트: 글자 줄은 2l, 아래 줄은 128 + 2(l − 8)
+    DEC
     ASL
-    CPY #$0008
+    CMP #$0010
     BCC +
     CLC
     ADC #$0070
